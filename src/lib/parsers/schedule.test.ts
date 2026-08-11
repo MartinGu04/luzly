@@ -105,3 +105,69 @@ describe("parseScheduleSheet", () => {
     expect(parseScheduleSheet(emptySheet, personnel)).toEqual([]);
   });
 });
+
+// Regression: the real workbook's first block has a blank/whitespace date
+// header (only "יום" is labeled), with a notes column right after it and
+// then the person columns. Later blocks do label their date column
+// "תאריך" explicitly. Cols: [0]="  " (whitespace date header), [1]="יום",
+// [2]="הערות", [3]="דני בדיקה", [4]="" (continuation), [5]="נועה דוגמה",
+// [6]="תאריך", [7]="יום", [8]="דני בדיקה", [9]="נועה דוגמה".
+const blankFirstHeaderSheet: RawSheet = {
+  name: "משמרות + תורנויות",
+  values: [
+    ["  ", "יום", "הערות", "דני בדיקה", "", "נועה דוגמה", "תאריך", "יום", "דני בדיקה", "נועה דוגמה"],
+    ["05/01/2026", "ב", "הערה", "בוקר", "משימה", "", "10.02.2026", "ג", "לילה", "חופש"],
+  ],
+};
+
+describe("parseScheduleSheet — blank/whitespace first date header (real workbook shape)", () => {
+  const assignments = parseScheduleSheet(blankFirstHeaderSheet, personnel);
+
+  it("still detects and emits assignments from the first block despite its blank date header", () => {
+    const firstBlock = assignments.filter((a) => a.date === "2026-01-05");
+    expect(firstBlock.length).toBeGreaterThan(0);
+  });
+
+  it("keeps continuation columns working inside the blank-header block", () => {
+    const daniJan5 = assignments.filter(
+      (a) => a.personName === DANI.name && a.date === "2026-01-05",
+    );
+    expect(daniJan5.map((a) => a.rawValue)).toEqual(expect.arrayContaining(["בוקר", "משימה"]));
+    expect(daniJan5).toHaveLength(2);
+  });
+
+  it("still excludes the notes column in the blank-header block", () => {
+    expect(assignments.some((a) => a.rawValue === "הערה")).toBe(false);
+  });
+
+  it("still detects the later block with an explicit 'תאריך' header", () => {
+    const feb10 = assignments.filter((a) => a.date === "2026-02-10");
+    expect(feb10).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ personName: DANI.name, rawValue: "לילה" }),
+        expect.objectContaining({ personName: NOA.name, rawValue: "חופש" }),
+      ]),
+    );
+  });
+
+  it("does not invent a phantom block from an unrelated blank column with no dates below it", () => {
+    // A blank column immediately before an unrelated "יום"-labeled column,
+    // with no parseable dates beneath it, must not be treated as a date column.
+    const sheet: RawSheet = {
+      name: "משמרות + תורנויות",
+      values: [
+        ["", "יום", "לא רלוונטי", "תאריך", "יום", "דני בדיקה"],
+        ["לא תאריך", "ב", "משהו", "05/01/2026", "ב", "בוקר"],
+      ],
+    };
+    const result = parseScheduleSheet(sheet, personnel);
+    expect(result).toEqual([{
+      personId: DANI.id,
+      personName: DANI.name,
+      date: "2026-01-05",
+      rawValue: "בוקר",
+      sourceSheet: "משמרות + תורנויות",
+      sourceCell: "F2",
+    }]);
+  });
+});
