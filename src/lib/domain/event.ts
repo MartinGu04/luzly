@@ -27,6 +27,14 @@ export type DutyFamily =
   | "callup";
 
 /**
+ * What kind of absence, for category === "absence" only. Lets rules engines
+ * reason about absences without inspecting Hebrew raw text — e.g. "after" is
+ * partial/ambiguous and must never be treated as a blocking full-day absence
+ * the way vacation/abroad/medical/day_off are.
+ */
+export type AbsenceKind = "vacation" | "abroad" | "medical" | "day_off" | "after";
+
+/**
  * A single person/date cell, semantically classified from a
  * `RawAssignment`. This is what a future rules engine and the UI should
  * consume — never `RawSheet`/`RawAssignment` directly.
@@ -60,4 +68,6 @@ export interface Event {
   /** The note text when category is "change_note"; null otherwise. */
   changeNote: string | null;
   dutyFamily: DutyFamily | null;
+  /** Set only when category === "absence"; null otherwise. */
+  absenceKind: AbsenceKind | null;
 }

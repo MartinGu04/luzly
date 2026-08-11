@@ -9,9 +9,9 @@ no Google API calls and no spreadsheet-cell access.
   person is scheduled/active on a given date — no such flag is stored
   here.
 - `event.ts` — the `Event` model (and its category/role/period/certainty/
-  duty-family unions) produced by `lib/parsers/event.ts` from a
-  `RawAssignment`. This — not `RawSheet`/`RawAssignment` — is what a
-  future rules engine and the UI should consume.
+  duty-family/absence-kind unions) produced by `lib/parsers/event.ts`
+  from a `RawAssignment`. This — not `RawSheet`/`RawAssignment` — is
+  what a future rules engine and the UI should consume.
 - `shiftSchedule.ts` — builds the day/night shift schedule from the
   workbook's configured day-shift start (never falls back to a default
   time — `ShiftConfigurationError` on missing/invalid config), and
@@ -29,3 +29,13 @@ no Google API calls and no spreadsheet-cell access.
   untouched; whether tentative coverage should count as operationally
   confirmed is left to a future rules engine, not decided here. No
   alert/severity logic.
+- `operationalIssues.ts` — `detectOperationalIssues`, the first
+  deterministic rules engine: blocking absence + active assignment,
+  shift coverage missing/partial (reusing `analyzeShiftCounterparts`,
+  no duplicated interval math), invalid shift-time overrides, and
+  personnel capability mismatch (`Person` capabilities are only
+  compared against the Event's actual scheduled role here — they are
+  never used for counterpart matching). Machine-readable
+  reason/severity only, no Hebrew UI copy or presentation colors in the
+  domain result. Deduplicates issues built from identical evidence
+  without collapsing genuinely different affected Events.

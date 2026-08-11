@@ -26,6 +26,7 @@ function shiftEvent(overrides: Partial<Event> = {}): Event {
     endTimeOverride: null,
     changeNote: null,
     dutyFamily: null,
+    absenceKind: null,
     ...overrides,
   };
 }

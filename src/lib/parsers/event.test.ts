@@ -113,20 +113,38 @@ describe("parseEvent — shift", () => {
 
 describe("parseEvent — absence / constraint", () => {
   it("11. vacation", () => {
-    expect(parseEvent(rawAssignment("חופש")).category).toBe("absence");
+    const event = parseEvent(rawAssignment("חופש"));
+    expect(event.category).toBe("absence");
+    expect(event.absenceKind).toBe("vacation");
   });
 
   it("12. abroad absence", () => {
-    expect(parseEvent(rawAssignment('חו"ל')).category).toBe("absence");
+    const event = parseEvent(rawAssignment('חו"ל'));
+    expect(event.category).toBe("absence");
+    expect(event.absenceKind).toBe("abroad");
   });
 
   it("future-compatible absence labels without medical logic", () => {
-    expect(parseEvent(rawAssignment("גימלים")).category).toBe("absence");
-    expect(parseEvent(rawAssignment("יום ד")).category).toBe("absence");
+    const medical = parseEvent(rawAssignment("גימלים"));
+    expect(medical.category).toBe("absence");
+    expect(medical.absenceKind).toBe("medical");
+
+    const dayOff = parseEvent(rawAssignment("יום ד"));
+    expect(dayOff.category).toBe("absence");
+    expect(dayOff.absenceKind).toBe("day_off");
   });
 
-  it("אפטר is represented as an absence-like event", () => {
-    expect(parseEvent(rawAssignment("אפטר")).category).toBe("absence");
+  it("אפטר is represented as an absence-like event with its own distinct, non-blocking kind", () => {
+    const event = parseEvent(rawAssignment("אפטר"));
+    expect(event.category).toBe("absence");
+    expect(event.absenceKind).toBe("after");
+  });
+
+  it("absenceKind is null for every non-absence category", () => {
+    expect(parseEvent(rawAssignment('אחמ"ש יום')).absenceKind).toBeNull();
+    expect(parseEvent(rawAssignment("אוקסיד")).absenceKind).toBeNull();
+    expect(parseEvent(rawAssignment("סוגר")).absenceKind).toBeNull();
+    expect(parseEvent(rawAssignment("ניקיון כללי")).absenceKind).toBeNull();
   });
 
   it("13. constraint: bare, day, night, morning", () => {
