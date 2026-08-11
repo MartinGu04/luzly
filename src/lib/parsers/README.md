@@ -17,4 +17,9 @@ sees output from here.
   sheet's independent date/day blocks and person-column ownership
   (including adjacent continuation columns) and emits one `RawAssignment`
   per non-empty cell. Does not semantically classify values yet.
+- `event.ts` — semantic parser: turns a `RawAssignment` into a typed
+  `Event` (shift/duty/absence/constraint/status/context/change_note/
+  other/unknown), preserving `rawValue` exactly and never guessing via
+  fuzzy matching. No conflict/coverage/fairness logic — that's a future
+  rules engine, not this layer.
 - `types.ts` — `RawAssignment`.
