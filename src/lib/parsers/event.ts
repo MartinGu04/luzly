@@ -1,4 +1,5 @@
 import type {
+  AbsenceKind,
   DutyFamily,
   Event,
   EventCategory,
@@ -44,6 +45,7 @@ export function parseEvent(raw: RawAssignment): Event {
     endTimeOverride: classification.endTimeOverride ?? null,
     changeNote: classification.changeNote ?? null,
     dutyFamily: classification.dutyFamily ?? null,
+    absenceKind: classification.absenceKind ?? null,
   };
 }
 
@@ -79,6 +81,7 @@ interface ClassificationResult {
   dutyFamily?: DutyFamily | null;
   slot?: number | null;
   changeNote?: string | null;
+  absenceKind?: AbsenceKind | null;
 }
 
 /**
@@ -102,8 +105,9 @@ function classify(text: string): ClassificationResult {
   const duty = parseDuty(text);
   if (duty) return { category: "duty", ...duty };
 
-  if (ABSENCE_PHRASES.has(text)) {
-    return { category: "absence" };
+  const absenceKind = ABSENCE_KIND_BY_PHRASE[text];
+  if (absenceKind) {
+    return { category: "absence", absenceKind };
   }
 
   const constraintPeriod = parseConstraint(text);
@@ -245,7 +249,13 @@ function parseDuty(text: string): DutyMatch | null {
 
 // --- 3. Absence / constraint --------------------------------------------------
 
-const ABSENCE_PHRASES = new Set(['חופש', 'חו"ל', "גימלים", "יום ד", "אפטר"]);
+const ABSENCE_KIND_BY_PHRASE: Record<string, AbsenceKind> = {
+  חופש: "vacation",
+  'חו"ל': "abroad",
+  גימלים: "medical",
+  "יום ד": "day_off",
+  אפטר: "after",
+};
 
 const CONSTRAINT_TOKEN = "אילוץ";
 const CONSTRAINT_PERIOD_TOKENS: Record<string, EventPeriod> = {
