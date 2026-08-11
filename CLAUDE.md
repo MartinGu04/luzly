@@ -17,6 +17,9 @@ existing Google Sheets scheduling workbook.
   (`components`, `app`) separated. Don't reach across layers.
 - Never expose secrets to client code.
 - Never commit secrets.
+- Never commit real operational scheduling data, personnel names/emails,
+  spreadsheet IDs, credentials, or production Sheet responses. Tests and
+  fixtures must use synthetic data.
 - No destructive migrations or hosted operations without explicit
   approval.
 - Always work on task branches. Never work directly on `main`.
