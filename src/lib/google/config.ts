@@ -1,3 +1,4 @@
+import "server-only";
 import { GoogleConfigError } from "./errors";
 
 export interface GoogleServiceAccountConfig {

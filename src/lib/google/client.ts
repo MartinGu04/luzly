@@ -1,3 +1,4 @@
+import "server-only";
 import { google, sheets_v4 } from "googleapis";
 import { readGoogleServiceAccountConfig } from "./config";
 

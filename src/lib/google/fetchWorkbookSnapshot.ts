@@ -1,3 +1,4 @@
+import "server-only";
 import { getGoogleSheetsContext } from "./client";
 import {
   ALL_SHEET_SOURCE_KEYS,
