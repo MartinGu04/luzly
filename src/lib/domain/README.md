@@ -39,3 +39,22 @@ no Google API calls and no spreadsheet-cell access.
   reason/severity only, no Hebrew UI copy or presentation colors in the
   domain result. Deduplicates issues built from identical evidence
   without collapsing genuinely different affected Events.
+- `dutyBlocks.ts` — `buildDutyBlocks`, grouping consecutive-calendar-day
+  duty Events (`category === "duty" && dutyFamily !== null` only) into
+  `DutyBlock`s for one person + duty family + slot. Built purely from
+  Event metadata, never Hebrew `rawValue`/`title`. Local calendar-date
+  arithmetic only (`parseCalendarDate`/`isNextCalendarDay`) — no
+  `Date`/UTC, so month/year boundaries and leap years are handled
+  without timezone risk and an unparseable date can never crash
+  grouping or silently join a valid run. `weekend_kitchen` gets an
+  explicit `weekendCompleteness` (complete only for an actual
+  Thursday-Friday-Saturday run — dates are never fabricated). Output is
+  deterministically sorted; a duplicate Event reference is deduplicated
+  so it can never inflate `dayCount`.
+- `dutyActions.ts` — `deriveDutyActions`, turning `DutyBlock`s into
+  machine-readable `duty_check_in` action data (never an actual
+  notification — no Notification API, cron, or push subscription here).
+  Always local time `"13:00"`, never converted to UTC. A one-day block
+  gets one same-day action; a multi-day block gets one action on every
+  actual date except the final one — the same rule for every duty
+  family, including `weekend_kitchen` (no separate reminder engine).
