@@ -70,11 +70,11 @@ export function buildPersonalScheduleReadModel(
     .filter((event) => classifyAssignmentTemporalState(event, shiftSchedule, now) === "current")
     .map((event) => toAssignmentView(event, shiftSchedule, now));
 
-  const upcomingAssignments = assignmentEvents.filter(
-    (event) => classifyAssignmentTemporalState(event, shiftSchedule, now) === "upcoming",
+  const upcomingAssignmentCandidates = assignmentEvents.filter((event) =>
+    isFutureAssignmentCandidate(event, shiftSchedule, now),
   );
 
-  const nextGroupEvents = selectEarliestGroup(upcomingAssignments, shiftSchedule);
+  const nextGroupEvents = selectEarliestAssignmentGroup(upcomingAssignmentCandidates, shiftSchedule);
   const nextAssignmentGroup: PersonalNextAssignmentGroup | null =
     nextGroupEvents.length === 0
       ? null
@@ -87,7 +87,7 @@ export function buildPersonalScheduleReadModel(
     (event) =>
       event.category === "shift" && classifyAssignmentTemporalState(event, shiftSchedule, now) === "current",
   );
-  const nextShiftEvents = selectEarliestGroup(
+  const nextShiftEvents = selectEarliestAssignmentGroup(
     assignmentEvents.filter(
       (event) =>
         event.category === "shift" &&
@@ -156,45 +156,59 @@ function compareEventsForDisplay(a: Event, b: Event, schedule: ShiftSchedule): n
   return a.sourceCell < b.sourceCell ? -1 : a.sourceCell > b.sourceCell ? 1 : 0;
 }
 
-interface AssignmentSortKey {
-  date: string;
-  order: number;
+/**
+ * A future/upcoming assignment candidate for `nextAssignmentGroup` /
+ * `nextShiftContexts`: either a normally-classified "upcoming" assignment
+ * (duty, or a resolved future/later-today shift), or a future-dated shift
+ * whose exact timing can't be resolved. The latter is never excluded just
+ * because its hour is unknown -- its calendar date alone is still known to
+ * be future, and it's carried through with an honest `not_evaluable`
+ * timing state rather than a guessed one. A same-day not_evaluable shift
+ * is deliberately excluded here -- its timing can't be shown to be either
+ * done or still to come.
+ */
+function isFutureAssignmentCandidate(event: Event, schedule: ShiftSchedule, now: LocalNow): boolean {
+  const state = classifyAssignmentTemporalState(event, schedule, now);
+  if (state === "upcoming") return true;
+  return state === "not_evaluable" && event.category === "shift" && event.date > now.date;
 }
 
-function assignmentSortKey(event: Event, schedule: ShiftSchedule): AssignmentSortKey {
-  const resolution = resolveEventShiftInterval(event, schedule);
-  const order = resolution.status === "resolved" ? resolution.interval.startMinute : Number.POSITIVE_INFINITY;
-  return { date: event.date, order };
-}
-
-function compareAssignmentSortKeys(a: AssignmentSortKey, b: AssignmentSortKey): number {
-  if (a.date !== b.date) return a.date < b.date ? -1 : 1;
-  return a.order - b.order;
+function isResolvedShiftEvent(event: Event, schedule: ShiftSchedule): boolean {
+  return event.category === "shift" && resolveEventShiftInterval(event, schedule).status === "resolved";
 }
 
 /**
- * Picks the earliest (date, effective-start) group among `events` and
- * returns every event that shares that exact key, deterministically
- * ordered. Used for both `nextAssignmentGroup` and the "next shift" pick
- * that drives `nextShiftContexts` -- never invents a time for entries whose
- * exact hour can't be resolved (they simply sort after resolved ones on the
- * same date via `Number.POSITIVE_INFINITY`).
+ * Picks the single earliest calendar date among `events` and returns every
+ * event on that date, deterministically ordered -- the group for
+ * `nextAssignmentGroup` / the "next shift" pick behind `nextShiftContexts`.
+ *
+ * Within that date, date-level entries (duties, and shifts whose exact
+ * hour can't be resolved) are always kept -- they never get dropped just
+ * because a resolved shift on the same date has a finite start minute to
+ * sort by. Resolved shifts on that date are narrowed to only the
+ * earliest-starting one(s), so a later same-date shift doesn't crowd out
+ * the group's "next" meaning; it simply isn't in *this* group.
  */
-function selectEarliestGroup(events: readonly Event[], schedule: ShiftSchedule): Event[] {
+function selectEarliestAssignmentGroup(events: readonly Event[], schedule: ShiftSchedule): Event[] {
   if (events.length === 0) return [];
 
-  let bestKey = assignmentSortKey(events[0], schedule);
-  for (const event of events.slice(1)) {
-    const key = assignmentSortKey(event, schedule);
-    if (compareAssignmentSortKeys(key, bestKey) < 0) bestKey = key;
+  const earliestDate = events.reduce((min, event) => (event.date < min ? event.date : min), events[0].date);
+  const sameDateEvents = events.filter((event) => event.date === earliestDate);
+
+  const resolvedShiftEvents = sameDateEvents.filter((event) => isResolvedShiftEvent(event, schedule));
+  const dateLevelEvents = sameDateEvents.filter((event) => !isResolvedShiftEvent(event, schedule));
+
+  let earliestResolvedShifts: Event[] = [];
+  if (resolvedShiftEvents.length > 0) {
+    const earliestStart = Math.min(
+      ...resolvedShiftEvents.map((event) => effectiveStartMinuteForSort(event, schedule)),
+    );
+    earliestResolvedShifts = resolvedShiftEvents.filter(
+      (event) => effectiveStartMinuteForSort(event, schedule) === earliestStart,
+    );
   }
 
-  return events
-    .filter((event) => {
-      const key = assignmentSortKey(event, schedule);
-      return key.date === bestKey.date && key.order === bestKey.order;
-    })
-    .sort((a, b) => compareEventsForDisplay(a, b, schedule));
+  return [...dateLevelEvents, ...earliestResolvedShifts].sort((a, b) => compareEventsForDisplay(a, b, schedule));
 }
 
 // ---------------------------------------------------------------------------
@@ -294,15 +308,56 @@ function buildShiftContext(
   schedule: ShiftSchedule,
 ): PersonalShiftContext {
   const analysis = analyzeShiftCounterparts(target, allEvents, schedule);
+  const sortCounterparts = (counterparts: readonly Event[]) =>
+    [...counterparts].sort((a, b) => compareCounterpartEvents(a, b, schedule));
+
   return {
     date: target.date,
     period: target.period,
     role: target.role,
     coverageStatus: analysis.coverageStatus,
     missingIntervals: analysis.missingIntervals,
-    primaryCounterparts: analysis.primaryCounterparts.map(toCounterpart),
-    shadowCounterparts: analysis.shadowCounterparts.map(toCounterpart),
+    primaryCounterparts: sortCounterparts(analysis.primaryCounterparts).map(toCounterpart),
+    shadowCounterparts: sortCounterparts(analysis.shadowCounterparts).map(toCounterpart),
   };
+}
+
+/**
+ * Total, deterministic order for a target shift's counterpart Events --
+ * `analyzeShiftCounterparts` preserves whatever order its input Event array
+ * happened to have, so this is what keeps the serialized counterpart lists
+ * stable regardless of the full server-side Event set's order.
+ * `sourceSheet`/`sourceCell` are used only as the final internal tie-break;
+ * neither is ever present on the exposed `PersonalCounterpart`.
+ */
+function compareCounterpartEvents(a: Event, b: Event, schedule: ShiftSchedule): number {
+  const startA = effectiveStartMinuteForSort(a, schedule);
+  const startB = effectiveStartMinuteForSort(b, schedule);
+  if (startA !== startB) return startA - startB;
+
+  if (a.personId !== b.personId) return a.personId < b.personId ? -1 : 1;
+
+  const roleCmp = compareNullableString(a.role, b.role);
+  if (roleCmp !== 0) return roleCmp;
+
+  if (a.period !== b.period) return a.period < b.period ? -1 : 1;
+
+  const startOverrideCmp = compareNullableString(a.startTimeOverride, b.startTimeOverride);
+  if (startOverrideCmp !== 0) return startOverrideCmp;
+
+  const endOverrideCmp = compareNullableString(a.endTimeOverride, b.endTimeOverride);
+  if (endOverrideCmp !== 0) return endOverrideCmp;
+
+  if (a.sourceSheet !== b.sourceSheet) return a.sourceSheet < b.sourceSheet ? -1 : 1;
+  return a.sourceCell < b.sourceCell ? -1 : a.sourceCell > b.sourceCell ? 1 : 0;
+}
+
+/** null sorts before any string -- a stable rule for comparing optional text fields. */
+function compareNullableString(a: string | null, b: string | null): number {
+  if (a === b) return 0;
+  if (a === null) return -1;
+  if (b === null) return 1;
+  return a < b ? -1 : 1;
 }
 
 function toIssueTargetSummary(event: Event): PersonalIssueTargetSummary {

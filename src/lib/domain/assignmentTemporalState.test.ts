@@ -189,4 +189,34 @@ describe("isEventStillRelevant", () => {
     const now = localNow({ date: "2026-08-12", minuteOfDay: 2 * 60 });
     expect(isEventStillRelevant(event, schedule, now)).toBe(false);
   });
+
+  it("a finished same-day shift is no longer relevant, even though its date is still today", () => {
+    const event = shiftEvent({ date: "2026-08-12", period: "day" }); // 07:30-19:30
+    const now = localNow({ date: "2026-08-12", minuteOfDay: 20 * 60 }); // 20:00, after end
+    expect(isEventStillRelevant(event, schedule, now)).toBe(false);
+  });
+
+  it("a not-yet-started later-today shift stays relevant", () => {
+    const event = shiftEvent({ date: "2026-08-12", period: "night" }); // starts 19:30
+    const now = localNow({ date: "2026-08-12", minuteOfDay: 10 * 60 });
+    expect(isEventStillRelevant(event, schedule, now)).toBe(true);
+  });
+
+  it("a non-shift Event dated today stays relevant regardless of any hour", () => {
+    const event = dutyEvent({ date: "2026-08-12" });
+    const now = localNow({ date: "2026-08-12", minuteOfDay: 23 * 60 });
+    expect(isEventStillRelevant(event, schedule, now)).toBe(true);
+  });
+
+  it("a same-day not_evaluable shift stays relevant -- never dropped for lack of a guessed hour", () => {
+    const event = shiftEvent({ date: "2026-08-12", period: "unspecified", role: null });
+    const now = localNow({ date: "2026-08-12", minuteOfDay: 23 * 60 });
+    expect(isEventStillRelevant(event, schedule, now)).toBe(true);
+  });
+
+  it("a future not_evaluable shift stays relevant", () => {
+    const event = shiftEvent({ date: "2026-08-20", period: "unspecified", role: null });
+    const now = localNow({ date: "2026-08-12", minuteOfDay: 600 });
+    expect(isEventStillRelevant(event, schedule, now)).toBe(true);
+  });
 });

@@ -66,14 +66,25 @@ function resolveNowMinuteOnEventTimeline(eventDate: string, now: LocalNow): numb
 
 /**
  * Whether `event` still deserves to appear in a present/future personal
- * view as of `now`. Handles the overnight-carry-forward case: a night shift
- * dated yesterday that's still running past midnight stays relevant even
- * though `Event.date` itself is already in the past. Duties never carry
- * forward this way -- they have no hours to still be "running".
+ * view as of `now`.
+ *
+ * Handles two edge cases symmetrically, both purely from resolved shift
+ * timing (never a guess): a night shift dated yesterday that's still
+ * running past midnight stays relevant even though `Event.date` itself is
+ * already in the past; and a day shift dated today that has already
+ * finished stops being relevant even though `Event.date` is still today.
+ * Duties and unresolved-timing shifts never carry forward from a past
+ * date -- they have no hours to still be "running" -- but a same-day or
+ * future Event whose exact hour can't be resolved stays relevant rather
+ * than being dropped for lack of a guessed time.
  */
 export function isEventStillRelevant(event: Event, schedule: ShiftSchedule, now: LocalNow): boolean {
-  if (event.date >= now.date) return true;
-  if (event.category !== "shift") return false;
-  if (!isNextCalendarDay(event.date, now.date)) return false;
-  return classifyShiftTemporalState(event, schedule, now) === "current";
+  if (event.date < now.date) {
+    if (event.category !== "shift") return false;
+    if (!isNextCalendarDay(event.date, now.date)) return false;
+    return classifyShiftTemporalState(event, schedule, now) === "current";
+  }
+
+  if (event.category !== "shift") return true;
+  return classifyShiftTemporalState(event, schedule, now) !== "past";
 }

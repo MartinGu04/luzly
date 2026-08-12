@@ -177,6 +177,47 @@ describe("todayEvents / upcomingEvents", () => {
     expect(model.upcomingEvents.some((e) => e.date === "2026-08-11")).toBe(true);
   });
 
+  it("a finished same-day shift stays in todayEvents but is dropped from upcomingEvents/currentAssignments", () => {
+    const events = [myShift({ date: "2026-08-12", period: "day" })]; // 07:30-19:30
+    const now = localNow({ date: "2026-08-12", minuteOfDay: 20 * 60 }); // 20:00, after end
+    const model = build({ events, now });
+    expect(model.todayEvents).toHaveLength(1);
+    expect(model.upcomingEvents).toHaveLength(0);
+    expect(model.currentAssignments).toHaveLength(0);
+  });
+
+  it("a not-yet-started later-today shift stays in upcomingEvents", () => {
+    const events = [myShift({ date: "2026-08-12", period: "night" })]; // starts 19:30
+    const now = localNow({ date: "2026-08-12", minuteOfDay: 10 * 60 });
+    const model = build({ events, now });
+    expect(model.upcomingEvents.some((e) => e.date === "2026-08-12")).toBe(true);
+  });
+
+  it("a currently-running same-day shift stays in upcomingEvents", () => {
+    const events = [myShift({ date: "2026-08-12", period: "day" })];
+    const now = localNow({ date: "2026-08-12", minuteOfDay: 10 * 60 });
+    const model = build({ events, now });
+    expect(model.upcomingEvents.some((e) => e.date === "2026-08-12")).toBe(true);
+  });
+
+  it("a future resolved shift stays in upcomingEvents", () => {
+    const events = [myShift({ date: "2026-08-20", period: "day" })];
+    const model = build({ events });
+    expect(model.upcomingEvents.some((e) => e.date === "2026-08-20")).toBe(true);
+  });
+
+  it("a same-day not_evaluable shift is never dropped for lack of a guessed hour", () => {
+    const events = [myShift({ date: "2026-08-12", period: "unspecified", role: null })];
+    const model = build({ events }); // now = today, 10:00
+    expect(model.upcomingEvents.some((e) => e.date === "2026-08-12")).toBe(true);
+  });
+
+  it("a future not_evaluable shift is never dropped for lack of a guessed hour", () => {
+    const events = [myShift({ date: "2026-08-20", period: "unspecified", role: null })];
+    const model = build({ events });
+    expect(model.upcomingEvents.some((e) => e.date === "2026-08-20")).toBe(true);
+  });
+
   it("16. historical Events are omitted from upcomingEvents", () => {
     const events = [myShift({ date: "2026-08-01", period: "day" })];
     const model = build({ events });
@@ -279,14 +320,57 @@ describe("nextAssignmentGroup", () => {
     expect(model.nextAssignmentGroup).toBeNull();
   });
 
-  it("27. an invalid/unspecified-timing shift is never guessed into upcoming/current -- it's simply absent from the group", () => {
+  it("27. a future not_evaluable shift is never dropped from nextAssignmentGroup -- its date is known even though its hour isn't", () => {
     const events = [myShift({ date: "2026-08-20", period: "unspecified", role: null })];
     const model = build({ events });
-    // Its exact timing can never be resolved, so it never gets forced into
-    // nextAssignmentGroup -- but it's still visible in the broader display
-    // list (upcomingEvents), just without a claimed temporal position.
+    expect(model.nextAssignmentGroup?.date).toBe("2026-08-20");
+    expect(model.nextAssignmentGroup?.events).toEqual([
+      expect.objectContaining({ date: "2026-08-20", category: "shift", temporalState: "not_evaluable" }),
+    ]);
+  });
+
+  it("a same-day not_evaluable shift is never guessed into the group -- its timing could be either done or still to come", () => {
+    const events = [myShift({ date: "2026-08-12", period: "unspecified", role: null })];
+    const model = build({ events }); // now = today, 10:00
     expect(model.nextAssignmentGroup).toBeNull();
-    expect(model.upcomingEvents.some((e) => e.date === "2026-08-20")).toBe(true);
+    // Still visible in the broader display list, just with no claimed temporal position.
+    expect(model.todayEvents.some((e) => e.category === "shift")).toBe(true);
+  });
+
+  it("duty + one resolved shift on the same future date are both preserved in the group", () => {
+    const events = [
+      myDuty({ date: "2026-08-20", dutyFamily: "guard", slot: 1 }),
+      myShift({ date: "2026-08-20", period: "day" }),
+    ];
+    const model = build({ events });
+    expect(model.nextAssignmentGroup?.date).toBe("2026-08-20");
+    expect(model.nextAssignmentGroup?.events.map((e) => e.category).sort()).toEqual(["duty", "shift"]);
+  });
+
+  it("duty + day + night shift on the same future date: the duty is preserved and only the earlier (day) shift joins it", () => {
+    const events = [
+      myDuty({ date: "2026-08-20", dutyFamily: "guard", slot: 1 }),
+      myShift({ date: "2026-08-20", period: "day" }), // starts 07:30
+      myShift({ date: "2026-08-20", period: "night" }), // starts 19:30 -- later
+    ];
+    const model = build({ events });
+    expect(model.nextAssignmentGroup?.date).toBe("2026-08-20");
+    expect(model.nextAssignmentGroup?.events).toHaveLength(2);
+    expect(model.nextAssignmentGroup?.events.map((e) => e.category).sort()).toEqual(["duty", "shift"]);
+    const shiftInGroup = model.nextAssignmentGroup?.events.find((e) => e.category === "shift");
+    expect(shiftInGroup?.period).toBe("day");
+  });
+
+  it("not_evaluable shift + duty on the same future date are both preserved as date-level entries", () => {
+    const events = [
+      myDuty({ date: "2026-08-20", dutyFamily: "guard", slot: 1 }),
+      myShift({ date: "2026-08-20", period: "unspecified", role: null }),
+    ];
+    const model = build({ events });
+    expect(model.nextAssignmentGroup?.date).toBe("2026-08-20");
+    expect(model.nextAssignmentGroup?.events).toHaveLength(2);
+    const shiftInGroup = model.nextAssignmentGroup?.events.find((e) => e.category === "shift");
+    expect(shiftInGroup?.temporalState).toBe("not_evaluable");
   });
 });
 
@@ -387,6 +471,70 @@ describe("currentShiftContexts / nextShiftContexts — colleague privacy", () =>
     const model = build({ events: [myDuty({ date: "2026-08-12" })] });
     expect(model.currentShiftContexts).toHaveLength(0);
     expect(model.nextShiftContexts).toHaveLength(0);
+  });
+
+  it("4. primary counterpart order is deterministic regardless of the full Event array's input order", () => {
+    const c2 = colleague({ id: "p_colleague2", name: "משה בדיקה", email: "moshe@example.invalid" });
+    const events = [
+      myShift({ date: "2026-08-12", period: "day", role: "technician" }),
+      colleagueShift({
+        date: "2026-08-12",
+        period: "day",
+        role: "supervisor",
+        startTimeOverride: "10:00",
+      }),
+      colleagueShift({
+        date: "2026-08-12",
+        period: "day",
+        role: "supervisor",
+        personId: c2.id,
+        personName: c2.name,
+        startTimeOverride: "08:00",
+      }),
+    ];
+    const people = [me(), colleague(), c2];
+
+    const forward = build({ events, people });
+    const reversed = build({ events: [...events].reverse(), people });
+
+    expect(forward.currentShiftContexts[0].primaryCounterparts.map((c) => c.personId)).toEqual([
+      c2.id,
+      COLLEAGUE_ID,
+    ]);
+    expect(JSON.stringify(forward.currentShiftContexts)).toBe(JSON.stringify(reversed.currentShiftContexts));
+  });
+
+  it("4. shadow counterpart order is also deterministic regardless of input order", () => {
+    const c2 = colleague({ id: "p_colleague2", name: "משה בדיקה", email: "moshe@example.invalid" });
+    const events = [
+      myShift({ date: "2026-08-12", period: "day", role: "technician" }),
+      colleagueShift({
+        date: "2026-08-12",
+        period: "day",
+        role: "supervisor",
+        shadow: true,
+        startTimeOverride: "10:00",
+      }),
+      colleagueShift({
+        date: "2026-08-12",
+        period: "day",
+        role: "supervisor",
+        shadow: true,
+        personId: c2.id,
+        personName: c2.name,
+        startTimeOverride: "08:00",
+      }),
+    ];
+    const people = [me(), colleague(), c2];
+
+    const forward = build({ events, people });
+    const reversed = build({ events: [...events].reverse(), people });
+
+    expect(forward.currentShiftContexts[0].shadowCounterparts.map((c) => c.personId)).toEqual([
+      c2.id,
+      COLLEAGUE_ID,
+    ]);
+    expect(JSON.stringify(forward.currentShiftContexts)).toBe(JSON.stringify(reversed.currentShiftContexts));
   });
 });
 
