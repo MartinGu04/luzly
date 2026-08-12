@@ -10,8 +10,12 @@ const WEEKDAY_LABELS = [
   "יום שבת",
 ];
 
-/** Standard Hebrew single-letter weekday abbreviation, e.g. "ה׳" for Thursday. */
-const SHORT_WEEKDAY_LABELS = ["א׳", "ב׳", "ג׳", "ד׳", "ה׳", "ו׳", "ש׳"];
+/**
+ * Standard Hebrew single-letter weekday abbreviations, Sunday-first (index
+ * 0 = Sunday, matching `dayOfWeek`/every Sunday-first calendar grid in this
+ * codebase). Exported directly for a calendar grid's weekday header row.
+ */
+export const SHORT_WEEKDAY_LABELS = ["א׳", "ב׳", "ג׳", "ד׳", "ה׳", "ו׳", "ש׳"];
 
 const MONTH_LABELS = [
   "ינואר",
@@ -63,6 +67,12 @@ export function formatCompactDate(dateStr: string): string | null {
   const parsed = parseCalendarDate(dateStr);
   if (!parsed) return null;
   return `${parsed.day}.${parsed.month}`;
+}
+
+/** "אוגוסט 2026" -- the Hebrew-language Gregorian month/year label for a calendar page header. `month` is 1-12. Returns null for an out-of-range month. */
+export function formatHebrewMonthYear(year: number, month: number): string | null {
+  if (month < 1 || month > 12) return null;
+  return `${MONTH_LABELS[month - 1]} ${year}`;
 }
 
 export type RelativeDayLabel = "today" | "tomorrow" | "other";

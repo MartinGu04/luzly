@@ -21,6 +21,11 @@ layer's safe projections may.
   `PersonalEventView` carries a server-resolved `timing`
   (`lib/domain/assignmentTiming.ts`) so the dashboard's progress bar/today
   timeline never re-derives shift hours from raw text.
+  `shiftCalendarEvents` is the one array that deliberately does NOT filter
+  out finished history — the person's own `category === "shift"` Events,
+  past/current/future — since it powers `/schedule`'s personal shift
+  calendar rather than a "what's still relevant" list like
+  `upcomingEvents`.
 - `buildPersonalScheduleReadModel.ts` — the pure, deterministic builder.
   Takes the authenticated `Person`, the full parsed `people`/`events`, a
   `ShiftSchedule`, and an explicit `LocalNow` — no network, no auth, no

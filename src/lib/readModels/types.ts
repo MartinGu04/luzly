@@ -162,6 +162,16 @@ export interface PersonalScheduleReadModel {
   todayEvents: PersonalEventView[];
   upcomingEvents: PersonalEventView[];
 
+  /**
+   * The authenticated person's own shift Events -- past, current, and
+   * future, every one present in the parsed schedule (unlike
+   * `upcomingEvents`, which deliberately excludes finished history). Powers
+   * the `/schedule` personal shift calendar only. Duties and absences are
+   * excluded on purpose: this is a shift calendar, not a full personal
+   * timeline. Deterministically ordered, same as every other array here.
+   */
+  shiftCalendarEvents: PersonalEventView[];
+
   currentAssignments: PersonalAssignmentView[];
   nextAssignmentGroup: PersonalNextAssignmentGroup | null;
 

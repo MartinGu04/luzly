@@ -29,9 +29,21 @@ describe("BottomNav", () => {
 
   it("the enabled dashboard route is a real link and marked as the current page", () => {
     render(<BottomNav />);
-    const link = screen.getByRole("link");
-    expect(link).toHaveAttribute("href", "/");
-    expect(link).toHaveAttribute("aria-current", "page");
+    const current = screen.getByRole("link", { current: "page" });
+    expect(current).toHaveAttribute("href", "/");
+  });
+
+  it("the schedule route is enabled: a real link, not aria-current on a different pathname", () => {
+    render(<BottomNav />);
+    const scheduleLink = screen.getByRole("link", { name: "משמרות" });
+    expect(scheduleLink).toHaveAttribute("href", "/schedule");
+    expect(scheduleLink).not.toHaveAttribute("aria-current");
+  });
+
+  it("other future routes (duties, with-me) remain disabled", () => {
+    render(<BottomNav />);
+    expect(screen.queryByRole("link", { name: "תורנויות" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "מי איתי" })).toBeNull();
   });
 
   it("disabled entries are marked aria-disabled, genuinely non-interactive", () => {
