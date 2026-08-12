@@ -42,4 +42,22 @@ describe("Header — holiday context", () => {
     render(<Header personName="דני בדיקה" localNow={{ date: "2026-12-08", minuteOfDay: 10 * 60 }} />);
     expect(screen.getAllByText("🕎")).toHaveLength(1);
   });
+
+  it("places the holiday chip on its own line, above the date line, never inline with it", () => {
+    render(<Header personName="דני בדיקה" localNow={{ date: "2026-09-11", minuteOfDay: 10 * 60 }} />);
+    const chip = screen.getByText("ערב ראש השנה").closest("span");
+    const dateLine = screen.getByText("יום שישי · 11 בספטמבר · כ״ט באלול תשפ״ו");
+
+    // The chip is not inside the date paragraph, and it precedes it in the DOM.
+    expect(dateLine.contains(chip)).toBe(false);
+    expect(chip?.compareDocumentPosition(dateLine)).toBeTruthy();
+    const position = chip!.compareDocumentPosition(dateLine);
+    expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("moves the date line directly under the greeting with no extra gap when there is no holiday", () => {
+    render(<Header personName="דני בדיקה" localNow={{ date: "2026-08-12", minuteOfDay: 10 * 60 }} />);
+    const dateLine = screen.getByText("יום רביעי · 12 באוגוסט · כ״ט באב תשפ״ו");
+    expect(dateLine.className).toMatch(/mt-1\.5/);
+  });
 });

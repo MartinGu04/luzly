@@ -37,15 +37,15 @@ export function Header({ personName, localNow }: HeaderProps) {
             {emoji}
           </span>
         </h1>
-        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
-          {dateLabel ? <p className="text-sm text-muted">{dateLabel}</p> : null}
-          {holiday ? (
+        {holiday ? (
+          <div className="mt-1">
             <span className="inline-flex items-center gap-1 rounded-full bg-overlay-soft px-2 py-0.5 text-xs font-medium text-foreground ring-1 ring-border">
               <span aria-hidden="true">{holiday.emoji}</span>
               {holiday.label}
             </span>
-          ) : null}
-        </div>
+          </div>
+        ) : null}
+        {dateLabel ? <p className={`text-sm text-muted ${holiday ? "mt-0.5" : "mt-1.5"}`}>{dateLabel}</p> : null}
       </div>
       <div className="shrink-0 rounded-full bg-overlay-soft px-4 py-2 ring-1 ring-border">
         <LiveClock initialTime={minuteOfDayToClock(localNow.minuteOfDay)} />
