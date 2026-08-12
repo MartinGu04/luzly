@@ -1,10 +1,12 @@
-import { CalendarClock, Sparkles } from "lucide-react";
+import { CalendarClock } from "lucide-react";
 import type {
   PersonalAssignmentView,
+  PersonalEventView,
   PersonalNextAssignmentGroup,
   PersonalShiftContext,
 } from "@/lib/readModels/types";
 import { relativeDayLabel, formatHebrewWeekdayAndDate } from "@/lib/presentation/hebrewDate";
+import { assignmentEmoji } from "@/lib/presentation/emoji";
 import { periodLabel, roleLabel } from "@/lib/presentation/labels";
 import { Badge } from "@/components/ui/Badge";
 import { Panel } from "@/components/ui/Panel";
@@ -19,15 +21,21 @@ interface HeroProps {
   /** Every current-shift counterpart context the read model computed -- Hero picks the one that actually matches its lead shift, never index 0 blindly. */
   currentShiftContexts: PersonalShiftContext[];
   nextShiftContexts: PersonalShiftContext[];
+  /** A known blocking absence (vacation/abroad/medical/day_off) dated today, only when there is no current shift/duty already active. */
+  vacationEvent: PersonalEventView | null;
+  /** Today's other Events besides `vacationEvent` -- preserved so a vacation day is never falsely reported as fully empty. */
+  otherTodayEvents: PersonalEventView[];
   fetchedAt: string;
   localNowDate: string;
 }
 
 /**
- * The dominant "what is happening to me now?" element. Three states:
- * a current assignment (shift preferred as lead, live pulse + progress),
- * an upcoming one (calmer, countdown only where genuinely known), or a
- * quiet empty state. "Who is with me?" renders embedded in the same
+ * The dominant "what is happening to me now?" element. States, in
+ * priority order: a current assignment (shift preferred as lead, live
+ * pulse + progress); a known vacation/leave day with nothing currently
+ * active (calm, never falsely "fully free" if other Events exist today);
+ * an upcoming assignment (calmer, countdown only where genuinely known);
+ * or a quiet empty state. "Who is with me?" renders embedded in the same
  * surface when relevant -- never a disconnected card.
  */
 export function Hero({
@@ -35,6 +43,8 @@ export function Hero({
   nextAssignmentGroup,
   currentShiftContexts,
   nextShiftContexts,
+  vacationEvent,
+  otherTodayEvents,
   fetchedAt,
   localNowDate,
 }: HeroProps) {
@@ -42,6 +52,10 @@ export function Hero({
     return (
       <CurrentHero assignments={currentAssignments} shiftContexts={currentShiftContexts} fetchedAt={fetchedAt} />
     );
+  }
+
+  if (vacationEvent) {
+    return <VacationHero vacationEvent={vacationEvent} otherTodayEvents={otherTodayEvents} />;
   }
 
   if (nextAssignmentGroup) {
@@ -79,6 +93,16 @@ function findMatchingShiftContext(
   );
 }
 
+/** A small restrained emoji anchor, rendered before the title it describes. Returns null (renders nothing) when the assignment maps to no known emoji. */
+function EmojiAnchor({ emoji }: { emoji: string | null }) {
+  if (!emoji) return null;
+  return (
+    <span aria-hidden="true" className="me-2">
+      {emoji}
+    </span>
+  );
+}
+
 function CurrentHero({
   assignments,
   shiftContexts,
@@ -92,6 +116,7 @@ function CurrentHero({
   const secondary = assignments.filter((a) => a !== lead);
   const meta = describeAssignment(lead);
   const shiftContext = findMatchingShiftContext(lead, shiftContexts);
+  const emoji = assignmentEmoji(lead);
 
   return (
     <Panel variant="hero" className="animate-fade-up relative overflow-hidden">
@@ -105,7 +130,10 @@ function CurrentHero({
         <span>פעיל עכשיו</span>
       </div>
 
-      <h2 className="relative mt-3 text-2xl font-bold text-balance text-foreground sm:text-3xl">{lead.title}</h2>
+      <h2 className="relative mt-3 text-2xl font-bold text-balance text-foreground sm:text-3xl">
+        <EmojiAnchor emoji={emoji} />
+        {lead.title}
+      </h2>
 
       {meta ? (
         <p className="relative mt-1.5 flex flex-wrap items-center gap-2 text-sm text-muted">
@@ -131,7 +159,7 @@ function CurrentHero({
           {secondary.map((assignment, index) => (
             <span
               key={index}
-              className="rounded-full bg-white/[0.05] px-3 py-1.5 text-xs font-medium text-foreground ring-1 ring-white/[0.07]"
+              className="rounded-full bg-overlay-soft px-3 py-1.5 text-xs font-medium text-foreground ring-1 ring-border"
             >
               {assignment.title}
             </span>
@@ -140,8 +168,42 @@ function CurrentHero({
       ) : null}
 
       {shiftContext ? (
-        <div className="relative mt-6 border-t border-white/[0.06] pt-5">
+        <div className="relative mt-6 border-t border-border pt-5">
           <CounterpartPanel context={shiftContext} compact />
+        </div>
+      ) : null}
+    </Panel>
+  );
+}
+
+function VacationHero({
+  vacationEvent,
+  otherTodayEvents,
+}: {
+  vacationEvent: PersonalEventView;
+  otherTodayEvents: PersonalEventView[];
+}) {
+  const emoji = assignmentEmoji(vacationEvent) ?? "🏖️";
+  const hasOtherItems = otherTodayEvents.length > 0;
+
+  return (
+    <Panel variant="hero" className="animate-fade-up text-center sm:text-start">
+      <span aria-hidden="true" className="text-3xl">
+        {emoji}
+      </span>
+      <h2 className="mt-3 text-xl font-bold text-foreground sm:text-2xl">{vacationEvent.title}</h2>
+      <p className="mt-1.5 text-sm text-muted">{hasOtherItems ? "אין לך שיבוץ פעיל כרגע" : "היום שלך פנוי"}</p>
+
+      {hasOtherItems ? (
+        <div className="mt-5 flex flex-wrap justify-center gap-2 sm:justify-start">
+          {otherTodayEvents.map((event, index) => (
+            <span
+              key={index}
+              className="rounded-full bg-overlay-soft px-3 py-1.5 text-xs font-medium text-foreground ring-1 ring-border"
+            >
+              {event.title}
+            </span>
+          ))}
         </div>
       ) : null}
     </Panel>
@@ -163,6 +225,7 @@ function NextHero({
   const others = group.events.filter((e) => e !== lead);
   const meta = describeAssignment(lead);
   const shiftContext = findMatchingShiftContext(lead, shiftContexts);
+  const emoji = assignmentEmoji(lead);
 
   const relDay = relativeDayLabel(group.date, localNowDate);
   const dateLabel =
@@ -175,7 +238,10 @@ function NextHero({
         <span>הבא שלך</span>
       </div>
 
-      <h2 className="mt-3 text-2xl font-bold text-balance text-foreground sm:text-3xl">{lead.title}</h2>
+      <h2 className="mt-3 text-2xl font-bold text-balance text-foreground sm:text-3xl">
+        <EmojiAnchor emoji={emoji} />
+        {lead.title}
+      </h2>
 
       {meta ? <p className="mt-1.5 text-sm text-muted">{meta}</p> : null}
 
@@ -201,7 +267,7 @@ function NextHero({
           {others.map((event, index) => (
             <span
               key={index}
-              className="rounded-full bg-white/[0.05] px-3 py-1.5 text-xs font-medium text-foreground ring-1 ring-white/[0.07]"
+              className="rounded-full bg-overlay-soft px-3 py-1.5 text-xs font-medium text-foreground ring-1 ring-border"
             >
               {event.title}
             </span>
@@ -210,7 +276,7 @@ function NextHero({
       ) : null}
 
       {shiftContext ? (
-        <div className="mt-6 border-t border-white/[0.06] pt-5">
+        <div className="mt-6 border-t border-border pt-5">
           <CounterpartPanel context={shiftContext} compact />
         </div>
       ) : null}
@@ -221,7 +287,9 @@ function NextHero({
 function EmptyHero() {
   return (
     <Panel variant="hero" className="animate-fade-up text-center sm:text-start">
-      <Sparkles className="mx-auto h-6 w-6 text-muted sm:mx-0" aria-hidden="true" strokeWidth={1.5} />
+      <span aria-hidden="true" className="text-3xl">
+        😌
+      </span>
       <h2 className="mt-3 text-xl font-bold text-foreground">הכול שקט כרגע</h2>
       <p className="mt-1.5 text-sm text-muted">אין לך שיבוצים קרובים בלוח.</p>
     </Panel>

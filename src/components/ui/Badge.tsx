@@ -9,7 +9,7 @@ interface BadgeProps {
 }
 
 const TONE_CLASSES: Record<BadgeTone, string> = {
-  neutral: "bg-white/[0.06] text-muted ring-1 ring-white/10",
+  neutral: "bg-overlay-soft text-muted ring-1 ring-border-strong",
   success: "bg-success/10 text-success ring-1 ring-success/25",
   warning: "bg-warning/10 text-warning ring-1 ring-warning/25",
   critical: "bg-critical/10 text-critical ring-1 ring-critical/25",

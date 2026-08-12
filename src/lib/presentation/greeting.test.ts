@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { firstNameOf, greetingForMinuteOfDay } from "./greeting";
+import { firstNameOf, greetingEmojiForMinuteOfDay, greetingForMinuteOfDay } from "./greeting";
 
 describe("greetingForMinuteOfDay", () => {
   it("9. chooses the correct Hebrew daypart for each hour band", () => {
@@ -16,6 +16,26 @@ describe("greetingForMinuteOfDay", () => {
     expect(greetingForMinuteOfDay(12 * 60)).toBe("צהריים טובים"); // noon
     expect(greetingForMinuteOfDay(17 * 60)).toBe("ערב טוב"); // 17:00 start of evening
     expect(greetingForMinuteOfDay(21 * 60)).toBe("לילה טוב"); // 21:00 start of night
+  });
+});
+
+describe("greetingEmojiForMinuteOfDay", () => {
+  it("maps morning to sun, afternoon to a hazy sun, evening/night to moon", () => {
+    expect(greetingEmojiForMinuteOfDay(6 * 60)).toBe("☀️"); // morning
+    expect(greetingEmojiForMinuteOfDay(13 * 60)).toBe("🌤️"); // afternoon
+    expect(greetingEmojiForMinuteOfDay(18 * 60)).toBe("🌙"); // evening
+    expect(greetingEmojiForMinuteOfDay(23 * 60)).toBe("🌙"); // night
+    expect(greetingEmojiForMinuteOfDay(2 * 60)).toBe("🌙"); // night
+  });
+
+  it("shares the exact same daypart boundaries as the greeting text", () => {
+    for (const minute of [0, 5 * 60, 12 * 60, 17 * 60, 21 * 60, 23 * 60 + 59]) {
+      const greeting = greetingForMinuteOfDay(minute);
+      const emoji = greetingEmojiForMinuteOfDay(minute);
+      if (greeting === "בוקר טוב") expect(emoji).toBe("☀️");
+      if (greeting === "צהריים טובים") expect(emoji).toBe("🌤️");
+      if (greeting === "ערב טוב" || greeting === "לילה טוב") expect(emoji).toBe("🌙");
+    }
   });
 });
 

@@ -2,6 +2,7 @@ import { Check, Circle } from "lucide-react";
 import type { ReactNode } from "react";
 import type { LocalNow } from "@/lib/domain/localNow";
 import type { PersonalDutyAction, PersonalEventView } from "@/lib/readModels/types";
+import { assignmentEmoji, dutyFamilyEmoji } from "@/lib/presentation/emoji";
 import { dutyFamilyLabel, periodLabel, roleLabel } from "@/lib/presentation/labels";
 import { Badge } from "@/components/ui/Badge";
 import { Panel } from "@/components/ui/Panel";
@@ -19,6 +20,7 @@ interface TimelineItem {
   key: string;
   minute: number;
   title: string;
+  emoji: string | null;
   subtitle: string | null;
   timeLabel: ReactNode;
   status: TimelineStatus;
@@ -61,6 +63,7 @@ export function TodayTimeline({ todayEvents, todayDutyActions, localNow }: Today
         key: `event-${index}`,
         minute: startMinute,
         title: event.title,
+        emoji: assignmentEmoji(event),
         subtitle: describeEvent(event),
         timeLabel: <TimeRange start={startLocalTime} end={endLocalTime} />,
         status: statusOf(startMinute, endMinute, localNow.minuteOfDay),
@@ -71,6 +74,7 @@ export function TodayTimeline({ todayEvents, todayDutyActions, localNow }: Today
         key: `event-${index}`,
         minute: 0,
         title: event.title,
+        emoji: assignmentEmoji(event),
         subtitle: describeEvent(event),
         timeLabel: null,
         status: "future",
@@ -85,6 +89,7 @@ export function TodayTimeline({ todayEvents, todayDutyActions, localNow }: Today
       key: `duty-action-${index}`,
       minute,
       title: "בדיקת תורנות",
+      emoji: dutyFamilyEmoji(action.dutyFamily),
       subtitle: dutyFamilyLabel(action.dutyFamily),
       timeLabel: <span dir="ltr">{action.localTime}</span>,
       status: localNow.minuteOfDay >= minute ? "past" : "future",
@@ -111,7 +116,7 @@ export function TodayTimeline({ todayEvents, todayDutyActions, localNow }: Today
         <ol className="relative mt-4">
           <div
             aria-hidden="true"
-            className="absolute top-1 bottom-1 w-px bg-white/10"
+            className="absolute top-1 bottom-1 w-px bg-overlay-strong"
             style={{ insetInlineStart: "15px" }}
           />
           {timedItems.map((item) => (
@@ -121,7 +126,14 @@ export function TodayTimeline({ todayEvents, todayDutyActions, localNow }: Today
               </div>
               <div className={`min-w-0 flex-1 ${item.status === "past" ? "opacity-55" : ""}`}>
                 <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-                  <p className="text-sm font-medium text-foreground">{item.title}</p>
+                  <p className="flex items-center gap-1.5 text-sm font-medium text-foreground">
+                    {item.emoji ? (
+                      <span aria-hidden="true" className="text-xs">
+                        {item.emoji}
+                      </span>
+                    ) : null}
+                    {item.title}
+                  </p>
                   <span className="text-xs text-muted">{item.timeLabel}</span>
                 </div>
                 {item.subtitle || item.tentative ? (
@@ -137,12 +149,19 @@ export function TodayTimeline({ todayEvents, todayDutyActions, localNow }: Today
       ) : null}
 
       {allDayItems.length > 0 ? (
-        <div className={timedItems.length > 0 ? "mt-2 border-t border-white/[0.06] pt-4" : "mt-4"}>
+        <div className={timedItems.length > 0 ? "mt-2 border-t border-border pt-4" : "mt-4"}>
           <p className="text-xs font-medium text-muted-2">ללא שעה</p>
           <ul className="mt-2 space-y-2">
             {allDayItems.map((item) => (
-              <li key={item.key} className="flex items-center justify-between gap-3 rounded-lg bg-white/[0.03] px-3 py-2">
-                <span className="text-sm text-foreground">{item.title}</span>
+              <li key={item.key} className="flex items-center justify-between gap-3 rounded-lg bg-overlay-faint px-3 py-2">
+                <span className="flex items-center gap-1.5 text-sm text-foreground">
+                  {item.emoji ? (
+                    <span aria-hidden="true" className="text-xs">
+                      {item.emoji}
+                    </span>
+                  ) : null}
+                  {item.title}
+                </span>
                 {item.tentative ? <Badge tone="warning">משוער</Badge> : null}
               </li>
             ))}
@@ -163,12 +182,12 @@ function TimelineDot({ status }: { status: TimelineStatus }) {
   }
   if (status === "past") {
     return (
-      <span className="flex h-4 w-4 items-center justify-center rounded-full bg-white/10 text-muted">
+      <span className="flex h-4 w-4 items-center justify-center rounded-full bg-overlay-strong text-muted">
         <Check className="h-2.5 w-2.5" aria-hidden="true" strokeWidth={3} />
       </span>
     );
   }
-  return <span className="mt-1 h-2 w-2 rounded-full bg-white/20" aria-hidden="true" />;
+  return <span className="mt-1 h-2 w-2 rounded-full bg-border-strong" aria-hidden="true" />;
 }
 
 function describeEvent(event: PersonalEventView): string | null {

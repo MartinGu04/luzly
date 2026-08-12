@@ -177,3 +177,46 @@ describe("Dashboard composition — Upcoming exclusion (issue 2)", () => {
     expect(screen.getByText("אין פריטים נוספים באופק הקרוב.")).toBeInTheDocument();
   });
 });
+
+describe("Dashboard composition — vacation state wiring", () => {
+  it("a blocking absence today with nothing current becomes the vacation hero", () => {
+    const vacation = baseEvent({
+      category: "absence",
+      role: null,
+      absenceKind: "vacation",
+      title: "חופש",
+      rawValue: "חופש",
+    });
+
+    render(<Dashboard model={model({ todayEvents: [vacation] })} />);
+
+    expect(screen.getByText("היום שלך פנוי")).toBeInTheDocument();
+  });
+
+  it("a current assignment still leads even when today also has a blocking absence (conflict case)", () => {
+    const vacation = baseEvent({
+      category: "absence",
+      role: null,
+      absenceKind: "vacation",
+      title: "חופש",
+      rawValue: "חופש",
+    });
+    const currentShift = assignment({ title: "טכנאי יום" });
+
+    render(
+      <Dashboard model={model({ todayEvents: [vacation], currentAssignments: [currentShift] })} />,
+    );
+
+    expect(screen.getByText("פעיל עכשיו")).toBeInTheDocument();
+    expect(screen.queryByText("היום שלך פנוי")).toBeNull();
+  });
+
+  it("a non-blocking absence kind ('after') never triggers the vacation hero", () => {
+    const partial = baseEvent({ category: "absence", role: null, absenceKind: "after", title: "אפטר" });
+
+    render(<Dashboard model={model({ todayEvents: [partial] })} />);
+
+    expect(screen.queryByText("היום שלך פנוי")).toBeNull();
+    expect(screen.getByText("הכול שקט כרגע")).toBeInTheDocument();
+  });
+});

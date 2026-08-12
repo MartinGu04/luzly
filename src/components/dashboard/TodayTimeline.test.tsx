@@ -101,4 +101,29 @@ describe("TodayTimeline", () => {
     const items = container.querySelectorAll("li");
     expect(items[0].querySelector(".opacity-55")).not.toBeNull();
   });
+
+  it("shows a semantic emoji anchor for a known day shift", () => {
+    const { container } = render(
+      <TodayTimeline todayEvents={[shiftEvent()]} todayDutyActions={[]} localNow={localNow()} />,
+    );
+    expect(container.textContent).toContain("☀️");
+  });
+
+  it("shows a semantic emoji anchor for a duty check-in action, from its typed dutyFamily", () => {
+    const { container } = render(
+      <TodayTimeline todayEvents={[]} todayDutyActions={[dutyAction({ dutyFamily: "guard" })]} localNow={localNow()} />,
+    );
+    expect(container.textContent).toContain("🛡️");
+  });
+
+  it("shows no emoji for a non-timed event with no known semantic mapping", () => {
+    const { container } = render(
+      <TodayTimeline
+        todayEvents={[dutyEvent({ dutyFamily: "rasar", title: "רס״ר" })]}
+        todayDutyActions={[]}
+        localNow={localNow()}
+      />,
+    );
+    expect(container.textContent).not.toMatch(/[\u{1F300}-\u{1FAFF}☀-➿]/u);
+  });
 });

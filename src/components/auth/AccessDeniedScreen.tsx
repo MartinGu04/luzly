@@ -18,7 +18,7 @@ export function AccessDeniedScreen() {
         <form action={signOutAction} className="mt-6">
           <button
             type="submit"
-            className="rounded-lg px-3 py-2 text-sm font-medium text-primary underline-offset-4 transition-colors hover:text-white hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+            className="rounded-lg px-3 py-2 text-sm font-medium text-primary underline-offset-4 transition-colors hover:text-foreground hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
           >
             התנתקות
           </button>

@@ -1,11 +1,114 @@
 @import "tailwindcss";
 
 /* ---------------------------------------------------------------------- */
-/* Design tokens -- dark-first (deep navy/graphite, not pure black).      */
-/* Every component reads colors through these custom properties rather   */
-/* than raw hex values, so the palette can evolve from one place.        */
+/* Design tokens -- light-first definition, with dark overrides for       */
+/* (a) the system preferring dark and no explicit choice, and (b) an      */
+/* explicit dark choice regardless of system. Every component reads      */
+/* colors through these custom properties rather than raw hex values, so */
+/* the palette (and the whole light/dark story) can evolve from one      */
+/* place. `data-theme` is set on <html> by the blocking init script in   */
+/* the root layout (never by React state, so there is nothing for React  */
+/* to hydrate differently) -- "system" means no attribute is set at all, */
+/* letting the media query below decide.                                 */
 /* ---------------------------------------------------------------------- */
 :root {
+  color-scheme: light;
+
+  --background: #f6f5f2;
+  --background-glow-a: #e4d9fb;
+  --background-glow-b: #d3eef7;
+
+  --foreground: #1c1f27;
+  --muted: #667085;
+  --muted-2: #98a1b3;
+
+  --surface-1: #ffffff;
+  --surface-2: #fdfcfb;
+  --surface-3: #f3f1fb;
+
+  --border: rgba(15, 23, 42, 0.08);
+  --border-strong: rgba(15, 23, 42, 0.14);
+
+  --overlay-faint: rgba(15, 23, 42, 0.035);
+  --overlay-soft: rgba(15, 23, 42, 0.05);
+  --overlay-strong: rgba(15, 23, 42, 0.08);
+
+  --grid-line: rgba(15, 23, 42, 0.035);
+
+  --card: var(--surface-1);
+  --card-foreground: var(--foreground);
+
+  --sidebar: #fbfaf7;
+  --sidebar-foreground: #1c1f27;
+  --sidebar-muted: #6b7280;
+  --sidebar-border: rgba(15, 23, 42, 0.08);
+
+  --primary: #7c3aed;
+  --primary-strong: #6d28d9;
+  --primary-foreground: #ffffff;
+
+  --accent: #0e7490;
+
+  --success: #15803d;
+  --success-foreground: #ffffff;
+  --warning: #b45309;
+  --warning-foreground: #ffffff;
+  --critical: #dc2626;
+  --critical-foreground: #ffffff;
+
+  --shadow-hero: 0 1px 0 0 rgba(255, 255, 255, 0.7) inset, 0 20px 45px -24px rgba(15, 23, 42, 0.18);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --background: #090b12;
+    --background-glow-a: #241a45;
+    --background-glow-b: #0d2233;
+
+    --foreground: #eef0f6;
+    --muted: #8b93a8;
+    --muted-2: #5c6478;
+
+    --surface-1: #12151f;
+    --surface-2: #171c29;
+    --surface-3: #1c2233;
+
+    --border: rgba(255, 255, 255, 0.08);
+    --border-strong: rgba(255, 255, 255, 0.16);
+
+    --overlay-faint: rgba(255, 255, 255, 0.03);
+    --overlay-soft: rgba(255, 255, 255, 0.06);
+    --overlay-strong: rgba(255, 255, 255, 0.1);
+
+    --grid-line: rgba(255, 255, 255, 0.025);
+
+    --sidebar: #0b0d15;
+    --sidebar-foreground: #e7e9f2;
+    --sidebar-muted: #7a839a;
+    --sidebar-border: rgba(255, 255, 255, 0.07);
+
+    --primary: #8b7bf5;
+    --primary-strong: #7461e8;
+    --primary-foreground: #ffffff;
+
+    --accent: #4fc3e8;
+
+    --success: #3ecf8e;
+    --success-foreground: #06281a;
+    --warning: #f5b84e;
+    --warning-foreground: #2c1c02;
+    --critical: #f77272;
+    --critical-foreground: #2b0a0a;
+
+    --shadow-hero: 0 1px 0 0 rgba(255, 255, 255, 0.05) inset, 0 24px 60px -28px rgba(0, 0, 0, 0.65);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
   --background: #090b12;
   --background-glow-a: #241a45;
   --background-glow-b: #0d2233;
@@ -21,8 +124,11 @@
   --border: rgba(255, 255, 255, 0.08);
   --border-strong: rgba(255, 255, 255, 0.16);
 
-  --card: var(--surface-1);
-  --card-foreground: var(--foreground);
+  --overlay-faint: rgba(255, 255, 255, 0.03);
+  --overlay-soft: rgba(255, 255, 255, 0.06);
+  --overlay-strong: rgba(255, 255, 255, 0.1);
+
+  --grid-line: rgba(255, 255, 255, 0.025);
 
   --sidebar: #0b0d15;
   --sidebar-foreground: #e7e9f2;
@@ -41,6 +147,8 @@
   --warning-foreground: #2c1c02;
   --critical: #f77272;
   --critical-foreground: #2b0a0a;
+
+  --shadow-hero: 0 1px 0 0 rgba(255, 255, 255, 0.05) inset, 0 24px 60px -28px rgba(0, 0, 0, 0.65);
 }
 
 @theme inline {
@@ -58,6 +166,10 @@
 
   --color-border: var(--border);
   --color-border-strong: var(--border-strong);
+
+  --color-overlay-faint: var(--overlay-faint);
+  --color-overlay-soft: var(--overlay-soft);
+  --color-overlay-strong: var(--overlay-strong);
 
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
@@ -84,10 +196,6 @@
   border-color: var(--border);
 }
 
-html {
-  color-scheme: dark;
-}
-
 body {
   background: var(--background);
   color: var(--foreground);
@@ -97,7 +205,7 @@ body {
 
 /* A restrained ambient backdrop: two soft, very low-opacity radial blobs
    fixed behind all content, plus a faint grid for depth. Never opaque
-   enough to fight with foreground contrast. */
+   enough to fight with foreground contrast, in either theme. */
 body::before {
   content: "";
   position: fixed;
@@ -117,8 +225,8 @@ body::after {
   pointer-events: none;
   opacity: 0.5;
   background-image:
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
-    linear-gradient(to right, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+    linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px),
+    linear-gradient(to right, var(--grid-line) 1px, transparent 1px);
   background-size: 42px 42px;
   mask-image: radial-gradient(80% 60% at 50% 0%, black, transparent 85%);
 }

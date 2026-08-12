@@ -17,7 +17,7 @@ export function BottomNav() {
   return (
     <nav
       aria-label="ניווט תחתון"
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-white/10 bg-[#0b0d15]/85 backdrop-blur-lg lg:hidden"
+      className="fixed inset-x-0 bottom-0 z-40 border-t border-sidebar-border bg-sidebar/85 backdrop-blur-lg lg:hidden"
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
     >
       <ul className="mx-auto flex max-w-lg items-stretch justify-around px-1">
@@ -59,7 +59,7 @@ export function BottomNav() {
                 />
                 <span
                   className={`text-[10.5px] font-medium leading-none transition-colors duration-200 ${
-                    isActive ? "text-white" : ""
+                    isActive ? "text-sidebar-foreground" : ""
                   }`}
                 >
                   {item.shortLabel}

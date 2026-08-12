@@ -76,7 +76,7 @@ export function ShiftProgress({ timing, fetchedAt, mode }: ShiftProgressProps) {
         aria-valuenow={progressPercent}
         aria-valuemin={0}
         aria-valuemax={100}
-        className="mt-2.5 h-2 w-full overflow-hidden rounded-full bg-white/[0.06]"
+        className="mt-2.5 h-2 w-full overflow-hidden rounded-full bg-overlay-soft"
       >
         <div
           className="h-full rounded-full bg-primary shadow-[0_0_12px_1px_var(--primary)] transition-[width] duration-1000 ease-out"

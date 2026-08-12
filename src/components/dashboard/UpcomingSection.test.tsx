@@ -182,4 +182,14 @@ describe("UpcomingSection", () => {
     );
     expect(container.textContent).not.toContain("@");
   });
+
+  it("shows a semantic emoji beside a shift row and a duty row, from typed fields only", () => {
+    const shift = shiftEvent({ date: "2026-08-20", period: "night", title: "טכנאי לילה" });
+    const block = dutyBlock({ dutyFamily: "reserve", startDate: "2026-08-21", endDate: "2026-08-21", dates: ["2026-08-21"] });
+    const { container } = render(
+      <UpcomingSection {...defaultProps} upcomingEvents={[shift]} dutyBlocks={[block]} />,
+    );
+    expect(container.textContent).toContain("🌙");
+    expect(container.textContent).toContain("🧩");
+  });
 });

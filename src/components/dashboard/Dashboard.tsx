@@ -1,4 +1,5 @@
-import type { PersonalScheduleReadModel } from "@/lib/readModels/types";
+import { BLOCKING_ABSENCE_KINDS } from "@/lib/domain/operationalIssues";
+import type { PersonalEventView, PersonalScheduleReadModel } from "@/lib/readModels/types";
 import { Header } from "./Header";
 import { Hero } from "./Hero";
 import { IssuesPanel } from "./IssuesPanel";
@@ -7,6 +8,15 @@ import { UpcomingSection } from "./UpcomingSection";
 
 interface DashboardProps {
   model: PersonalScheduleReadModel;
+}
+
+/** A known blocking absence (vacation/abroad/medical/day_off) dated today, reusing the domain's own "blocking" semantics -- never redefined here. */
+function findVacationEvent(todayEvents: readonly PersonalEventView[]): PersonalEventView | null {
+  return (
+    todayEvents.find(
+      (event) => event.category === "absence" && event.absenceKind !== null && BLOCKING_ABSENCE_KINDS.has(event.absenceKind),
+    ) ?? null
+  );
 }
 
 /**
@@ -19,14 +29,26 @@ interface DashboardProps {
  * on mobile, hero-first.
  */
 export function Dashboard({ model }: DashboardProps) {
-  const isCurrentHero = model.currentAssignments.length > 0;
+  const hasCurrentAssignment = model.currentAssignments.length > 0;
+
+  // Vacation only becomes the hero's story when nothing is currently
+  // active -- a blocking absence alongside a live assignment is exactly
+  // the blocking_absence_with_assignment conflict, already surfaced via
+  // Issues; the current assignment still leads the hero.
+  const vacationEvent = hasCurrentAssignment ? null : findVacationEvent(model.todayEvents);
+  const otherTodayEvents = vacationEvent ? model.todayEvents.filter((event) => event !== vacationEvent) : [];
+
+  const showsNextGroup = !hasCurrentAssignment && !vacationEvent && model.nextAssignmentGroup !== null;
 
   // The exact assignments the Hero is already displaying -- Upcoming must
   // exclude only these specific Events, never every Event sharing their
   // date (see UpcomingSection for why a date-wide exclusion is wrong).
-  const heroAssignments = isCurrentHero
+  // Nothing is "represented" when the hero shows the vacation/empty state.
+  const heroAssignments = hasCurrentAssignment
     ? model.currentAssignments
-    : (model.nextAssignmentGroup?.events ?? []);
+    : showsNextGroup
+      ? (model.nextAssignmentGroup?.events ?? [])
+      : [];
 
   const todayDutyActions = model.dutyActions.filter((action) => action.date === model.localNow.date);
 
@@ -41,6 +63,8 @@ export function Dashboard({ model }: DashboardProps) {
             nextAssignmentGroup={model.nextAssignmentGroup}
             currentShiftContexts={model.currentShiftContexts}
             nextShiftContexts={model.nextShiftContexts}
+            vacationEvent={vacationEvent}
+            otherTodayEvents={otherTodayEvents}
             fetchedAt={model.fetchedAt}
             localNowDate={model.localNow.date}
           />

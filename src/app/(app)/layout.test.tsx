@@ -1,6 +1,12 @@
+import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
+import { ThemeProvider } from "@/lib/theme/ThemeProvider";
 import type { PersonalProfile } from "@/lib/readModels/types";
+
+function renderWithTheme(ui: ReactElement) {
+  return render(<ThemeProvider>{ui}</ThemeProvider>);
+}
 
 const getRequestPersonalSchedule = vi.fn();
 const redirect = vi.fn((path: string) => {
@@ -66,7 +72,7 @@ describe("(app) layout — server-side auth gating", () => {
     getRequestPersonalSchedule.mockResolvedValue({ status: "unmapped" });
 
     const element = await ProtectedLayout({ children: <div>SECRET_DASHBOARD_CONTENT</div> });
-    render(element);
+    renderWithTheme(element);
 
     expect(screen.queryByText("SECRET_DASHBOARD_CONTENT")).toBeNull();
     expect(screen.getByText("אין לך הרשאה ל-Luzly")).toBeInTheDocument();
@@ -76,7 +82,7 @@ describe("(app) layout — server-side auth gating", () => {
     getRequestPersonalSchedule.mockResolvedValue({ status: "unmapped" });
 
     const element = await ProtectedLayout({ children: <div>x</div> });
-    const { container } = render(element);
+    const { container } = renderWithTheme(element);
 
     expect(container.textContent).not.toContain("stranger@example.invalid");
     expect(container.textContent).not.toContain("@");
@@ -86,7 +92,7 @@ describe("(app) layout — server-side auth gating", () => {
     getRequestPersonalSchedule.mockResolvedValue({ status: "unmapped" });
 
     const element = await ProtectedLayout({ children: <div>x</div> });
-    render(element);
+    renderWithTheme(element);
 
     expect(screen.getByRole("button", { name: "התנתקות" })).toBeInTheDocument();
   });
@@ -95,7 +101,7 @@ describe("(app) layout — server-side auth gating", () => {
     getRequestPersonalSchedule.mockResolvedValue(okResult(profile()));
 
     const element = await ProtectedLayout({ children: <div>SECRET_DASHBOARD_CONTENT</div> });
-    render(element);
+    renderWithTheme(element);
 
     expect(screen.getByText("SECRET_DASHBOARD_CONTENT")).toBeInTheDocument();
     expect(screen.getAllByText("דני בדיקה").length).toBeGreaterThan(0);
@@ -114,7 +120,7 @@ describe("(app) layout — server-side auth gating", () => {
     getRequestPersonalSchedule.mockResolvedValue({ status: "missing_email" });
 
     const element = await ProtectedLayout({ children: <div>SECRET_DASHBOARD_CONTENT</div> });
-    render(element);
+    renderWithTheme(element);
 
     expect(screen.queryByText("SECRET_DASHBOARD_CONTENT")).toBeNull();
     expect(screen.getByText("אין לך הרשאה ל-Luzly")).toBeInTheDocument();
@@ -124,7 +130,7 @@ describe("(app) layout — server-side auth gating", () => {
     getRequestPersonalSchedule.mockResolvedValue({ status: "ambiguous_identity" });
 
     const element = await ProtectedLayout({ children: <div>SECRET_DASHBOARD_CONTENT</div> });
-    render(element);
+    renderWithTheme(element);
 
     expect(redirect).not.toHaveBeenCalled();
     expect(screen.queryByText("SECRET_DASHBOARD_CONTENT")).toBeNull();
@@ -142,7 +148,7 @@ describe("(app) layout — server-side auth gating", () => {
     for (const state of denialStates) {
       getRequestPersonalSchedule.mockResolvedValue(state);
       const element = await ProtectedLayout({ children: <div>x</div> });
-      const { container } = render(element);
+      const { container } = renderWithTheme(element);
       renderedTexts.push(container.textContent ?? "");
       cleanup();
     }
@@ -158,7 +164,7 @@ describe("(app) layout — server-side auth gating", () => {
     });
 
     const element = await ProtectedLayout({ children: <div>DASHBOARD_CONTENT_AREA</div> });
-    render(element);
+    renderWithTheme(element);
 
     expect(screen.getByText("DASHBOARD_CONTENT_AREA")).toBeInTheDocument();
     expect(screen.getAllByText("נועה דוגמה").length).toBeGreaterThan(0);
@@ -172,7 +178,7 @@ describe("(app) layout — server-side auth gating", () => {
     });
 
     const element = await ProtectedLayout({ children: <div>x</div> });
-    const { container } = render(element);
+    const { container } = renderWithTheme(element);
 
     expect(container.textContent).not.toContain("תחילת משמרת יום");
     expect(container.textContent).not.toContain("Missing shift start time");

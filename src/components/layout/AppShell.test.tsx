@@ -1,5 +1,7 @@
+import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
+import { ThemeProvider } from "@/lib/theme/ThemeProvider";
 import { AppShell } from "./AppShell";
 
 vi.mock("next/navigation", () => ({ usePathname: () => "/" }));
@@ -8,9 +10,13 @@ afterEach(() => {
   cleanup();
 });
 
+function renderWithTheme(ui: ReactElement) {
+  return render(<ThemeProvider>{ui}</ThemeProvider>);
+}
+
 describe("AppShell — mobile identity/sign-out", () => {
   it("renders a mobile sign-out affordance alongside the desktop Sidebar's IdentityFooter", () => {
-    render(
+    renderWithTheme(
       <AppShell person={{ name: "דני בדיקה", isManager: false }}>
         <div>DASHBOARD_CONTENT</div>
       </AppShell>,
@@ -20,7 +26,7 @@ describe("AppShell — mobile identity/sign-out", () => {
   });
 
   it("the mobile identity bar shows the safe person name", () => {
-    render(
+    renderWithTheme(
       <AppShell person={{ name: "דני בדיקה", isManager: false }}>
         <div>content</div>
       </AppShell>,
@@ -29,7 +35,7 @@ describe("AppShell — mobile identity/sign-out", () => {
   });
 
   it("shows the manager indication when isManager is true", () => {
-    render(
+    renderWithTheme(
       <AppShell person={{ name: "נועה דוגמה", isManager: true }}>
         <div>content</div>
       </AppShell>,
@@ -38,7 +44,7 @@ describe("AppShell — mobile identity/sign-out", () => {
   });
 
   it("never renders an email anywhere in the shell", () => {
-    const { container } = render(
+    const { container } = renderWithTheme(
       <AppShell person={{ name: "דני בדיקה", isManager: false }}>
         <div>content</div>
       </AppShell>,
@@ -47,7 +53,7 @@ describe("AppShell — mobile identity/sign-out", () => {
   });
 
   it("remains available around configuration_error content (any children), not just the real dashboard", () => {
-    render(
+    renderWithTheme(
       <AppShell person={{ name: "דני בדיקה", isManager: false }}>
         <div>לא ניתן לחשב כרגע את שעות המשמרות</div>
       </AppShell>,
@@ -57,17 +63,29 @@ describe("AppShell — mobile identity/sign-out", () => {
   });
 
   it("renders no identity/sign-out affordance when no person is provided", () => {
-    render(<AppShell>{null}</AppShell>);
+    renderWithTheme(<AppShell>{null}</AppShell>);
     expect(screen.queryByRole("button", { name: "התנתקות" })).toBeNull();
   });
 
   it("keeps the bottom navigation -- no hamburger drawer reappears", () => {
-    render(
+    renderWithTheme(
       <AppShell person={{ name: "דני בדיקה", isManager: false }}>
         <div>content</div>
       </AppShell>,
     );
     expect(screen.getByRole("navigation", { name: "ניווט תחתון" })).toBeInTheDocument();
     expect(screen.queryByLabelText("פתיחת תפריט")).toBeNull();
+  });
+});
+
+describe("AppShell — theme control", () => {
+  it("renders the theme toggle in both the desktop sidebar and the mobile identity bar", () => {
+    renderWithTheme(
+      <AppShell person={{ name: "דני בדיקה", isManager: false }}>
+        <div>content</div>
+      </AppShell>,
+    );
+    // Two radiogroups: one in Sidebar, one in MobileIdentityBar.
+    expect(screen.getAllByRole("radiogroup", { name: "ערכת נושא" })).toHaveLength(2);
   });
 });

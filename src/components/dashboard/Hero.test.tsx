@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import type {
   PersonalAssignmentView,
+  PersonalEventView,
   PersonalNextAssignmentGroup,
   PersonalShiftContext,
 } from "@/lib/readModels/types";
@@ -52,6 +53,27 @@ function nextGroup(events: PersonalAssignmentView[]): PersonalNextAssignmentGrou
   return { date: events[0].date, events };
 }
 
+function absenceEvent(overrides: Partial<PersonalEventView> = {}): PersonalEventView {
+  return {
+    date: "2026-08-12",
+    title: "חופש",
+    rawValue: "חופש",
+    category: "absence",
+    certainty: "confirmed",
+    role: null,
+    period: "unspecified",
+    slot: null,
+    shadow: false,
+    startTimeOverride: null,
+    endTimeOverride: null,
+    dutyFamily: null,
+    absenceKind: "vacation",
+    changeNote: null,
+    timing: { status: "not_evaluable" },
+    ...overrides,
+  };
+}
+
 function shiftContext(overrides: Partial<PersonalShiftContext> = {}): PersonalShiftContext {
   return {
     date: "2026-08-12",
@@ -70,6 +92,8 @@ const defaultProps = {
   nextAssignmentGroup: null as PersonalNextAssignmentGroup | null,
   currentShiftContexts: [] as PersonalShiftContext[],
   nextShiftContexts: [] as PersonalShiftContext[],
+  vacationEvent: null as PersonalEventView | null,
+  otherTodayEvents: [] as PersonalEventView[],
   fetchedAt: "2026-08-12T08:00:00.000Z",
   localNowDate: "2026-08-12",
 };
@@ -134,6 +158,62 @@ describe("Hero — empty state", () => {
     render(<Hero {...defaultProps} />);
     expect(screen.getByText("הכול שקט כרגע")).toBeInTheDocument();
     expect(screen.queryByText("אין נתונים")).toBeNull();
+  });
+});
+
+describe("Hero — vacation/leave state", () => {
+  it("a vacation day with nothing else today reads as genuinely free", () => {
+    render(<Hero {...defaultProps} vacationEvent={absenceEvent()} otherTodayEvents={[]} />);
+    expect(screen.getByText("חופש")).toBeInTheDocument();
+    expect(screen.getByText("היום שלך פנוי")).toBeInTheDocument();
+  });
+
+  it("never claims the day is free when other today Events also exist", () => {
+    const other = dutyAssignment({ title: "עתודה 2" });
+    render(<Hero {...defaultProps} vacationEvent={absenceEvent()} otherTodayEvents={[other]} />);
+    expect(screen.queryByText("היום שלך פנוי")).toBeNull();
+    expect(screen.getByText("אין לך שיבוץ פעיל כרגע")).toBeInTheDocument();
+    expect(screen.getByText("עתודה 2")).toBeInTheDocument();
+  });
+
+  it("takes priority over an upcoming next-assignment group", () => {
+    const group = nextGroup([dutyAssignment({ temporalState: "upcoming", date: "2026-08-20" })]);
+    render(<Hero {...defaultProps} vacationEvent={absenceEvent()} nextAssignmentGroup={group} />);
+    expect(screen.getByText("חופש")).toBeInTheDocument();
+    expect(screen.queryByText("הבא שלך")).toBeNull();
+  });
+
+  it("never renders when there is a current assignment (handled by Dashboard, but Hero itself also never shows both)", () => {
+    render(
+      <Hero {...defaultProps} currentAssignments={[baseAssignment()]} vacationEvent={absenceEvent()} />,
+    );
+    expect(screen.getByText("פעיל עכשיו")).toBeInTheDocument();
+    expect(screen.queryByText("היום שלך פנוי")).toBeNull();
+  });
+});
+
+describe("Hero — semantic assignment emoji", () => {
+  it("shows a sun emoji for a day shift lead", () => {
+    const { container } = render(<Hero {...defaultProps} currentAssignments={[baseAssignment()]} />);
+    expect(container.textContent).toContain("☀️");
+  });
+
+  it("shows a moon emoji for a night shift lead", () => {
+    const nightShift = baseAssignment({ period: "night", title: "טכנאי לילה" });
+    const { container } = render(<Hero {...defaultProps} currentAssignments={[nightShift]} />);
+    expect(container.textContent).toContain("🌙");
+  });
+
+  it("shows a shield emoji for a guard duty lead", () => {
+    const { container } = render(<Hero {...defaultProps} currentAssignments={[dutyAssignment()]} />);
+    expect(container.textContent).toContain("🛡️");
+  });
+
+  it("shows no emoji for an unspecified-period shift -- never guesses", () => {
+    const unspecified = baseAssignment({ period: "unspecified", role: null, title: "משמרת" });
+    const { container } = render(<Hero {...defaultProps} currentAssignments={[unspecified]} />);
+    expect(container.textContent).not.toContain("☀️");
+    expect(container.textContent).not.toContain("🌙");
   });
 });
 

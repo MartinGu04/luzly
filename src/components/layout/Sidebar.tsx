@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { APP_NAME } from "@/lib/config/productName";
+import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { navItems } from "./nav-items";
 import { IdentityFooter } from "./IdentityFooter";
 
@@ -19,8 +20,9 @@ export function Sidebar({ person }: SidebarProps) {
 
   return (
     <aside className="relative hidden w-[264px] shrink-0 flex-col border-e border-sidebar-border bg-sidebar text-sidebar-foreground lg:flex">
-      <div className="px-6 py-6">
-        <span className="text-lg font-bold tracking-tight text-white">{APP_NAME}</span>
+      <div className="flex items-center justify-between px-6 py-6">
+        <span className="text-lg font-bold tracking-tight text-sidebar-foreground">{APP_NAME}</span>
+        <ThemeToggle />
       </div>
 
       <nav className="flex flex-1 flex-col gap-1 px-3" aria-label="ניווט ראשי">
@@ -39,7 +41,7 @@ export function Sidebar({ person }: SidebarProps) {
                   <Icon className="h-[18px] w-[18px] opacity-60" aria-hidden="true" strokeWidth={1.75} />
                   {item.label}
                 </span>
-                <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] text-sidebar-muted">בקרוב</span>
+                <span className="rounded-full bg-overlay-soft px-2 py-0.5 text-[10px] text-sidebar-muted">בקרוב</span>
               </div>
             );
           }
@@ -51,8 +53,8 @@ export function Sidebar({ person }: SidebarProps) {
               aria-current={isActive ? "page" : undefined}
               className={`group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors duration-200 ${
                 isActive
-                  ? "bg-white/[0.07] text-white"
-                  : "text-sidebar-foreground hover:bg-white/[0.05] hover:text-white"
+                  ? "bg-overlay-strong text-sidebar-foreground"
+                  : "text-sidebar-foreground hover:bg-overlay-soft"
               }`}
             >
               {isActive ? (

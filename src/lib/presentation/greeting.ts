@@ -13,6 +13,18 @@ export function greetingForMinuteOfDay(minuteOfDay: number): string {
 }
 
 /**
+ * One restrained contextual emoji for the same daypart buckets as
+ * `greetingForMinuteOfDay` -- kept as a single small typographic accent
+ * next to the greeting text, never a large illustration.
+ */
+export function greetingEmojiForMinuteOfDay(minuteOfDay: number): string {
+  const hour = Math.floor(minuteOfDay / 60);
+  if (hour >= 5 && hour < 12) return "☀️";
+  if (hour >= 12 && hour < 17) return "🌤️";
+  return "🌙";
+}
+
+/**
  * The first "word" of a (possibly multi-word, possibly untrimmed) Hebrew
  * name, for a compact personal greeting. Never throws on an empty/blank
  * name -- callers decide whether to render a name-less greeting instead.

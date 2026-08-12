@@ -79,8 +79,8 @@ function CounterpartRow({ counterpart, shadow }: { counterpart: PersonalCounterp
   const period = periodLabel(counterpart.period);
 
   return (
-    <li className="flex items-center gap-3 rounded-xl bg-white/[0.03] px-3 py-2.5 ring-1 ring-white/[0.05]">
-      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/[0.06] text-muted">
+    <li className="flex items-center gap-3 rounded-xl bg-overlay-faint px-3 py-2.5 ring-1 ring-border">
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-overlay-soft text-muted">
         <UserRound className="h-4 w-4" aria-hidden="true" strokeWidth={1.75} />
       </span>
       <div className="min-w-0 flex-1">

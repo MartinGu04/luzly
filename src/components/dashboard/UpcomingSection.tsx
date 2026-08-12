@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { PersonalDutyBlock, PersonalEventView } from "@/lib/readModels/types";
+import { assignmentEmoji, dutyFamilyEmoji } from "@/lib/presentation/emoji";
 import { dutyFamilyLabel, periodLabel, roleLabel } from "@/lib/presentation/labels";
 import { formatShortWeekday } from "@/lib/presentation/hebrewDate";
 import { Badge } from "@/components/ui/Badge";
@@ -91,6 +92,7 @@ interface UpcomingRow {
   date: string;
   endDate?: string;
   title: string;
+  emoji: string | null;
   meta: string | null;
   time: ReactNode | null;
   tentative: boolean;
@@ -116,6 +118,7 @@ export function UpcomingSection({
       key: `shift-${index}`,
       date: event.date,
       title: event.title,
+      emoji: assignmentEmoji(event),
       meta: [roleLabel(event.role), periodLabel(event.period)].filter(Boolean).join(" · ") || null,
       time:
         event.timing.status === "resolved" ? (
@@ -132,6 +135,7 @@ export function UpcomingSection({
       date: block.startDate,
       endDate: block.endDate !== block.startDate ? block.endDate : undefined,
       title: dutyFamilyLabel(block.dutyFamily) + (block.slot !== null ? ` ${block.slot}` : ""),
+      emoji: dutyFamilyEmoji(block.dutyFamily),
       meta: block.dayCount > 1 ? `${block.dayCount} ימים` : null,
       time: null,
       tentative: block.certainty === "tentative" || block.certainty === "mixed",
@@ -153,16 +157,23 @@ export function UpcomingSection({
           {rows.map((row) => (
             <li
               key={row.key}
-              className="flex items-center gap-3 rounded-xl px-2 py-2.5 transition-colors duration-200 hover:bg-white/[0.03]"
+              className="flex items-center gap-3 rounded-xl px-2 py-2.5 transition-colors duration-200 hover:bg-overlay-faint"
             >
-              <div className="flex w-14 shrink-0 flex-col items-center justify-center rounded-lg bg-white/[0.04] py-1.5 text-center">
+              <div className="flex w-14 shrink-0 flex-col items-center justify-center rounded-lg bg-overlay-soft py-1.5 text-center">
                 <span className="text-[10px] font-medium text-muted-2">{formatShortWeekday(row.date)}</span>
                 <span dir="ltr" className="text-xs font-semibold text-foreground">
                   {formatDateRangeCompact(row.date, row.endDate)}
                 </span>
               </div>
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-foreground">{row.title}</p>
+                <p className="flex items-center gap-1.5 truncate text-sm font-medium text-foreground">
+                  {row.emoji ? (
+                    <span aria-hidden="true" className="text-xs">
+                      {row.emoji}
+                    </span>
+                  ) : null}
+                  {row.title}
+                </p>
                 {row.meta ? <p className="truncate text-xs text-muted">{row.meta}</p> : null}
               </div>
               <div className="flex shrink-0 flex-col items-end gap-1">
