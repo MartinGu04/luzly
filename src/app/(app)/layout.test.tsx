@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import type { Person } from "@/lib/domain/types";
 
@@ -24,6 +24,10 @@ function person(overrides: Partial<Person> = {}): Person {
     ...overrides,
   };
 }
+
+beforeEach(() => {
+  redirect.mockClear();
+});
 
 afterEach(() => {
   cleanup();
@@ -75,5 +79,54 @@ describe("(app) layout — server-side auth gating", () => {
 
     expect(screen.getByText("SECRET_DASHBOARD_CONTENT")).toBeInTheDocument();
     expect(screen.getAllByText("דני בדיקה").length).toBeGreaterThan(0);
+  });
+
+  it("6. a missing-email authenticated user is NOT redirected to /login (would loop)", async () => {
+    resolveCurrentPerson.mockResolvedValue({ status: "missing_email" });
+
+    await expect(
+      ProtectedLayout({ children: <div>SECRET_DASHBOARD_CONTENT</div> }),
+    ).resolves.not.toThrow();
+    expect(redirect).not.toHaveBeenCalled();
+  });
+
+  it("7. a missing-email user never reaches AppShell/protected content -- same generic denial screen", async () => {
+    resolveCurrentPerson.mockResolvedValue({ status: "missing_email" });
+
+    const element = await ProtectedLayout({ children: <div>SECRET_DASHBOARD_CONTENT</div> });
+    render(element);
+
+    expect(screen.queryByText("SECRET_DASHBOARD_CONTENT")).toBeNull();
+    expect(screen.getByText("אין לך הרשאה ל-Luzly")).toBeInTheDocument();
+  });
+
+  it("an ambiguous-identity user is denied the same way, never redirected, never reaching AppShell", async () => {
+    resolveCurrentPerson.mockResolvedValue({ status: "ambiguous_identity" });
+
+    const element = await ProtectedLayout({ children: <div>SECRET_DASHBOARD_CONTENT</div> });
+    render(element);
+
+    expect(redirect).not.toHaveBeenCalled();
+    expect(screen.queryByText("SECRET_DASHBOARD_CONTENT")).toBeNull();
+    expect(screen.getByText("אין לך הרשאה ל-Luzly")).toBeInTheDocument();
+  });
+
+  it("the denial screen text is identical for unmapped, missing_email, and ambiguous_identity", async () => {
+    const denialStates = [
+      { status: "unmapped", email: "stranger@example.invalid" },
+      { status: "missing_email" },
+      { status: "ambiguous_identity" },
+    ];
+
+    const renderedTexts: string[] = [];
+    for (const state of denialStates) {
+      resolveCurrentPerson.mockResolvedValue(state);
+      const element = await ProtectedLayout({ children: <div>x</div> });
+      const { container } = render(element);
+      renderedTexts.push(container.textContent ?? "");
+      cleanup();
+    }
+
+    expect(new Set(renderedTexts).size).toBe(1);
   });
 });

@@ -10,5 +10,5 @@ import { readSupabasePublicConfig } from "./config";
  */
 export function createSupabaseBrowserClient() {
   const config = readSupabasePublicConfig();
-  return createBrowserClient(config.url, config.anonKey);
+  return createBrowserClient(config.url, config.publishableKey);
 }

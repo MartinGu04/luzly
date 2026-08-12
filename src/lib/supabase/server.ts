@@ -13,7 +13,7 @@ export async function createSupabaseServerClient() {
   const config = readSupabasePublicConfig();
   const cookieStore = await cookies();
 
-  return createServerClient(config.url, config.anonKey, {
+  return createServerClient(config.url, config.publishableKey, {
     cookies: {
       getAll() {
         return cookieStore.getAll();
@@ -26,8 +26,10 @@ export async function createSupabaseServerClient() {
         } catch {
           // Called from a Server Component render, which can't set
           // cookies (there's no outgoing response to attach them to).
-          // Harmless here: this app has no middleware relying on a
-          // proactively refreshed session cookie.
+          // Harmless: `proxy.ts` already refreshes/propagates the
+          // session cookie on every matched request before it reaches
+          // here, so this client never depends on writing a cookie
+          // itself to see a valid, up-to-date session.
         }
       },
     },

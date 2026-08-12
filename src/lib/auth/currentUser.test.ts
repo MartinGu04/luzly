@@ -13,43 +13,53 @@ beforeEach(() => {
 });
 
 describe("getAuthenticatedIdentity", () => {
-  it("returns null when there is no authenticated user", async () => {
+  it("8. returns { status: 'unauthenticated' } when there is no authenticated user", async () => {
     getUser.mockResolvedValue({ data: { user: null }, error: null });
-    expect(await getAuthenticatedIdentity()).toBeNull();
+    expect(await getAuthenticatedIdentity()).toEqual({ status: "unauthenticated" });
   });
 
-  it("returns null on a Supabase auth error, never throwing", async () => {
+  it("returns unauthenticated on a Supabase auth error, never throwing", async () => {
     getUser.mockResolvedValue({ data: { user: null }, error: { message: "boom" } });
-    await expect(getAuthenticatedIdentity()).resolves.toBeNull();
+    await expect(getAuthenticatedIdentity()).resolves.toEqual({ status: "unauthenticated" });
   });
 
-  it("6. denies a user whose account has no usable email", async () => {
+  it("5. an authenticated user with no usable email is 'missing_email', distinct from 'unauthenticated'", async () => {
     getUser.mockResolvedValue({ data: { user: { id: "u1", email: undefined } }, error: null });
-    expect(await getAuthenticatedIdentity()).toBeNull();
+    const result = await getAuthenticatedIdentity();
+    expect(result).toEqual({ status: "missing_email", userId: "u1" });
+    expect(result.status).not.toBe("unauthenticated");
   });
 
-  it("denies a user whose email is blank/whitespace-only, never falling back to name matching", async () => {
+  it("blank/whitespace-only email is also 'missing_email', never falling back to name/metadata matching", async () => {
     getUser.mockResolvedValue({
       data: { user: { id: "u1", email: "   ", user_metadata: { full_name: "דני בדיקה" } } },
       error: null,
     });
-    expect(await getAuthenticatedIdentity()).toBeNull();
+    expect(await getAuthenticatedIdentity()).toEqual({ status: "missing_email", userId: "u1" });
   });
 
-  it("resolves userId/email from the server-verified user record", async () => {
+  it("resolves userId/email from the server-verified user record when authenticated with an email", async () => {
     getUser.mockResolvedValue({ data: { user: { id: "u1", email: "dani@example.invalid" } }, error: null });
-    expect(await getAuthenticatedIdentity()).toEqual({ userId: "u1", email: "dani@example.invalid" });
+    expect(await getAuthenticatedIdentity()).toEqual({
+      status: "authenticated",
+      userId: "u1",
+      email: "dani@example.invalid",
+    });
   });
 
-  it("4. trims the email from the provider record", async () => {
+  it("trims the email from the provider record", async () => {
     getUser.mockResolvedValue({
       data: { user: { id: "u1", email: "  dani@example.invalid  " } },
       error: null,
     });
-    expect(await getAuthenticatedIdentity()).toEqual({ userId: "u1", email: "dani@example.invalid" });
+    expect(await getAuthenticatedIdentity()).toEqual({
+      status: "authenticated",
+      userId: "u1",
+      email: "dani@example.invalid",
+    });
   });
 
-  it("10. uses Supabase's server-verified getUser(), not a locally-trusted getSession()", async () => {
+  it("uses Supabase's server-verified getUser(), not a locally-trusted getSession()", async () => {
     getUser.mockResolvedValue({ data: { user: { id: "u1", email: "dani@example.invalid" } }, error: null });
     await getAuthenticatedIdentity();
     expect(getUser).toHaveBeenCalledTimes(1);

@@ -6,18 +6,35 @@ import { getAuthenticatedIdentity } from "./currentUser";
 
 export type ResolveCurrentPersonResult =
   | { status: "unauthenticated" }
+  | { status: "missing_email" }
   | { status: "unmapped"; email: string }
+  | { status: "ambiguous_identity" }
   | { status: "ok"; person: Person };
+
+export type PersonEmailLookupResult =
+  | { status: "not_found" }
+  | { status: "found"; person: Person }
+  | { status: "ambiguous" };
 
 /**
  * Matches an authenticated email against parsed כ"א personnel by email
  * only — never by display-name similarity. Comparison is trimmed and
  * case-insensitive (and nothing further: email equality, not fuzzy
- * matching). Pure and independently testable with synthetic Person[].
+ * matching). Fails closed: if the normalized email matches more than one
+ * personnel record, this is "ambiguous", never a silent first-match —
+ * two people sharing a (differently-cased/spaced) email in כ"א must never
+ * let either of them in as the other. Pure and independently testable
+ * with synthetic Person[].
  */
-export function findPersonByEmail(people: readonly Person[], email: string): Person | null {
+export function findPersonByEmail(people: readonly Person[], email: string): PersonEmailLookupResult {
   const normalized = normalizeEmailForComparison(email);
-  return people.find((person) => person.email !== null && normalizeEmailForComparison(person.email) === normalized) ?? null;
+  const matches = people.filter(
+    (person) => person.email !== null && normalizeEmailForComparison(person.email) === normalized,
+  );
+
+  if (matches.length === 0) return { status: "not_found" };
+  if (matches.length > 1) return { status: "ambiguous" };
+  return { status: "found", person: matches[0] };
 }
 
 function normalizeEmailForComparison(email: string): string {
@@ -27,8 +44,9 @@ function normalizeEmailForComparison(email: string): string {
 /**
  * Maps the authenticated Supabase user to a parsed כ"א `Person`:
  *
- * 1. requires an authenticated Supabase user (never trusts a
- *    client-supplied email)
+ * 1. requires an authenticated Supabase user with a usable email (never
+ *    trusts a client-supplied email, never falls back to name/user-ID
+ *    matching)
  * 2. fetches the workbook snapshot server-side (reuses the existing
  *    read-only Google layer — no duplicate API access)
  * 3. parses the personnel sheet (reuses the existing parser — no
@@ -36,20 +54,26 @@ function normalizeEmailForComparison(email: string): string {
  * 4. finds the matching Person by email
  *
  * A valid Google/Supabase login does NOT by itself grant Luzly access —
- * an authenticated email absent from כ"א resolves to "unmapped", not a
- * Person. Manager status is whatever `Person.isManager` says; this
- * function invents no separate allowlist.
+ * an authenticated email absent from כ"א resolves to "unmapped", an
+ * account with no usable email resolves to "missing_email", and an email
+ * matching more than one כ"א record resolves to "ambiguous_identity" —
+ * none of these are a Person. Manager status is whatever `Person.isManager`
+ * says; this function invents no separate allowlist.
  */
 export async function resolveCurrentPerson(): Promise<ResolveCurrentPersonResult> {
   const identity = await getAuthenticatedIdentity();
-  if (!identity) return { status: "unauthenticated" };
+
+  if (identity.status === "unauthenticated") return { status: "unauthenticated" };
+  if (identity.status === "missing_email") return { status: "missing_email" };
 
   const snapshot = await fetchRawWorkbookSnapshot(["personnel"]);
   const personnelSheet = snapshot.sheets[0];
   const people = parsePersonnelSheet(personnelSheet);
 
-  const person = findPersonByEmail(people, identity.email);
-  if (!person) return { status: "unmapped", email: identity.email };
+  const lookup = findPersonByEmail(people, identity.email);
 
-  return { status: "ok", person };
+  if (lookup.status === "not_found") return { status: "unmapped", email: identity.email };
+  if (lookup.status === "ambiguous") return { status: "ambiguous_identity" };
+
+  return { status: "ok", person: lookup.person };
 }
