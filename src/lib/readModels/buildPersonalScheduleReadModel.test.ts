@@ -473,6 +473,67 @@ describe("currentShiftContexts / nextShiftContexts — colleague privacy", () =>
     expect(model.nextShiftContexts).toHaveLength(0);
   });
 
+  it("a future not_evaluable shift before a later resolved shift: nextShiftContexts uses the earlier not_evaluable date", () => {
+    const events = [
+      myShift({ date: "2026-08-15", period: "unspecified", role: null }),
+      myShift({ date: "2026-08-16", period: "day", role: "technician" }),
+    ];
+    const model = build({ events });
+    expect(model.nextAssignmentGroup?.date).toBe("2026-08-15");
+    expect(model.nextShiftContexts).toHaveLength(1);
+    expect(model.nextShiftContexts[0].date).toBe("2026-08-15");
+    expect(model.nextShiftContexts[0].coverageStatus).toBe("not_evaluable");
+  });
+
+  it("a future not_evaluable shift with a matching unspecified opposite-role counterpart stays machine-readable and privacy-safe", () => {
+    const events = [
+      myShift({ date: "2026-08-15", period: "unspecified", role: "technician" }),
+      colleagueShift({ date: "2026-08-15", period: "unspecified", role: "supervisor" }),
+    ];
+    const model = build({ events, people: [me(), colleague()] });
+
+    expect(model.nextShiftContexts).toHaveLength(1);
+    expect(model.nextShiftContexts[0].date).toBe("2026-08-15");
+    expect(model.nextShiftContexts[0].coverageStatus).toBe("not_evaluable");
+    expect(model.nextShiftContexts[0].primaryCounterparts).toEqual([
+      {
+        personId: COLLEAGUE_ID,
+        personName: "נועה דוגמה",
+        role: "supervisor",
+        certainty: "confirmed",
+        shadow: false,
+        period: "unspecified",
+        startTimeOverride: null,
+        endTimeOverride: null,
+      },
+    ]);
+    expect(JSON.stringify(model.nextShiftContexts)).not.toContain("noa@example.invalid");
+    expect(JSON.stringify(model.nextShiftContexts)).not.toContain("isSupervisor");
+  });
+
+  it("a same-day not_evaluable shift is still never guessed to be the next shift", () => {
+    const events = [
+      myShift({ date: "2026-08-12", period: "unspecified", role: null }),
+      myShift({ date: "2026-08-20", period: "day", role: "technician" }),
+    ];
+    const model = build({ events }); // now = 2026-08-12, 10:00
+    expect(model.nextShiftContexts).toHaveLength(1);
+    expect(model.nextShiftContexts[0].date).toBe("2026-08-20");
+  });
+
+  it("nextShiftContexts for a future not_evaluable shift is deterministic under shuffled input", () => {
+    const events = [
+      myShift({ date: "2026-08-15", period: "unspecified", role: "technician" }),
+      colleagueShift({ date: "2026-08-15", period: "unspecified", role: "supervisor" }),
+      myShift({ date: "2026-08-16", period: "day", role: "technician" }),
+    ];
+    const people = [me(), colleague()];
+    const forward = build({ events, people });
+    const reversed = build({ events: [...events].reverse(), people });
+    expect(JSON.stringify(forward.nextShiftContexts)).toBe(JSON.stringify(reversed.nextShiftContexts));
+    expect(JSON.stringify(forward.nextAssignmentGroup)).toBe(JSON.stringify(reversed.nextAssignmentGroup));
+  });
+
   it("4. primary counterpart order is deterministic regardless of the full Event array's input order", () => {
     const c2 = colleague({ id: "p_colleague2", name: "משה בדיקה", email: "moshe@example.invalid" });
     const events = [

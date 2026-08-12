@@ -89,9 +89,7 @@ export function buildPersonalScheduleReadModel(
   );
   const nextShiftEvents = selectEarliestAssignmentGroup(
     assignmentEvents.filter(
-      (event) =>
-        event.category === "shift" &&
-        classifyAssignmentTemporalState(event, shiftSchedule, now) === "upcoming",
+      (event) => event.category === "shift" && isFutureAssignmentCandidate(event, shiftSchedule, now),
     ),
     shiftSchedule,
   );
