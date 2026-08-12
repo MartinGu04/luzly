@@ -33,7 +33,7 @@ export function MobileIdentityBar({ name, isManager }: MobileIdentityBarProps) {
           <button
             type="submit"
             aria-label="התנתקות"
-            className="flex h-9 w-9 items-center justify-center rounded-lg text-muted transition-colors duration-200 hover:bg-overlay-soft hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-critical/80 transition-colors duration-200 hover:bg-critical/10 hover:text-critical focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-critical"
           >
             <LogOut className="h-[16px] w-[16px]" aria-hidden="true" strokeWidth={1.75} />
           </button>

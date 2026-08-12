@@ -78,6 +78,24 @@ describe("AppShell — mobile identity/sign-out", () => {
   });
 });
 
+describe("AppShell — sign-out looks destructive", () => {
+  it("gives every sign-out affordance a red/critical treatment in both themes", () => {
+    renderWithTheme(
+      <AppShell person={{ name: "דני בדיקה", isManager: false }}>
+        <div>content</div>
+      </AppShell>,
+    );
+    const buttons = screen.getAllByRole("button", { name: "התנתקות" });
+    expect(buttons).toHaveLength(2);
+    for (const button of buttons) {
+      expect(button.className).toMatch(/text-critical/);
+      expect(button.className).toMatch(/hover:bg-critical/);
+      // Never a hardcoded dark-only red -- always the theme-aware token.
+      expect(button.className).not.toMatch(/#|rgb\(/);
+    }
+  });
+});
+
 describe("AppShell — theme control", () => {
   it("renders the theme toggle in both the desktop sidebar and the mobile identity bar", () => {
     renderWithTheme(

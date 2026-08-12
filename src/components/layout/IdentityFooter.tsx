@@ -21,7 +21,7 @@ export function IdentityFooter({ name, isManager }: IdentityFooterProps) {
           <button
             type="submit"
             aria-label="התנתקות"
-            className="flex h-9 w-9 items-center justify-center rounded-lg text-sidebar-muted transition-colors duration-200 hover:bg-overlay-soft hover:text-sidebar-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-critical/80 transition-colors duration-200 hover:bg-critical/10 hover:text-critical focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-critical"
           >
             <LogOut className="h-[17px] w-[17px]" aria-hidden="true" strokeWidth={1.75} />
           </button>
