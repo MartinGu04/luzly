@@ -3,8 +3,13 @@
 import { useState } from "react";
 import Link from "next/link";
 import { navItems } from "./nav-items";
+import { IdentityFooter } from "./IdentityFooter";
 
-export function MobileNav() {
+interface MobileNavProps {
+  person?: { name: string; isManager: boolean };
+}
+
+export function MobileNav({ person }: MobileNavProps) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -32,31 +37,34 @@ export function MobileNav() {
             onClick={() => setOpen(false)}
             className="flex-1 bg-black/40"
           />
-          <nav className="flex w-64 flex-col gap-1 bg-sidebar p-3 text-sidebar-foreground">
-            {navItems.map((item) =>
-              item.enabled ? (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  onClick={() => setOpen(false)}
-                  className="rounded-lg px-3 py-2 text-sm font-medium text-sidebar-foreground transition-colors hover:bg-white/10"
-                >
-                  {item.label}
-                </Link>
-              ) : (
-                <div
-                  key={item.href}
-                  aria-disabled="true"
-                  className="flex items-center justify-between rounded-lg px-3 py-2 text-sm font-medium text-sidebar-muted"
-                >
-                  <span>{item.label}</span>
-                  <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] text-sidebar-muted">
-                    בקרוב
-                  </span>
-                </div>
-              ),
-            )}
-          </nav>
+          <div className="flex w-64 flex-col bg-sidebar text-sidebar-foreground">
+            <nav className="flex flex-1 flex-col gap-1 p-3">
+              {navItems.map((item) =>
+                item.enabled ? (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    onClick={() => setOpen(false)}
+                    className="rounded-lg px-3 py-2 text-sm font-medium text-sidebar-foreground transition-colors hover:bg-white/10"
+                  >
+                    {item.label}
+                  </Link>
+                ) : (
+                  <div
+                    key={item.href}
+                    aria-disabled="true"
+                    className="flex items-center justify-between rounded-lg px-3 py-2 text-sm font-medium text-sidebar-muted"
+                  >
+                    <span>{item.label}</span>
+                    <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] text-sidebar-muted">
+                      בקרוב
+                    </span>
+                  </div>
+                ),
+              )}
+            </nav>
+            {person ? <IdentityFooter name={person.name} isManager={person.isManager} /> : null}
+          </div>
         </div>
       ) : null}
     </div>

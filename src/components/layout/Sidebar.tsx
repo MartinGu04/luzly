@@ -1,7 +1,12 @@
 import Link from "next/link";
 import { navItems } from "./nav-items";
+import { IdentityFooter } from "./IdentityFooter";
 
-export function Sidebar() {
+interface SidebarProps {
+  person?: { name: string; isManager: boolean };
+}
+
+export function Sidebar({ person }: SidebarProps) {
   return (
     <aside className="hidden w-64 shrink-0 flex-col bg-sidebar text-sidebar-foreground lg:flex">
       <div className="px-6 py-6 text-xl font-bold text-white">Luzly</div>
@@ -29,6 +34,7 @@ export function Sidebar() {
           ),
         )}
       </nav>
+      {person ? <IdentityFooter name={person.name} isManager={person.isManager} /> : null}
     </aside>
   );
 }
