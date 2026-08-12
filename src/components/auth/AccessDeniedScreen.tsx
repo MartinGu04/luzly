@@ -1,29 +1,29 @@
 import { signOutAction } from "@/lib/auth/actions";
+import { APP_NAME } from "@/lib/config/productName";
+import { Panel } from "@/components/ui/Panel";
 
 /**
- * The single generic "you're signed in, but Luzly won't let you in" screen,
- * used for every denial state (unmapped email, no usable email, ambiguous
- * identity) — deliberately the same message for all of them, so the UI
- * itself can never hint which specific case applies. No personnel names,
- * emails, or workbook details are ever rendered here.
+ * The single generic "you're signed in, but the app won't let you in"
+ * screen, used for every denial state (unmapped email, no usable email,
+ * ambiguous identity) — deliberately the same message for all of them, so
+ * the UI itself can never hint which specific case applies. No personnel
+ * names, emails, or workbook details are ever rendered here.
  */
 export function AccessDeniedScreen() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <div className="w-full max-w-sm rounded-2xl bg-card p-8 text-center shadow-sm ring-1 ring-border">
-        <h1 className="text-lg font-bold text-foreground">אין לך הרשאה ל-Luzly</h1>
-        <p className="mt-2 text-sm text-muted">
-          פנה/י למנהל המערכת אם לדעתך זו טעות.
-        </p>
+    <div className="flex min-h-screen items-center justify-center px-4">
+      <Panel variant="hero" className="w-full max-w-sm text-center">
+        <h1 className="text-lg font-bold text-foreground">אין לך הרשאה ל-{APP_NAME}</h1>
+        <p className="mt-2 text-sm text-muted">פנה/י למנהל המערכת אם לדעתך זו טעות.</p>
         <form action={signOutAction} className="mt-6">
           <button
             type="submit"
-            className="text-sm font-medium text-primary underline underline-offset-2"
+            className="rounded-lg px-3 py-2 text-sm font-medium text-primary underline-offset-4 transition-colors hover:text-foreground hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
           >
             התנתקות
           </button>
         </form>
-      </div>
+      </Panel>
     </div>
   );
 }

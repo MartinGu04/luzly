@@ -188,7 +188,7 @@ function computeWeekendCompleteness(
 // so grouping can never be shifted by a runtime timezone.
 // ---------------------------------------------------------------------------
 
-interface CalendarDate {
+export interface CalendarDate {
   year: number;
   month: number;
   day: number;
@@ -240,8 +240,13 @@ export function isNextCalendarDay(dateStr: string, nextDateStr: string): boolean
   return expected.year === next.year && expected.month === next.month && expected.day === next.day;
 }
 
-/** Sakamoto's algorithm -- 0=Sunday .. 6=Saturday, pure integer arithmetic. */
-function dayOfWeek({ year, month, day }: CalendarDate): number {
+/**
+ * Sakamoto's algorithm -- 0=Sunday .. 6=Saturday, pure integer arithmetic.
+ * Exported for reuse by presentation-layer Hebrew weekday formatting, so a
+ * calendar date's displayed weekday never has to be derived by constructing
+ * a `Date` (and risking a runtime-timezone-dependent rollover).
+ */
+export function dayOfWeek({ year, month, day }: CalendarDate): number {
   const monthOffsets = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
   const y = month < 3 ? year - 1 : year;
   return (

@@ -1,4 +1,5 @@
 import type { AssignmentTemporalState } from "@/lib/domain/assignmentTemporalState";
+import type { AssignmentTiming } from "@/lib/domain/assignmentTiming";
 import type { DerivedDutyActionType } from "@/lib/domain/dutyActions";
 import type { DutyBlockCertainty, WeekendCompleteness } from "@/lib/domain/dutyBlocks";
 import type {
@@ -35,6 +36,13 @@ export interface PersonalProfile {
  * verbatim for the person they belong to. Never includes `sourceSheet`,
  * `sourceCell`, `personId`, or `personName` — those are workbook-origin /
  * identity fields with no place in a serialized read model.
+ *
+ * `timing` is server-resolved once against `localNow` (never re-derived
+ * from raw text in the UI) so any timed display -- the today timeline in
+ * particular -- can place an event correctly without recomputing shift
+ * rules client-side. `status === "not_evaluable"` for every non-shift
+ * category and for any shift whose exact hour can't be resolved -- no
+ * invented start/end/duration.
  */
 export interface PersonalEventView {
   date: string;
@@ -51,9 +59,10 @@ export interface PersonalEventView {
   dutyFamily: DutyFamily | null;
   absenceKind: AbsenceKind | null;
   changeNote: string | null;
+  timing: AssignmentTiming;
 }
 
-/** A shift/duty `PersonalEventView`, annotated with its resolved timing state. */
+/** A shift/duty `PersonalEventView`, additionally annotated with its resolved temporal state relative to `localNow`. */
 export interface PersonalAssignmentView extends PersonalEventView {
   temporalState: AssignmentTemporalState;
 }

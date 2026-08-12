@@ -17,7 +17,10 @@ layer's safe projections may.
   `PersonalProfile`). None of these carry `sourceSheet`/`sourceCell`,
   workbook IDs, or a colleague's email/manager/capability flags; the
   authenticated person's own profile never carries their email either —
-  that belongs to the auth boundary, not presentation.
+  that belongs to the auth boundary, not presentation. Every
+  `PersonalEventView` carries a server-resolved `timing`
+  (`lib/domain/assignmentTiming.ts`) so the dashboard's progress bar/today
+  timeline never re-derives shift hours from raw text.
 - `buildPersonalScheduleReadModel.ts` — the pure, deterministic builder.
   Takes the authenticated `Person`, the full parsed `people`/`events`, a
   `ShiftSchedule`, and an explicit `LocalNow` — no network, no auth, no
@@ -28,7 +31,9 @@ layer's safe projections may.
   exposure is deliberately minimal: counterpart context only for the
   person's current/next shift(s), never every coworker's schedule. Every
   array is explicitly sorted — input Event order never affects output
-  order — and nothing passed in is ever mutated.
+  order — and nothing passed in is ever mutated. Also exports
+  `toPersonalProfile`, reused by `personalSchedule.ts` for the
+  `configuration_error` state below.
 - `personalSchedule.ts` — `loadPersonalScheduleReadModel()`, the
   server-only orchestration layer. Resolves the Supabase identity first
   (a non-authenticated session never triggers a Google request),
@@ -37,7 +42,16 @@ layer's safe projections may.
   that's a later manager feature), resolves the Person via
   `resolveIdentityAgainstPeople` (no second personnel fetch/parse), and
   fails closed as a typed `configuration_error` — never a default start
-  time — on invalid/missing shift configuration.
+  time — on invalid/missing shift configuration. That state still carries
+  the resolved person's safe profile (identity resolution succeeded; only
+  the shift-time configuration didn't), so the app shell can render
+  normally around a polished in-content error state.
+- `getRequestPersonalSchedule.ts` — `cache(loadPersonalScheduleReadModel)`,
+  a React request-scoped memoization. The protected `(app)` layout
+  (identity/shell) and the dashboard page (content) both call this, so a
+  normal request performs exactly one Google workbook batch fetch instead
+  of two. Scoped to a single request's render only — never persistent
+  across requests/users, never `unstable_cache`, no module-level state.
 
-No public API route consumes this yet — PR #9 is expected to call
-`loadPersonalScheduleReadModel()` directly from Server Components.
+No public API route consumes this yet — PR #9's dashboard calls
+`getRequestPersonalSchedule()` directly from Server Components.

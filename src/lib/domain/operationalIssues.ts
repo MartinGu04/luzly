@@ -62,9 +62,12 @@ export function detectOperationalIssues(
 
 /**
  * "after" (אפטר) is partial/ambiguous and deliberately excluded — it must
- * never be treated as a blocking full-day absence.
+ * never be treated as a blocking full-day absence. Exported so the
+ * presentation layer can reuse the exact same "does this absence block
+ * the whole day" semantics (e.g. deciding whether to show a calm
+ * vacation-day hero) without redefining it.
  */
-const BLOCKING_ABSENCE_KINDS: ReadonlySet<AbsenceKind> = new Set([
+export const BLOCKING_ABSENCE_KINDS: ReadonlySet<AbsenceKind> = new Set([
   "vacation",
   "abroad",
   "medical",

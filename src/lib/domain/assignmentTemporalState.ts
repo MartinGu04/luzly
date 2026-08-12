@@ -57,8 +57,13 @@ function classifyShiftTemporalState(
  * day away from `eventDate` in either direction, which is structurally
  * impossible for any interval this domain can produce (max 31.5h): the
  * caller falls back to plain calendar-date ordering in that case.
+ *
+ * Exported for reuse by `assignmentTiming.ts`, which needs the exact same
+ * "now, expressed on this Event's own timeline" value to compute
+ * elapsed/remaining minutes -- never a second, subtly different
+ * implementation of this placement.
  */
-function resolveNowMinuteOnEventTimeline(eventDate: string, now: LocalNow): number | null {
+export function resolveNowMinuteOnEventTimeline(eventDate: string, now: LocalNow): number | null {
   if (eventDate === now.date) return now.minuteOfDay;
   if (isNextCalendarDay(eventDate, now.date)) return now.minuteOfDay + MINUTES_PER_DAY;
   return null;

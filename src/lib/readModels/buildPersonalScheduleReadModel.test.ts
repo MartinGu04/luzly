@@ -248,6 +248,38 @@ describe("todayEvents / upcomingEvents", () => {
     expect(model.todayEvents[0]).not.toHaveProperty("sourceCell");
     expect(model.todayEvents[0].rawValue).toBe("טכנאי יום");
   });
+
+  it("a resolved shift in todayEvents carries server-resolved timing", () => {
+    const events = [myShift({ date: "2026-08-12", period: "day" })]; // 07:30-19:30
+    const now = localNow({ date: "2026-08-12", minuteOfDay: 8 * 60 });
+    const model = build({ events, now });
+    expect(model.todayEvents[0].timing).toEqual({
+      status: "resolved",
+      startLocalTime: "07:30",
+      endLocalTime: "19:30",
+      durationMinutes: 720,
+      elapsedMinutesAtLoad: 30,
+      remainingMinutesAtLoad: 690,
+      progressPercentAtLoad: 4,
+      minutesUntilStartAtLoad: 0,
+    });
+  });
+
+  it("a duty in todayEvents always carries not_evaluable timing -- no invented duration", () => {
+    const events = [myDuty({ date: "2026-08-12" })];
+    const model = build({ events });
+    expect(model.todayEvents[0].timing).toEqual({ status: "not_evaluable" });
+  });
+
+  it("an overnight resolved shift in upcomingEvents carries correctly-wrapped 19:30 -> 07:30 timing", () => {
+    const events = [myShift({ date: "2026-08-11", period: "night" })];
+    const now = localNow({ date: "2026-08-12", minuteOfDay: 2 * 60 });
+    const model = build({ events, now });
+    const [event] = model.upcomingEvents;
+    expect(event.timing).toEqual(
+      expect.objectContaining({ status: "resolved", startLocalTime: "19:30", endLocalTime: "07:30" }),
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
