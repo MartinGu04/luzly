@@ -31,6 +31,8 @@ const FORBIDDEN_PATTERNS = [
   /parsePersonnelSheet/,
   /parseScheduleSheet/,
   /parseSettingsSheet/,
+  /loadPersonalScheduleReadModel/,
+  /buildPersonalScheduleReadModel/,
 ];
 
 describe("route handler data-exposure guard", () => {

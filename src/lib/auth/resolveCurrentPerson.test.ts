@@ -8,7 +8,8 @@ const fetchRawWorkbookSnapshot = vi.fn();
 vi.mock("./currentUser", () => ({ getAuthenticatedIdentity }));
 vi.mock("@/lib/google", () => ({ fetchRawWorkbookSnapshot }));
 
-const { findPersonByEmail, resolveCurrentPerson } = await import("./resolveCurrentPerson");
+const { findPersonByEmail, resolveCurrentPerson, resolveIdentityAgainstPeople, resolveCurrentPersonFromPeople } =
+  await import("./resolveCurrentPerson");
 
 function person(overrides: Partial<Person> = {}): Person {
   return {
@@ -223,5 +224,92 @@ describe("resolveCurrentPerson (orchestration, mocked identity + Google layer)",
     });
     const result = await resolveCurrentPerson();
     expect(result.status).toBe("ok");
+  });
+});
+
+describe("resolveIdentityAgainstPeople (pure, shared by resolveCurrentPerson and the read model loader)", () => {
+  it("4. an unauthenticated identity resolves to unauthenticated regardless of people", () => {
+    const p = person();
+    expect(resolveIdentityAgainstPeople({ status: "unauthenticated" }, [p])).toEqual({
+      status: "unauthenticated",
+    });
+  });
+
+  it("5. a missing-email identity resolves to missing_email regardless of people", () => {
+    const p = person();
+    expect(
+      resolveIdentityAgainstPeople({ status: "missing_email", userId: "u1" }, [p]),
+    ).toEqual({ status: "missing_email" });
+  });
+
+  it("resolves the matching Person for a unique authenticated email", () => {
+    const p = person({ email: "dani@example.invalid" });
+    const result = resolveIdentityAgainstPeople(
+      { status: "authenticated", userId: "u1", email: "dani@example.invalid" },
+      [p],
+    );
+    expect(result).toEqual({ status: "ok", person: p });
+  });
+
+  it("6. an unmapped email produces unmapped, not a Person", () => {
+    const p = person({ email: "dani@example.invalid" });
+    const result = resolveIdentityAgainstPeople(
+      { status: "authenticated", userId: "u1", email: "stranger@example.invalid" },
+      [p],
+    );
+    expect(result).toEqual({ status: "unmapped", email: "stranger@example.invalid" });
+  });
+
+  it("3. a duplicate personnel email produces ambiguous_identity", () => {
+    const a = person({ id: "p_a", email: "shared@example.invalid" });
+    const b = person({ id: "p_b", email: "SHARED@example.invalid" });
+    const result = resolveIdentityAgainstPeople(
+      { status: "authenticated", userId: "u1", email: "shared@example.invalid" },
+      [a, b],
+    );
+    expect(result).toEqual({ status: "ambiguous_identity" });
+  });
+
+  it("does not mutate the people array or its entries", () => {
+    const p = Object.freeze(person());
+    const people = Object.freeze([p]);
+    expect(() =>
+      resolveIdentityAgainstPeople(
+        { status: "authenticated", userId: "u1", email: "dani@example.invalid" },
+        people,
+      ),
+    ).not.toThrow();
+  });
+});
+
+describe("resolveCurrentPersonFromPeople (async wrapper over the Supabase identity + pure mapping)", () => {
+  beforeEach(() => {
+    getAuthenticatedIdentity.mockReset();
+    fetchRawWorkbookSnapshot.mockReset();
+  });
+
+  it("resolves the Person from an already-parsed personnel list, without any Google call", async () => {
+    getAuthenticatedIdentity.mockResolvedValue({
+      status: "authenticated",
+      userId: "u1",
+      email: "dani@example.invalid",
+    });
+    const p = person({ email: "dani@example.invalid" });
+
+    const result = await resolveCurrentPersonFromPeople([p]);
+
+    expect(result).toEqual({ status: "ok", person: p });
+    expect(fetchRawWorkbookSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("mirrors resolveCurrentPerson's fail-closed behavior for an unmapped email", async () => {
+    getAuthenticatedIdentity.mockResolvedValue({
+      status: "authenticated",
+      userId: "u1",
+      email: "stranger@example.invalid",
+    });
+
+    const result = await resolveCurrentPersonFromPeople([person()]);
+    expect(result).toEqual({ status: "unmapped", email: "stranger@example.invalid" });
   });
 });

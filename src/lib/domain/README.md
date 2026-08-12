@@ -58,3 +58,17 @@ no Google API calls and no spreadsheet-cell access.
   gets one same-day action; a multi-day block gets one action on every
   actual date except the final one — the same rule for every duty
   family, including `weekend_kitchen` (no separate reminder engine).
+- `localNow.ts` — the `LocalNow` shape (`date` + `minuteOfDay`), a plain
+  local-clock reading. Producing one from a real instant is a runtime
+  boundary concern (`lib/time`), not a domain concern — this is only the
+  type every domain temporal rule is expressed against.
+- `assignmentTemporalState.ts` — `classifyAssignmentTemporalState`,
+  classifying a shift/duty `Event` as `current`/`upcoming`/`past` relative
+  to a `LocalNow` (duties: calendar date only, no invented hours; shifts:
+  reuses `resolveEventShiftInterval`, comparing `now` on the shift's own
+  minute timeline so an overnight shift crossing midnight is handled
+  without touching `Date`/UTC). An unresolved shift interval (unspecified
+  period or an invalid override) is always `not_evaluable`, on any date —
+  never guessed into a bucket. `isEventStillRelevant` is the same
+  overnight-carry-forward rule reused for "should this Event still show up
+  in a present/future view".

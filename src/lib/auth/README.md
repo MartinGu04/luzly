@@ -20,6 +20,15 @@ connects "who signed in" to "which כ"א Person that is."
   access: an authenticated email absent from כ"א resolves to
   `{ status: "unmapped" }`, not a Person. `Person.isManager` is the only
   source of manager status — no separate allowlist exists.
+  `resolveIdentityAgainstPeople(identity, people)` is the same mapping
+  factored out as a pure function of an already-resolved identity and an
+  already-parsed personnel list, and `resolveCurrentPersonFromPeople(people)`
+  is the async wrapper over it — both exist so a caller that has already
+  fetched/parsed כ"א for its own purposes (e.g. `lib/readModels`) can reuse
+  the exact same fail-closed behavior without a second Google personnel
+  request or a second parse. `resolveCurrentPerson` itself now delegates to
+  `resolveIdentityAgainstPeople` too, so there is exactly one place this
+  mapping logic lives.
 - `safeRedirect.ts` — `sanitizeNextPath`, validating the OAuth callback's
   `next` redirect target so it can only ever point back into Luzly.
 - `actions.ts` — `signOutAction`, a Server Action that signs out
