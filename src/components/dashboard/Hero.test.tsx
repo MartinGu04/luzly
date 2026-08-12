@@ -68,8 +68,8 @@ function shiftContext(overrides: Partial<PersonalShiftContext> = {}): PersonalSh
 const defaultProps = {
   currentAssignments: [] as PersonalAssignmentView[],
   nextAssignmentGroup: null as PersonalNextAssignmentGroup | null,
-  currentShiftContext: null as PersonalShiftContext | null,
-  nextShiftContext: null as PersonalShiftContext | null,
+  currentShiftContexts: [] as PersonalShiftContext[],
+  nextShiftContexts: [] as PersonalShiftContext[],
   fetchedAt: "2026-08-12T08:00:00.000Z",
   localNowDate: "2026-08-12",
 };
@@ -138,7 +138,7 @@ describe("Hero — empty state", () => {
 });
 
 describe("Hero — counterpart context embedding", () => {
-  it("embeds currentShiftContext connected to the current hero", () => {
+  it("embeds a matching currentShiftContext connected to the current hero", () => {
     const context = shiftContext({
       primaryCounterparts: [
         {
@@ -153,13 +153,106 @@ describe("Hero — counterpart context embedding", () => {
         },
       ],
     });
-    render(<Hero {...defaultProps} currentAssignments={[baseAssignment()]} currentShiftContext={context} />);
+    render(
+      <Hero {...defaultProps} currentAssignments={[baseAssignment()]} currentShiftContexts={[context]} />,
+    );
     expect(screen.getByText("מי איתי?")).toBeInTheDocument();
     expect(screen.getByText("נועה דוגמה")).toBeInTheDocument();
   });
 
   it("does not render a counterpart section when there is no shift context", () => {
-    render(<Hero {...defaultProps} currentAssignments={[dutyAssignment()]} currentShiftContext={null} />);
+    render(<Hero {...defaultProps} currentAssignments={[dutyAssignment()]} currentShiftContexts={[]} />);
     expect(screen.queryByText("מי איתי?")).toBeNull();
+  });
+
+  it("a duty-only next group never gets a later shift's counterpart context (the reported bug)", () => {
+    // next group = duty on the 13th; the only available shift context belongs to a shift on the 15th.
+    const group = nextGroup([
+      dutyAssignment({ temporalState: "upcoming", date: "2026-08-13" }),
+    ]);
+    const laterShiftContext = shiftContext({ date: "2026-08-15", period: "day", role: "technician" });
+    render(
+      <Hero
+        {...defaultProps}
+        nextAssignmentGroup={group}
+        nextShiftContexts={[laterShiftContext]}
+        localNowDate="2026-08-12"
+      />,
+    );
+    expect(screen.getByText("הבא שלך")).toBeInTheDocument();
+    expect(screen.queryByText("מי איתי?")).toBeNull();
+  });
+
+  it("a next group containing a matching same-date shift renders its counterpart context normally", () => {
+    const shiftEvent = baseAssignment({
+      date: "2026-08-15",
+      period: "day",
+      role: "technician",
+      temporalState: "upcoming",
+      timing: {
+        status: "resolved",
+        startLocalTime: "07:30",
+        endLocalTime: "19:30",
+        durationMinutes: 720,
+        elapsedMinutesAtLoad: 0,
+        remainingMinutesAtLoad: 720,
+        progressPercentAtLoad: 0,
+        minutesUntilStartAtLoad: 0,
+      },
+    });
+    const group = nextGroup([shiftEvent]);
+    const matchingContext = shiftContext({
+      date: "2026-08-15",
+      period: "day",
+      role: "technician",
+      primaryCounterparts: [
+        {
+          personId: "p_2",
+          personName: "נועה דוגמה",
+          role: "supervisor",
+          certainty: "confirmed",
+          shadow: false,
+          period: "day",
+          startTimeOverride: null,
+          endTimeOverride: null,
+        },
+      ],
+    });
+    render(
+      <Hero
+        {...defaultProps}
+        nextAssignmentGroup={group}
+        nextShiftContexts={[matchingContext]}
+        localNowDate="2026-08-12"
+      />,
+    );
+    expect(screen.getByText("מי איתי?")).toBeInTheDocument();
+    expect(screen.getByText("נועה דוגמה")).toBeInTheDocument();
+  });
+
+  it("picks the matching context out of several current-shift contexts, not index 0", () => {
+    const lead = baseAssignment({ date: "2026-08-12", period: "day", role: "technician" });
+    const wrongContext = shiftContext({ date: "2026-08-12", period: "night", role: "technician" });
+    const rightContext = shiftContext({
+      date: "2026-08-12",
+      period: "day",
+      role: "technician",
+      primaryCounterparts: [
+        {
+          personId: "p_3",
+          personName: "משה כהן",
+          role: "supervisor",
+          certainty: "confirmed",
+          shadow: false,
+          period: "day",
+          startTimeOverride: null,
+          endTimeOverride: null,
+        },
+      ],
+    });
+    render(
+      <Hero {...defaultProps} currentAssignments={[lead]} currentShiftContexts={[wrongContext, rightContext]} />,
+    );
+    expect(screen.getByText("משה כהן")).toBeInTheDocument();
   });
 });

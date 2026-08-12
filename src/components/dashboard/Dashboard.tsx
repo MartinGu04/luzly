@@ -20,10 +20,13 @@ interface DashboardProps {
  */
 export function Dashboard({ model }: DashboardProps) {
   const isCurrentHero = model.currentAssignments.length > 0;
-  const heroShiftContext = isCurrentHero
-    ? (model.currentShiftContexts[0] ?? null)
-    : (model.nextShiftContexts[0] ?? null);
-  const heroDate = isCurrentHero ? model.localNow.date : (model.nextAssignmentGroup?.date ?? null);
+
+  // The exact assignments the Hero is already displaying -- Upcoming must
+  // exclude only these specific Events, never every Event sharing their
+  // date (see UpcomingSection for why a date-wide exclusion is wrong).
+  const heroAssignments = isCurrentHero
+    ? model.currentAssignments
+    : (model.nextAssignmentGroup?.events ?? []);
 
   const todayDutyActions = model.dutyActions.filter((action) => action.date === model.localNow.date);
 
@@ -36,8 +39,8 @@ export function Dashboard({ model }: DashboardProps) {
           <Hero
             currentAssignments={model.currentAssignments}
             nextAssignmentGroup={model.nextAssignmentGroup}
-            currentShiftContext={isCurrentHero ? heroShiftContext : null}
-            nextShiftContext={isCurrentHero ? null : heroShiftContext}
+            currentShiftContexts={model.currentShiftContexts}
+            nextShiftContexts={model.nextShiftContexts}
             fetchedAt={model.fetchedAt}
             localNowDate={model.localNow.date}
           />
@@ -60,7 +63,7 @@ export function Dashboard({ model }: DashboardProps) {
               upcomingEvents={model.upcomingEvents}
               dutyBlocks={model.dutyBlocks}
               localNowDate={model.localNow.date}
-              heroDate={heroDate}
+              representedAssignments={heroAssignments}
             />
           </div>
         </div>

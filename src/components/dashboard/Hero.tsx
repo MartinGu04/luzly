@@ -16,8 +16,9 @@ import { TimeRange } from "./TimeRange";
 interface HeroProps {
   currentAssignments: PersonalAssignmentView[];
   nextAssignmentGroup: PersonalNextAssignmentGroup | null;
-  currentShiftContext: PersonalShiftContext | null;
-  nextShiftContext: PersonalShiftContext | null;
+  /** Every current-shift counterpart context the read model computed -- Hero picks the one that actually matches its lead shift, never index 0 blindly. */
+  currentShiftContexts: PersonalShiftContext[];
+  nextShiftContexts: PersonalShiftContext[];
   fetchedAt: string;
   localNowDate: string;
 }
@@ -32,14 +33,14 @@ interface HeroProps {
 export function Hero({
   currentAssignments,
   nextAssignmentGroup,
-  currentShiftContext,
-  nextShiftContext,
+  currentShiftContexts,
+  nextShiftContexts,
   fetchedAt,
   localNowDate,
 }: HeroProps) {
   if (currentAssignments.length > 0) {
     return (
-      <CurrentHero assignments={currentAssignments} shiftContext={currentShiftContext} fetchedAt={fetchedAt} />
+      <CurrentHero assignments={currentAssignments} shiftContexts={currentShiftContexts} fetchedAt={fetchedAt} />
     );
   }
 
@@ -47,7 +48,7 @@ export function Hero({
     return (
       <NextHero
         group={nextAssignmentGroup}
-        shiftContext={nextShiftContext}
+        shiftContexts={nextShiftContexts}
         fetchedAt={fetchedAt}
         localNowDate={localNowDate}
       />
@@ -57,18 +58,40 @@ export function Hero({
   return <EmptyHero />;
 }
 
+/**
+ * A counterpart context may only be embedded when it actually corresponds
+ * to the shift being displayed as the hero's lead -- matched on the safe
+ * date/role/period fields already on both sides, never by array index.
+ * `nextShiftContexts` in particular is computed independently of
+ * `nextAssignmentGroup` (it's the earliest upcoming SHIFT specifically,
+ * which can land on a later date than a duty-only next group), so index 0
+ * can silently belong to a different, later shift than the one shown.
+ */
+function findMatchingShiftContext(
+  lead: PersonalAssignmentView,
+  contexts: readonly PersonalShiftContext[],
+): PersonalShiftContext | null {
+  if (lead.category !== "shift") return null;
+  return (
+    contexts.find(
+      (context) => context.date === lead.date && context.role === lead.role && context.period === lead.period,
+    ) ?? null
+  );
+}
+
 function CurrentHero({
   assignments,
-  shiftContext,
+  shiftContexts,
   fetchedAt,
 }: {
   assignments: PersonalAssignmentView[];
-  shiftContext: PersonalShiftContext | null;
+  shiftContexts: PersonalShiftContext[];
   fetchedAt: string;
 }) {
   const lead = assignments.find((a) => a.category === "shift") ?? assignments[0];
   const secondary = assignments.filter((a) => a !== lead);
   const meta = describeAssignment(lead);
+  const shiftContext = findMatchingShiftContext(lead, shiftContexts);
 
   return (
     <Panel variant="hero" className="animate-fade-up relative overflow-hidden">
@@ -127,18 +150,19 @@ function CurrentHero({
 
 function NextHero({
   group,
-  shiftContext,
+  shiftContexts,
   fetchedAt,
   localNowDate,
 }: {
   group: PersonalNextAssignmentGroup;
-  shiftContext: PersonalShiftContext | null;
+  shiftContexts: PersonalShiftContext[];
   fetchedAt: string;
   localNowDate: string;
 }) {
   const lead = group.events.find((e) => e.category === "shift" && e.timing.status === "resolved") ?? group.events[0];
   const others = group.events.filter((e) => e !== lead);
   const meta = describeAssignment(lead);
+  const shiftContext = findMatchingShiftContext(lead, shiftContexts);
 
   const relDay = relativeDayLabel(group.date, localNowDate);
   const dateLabel =

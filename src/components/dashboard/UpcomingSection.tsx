@@ -10,8 +10,80 @@ interface UpcomingSectionProps {
   upcomingEvents: PersonalEventView[];
   dutyBlocks: PersonalDutyBlock[];
   localNowDate: string;
-  /** The date already shown by the hero (its content shouldn't repeat here). */
-  heroDate: string | null;
+  /**
+   * The exact Events the Hero is already displaying (currentAssignments,
+   * or nextAssignmentGroup.events) -- excluded here by an exact-Event
+   * match, never by date alone. A same-date Event the Hero is NOT
+   * showing (a later shift, an unrelated duty) must still appear.
+   */
+  representedAssignments: PersonalEventView[];
+}
+
+/**
+ * A signature built only from fields already safe on `PersonalEventView`
+ * -- never `sourceSheet`/`sourceCell`. Good enough to recognize "this is
+ * the same Event the Hero is showing", while still letting two distinct
+ * Events that happen to share every visible field be treated as
+ * legitimately separate entries (multiplicity is preserved via counting,
+ * not a Set -- see `excludeRepresented`).
+ */
+function eventSignature(event: PersonalEventView): string {
+  return [
+    event.date,
+    event.category,
+    event.role ?? "",
+    event.period,
+    event.slot ?? "",
+    event.dutyFamily ?? "",
+    event.shadow ? "1" : "0",
+    event.startTimeOverride ?? "",
+    event.endTimeOverride ?? "",
+    event.title,
+    event.rawValue,
+  ].join("|");
+}
+
+/**
+ * Removes exactly the Events already represented by the Hero -- one
+ * upcoming Event per matching represented Event, never a blanket
+ * same-signature wipe (so genuine duplicate-safe projections aren't
+ * accidentally collapsed).
+ */
+function excludeRepresented<T extends PersonalEventView>(events: T[], represented: PersonalEventView[]): T[] {
+  const remaining = new Map<string, number>();
+  for (const event of represented) {
+    const sig = eventSignature(event);
+    remaining.set(sig, (remaining.get(sig) ?? 0) + 1);
+  }
+
+  const kept: T[] = [];
+  for (const event of events) {
+    const sig = eventSignature(event);
+    const count = remaining.get(sig) ?? 0;
+    if (count > 0) {
+      remaining.set(sig, count - 1);
+      continue;
+    }
+    kept.push(event);
+  }
+  return kept;
+}
+
+/**
+ * A duty block is already represented by the Hero when one of the Hero's
+ * own duty Events belongs to it (same family + slot, and its date is one
+ * of the block's actual dates) -- not merely because the block's
+ * `startDate` happens to equal the Hero's date, which fails for a
+ * multi-day block that started before today/the next group's date.
+ */
+function isBlockRepresented(block: PersonalDutyBlock, representedAssignments: PersonalEventView[]): boolean {
+  return representedAssignments.some(
+    (event) =>
+      event.category === "duty" &&
+      event.dutyFamily === block.dutyFamily &&
+      event.slot === block.slot &&
+      block.dates.includes(event.date),
+  );
 }
 
 interface UpcomingRow {
@@ -32,10 +104,15 @@ const MAX_ROWS = 6;
  * summarized from `dutyBlocks` so a multi-day duty gets one compact
  * grouped row instead of one row per day.
  */
-export function UpcomingSection({ upcomingEvents, dutyBlocks, localNowDate, heroDate }: UpcomingSectionProps) {
-  const shiftRows: UpcomingRow[] = upcomingEvents
-    .filter((event) => event.category === "shift" && event.date !== heroDate)
-    .map((event, index) => ({
+export function UpcomingSection({
+  upcomingEvents,
+  dutyBlocks,
+  localNowDate,
+  representedAssignments,
+}: UpcomingSectionProps) {
+  const upcomingShiftEvents = upcomingEvents.filter((event) => event.category === "shift");
+  const shiftRows: UpcomingRow[] = excludeRepresented(upcomingShiftEvents, representedAssignments).map(
+    (event, index) => ({
       key: `shift-${index}`,
       date: event.date,
       title: event.title,
@@ -45,10 +122,11 @@ export function UpcomingSection({ upcomingEvents, dutyBlocks, localNowDate, hero
           <TimeRange start={event.timing.startLocalTime} end={event.timing.endLocalTime} />
         ) : null,
       tentative: event.certainty === "tentative",
-    }));
+    }),
+  );
 
   const dutyRows: UpcomingRow[] = dutyBlocks
-    .filter((block) => block.endDate >= localNowDate && block.startDate !== heroDate)
+    .filter((block) => block.endDate >= localNowDate && !isBlockRepresented(block, representedAssignments))
     .map((block, index) => ({
       key: `duty-${index}`,
       date: block.startDate,
