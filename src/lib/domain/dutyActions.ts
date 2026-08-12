@@ -51,10 +51,29 @@ export function deriveDutyActions(blocks: readonly DutyBlock[]): DerivedDutyActi
   return actions.sort(compareDutyActions);
 }
 
-/** Chronological by date, then localTime, then personId as a stable secondary key. */
+/**
+ * Chronological by date, then localTime, then personId -- and then, since
+ * the same person can have same-date/same-time actions from two different
+ * DutyBlocks (e.g. an oxid block and a rasar block), by the source
+ * DutyBlock's own dutyFamily/slot/startDate/endDate. This makes the order
+ * a total order: independent of input order, never left to a comparator
+ * that returns 0 for genuinely different actions.
+ */
 function compareDutyActions(a: DerivedDutyAction, b: DerivedDutyAction): number {
   if (a.date !== b.date) return a.date < b.date ? -1 : 1;
   if (a.localTime !== b.localTime) return a.localTime < b.localTime ? -1 : 1;
   if (a.personId !== b.personId) return a.personId < b.personId ? -1 : 1;
+
+  const blockA = a.dutyBlock;
+  const blockB = b.dutyBlock;
+  if (blockA.dutyFamily !== blockB.dutyFamily) return blockA.dutyFamily < blockB.dutyFamily ? -1 : 1;
+
+  const slotA = blockA.slot ?? -1;
+  const slotB = blockB.slot ?? -1;
+  if (slotA !== slotB) return slotA - slotB;
+
+  if (blockA.startDate !== blockB.startDate) return blockA.startDate < blockB.startDate ? -1 : 1;
+  if (blockA.endDate !== blockB.endDate) return blockA.endDate < blockB.endDate ? -1 : 1;
+
   return 0;
 }

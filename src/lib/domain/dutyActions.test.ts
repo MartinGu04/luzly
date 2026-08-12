@@ -192,6 +192,28 @@ describe("deriveDutyActions — determinism, immutability, evidence", () => {
     expect(shuffled.map((a) => [a.date, a.personId])).toEqual(forward.map((a) => [a.date, a.personId]));
   });
 
+  it("regression: same person/date/time actions from two different DutyBlocks stay in a deterministic family order regardless of input order", () => {
+    const oxidBlock = buildDutyBlocks([
+      dutyEvent("oxid", { date: "2026-01-05", personId: "p_shared" }),
+    ])[0];
+    const rasarBlock = buildDutyBlocks([
+      dutyEvent("rasar", { date: "2026-01-05", personId: "p_shared" }),
+    ])[0];
+
+    const forward = deriveDutyActions([oxidBlock, rasarBlock]);
+    const reversed = deriveDutyActions([rasarBlock, oxidBlock]);
+
+    const signature = (actions: typeof forward) =>
+      actions.map((a) => [a.date, a.localTime, a.personId, a.dutyBlock.dutyFamily]);
+
+    expect(signature(forward)).toEqual(signature(reversed));
+    // Documented tie-break: dutyFamily ascending after date/localTime/personId -- "oxid" < "rasar".
+    expect(signature(forward)).toEqual([
+      ["2026-01-05", "13:00", "p_shared", "oxid"],
+      ["2026-01-05", "13:00", "p_shared", "rasar"],
+    ]);
+  });
+
   it("38. Event objects are not mutated", () => {
     const event = Object.freeze(guardEvent("2026-01-05", 1));
     const blocks = buildDutyBlocks([event]);
