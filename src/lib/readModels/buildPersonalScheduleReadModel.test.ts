@@ -1,0 +1,596 @@
+import { describe, expect, it } from "vitest";
+import { buildShiftSchedule } from "@/lib/domain/shiftSchedule";
+import type { Event } from "@/lib/domain/event";
+import type { LocalNow } from "@/lib/domain/localNow";
+import type { Person } from "@/lib/domain/types";
+import { buildPersonalScheduleReadModel } from "./buildPersonalScheduleReadModel";
+import type { PersonalScheduleReadModel } from "./types";
+
+// day 07:30-19:30, night 19:30-07:30(+1)
+const schedule = buildShiftSchedule("07:30");
+
+let cellCounter = 0;
+function nextCell(): string {
+  cellCounter += 1;
+  return `C${cellCounter}`;
+}
+
+const ME_ID = "p_me";
+const COLLEAGUE_ID = "p_colleague";
+
+function me(overrides: Partial<Person> = {}): Person {
+  return {
+    id: ME_ID,
+    name: "דני בדיקה",
+    email: "dani@example.invalid",
+    isManager: false,
+    isTechnician: true,
+    isSupervisor: false,
+    personnelType: null,
+    ...overrides,
+  };
+}
+
+function colleague(overrides: Partial<Person> = {}): Person {
+  return {
+    id: COLLEAGUE_ID,
+    name: "נועה דוגמה",
+    email: "noa@example.invalid",
+    isManager: false,
+    isTechnician: false,
+    isSupervisor: true,
+    personnelType: null,
+    ...overrides,
+  };
+}
+
+function baseEvent(overrides: Partial<Event> = {}): Event {
+  return {
+    personId: ME_ID,
+    personName: "דני בדיקה",
+    date: "2026-08-12",
+    title: "טכנאי יום",
+    rawValue: "טכנאי יום",
+    category: "shift",
+    certainty: "confirmed",
+    role: "technician",
+    period: "day",
+    sourceSheet: "משמרות + תורנויות",
+    sourceCell: nextCell(),
+    slot: null,
+    shadow: false,
+    startTimeOverride: null,
+    endTimeOverride: null,
+    changeNote: null,
+    dutyFamily: null,
+    absenceKind: null,
+    ...overrides,
+  };
+}
+
+function myShift(overrides: Partial<Event> = {}): Event {
+  return baseEvent({ category: "shift", ...overrides });
+}
+
+function myDuty(overrides: Partial<Event> = {}): Event {
+  return baseEvent({
+    category: "duty",
+    role: null,
+    period: "unspecified",
+    dutyFamily: "guard",
+    slot: 1,
+    title: "שומר 1",
+    rawValue: "שומר 1",
+    ...overrides,
+  });
+}
+
+function colleagueShift(overrides: Partial<Event> = {}): Event {
+  return baseEvent({
+    personId: COLLEAGUE_ID,
+    personName: "נועה דוגמה",
+    category: "shift",
+    role: "supervisor",
+    ...overrides,
+  });
+}
+
+function localNow(overrides: Partial<LocalNow> = {}): LocalNow {
+  return { date: "2026-08-12", minuteOfDay: 10 * 60, ...overrides }; // 10:00
+}
+
+function build(opts: {
+  person?: Person;
+  people?: Person[];
+  events?: Event[];
+  now?: LocalNow;
+}): PersonalScheduleReadModel {
+  const person = opts.person ?? me();
+  const people = opts.people ?? [person];
+  return buildPersonalScheduleReadModel({
+    person,
+    people,
+    events: opts.events ?? [],
+    shiftSchedule: schedule,
+    fetchedAt: "2026-08-12T08:00:00.000Z",
+    now: opts.now ?? localNow(),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Profile
+// ---------------------------------------------------------------------------
+
+describe("PersonalProfile", () => {
+  it("exposes the authenticated person's safe profile fields", () => {
+    const model = build({ person: me({ isManager: true, personnelType: "internal" }) });
+    expect(model.person).toEqual({
+      id: ME_ID,
+      name: "דני בדיקה",
+      isManager: true,
+      isTechnician: true,
+      isSupervisor: false,
+      personnelType: "internal",
+    });
+  });
+
+  it("10. never includes the authenticated person's email", () => {
+    const model = build({});
+    expect(JSON.stringify(model.person)).not.toContain("dani@example.invalid");
+    expect(model.person).not.toHaveProperty("email");
+  });
+
+  it("11. never includes the full People[] array", () => {
+    const model = build({ people: [me(), colleague()] });
+    expect(model).not.toHaveProperty("people");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// today / upcoming events
+// ---------------------------------------------------------------------------
+
+describe("todayEvents / upcomingEvents", () => {
+  it("14. todayEvents contains only own Events dated today", () => {
+    const events = [
+      myShift({ date: "2026-08-12" }),
+      myDuty({ date: "2026-08-13" }),
+      colleagueShift({ date: "2026-08-12" }),
+    ];
+    const model = build({ events, people: [me(), colleague()] });
+    expect(model.todayEvents).toHaveLength(1);
+    expect(model.todayEvents[0].date).toBe("2026-08-12");
+  });
+
+  it("13. only the authenticated person's own Events appear anywhere in todayEvents/upcomingEvents", () => {
+    const events = [myShift({ date: "2026-08-12" }), colleagueShift({ date: "2026-08-12" })];
+    const model = build({ events, people: [me(), colleague()] });
+    expect(model.todayEvents.every((e) => e.title === "טכנאי יום")).toBe(true);
+    expect(JSON.stringify(model.todayEvents)).not.toContain("נועה");
+    expect(JSON.stringify(model.upcomingEvents)).not.toContain("נועה");
+  });
+
+  it("an overnight shift from yesterday still active after midnight remains in upcomingEvents", () => {
+    const events = [myShift({ date: "2026-08-11", period: "night" })];
+    const now = localNow({ date: "2026-08-12", minuteOfDay: 2 * 60 });
+    const model = build({ events, now });
+    expect(model.upcomingEvents.some((e) => e.date === "2026-08-11")).toBe(true);
+  });
+
+  it("16. historical Events are omitted from upcomingEvents", () => {
+    const events = [myShift({ date: "2026-08-01", period: "day" })];
+    const model = build({ events });
+    expect(model.upcomingEvents).toHaveLength(0);
+  });
+
+  it("a finished overnight shift from yesterday is omitted from upcomingEvents", () => {
+    const events = [myShift({ date: "2026-08-11", period: "night" })];
+    const now = localNow({ date: "2026-08-12", minuteOfDay: 8 * 60 }); // after 07:30
+    const model = build({ events, now });
+    expect(model.upcomingEvents.some((e) => e.date === "2026-08-11")).toBe(false);
+  });
+
+  it("15. future Events are sorted deterministically by date", () => {
+    const events = [
+      myShift({ date: "2026-08-20", period: "day" }),
+      myShift({ date: "2026-08-14", period: "day" }),
+      myDuty({ date: "2026-08-16" }),
+    ];
+    const model = build({ events });
+    expect(model.upcomingEvents.map((e) => e.date)).toEqual(["2026-08-14", "2026-08-16", "2026-08-20"]);
+  });
+
+  it("12. PersonalEventView never exposes sourceSheet/sourceCell", () => {
+    const events = [myShift({ date: "2026-08-12" })];
+    const model = build({ events });
+    expect(model.todayEvents[0]).not.toHaveProperty("sourceSheet");
+    expect(model.todayEvents[0]).not.toHaveProperty("sourceCell");
+    expect(model.todayEvents[0].rawValue).toBe("טכנאי יום");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// current assignments
+// ---------------------------------------------------------------------------
+
+describe("currentAssignments", () => {
+  it("24. multiple additive assignments (shift + duty) on the same day are both preserved", () => {
+    const events = [
+      myShift({ date: "2026-08-12", period: "day" }),
+      myDuty({ date: "2026-08-12" }),
+    ];
+    const model = build({ events });
+    expect(model.currentAssignments).toHaveLength(2);
+    expect(model.currentAssignments.every((a) => a.temporalState === "current")).toBe(true);
+  });
+
+  it("does not force a single current Event -- status alongside a shift is not an assignment", () => {
+    const events = [myShift({ date: "2026-08-12", period: "day" }), baseEvent({ category: "status" })];
+    const model = build({ events });
+    expect(model.currentAssignments).toHaveLength(1);
+    expect(model.currentAssignments[0].category).toBe("shift");
+  });
+
+  it("a past shift is not in currentAssignments", () => {
+    const events = [myShift({ date: "2026-08-12", period: "day" })];
+    const now = localNow({ date: "2026-08-12", minuteOfDay: 20 * 60 });
+    const model = build({ events, now });
+    expect(model.currentAssignments).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// next assignment group
+// ---------------------------------------------------------------------------
+
+describe("nextAssignmentGroup", () => {
+  it("25. picks a later-today shift over a future duty", () => {
+    const events = [
+      myShift({ date: "2026-08-12", period: "night" }), // starts 19:30 today
+      myDuty({ date: "2026-08-20" }),
+    ];
+    const model = build({ events }); // now = 10:00 today
+    expect(model.nextAssignmentGroup?.date).toBe("2026-08-12");
+    expect(model.nextAssignmentGroup?.events[0].category).toBe("shift");
+  });
+
+  it("26. picks a future duty when there is no upcoming shift", () => {
+    const events = [myDuty({ date: "2026-08-20" })];
+    const model = build({ events });
+    expect(model.nextAssignmentGroup).toEqual({
+      date: "2026-08-20",
+      events: [expect.objectContaining({ category: "duty", temporalState: "upcoming" })],
+    });
+  });
+
+  it("preserves multiple assignments sharing the same next date/start group", () => {
+    const events = [
+      myDuty({ date: "2026-08-20", dutyFamily: "guard", slot: 1, title: "שומר 1" }),
+      myDuty({ date: "2026-08-20", dutyFamily: "reserve", slot: 2, title: "עתודה 2" }),
+      myDuty({ date: "2026-08-25", dutyFamily: "guard", slot: 1 }),
+    ];
+    const model = build({ events });
+    expect(model.nextAssignmentGroup?.date).toBe("2026-08-20");
+    expect(model.nextAssignmentGroup?.events).toHaveLength(2);
+  });
+
+  it("null when there are no upcoming assignments", () => {
+    const model = build({ events: [] });
+    expect(model.nextAssignmentGroup).toBeNull();
+  });
+
+  it("27. an invalid/unspecified-timing shift is never guessed into upcoming/current -- it's simply absent from the group", () => {
+    const events = [myShift({ date: "2026-08-20", period: "unspecified", role: null })];
+    const model = build({ events });
+    // Its exact timing can never be resolved, so it never gets forced into
+    // nextAssignmentGroup -- but it's still visible in the broader display
+    // list (upcomingEvents), just without a claimed temporal position.
+    expect(model.nextAssignmentGroup).toBeNull();
+    expect(model.upcomingEvents.some((e) => e.date === "2026-08-20")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// shift counterpart privacy
+// ---------------------------------------------------------------------------
+
+describe("currentShiftContexts / nextShiftContexts — colleague privacy", () => {
+  it("28. current shift counterpart analysis uses all server Events", () => {
+    const events = [
+      myShift({ date: "2026-08-12", period: "day", role: "technician" }),
+      colleagueShift({ date: "2026-08-12", period: "day", role: "supervisor" }),
+    ];
+    const model = build({ events, people: [me(), colleague()] });
+    expect(model.currentShiftContexts).toHaveLength(1);
+    expect(model.currentShiftContexts[0].coverageStatus).toBe("full");
+  });
+
+  it("29. primary counterpart is exposed with only the minimal safe fields", () => {
+    const events = [
+      myShift({ date: "2026-08-12", period: "day", role: "technician" }),
+      colleagueShift({ date: "2026-08-12", period: "day", role: "supervisor" }),
+    ];
+    const model = build({ events, people: [me(), colleague()] });
+    const [counterpart] = model.currentShiftContexts[0].primaryCounterparts;
+    expect(counterpart).toEqual({
+      personId: COLLEAGUE_ID,
+      personName: "נועה דוגמה",
+      role: "supervisor",
+      certainty: "confirmed",
+      shadow: false,
+      period: "day",
+      startTimeOverride: null,
+      endTimeOverride: null,
+    });
+  });
+
+  it("32. colleague email is never exposed", () => {
+    const events = [
+      myShift({ date: "2026-08-12", period: "day", role: "technician" }),
+      colleagueShift({ date: "2026-08-12", period: "day", role: "supervisor" }),
+    ];
+    const model = build({ events, people: [me(), colleague()] });
+    expect(JSON.stringify(model)).not.toContain("noa@example.invalid");
+    expect(model.currentShiftContexts[0].primaryCounterparts[0]).not.toHaveProperty("email");
+    expect(model.currentShiftContexts[0].primaryCounterparts[0]).not.toHaveProperty("isManager");
+    expect(model.currentShiftContexts[0].primaryCounterparts[0]).not.toHaveProperty("isSupervisor");
+    expect(model.currentShiftContexts[0].primaryCounterparts[0]).not.toHaveProperty("personnelType");
+  });
+
+  it("30. shadow counterparts are kept separate from primary counterparts", () => {
+    const events = [
+      myShift({ date: "2026-08-12", period: "day", role: "technician" }),
+      colleagueShift({ date: "2026-08-12", period: "day", role: "supervisor", shadow: true }),
+    ];
+    const model = build({ events, people: [me(), colleague()] });
+    expect(model.currentShiftContexts[0].primaryCounterparts).toHaveLength(0);
+    expect(model.currentShiftContexts[0].shadowCounterparts).toHaveLength(1);
+    expect(model.currentShiftContexts[0].shadowCounterparts[0].shadow).toBe(true);
+  });
+
+  it("31. an unrelated coworker Event (different date/period) is never exposed", () => {
+    const events = [
+      myShift({ date: "2026-08-12", period: "day", role: "technician" }),
+      colleagueShift({ date: "2026-09-01", period: "night", role: "supervisor" }),
+    ];
+    const model = build({ events, people: [me(), colleague()] });
+    expect(model.currentShiftContexts[0].primaryCounterparts).toHaveLength(0);
+    expect(JSON.stringify(model)).not.toContain("2026-09-01");
+  });
+
+  it("33. current overnight shift counterpart analysis still works after midnight", () => {
+    const events = [
+      myShift({ date: "2026-08-11", period: "night", role: "technician" }),
+      colleagueShift({ date: "2026-08-11", period: "night", role: "supervisor" }),
+    ];
+    const now = localNow({ date: "2026-08-12", minuteOfDay: 2 * 60 });
+    const model = build({ events, people: [me(), colleague()], now });
+    expect(model.currentShiftContexts).toHaveLength(1);
+    expect(model.currentShiftContexts[0].date).toBe("2026-08-11");
+    expect(model.currentShiftContexts[0].primaryCounterparts[0].personId).toBe(COLLEAGUE_ID);
+  });
+
+  it("nextShiftContexts reflects the earliest upcoming SHIFT, independent of an earlier next duty", () => {
+    const events = [
+      myDuty({ date: "2026-08-13" }), // earlier than the shift, but not a shift
+      myShift({ date: "2026-08-15", period: "day", role: "technician" }),
+      colleagueShift({ date: "2026-08-15", period: "day", role: "supervisor" }),
+    ];
+    const model = build({ events, people: [me(), colleague()] });
+    expect(model.nextAssignmentGroup?.date).toBe("2026-08-13"); // the duty
+    expect(model.nextShiftContexts).toHaveLength(1);
+    expect(model.nextShiftContexts[0].date).toBe("2026-08-15"); // the shift
+    expect(model.nextShiftContexts[0].primaryCounterparts[0].personId).toBe(COLLEAGUE_ID);
+  });
+
+  it("currentShiftContexts/nextShiftContexts are empty when there is no current/next shift", () => {
+    const model = build({ events: [myDuty({ date: "2026-08-12" })] });
+    expect(model.currentShiftContexts).toHaveLength(0);
+    expect(model.nextShiftContexts).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// operational issues
+// ---------------------------------------------------------------------------
+
+describe("issues", () => {
+  it("34. issues are computed from the full server-side event set (missing coverage detected)", () => {
+    const events = [myShift({ date: "2026-08-12", period: "day", role: "technician" })];
+    const model = build({ events, people: [me(), colleague()] });
+    expect(model.issues.some((issue) => issue.reason === "shift_coverage_missing")).toBe(true);
+  });
+
+  it("35. only the authenticated person's own issues are exposed", () => {
+    const events = [
+      myShift({ date: "2026-08-12", period: "day", role: "technician" }),
+      colleagueShift({ date: "2026-09-01", period: "day", role: "supervisor" }), // colleague's own missing-coverage issue
+    ];
+    const model = build({ events, people: [me(), colleague()] });
+    expect(model.issues.every((issue) => issue.date !== "2026-09-01")).toBe(true);
+  });
+
+  it("36. historical (non-carried-forward) issues are omitted", () => {
+    const events = [myShift({ date: "2026-08-01", period: "day", role: "technician" })];
+    const model = build({ events, people: [me(), colleague()] });
+    expect(model.issues).toHaveLength(0);
+  });
+
+  it("37. a current overnight shift's issue from the previous date is retained", () => {
+    const events = [myShift({ date: "2026-08-11", period: "night", role: "technician" })];
+    const now = localNow({ date: "2026-08-12", minuteOfDay: 2 * 60 });
+    const model = build({ events, people: [me(), colleague()], now });
+    expect(model.issues.some((issue) => issue.date === "2026-08-11")).toBe(true);
+  });
+
+  it("PersonalIssue never exposes raw evidence Events or sourceSheet/sourceCell", () => {
+    const events = [myShift({ date: "2026-08-12", period: "day", role: "technician" })];
+    const model = build({ events, people: [me(), colleague()] });
+    const [issue] = model.issues;
+    expect(issue).not.toHaveProperty("events");
+    expect(JSON.stringify(issue)).not.toContain("sourceCell");
+    expect(issue.targetEvent).toEqual({
+      date: "2026-08-12",
+      category: "shift",
+      title: "טכנאי יום",
+      role: "technician",
+      period: "day",
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// duty blocks / actions
+// ---------------------------------------------------------------------------
+
+describe("dutyBlocks / dutyActions", () => {
+  it("38. dutyBlocks contain only the authenticated person's duties", () => {
+    const events = [
+      myDuty({ date: "2026-08-12", dutyFamily: "guard", slot: 1 }),
+      baseEvent({
+        personId: COLLEAGUE_ID,
+        personName: "נועה דוגמה",
+        category: "duty",
+        role: null,
+        dutyFamily: "guard",
+        slot: 1,
+        date: "2026-08-12",
+      }),
+    ];
+    const model = build({ events, people: [me(), colleague()] });
+    expect(model.dutyBlocks).toHaveLength(1);
+    expect(JSON.stringify(model.dutyBlocks)).not.toContain("נועה");
+  });
+
+  it("39. dutyActions contain only the authenticated person's actions, 41. 13:00 semantics unchanged", () => {
+    const events = [
+      myDuty({ date: "2026-08-12", dutyFamily: "guard", slot: 1 }),
+      myDuty({ date: "2026-08-13", dutyFamily: "guard", slot: 1 }),
+      myDuty({ date: "2026-08-14", dutyFamily: "guard", slot: 1 }),
+    ];
+    const model = build({ events });
+    expect(model.dutyActions.every((a) => a.localTime === "13:00")).toBe(true);
+    // Multi-day block -> no check-in on the final day.
+    expect(model.dutyActions.map((a) => a.date)).toEqual(["2026-08-12", "2026-08-13"]);
+  });
+
+  it("40. old duty actions (before localNow.date) are omitted", () => {
+    const events = [
+      myDuty({ date: "2026-08-05", dutyFamily: "guard", slot: 1 }),
+      myDuty({ date: "2026-08-06", dutyFamily: "guard", slot: 1 }),
+    ];
+    const model = build({ events });
+    // Both action dates (08-05 check-in) are before "today" (08-12) -> none survive.
+    expect(model.dutyActions).toHaveLength(0);
+    // But the block itself is still reported (blocks are not date-filtered).
+    expect(model.dutyBlocks).toHaveLength(1);
+  });
+
+  it("42. weekend kitchen completeness semantics are preserved through the projection", () => {
+    // Thursday 2026-08-13, Friday 2026-08-14, Saturday 2026-08-15.
+    const events = [
+      myDuty({ date: "2026-08-13", dutyFamily: "weekend_kitchen", slot: null, title: 'סופ"ש מטבח' }),
+      myDuty({ date: "2026-08-14", dutyFamily: "weekend_kitchen", slot: null, title: 'סופ"ש מטבח' }),
+      myDuty({ date: "2026-08-15", dutyFamily: "weekend_kitchen", slot: null, title: 'סופ"ש מטבח' }),
+    ];
+    const model = build({ events });
+    expect(model.dutyBlocks[0].weekendCompleteness).toBe("complete");
+  });
+
+  it("PersonalDutyBlock/PersonalDutyAction never expose personId or raw events", () => {
+    const events = [myDuty({ date: "2026-08-12", dutyFamily: "guard", slot: 1 })];
+    const model = build({ events });
+    expect(model.dutyBlocks[0]).not.toHaveProperty("personId");
+    expect(model.dutyBlocks[0]).not.toHaveProperty("events");
+    expect(model.dutyActions[0]).not.toHaveProperty("personId");
+    expect(model.dutyActions[0]).not.toHaveProperty("dutyBlock");
+    expect(model.dutyActions[0]).not.toHaveProperty("sourceEvents");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// determinism / no mutation
+// ---------------------------------------------------------------------------
+
+describe("determinism and input safety", () => {
+  it("43. output is identical regardless of input Event order", () => {
+    const events = [
+      myShift({ date: "2026-08-12", period: "day" }),
+      myDuty({ date: "2026-08-13" }),
+      colleagueShift({ date: "2026-08-12", period: "day", role: "supervisor" }),
+      myShift({ date: "2026-08-20", period: "night" }),
+    ];
+    const forward = build({ events, people: [me(), colleague()] });
+    const shuffled = build({ events: [...events].reverse(), people: [me(), colleague()] });
+    expect(JSON.stringify(forward)).toBe(JSON.stringify(shuffled));
+  });
+
+  it("44. input Events/People are never mutated", () => {
+    const events = Object.freeze([Object.freeze(myShift({ date: "2026-08-12", period: "day" }))]);
+    const people = Object.freeze([Object.freeze(me()), Object.freeze(colleague())]);
+    expect(() =>
+      buildPersonalScheduleReadModel({
+        person: me(),
+        people,
+        events,
+        shiftSchedule: schedule,
+        fetchedAt: "2026-08-12T08:00:00.000Z",
+        now: localNow(),
+      }),
+    ).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// no full data leak
+// ---------------------------------------------------------------------------
+
+const FORBIDDEN_KEYS = new Set([
+  "sourceSheet",
+  "sourceCell",
+  "email",
+  "spreadsheetId",
+  "serviceAccountEmail",
+  "privateKey",
+  "people",
+  "values",
+  "sheets",
+]);
+
+function assertNoForbiddenKeys(value: unknown, path = "$"): void {
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => assertNoForbiddenKeys(item, `${path}[${index}]`));
+    return;
+  }
+  if (value !== null && typeof value === "object") {
+    for (const [key, val] of Object.entries(value)) {
+      if (FORBIDDEN_KEYS.has(key)) {
+        throw new Error(`Forbidden key "${key}" found at ${path}.${key}`);
+      }
+      assertNoForbiddenKeys(val, `${path}.${key}`);
+    }
+  }
+}
+
+describe("no full data leak", () => {
+  it("recursively contains none of the forbidden workbook/identity keys", () => {
+    const events = [
+      myShift({ date: "2026-08-12", period: "day" }),
+      myDuty({ date: "2026-08-13" }),
+      colleagueShift({ date: "2026-08-12", period: "day", role: "supervisor" }),
+    ];
+    const model = build({ events, people: [me(), colleague()] });
+    expect(() => assertNoForbiddenKeys(model)).not.toThrow();
+  });
+
+  it("never contains either person's raw email value", () => {
+    const events = [
+      myShift({ date: "2026-08-12", period: "day" }),
+      colleagueShift({ date: "2026-08-12", period: "day", role: "supervisor" }),
+    ];
+    const model = build({ events, people: [me(), colleague()] });
+    const serialized = JSON.stringify(model);
+    expect(serialized).not.toContain("dani@example.invalid");
+    expect(serialized).not.toContain("noa@example.invalid");
+  });
+});

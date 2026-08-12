@@ -2,7 +2,7 @@ import "server-only";
 import { fetchRawWorkbookSnapshot } from "@/lib/google";
 import { parsePersonnelSheet } from "@/lib/parsers/personnel";
 import type { Person } from "@/lib/domain/types";
-import { getAuthenticatedIdentity } from "./currentUser";
+import { getAuthenticatedIdentity, type AuthIdentityResult } from "./currentUser";
 
 export type ResolveCurrentPersonResult =
   | { status: "unauthenticated" }
@@ -42,6 +42,44 @@ function normalizeEmailForComparison(email: string): string {
 }
 
 /**
+ * The identity <-> personnel mapping step, factored out as a pure function
+ * of an already-resolved `AuthIdentityResult` and an already-parsed
+ * personnel list. This is what lets a caller that has already fetched and
+ * parsed כ"א for its own purposes (e.g. the personal schedule read model)
+ * reuse the exact same fail-closed mapping behavior without triggering a
+ * second Google personnel request or a second personnel parse.
+ */
+export function resolveIdentityAgainstPeople(
+  identity: AuthIdentityResult,
+  people: readonly Person[],
+): ResolveCurrentPersonResult {
+  if (identity.status === "unauthenticated") return { status: "unauthenticated" };
+  if (identity.status === "missing_email") return { status: "missing_email" };
+
+  const lookup = findPersonByEmail(people, identity.email);
+
+  if (lookup.status === "not_found") return { status: "unmapped", email: identity.email };
+  if (lookup.status === "ambiguous") return { status: "ambiguous_identity" };
+
+  return { status: "ok", person: lookup.person };
+}
+
+/**
+ * Maps the authenticated Supabase user to a parsed כ"א `Person`, given an
+ * already-parsed personnel list (e.g. from a caller that batch-fetched
+ * personnel alongside other sheets). Fetches nothing from Google itself —
+ * only resolves the Supabase identity and delegates to
+ * `resolveIdentityAgainstPeople` for the exact same fail-closed mapping
+ * behavior as `resolveCurrentPerson`.
+ */
+export async function resolveCurrentPersonFromPeople(
+  people: readonly Person[],
+): Promise<ResolveCurrentPersonResult> {
+  const identity = await getAuthenticatedIdentity();
+  return resolveIdentityAgainstPeople(identity, people);
+}
+
+/**
  * Maps the authenticated Supabase user to a parsed כ"א `Person`:
  *
  * 1. requires an authenticated Supabase user with a usable email (never
@@ -70,10 +108,5 @@ export async function resolveCurrentPerson(): Promise<ResolveCurrentPersonResult
   const personnelSheet = snapshot.sheets[0];
   const people = parsePersonnelSheet(personnelSheet);
 
-  const lookup = findPersonByEmail(people, identity.email);
-
-  if (lookup.status === "not_found") return { status: "unmapped", email: identity.email };
-  if (lookup.status === "ambiguous") return { status: "ambiguous_identity" };
-
-  return { status: "ok", person: lookup.person };
+  return resolveIdentityAgainstPeople(identity, people);
 }
