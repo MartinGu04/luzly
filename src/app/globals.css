@@ -1,45 +1,208 @@
 @import "tailwindcss";
 
+/* ---------------------------------------------------------------------- */
+/* Design tokens -- dark-first (deep navy/graphite, not pure black).      */
+/* Every component reads colors through these custom properties rather   */
+/* than raw hex values, so the palette can evolve from one place.        */
+/* ---------------------------------------------------------------------- */
 :root {
-  --background: #f4f5f8;
-  --foreground: #0f172a;
+  --background: #090b12;
+  --background-glow-a: #241a45;
+  --background-glow-b: #0d2233;
 
-  --card: #ffffff;
-  --card-foreground: #0f172a;
+  --foreground: #eef0f6;
+  --muted: #8b93a8;
+  --muted-2: #5c6478;
 
-  --sidebar: #0b1324;
-  --sidebar-foreground: #e2e8f0;
-  --sidebar-muted: #94a3b8;
+  --surface-1: #12151f;
+  --surface-2: #171c29;
+  --surface-3: #1c2233;
 
-  --primary: #2563eb;
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.16);
+
+  --card: var(--surface-1);
+  --card-foreground: var(--foreground);
+
+  --sidebar: #0b0d15;
+  --sidebar-foreground: #e7e9f2;
+  --sidebar-muted: #7a839a;
+  --sidebar-border: rgba(255, 255, 255, 0.07);
+
+  --primary: #8b7bf5;
+  --primary-strong: #7461e8;
   --primary-foreground: #ffffff;
 
-  --border: #e2e8f0;
-  --muted: #64748b;
+  --accent: #4fc3e8;
+
+  --success: #3ecf8e;
+  --success-foreground: #06281a;
+  --warning: #f5b84e;
+  --warning-foreground: #2c1c02;
+  --critical: #f77272;
+  --critical-foreground: #2b0a0a;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-2: var(--muted-2);
+
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
 
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
 
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-muted: var(--sidebar-muted);
+  --color-sidebar-border: var(--sidebar-border);
 
   --color-primary: var(--primary);
+  --color-primary-strong: var(--primary-strong);
   --color-primary-foreground: var(--primary-foreground);
 
-  --color-border: var(--border);
-  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-critical: var(--critical);
+  --color-critical-foreground: var(--critical-foreground);
 
   --font-sans: var(--font-heebo);
+}
+
+* {
+  border-color: var(--border);
+}
+
+html {
+  color-scheme: dark;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  position: relative;
+}
+
+/* A restrained ambient backdrop: two soft, very low-opacity radial blobs
+   fixed behind all content, plus a faint grid for depth. Never opaque
+   enough to fight with foreground contrast. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  background:
+    radial-gradient(60rem 40rem at 15% -10%, color-mix(in srgb, var(--background-glow-a) 32%, transparent), transparent 60%),
+    radial-gradient(50rem 36rem at 110% 15%, color-mix(in srgb, var(--background-glow-b) 28%, transparent), transparent 55%);
+}
+
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.5;
+  background-image:
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(to right, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+  background-size: 42px 42px;
+  mask-image: radial-gradient(80% 60% at 50% 0%, black, transparent 85%);
+}
+
+::selection {
+  background: color-mix(in srgb, var(--primary) 40%, transparent);
+  color: var(--foreground);
+}
+
+/* ---------------------------------------------------------------------- */
+/* Motion system -- named keyframes, used deliberately and sparingly.     */
+/* Recommended feel: 200-350ms for interactions, 2.5-8s for ambient       */
+/* cycles. Every animation below is disabled under reduced motion.        */
+/* ---------------------------------------------------------------------- */
+
+@keyframes pulse-dot {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(0.82); opacity: 0.85; }
+}
+
+@keyframes pulse-ring {
+  0% { transform: scale(0.75); opacity: 0.5; }
+  75%, 100% { transform: scale(2.1); opacity: 0; }
+}
+
+@keyframes ambient-glow {
+  0%, 100% { opacity: 0.28; transform: translate3d(0, 0, 0) scale(1); }
+  50% { opacity: 0.48; transform: translate3d(-1.5%, 1.5%, 0) scale(1.04); }
+}
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes breathe {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+@keyframes issue-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+@keyframes skeleton-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.animate-pulse-dot { animation: pulse-dot 2.4s ease-in-out infinite; }
+.animate-pulse-ring { animation: pulse-ring 2.4s cubic-bezier(0.25, 0.6, 0.35, 1) infinite; }
+.animate-ambient-glow { animation: ambient-glow 7s ease-in-out infinite; }
+.animate-fade-up { animation: fade-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.animate-breathe { animation: breathe 3.4s ease-in-out infinite; }
+.animate-issue-pulse { animation: issue-pulse 2.8s ease-in-out infinite; }
+
+.skeleton {
+  background-image: linear-gradient(
+    100deg,
+    var(--surface-2) 35%,
+    var(--surface-3) 50%,
+    var(--surface-2) 65%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 2.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-pulse-dot,
+  .animate-pulse-ring,
+  .animate-ambient-glow,
+  .animate-fade-up,
+  .animate-breathe,
+  .animate-issue-pulse,
+  .skeleton {
+    animation: none !important;
+  }
+
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

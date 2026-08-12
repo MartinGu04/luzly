@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Heebo } from "next/font/google";
+import { APP_NAME } from "@/lib/config/productName";
 import "./globals.css";
 
 const heebo = Heebo({
@@ -8,7 +9,7 @@ const heebo = Heebo({
 });
 
 export const metadata: Metadata = {
-  title: "Luzly",
+  title: APP_NAME,
   description: "מלווה תזמון מבוסס Google Sheets",
 };
 

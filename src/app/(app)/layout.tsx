@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/layout/AppShell";
 import { AccessDeniedScreen } from "@/components/auth/AccessDeniedScreen";
-import { resolveCurrentPerson } from "@/lib/auth/resolveCurrentPerson";
+import { getRequestPersonalSchedule } from "@/lib/readModels/getRequestPersonalSchedule";
 
 /**
  * Every route here resolves a specific authenticated user's identity, so
@@ -14,31 +14,46 @@ import { resolveCurrentPerson } from "@/lib/auth/resolveCurrentPerson";
 export const dynamic = "force-dynamic";
 
 /**
- * Protects every route under this group server-side.
+ * Protects every route under this group server-side, using the SAME
+ * request-scoped `getRequestPersonalSchedule()` call the dashboard page
+ * itself uses. React's `cache()` (inside that helper) deduplicates the two
+ * calls within one request, so a normal render performs exactly one
+ * Google workbook batch fetch — never a separate identity fetch followed
+ * by a second content fetch.
  *
  * Only a genuinely unauthenticated visitor is redirected to /login (no
  * client useEffect redirect, no flash of protected content). Every other
- * non-"ok" state is an authenticated user Luzly still denies access to —
- * no usable email, an email absent from כ"א, or an email matching more
- * than one כ"א record — and none of those are redirected back into the
- * login flow (that would loop); they all get the same generic denial
- * screen instead of app content, revealing no personnel names, emails,
- * or workbook details either way.
+ * non-"ok"/non-"configuration_error" state is an authenticated user still
+ * denied access — no usable email, an email absent from כ"א, or an email
+ * matching more than one כ"א record — and none of those are redirected
+ * back into the login flow (that would loop); they all get the same
+ * generic denial screen instead of app content, revealing no personnel
+ * names, emails, or workbook details either way.
+ *
+ * `configuration_error` is different: the identity itself resolved fine,
+ * only the shift-schedule configuration is broken, so this authorized
+ * person still gets the real app shell (sidebar/identity) -- the dashboard
+ * page itself renders the polished "can't compute shift hours" state in
+ * its content area.
  */
 export default async function ProtectedLayout({ children }: { children: ReactNode }) {
-  const result = await resolveCurrentPerson();
+  const result = await getRequestPersonalSchedule();
 
   if (result.status === "unauthenticated") {
     redirect("/login");
   }
 
-  if (result.status !== "ok") {
+  if (
+    result.status === "missing_email" ||
+    result.status === "unmapped" ||
+    result.status === "ambiguous_identity"
+  ) {
     return <AccessDeniedScreen />;
   }
 
+  const person = result.status === "ok" ? result.model.person : result.person;
+
   return (
-    <AppShell person={{ name: result.person.name, isManager: result.person.isManager }}>
-      {children}
-    </AppShell>
+    <AppShell person={{ name: person.name, isManager: person.isManager }}>{children}</AppShell>
   );
 }

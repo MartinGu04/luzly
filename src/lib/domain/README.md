@@ -43,14 +43,15 @@ no Google API calls and no spreadsheet-cell access.
   duty Events (`category === "duty" && dutyFamily !== null` only) into
   `DutyBlock`s for one person + duty family + slot. Built purely from
   Event metadata, never Hebrew `rawValue`/`title`. Local calendar-date
-  arithmetic only (`parseCalendarDate`/`isNextCalendarDay`) — no
-  `Date`/UTC, so month/year boundaries and leap years are handled
+  arithmetic only (`parseCalendarDate`/`isNextCalendarDay`/`dayOfWeek`) —
+  no `Date`/UTC, so month/year boundaries and leap years are handled
   without timezone risk and an unparseable date can never crash
   grouping or silently join a valid run. `weekend_kitchen` gets an
   explicit `weekendCompleteness` (complete only for an actual
   Thursday-Friday-Saturday run — dates are never fabricated). Output is
   deterministically sorted; a duplicate Event reference is deduplicated
-  so it can never inflate `dayCount`.
+  so it can never inflate `dayCount`. `parseCalendarDate`/`dayOfWeek` are
+  also reused by `lib/presentation` for Date-free Hebrew weekday display.
 - `dutyActions.ts` — `deriveDutyActions`, turning `DutyBlock`s into
   machine-readable `duty_check_in` action data (never an actual
   notification — no Notification API, cron, or push subscription here).
@@ -71,4 +72,15 @@ no Google API calls and no spreadsheet-cell access.
   period or an invalid override) is always `not_evaluable`, on any date —
   never guessed into a bucket. `isEventStillRelevant` is the same
   overnight-carry-forward rule reused for "should this Event still show up
-  in a present/future view".
+  in a present/future view". `resolveNowMinuteOnEventTimeline` is exported
+  for `assignmentTiming.ts` to reuse the exact same "now, on this Event's
+  own timeline" placement.
+- `assignmentTiming.ts` — `computeAssignmentTiming`, a safe
+  presentation-ready projection of a shift's resolved timing as of a
+  `LocalNow`: wrapped `"HH:mm"` start/end (an overnight end past midnight
+  reads e.g. `"07:30"`), duration, and elapsed/remaining/progress/
+  minutes-until-start as of that instant. `not_evaluable` for every duty
+  and every shift whose interval can't resolve — never an invented
+  start/end/duration. The dashboard's live progress bar only ever
+  advances this forward using elapsed wall-clock time; it never
+  re-derives the underlying scheduling rules client-side.

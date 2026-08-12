@@ -2,6 +2,7 @@ import {
   classifyAssignmentTemporalState,
   isEventStillRelevant,
 } from "@/lib/domain/assignmentTemporalState";
+import { computeAssignmentTiming } from "@/lib/domain/assignmentTiming";
 import type { DerivedDutyAction } from "@/lib/domain/dutyActions";
 import { deriveDutyActions } from "@/lib/domain/dutyActions";
 import { buildDutyBlocks, type DutyBlock } from "@/lib/domain/dutyBlocks";
@@ -58,11 +59,13 @@ export function buildPersonalScheduleReadModel(
   const personEvents = events.filter((event) => event.personId === person.id);
   const sortedPersonEvents = [...personEvents].sort((a, b) => compareEventsForDisplay(a, b, shiftSchedule));
 
-  const todayEvents = sortedPersonEvents.filter((event) => event.date === now.date).map(toEventView);
+  const todayEvents = sortedPersonEvents
+    .filter((event) => event.date === now.date)
+    .map((event) => toEventView(event, shiftSchedule, now));
 
   const upcomingEvents = sortedPersonEvents
     .filter((event) => isEventStillRelevant(event, shiftSchedule, now))
-    .map(toEventView);
+    .map((event) => toEventView(event, shiftSchedule, now));
 
   const assignmentEvents = sortedPersonEvents.filter(isAssignmentEvent);
 
@@ -108,7 +111,7 @@ export function buildPersonalScheduleReadModel(
   const dutyActions = deriveDutyActions(dutyBlocks).filter((action) => action.date >= now.date);
 
   return {
-    person: toProfile(person),
+    person: toPersonalProfile(person),
     fetchedAt,
     localNow: now,
     todayEvents,
@@ -250,7 +253,8 @@ function isIssueRelevant(issue: OperationalIssue, schedule: ShiftSchedule, now: 
 // Safe projections
 // ---------------------------------------------------------------------------
 
-function toProfile(person: Person): PersonalProfile {
+/** Exported so the orchestration loader can project a Person into a safe profile outside a full read model (e.g. for `configuration_error`). */
+export function toPersonalProfile(person: Person): PersonalProfile {
   return {
     id: person.id,
     name: person.name,
@@ -261,7 +265,7 @@ function toProfile(person: Person): PersonalProfile {
   };
 }
 
-function toEventView(event: Event): PersonalEventView {
+function toEventView(event: Event, schedule: ShiftSchedule, now: LocalNow): PersonalEventView {
   return {
     date: event.date,
     title: event.title,
@@ -277,12 +281,13 @@ function toEventView(event: Event): PersonalEventView {
     dutyFamily: event.dutyFamily,
     absenceKind: event.absenceKind,
     changeNote: event.changeNote,
+    timing: computeAssignmentTiming(event, schedule, now),
   };
 }
 
 function toAssignmentView(event: Event, schedule: ShiftSchedule, now: LocalNow): PersonalAssignmentView {
   return {
-    ...toEventView(event),
+    ...toEventView(event, schedule, now),
     temporalState: classifyAssignmentTemporalState(event, schedule, now),
   };
 }

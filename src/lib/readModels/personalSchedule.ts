@@ -14,15 +14,24 @@ import { parsePersonnelSheet } from "@/lib/parsers/personnel";
 import { parseScheduleSheet } from "@/lib/parsers/schedule";
 import { parseSettingsSheet } from "@/lib/parsers/settings";
 import { getJerusalemLocalNow } from "@/lib/time/jerusalemClock";
-import { buildPersonalScheduleReadModel } from "./buildPersonalScheduleReadModel";
-import type { PersonalScheduleReadModel } from "./types";
+import { buildPersonalScheduleReadModel, toPersonalProfile } from "./buildPersonalScheduleReadModel";
+import type { PersonalProfile, PersonalScheduleReadModel } from "./types";
 
 export type PersonalScheduleLoadResult =
   | { status: "unauthenticated" }
   | { status: "missing_email" }
   | { status: "unmapped" }
   | { status: "ambiguous_identity" }
-  | { status: "configuration_error"; message: string }
+  /**
+   * `person` here is the same safe profile as `PersonalScheduleReadModel.person`
+   * -- the identity itself resolved successfully; only the shift-schedule
+   * *configuration* is broken. This lets the app shell still show who's
+   * signed in and offer sign-out while the dashboard content area renders a
+   * polished "can't compute shift hours right now" state instead of the
+   * real schedule. `message` is for server-side diagnostics only -- the UI
+   * must never render it (never the raw exception text).
+   */
+  | { status: "configuration_error"; message: string; person: PersonalProfile }
   | { status: "ok"; model: PersonalScheduleReadModel };
 
 /**
@@ -81,7 +90,11 @@ export async function loadPersonalScheduleReadModel(): Promise<PersonalScheduleL
     shiftSchedule = buildShiftSchedule(settings.shiftStartTimeDay);
   } catch (error) {
     if (error instanceof ShiftConfigurationError) {
-      return { status: "configuration_error", message: error.message };
+      return {
+        status: "configuration_error",
+        message: error.message,
+        person: toPersonalProfile(identityResult.person),
+      };
     }
     throw error;
   }
