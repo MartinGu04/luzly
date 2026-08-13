@@ -338,6 +338,63 @@ describe("buildManagerOverviewReadModel — potential vs internal", () => {
     expect(model.potentialRequirements.every((r) => r.date === "2026-08-13")).toBe(true);
   });
 
+  it("a range spanning both Potential halves (H1/H2) never collides on shared A1 cell references", () => {
+    const spanningRange = {
+      key: "30d" as const,
+      startDate: "2026-06-15",
+      endDate: "2026-07-15",
+      dates: ["2026-06-15", "2026-07-15"],
+      month: null,
+    };
+    const h1Allocation = allocation({
+      sourceSheet: 'פוטנציאל תקש"אס 1-6/2026',
+      sourceCell: "C2",
+      date: "2026-06-15",
+      dutyFamily: "guard",
+      slot: 1,
+      columnLabel: "שומר 1",
+      sourceAllocationLabel: "סייבר H1",
+      resolvedSourcePersonId: null,
+    });
+    const h2Allocation = allocation({
+      sourceSheet: 'פוטנציאל תקש"אס 7-12/2026',
+      sourceCell: "C2",
+      date: "2026-07-15",
+      dutyFamily: "reserve",
+      slot: 1,
+      sourceSlot: 1,
+      columnLabel: "עתודה 1",
+      sourceAllocationLabel: "סייבר H2",
+      resolvedSourcePersonId: null,
+    });
+
+    const model = buildModel({
+      range: spanningRange,
+      potentialAllocations: [h1Allocation, h2Allocation],
+      events: [
+        event({
+          personId: MARTIN.id,
+          personName: MARTIN.name,
+          date: "2026-06-15",
+          category: "duty",
+          role: null,
+          period: "unspecified",
+          dutyFamily: "guard",
+          slot: 1,
+        }),
+      ],
+    });
+
+    expect(model.potentialRequirements).toHaveLength(2);
+    const h1Result = model.potentialRequirements.find((r) => r.date === "2026-06-15")!;
+    const h2Result = model.potentialRequirements.find((r) => r.date === "2026-07-15")!;
+
+    expect(h1Result.columnLabel).toBe("שומר 1");
+    expect(h1Result.status).toBe("covered");
+    expect(h2Result.columnLabel).toBe("עתודה 1");
+    expect(h2Result.status).toBe("missing");
+  });
+
   it("an organizational label never resolves a source person name, but still reconciles structurally", () => {
     const model = buildModel({
       events: [

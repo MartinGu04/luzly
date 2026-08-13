@@ -104,9 +104,14 @@ export function parsePotentialSheet(sheet: RawSheet, personnel: readonly Person[
   }
   if (columns.length === 0) return [];
 
-  const personByNormalizedName = new Map<string, Person>();
+  // Grouped by normalized name (not a single Person) -- a duplicate name must
+  // never resolve arbitrarily via last-write-wins. See resolveSourcePersonId below.
+  const peopleByNormalizedName = new Map<string, Person[]>();
   for (const person of personnel) {
-    personByNormalizedName.set(normalizeAllocationText(person.name), person);
+    const key = normalizeAllocationText(person.name);
+    const group = peopleByNormalizedName.get(key);
+    if (group) group.push(person);
+    else peopleByNormalizedName.set(key, [person]);
   }
 
   const allocations: PotentialAllocation[] = [];
@@ -121,8 +126,6 @@ export function parsePotentialSheet(sheet: RawSheet, personnel: readonly Person[
       const trimmed = rawValue.trim();
       if (trimmed === "" || trimmed === STRUCTURAL_PLACEHOLDER) continue;
 
-      const resolvedPerson = personByNormalizedName.get(normalizeAllocationText(rawValue));
-
       allocations.push({
         date,
         dutyFamily: schema.dutyFamily,
@@ -130,7 +133,7 @@ export function parsePotentialSheet(sheet: RawSheet, personnel: readonly Person[
         sourceSlot: schema.sourceSlot,
         columnLabel: label,
         sourceAllocationLabel: rawValue,
-        resolvedSourcePersonId: resolvedPerson?.id ?? null,
+        resolvedSourcePersonId: resolveSourcePersonId(rawValue, peopleByNormalizedName),
         sourceSheet: sheet.name,
         sourceCell: toA1Cell(row, col),
       });
@@ -182,4 +185,20 @@ function columnHasParseableDate(values: RawCellValue[][], headerRowIndex: number
 
 function normalizeAllocationText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * `resolvedSourcePersonId` is OPTIONAL context only (PR #14 §12/§2) --
+ * resolves to a specific `Person.id` ONLY when the normalized allocation
+ * text matches EXACTLY ONE personnel record. Zero matches -> null (an
+ * organizational/source label). Two or more personnel sharing the same
+ * normalized name -> null too -- never an arbitrary/last-write-wins pick.
+ * No fuzzy matching either way.
+ */
+function resolveSourcePersonId(
+  rawValue: string,
+  peopleByNormalizedName: ReadonlyMap<string, Person[]>,
+): string | null {
+  const matches = peopleByNormalizedName.get(normalizeAllocationText(rawValue));
+  return matches?.length === 1 ? matches[0].id : null;
 }

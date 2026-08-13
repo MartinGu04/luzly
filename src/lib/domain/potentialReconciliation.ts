@@ -141,6 +141,17 @@ interface AllocationGroup {
  * INPUT allocation order in its output (the parser's own deterministic
  * top-to-bottom/left-to-right order), regardless of internal grouping.
  */
+/**
+ * `sourceCell` alone (e.g. "C2") is NOT globally unique -- both Potential
+ * sheets (H1/H2) use the same A1 cell references, so a range spanning
+ * both halves could collide on the same cell reference from different
+ * sheets. `sourceSheet` disambiguates them. Internal-only join key --
+ * never exposed on `ManagerRequirementReconciliation`.
+ */
+function allocationIdentity(allocation: PotentialAllocation): string {
+  return `${allocation.sourceSheet}!${allocation.sourceCell}`;
+}
+
 export function reconcilePotentialAllocations(
   allocations: readonly PotentialAllocation[],
   events: readonly Event[],
@@ -156,7 +167,7 @@ export function reconcilePotentialAllocations(
     group.allocations.push(allocation);
   }
 
-  const resultByCell = new Map<string, ManagerRequirementReconciliation>();
+  const resultByIdentity = new Map<string, ManagerRequirementReconciliation>();
 
   for (const group of groups.values()) {
     const internalEvents = events.filter(
@@ -166,7 +177,7 @@ export function reconcilePotentialAllocations(
     if (EXACT_SLOT_FAMILIES.has(group.dutyFamily)) {
       for (const allocation of group.allocations) {
         const matches = internalEvents.filter((event) => event.slot === allocation.slot).sort(stableEventOrder);
-        resultByCell.set(allocation.sourceCell, buildResult(allocation, matches, events));
+        resultByIdentity.set(allocationIdentity(allocation), buildResult(allocation, matches, events));
       }
       continue;
     }
@@ -174,7 +185,7 @@ export function reconcilePotentialAllocations(
     if (SINGLE_FAMILIES.has(group.dutyFamily)) {
       const matches = [...internalEvents].sort(stableEventOrder);
       for (const allocation of group.allocations) {
-        resultByCell.set(allocation.sourceCell, buildResult(allocation, matches, events));
+        resultByIdentity.set(allocationIdentity(allocation), buildResult(allocation, matches, events));
       }
       continue;
     }
@@ -187,16 +198,16 @@ export function reconcilePotentialAllocations(
 
       sortedAllocations.forEach((allocation, index) => {
         const matched = sortedEvents[index];
-        resultByCell.set(allocation.sourceCell, buildResult(allocation, matched ? [matched] : [], events));
+        resultByIdentity.set(allocationIdentity(allocation), buildResult(allocation, matched ? [matched] : [], events));
       });
       continue;
     }
 
     // Genuinely unknown/unsupported requirement family -- defensive only; the parser never emits one today.
     for (const allocation of group.allocations) {
-      resultByCell.set(allocation.sourceCell, buildResult(allocation, [], events, "not_evaluable"));
+      resultByIdentity.set(allocationIdentity(allocation), buildResult(allocation, [], events, "not_evaluable"));
     }
   }
 
-  return allocations.map((allocation) => resultByCell.get(allocation.sourceCell)!);
+  return allocations.map((allocation) => resultByIdentity.get(allocationIdentity(allocation))!);
 }

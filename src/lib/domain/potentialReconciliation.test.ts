@@ -280,6 +280,87 @@ describe("reconcilePotentialAllocations — batch ordering", () => {
   });
 });
 
+describe("reconcilePotentialAllocations — cross-sheet identity (H1/H2 can share A1 cell references)", () => {
+  it("H1 C2 and H2 C2 never collide, even sharing the exact same sourceCell text", () => {
+    const h1Allocation = allocation({
+      sourceSheet: 'פוטנציאל תקש"אס 1-6/2026',
+      sourceCell: "C2",
+      date: "2026-06-15",
+      dutyFamily: "guard",
+      slot: 1,
+      columnLabel: "שומר 1",
+      sourceAllocationLabel: "סייבר H1",
+    });
+    const h2Allocation = allocation({
+      sourceSheet: 'פוטנציאל תקש"אס 7-12/2026',
+      sourceCell: "C2",
+      date: "2026-07-15",
+      dutyFamily: "reserve",
+      slot: 1,
+      sourceSlot: 1,
+      columnLabel: "עתודה 1",
+      sourceAllocationLabel: "סייבר H2",
+    });
+    const events = [
+      event({ personId: "p_martin", personName: "מרטין בדיקה", date: "2026-06-15", dutyFamily: "guard", slot: 1 }),
+      // No matching internal reserve Event for the H2 allocation -- it should end up "missing".
+    ];
+
+    const results = reconcilePotentialAllocations([h1Allocation, h2Allocation], events);
+
+    expect(results).toHaveLength(2);
+    const [h1Result, h2Result] = results;
+
+    expect(h1Result.date).toBe("2026-06-15");
+    expect(h1Result.dutyFamily).toBe("guard");
+    expect(h1Result.columnLabel).toBe("שומר 1");
+    expect(h1Result.sourceAllocationLabel).toBe("סייבר H1");
+    expect(h1Result.status).toBe("covered");
+    expect(h1Result.actualAssignees).toEqual([{ personId: "p_martin", personName: "מרטין בדיקה", certainty: "confirmed" }]);
+
+    expect(h2Result.date).toBe("2026-07-15");
+    expect(h2Result.dutyFamily).toBe("reserve");
+    expect(h2Result.columnLabel).toBe("עתודה 1");
+    expect(h2Result.sourceAllocationLabel).toBe("סייבר H2");
+    expect(h2Result.status).toBe("missing");
+    expect(h2Result.actualAssignees).toEqual([]);
+
+    // Input order preserved.
+    expect(results.map((r) => r.sourceAllocationLabel)).toEqual(["סייבר H1", "סייבר H2"]);
+  });
+
+  it("a shared sourceCell across sheets never leaks one allocation's actualAssignees into the other's result", () => {
+    const h1Allocation = allocation({
+      sourceSheet: 'פוטנציאל תקש"אס 1-6/2026',
+      sourceCell: "D5",
+      date: "2026-06-20",
+      dutyFamily: "oxid",
+      slot: null,
+      sourceSlot: 1,
+      columnLabel: "אוקסיד 1",
+    });
+    const h2Allocation = allocation({
+      sourceSheet: 'פוטנציאל תקש"אס 7-12/2026',
+      sourceCell: "D5",
+      date: "2026-08-20",
+      dutyFamily: "oxid",
+      slot: null,
+      sourceSlot: 1,
+      columnLabel: "אוקסיד 1",
+    });
+    const events = [
+      event({ personId: "p_only_h1", personName: "רק ב-H1", date: "2026-06-20", dutyFamily: "oxid", slot: null }),
+    ];
+
+    const [h1Result, h2Result] = reconcilePotentialAllocations([h1Allocation, h2Allocation], events);
+
+    expect(h1Result.status).toBe("covered");
+    expect(h1Result.actualAssignees[0]?.personId).toBe("p_only_h1");
+    expect(h2Result.status).toBe("missing");
+    expect(h2Result.actualAssignees).toEqual([]);
+  });
+});
+
 describe("ManagerRequirementStatus — forward compatibility", () => {
   it("partial remains a valid literal state of the type, even though this domain doesn't produce it today", () => {
     const partial: ManagerRequirementStatus = "partial";

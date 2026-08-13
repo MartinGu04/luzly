@@ -34,15 +34,19 @@ no Google API calls and no spreadsheet-cell access.
   together. Deliberately independent of any single person's identity —
   it never picks an arbitrary "target" Event the way
   `analyzeShiftCounterparts` does, so the result never depends on
-  `personId`/`sourceCell` ordering. `"full"` only when both roles cover
-  the whole canonical window; `"missing"` if either role has zero
-  coverage at all (even if the other role is fully covered); `"partial"`
-  otherwise, with `missingIntervals` being the merged union of both
-  roles' own gaps; `"not_evaluable"` when an unresolved/invalid Event
-  makes a role's true coverage impossible to honestly determine (unless
-  resolved coverage alone already proves that role's window is fully
-  covered — an extra unresolved duplicate Event never invalidates an
-  already-provably-full result).
+  `personId`/`sourceCell` ordering. Precedence: a PROVABLY-absent role
+  (zero non-shadow Events for it, not merely unresolved ones) always makes
+  the group `"missing"` — with `missingIntervals` covering the ENTIRE
+  canonical window — regardless of whether the other role is ambiguous,
+  partial, or even fully covered; proven absence beats uncertainty
+  elsewhere. Only once neither role is provably absent does ambiguity get
+  checked: `"not_evaluable"` when an unresolved/invalid Event makes a
+  role's true coverage impossible to honestly determine (unless resolved
+  coverage alone already proves that role's window is fully covered — an
+  extra unresolved duplicate Event never invalidates an already-provably-
+  full result). Otherwise: `"full"` only when both roles cleanly cover the
+  whole canonical window; `"partial"` otherwise, with `missingIntervals`
+  being the merged union of both roles' own gaps.
 - `operationalIssues.ts` — `detectOperationalIssues`, the first
   deterministic rules engine: blocking absence + active assignment,
   shift coverage missing/partial (reusing `analyzeShiftCounterparts`,

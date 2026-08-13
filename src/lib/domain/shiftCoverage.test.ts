@@ -462,6 +462,43 @@ describe("analyzeUnitShiftCoverage — unit-wide group coverage (PR #14 hardenin
     expect(result.missingIntervals).toEqual([]);
   });
 
+  it("J. proven-missing precedence: NO technician Event + an invalid/unresolvable supervisor Event => missing, not not_evaluable", () => {
+    const invalidSup = supervisorDay({ startTimeOverride: "99:99" });
+    const result = analyzeUnitShiftCoverage("day", [invalidSup], schedule);
+    expect(result.coverageStatus).toBe("missing");
+    expect(result.missingIntervals).toEqual([{ startMinute: 450, endMinute: 1170 }]);
+  });
+
+  it("J2. proven-missing precedence: an invalid/unresolvable technician Event + NO supervisor Event => missing, not not_evaluable", () => {
+    const invalidTech = technicianDay({ startTimeOverride: "99:99" });
+    const result = analyzeUnitShiftCoverage("day", [invalidTech], schedule);
+    expect(result.coverageStatus).toBe("missing");
+    expect(result.missingIntervals).toEqual([{ startMinute: 450, endMinute: 1170 }]);
+  });
+
+  it("K. an invalid technician + a FULLY covered supervisor is still not_evaluable, never fabricated as missing/full", () => {
+    const invalidTech = technicianDay({ startTimeOverride: "99:99" });
+    const sup = supervisorDay();
+    const result = analyzeUnitShiftCoverage("day", [invalidTech, sup], schedule);
+    expect(result.coverageStatus).toBe("not_evaluable");
+    expect(result.missingIntervals).toEqual([]);
+  });
+
+  it("K2. the symmetric case: a fully covered technician + an invalid supervisor is not_evaluable", () => {
+    const tech = technicianDay();
+    const invalidSup = supervisorDay({ startTimeOverride: "99:99" });
+    const result = analyzeUnitShiftCoverage("day", [tech, invalidSup], schedule);
+    expect(result.coverageStatus).toBe("not_evaluable");
+    expect(result.missingIntervals).toEqual([]);
+  });
+
+  it("L. proven-absence precedence beats a merely-PARTIAL (not zero) other role too: technician provably zero + supervisor partially covered => still missing, entire canonical window", () => {
+    const partialSup = supervisorDay({ endTimeOverride: "12:00" });
+    const result = analyzeUnitShiftCoverage("day", [partialSup], schedule);
+    expect(result.coverageStatus).toBe("missing");
+    expect(result.missingIntervals).toEqual([{ startMinute: 450, endMinute: 1170 }]);
+  });
+
   it("a period with no canonical window (morning/unspecified) is always not_evaluable", () => {
     const tech = technicianDay({ period: "morning" });
     const result = analyzeUnitShiftCoverage("morning", [tech], schedule);

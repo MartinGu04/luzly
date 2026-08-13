@@ -114,7 +114,10 @@ function buildManagerPotentialRowView(
   return {
     key: `${row.date}-${row.columnLabel}-${index}`,
     dateLabel: issueDateLabel(row.date, todayDate),
-    requirementTitle: dutyBlockTitle({ dutyFamily: row.dutyFamily, slot: row.slot }),
+    // The verified Potential column header IS the requirement identity (e.g. "אוקסיד 3", "מטבח מלא 2") --
+    // reconstructing it via dutyBlockTitle({dutyFamily,slot}) would lose the Potential-side numbering for
+    // multiplicity families, since their internal Event.slot is intentionally null.
+    requirementTitle: row.columnLabel,
     sourceAllocationLabel: row.sourceAllocationLabel,
     actualAssigneeNames: row.actualAssignees.map((assignee) => assignee.personName),
     status: row.status,

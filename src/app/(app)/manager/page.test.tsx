@@ -262,6 +262,38 @@ describe("ManagerPage — everyone view", () => {
     expect(screen.getAllByText(/איתן דוגמה/).length).toBeGreaterThan(0);
   });
 
+  it("shows the exact Potential column label for a multiplicity family, never the bare family name", async () => {
+    getRequestManagerOverview.mockResolvedValue(
+      okResult(
+        model({
+          potentialRequirements: [
+            potentialRow({
+              dutyFamily: "oxid",
+              slot: null,
+              columnLabel: "אוקסיד 3",
+              status: "missing",
+              sourceConflict: null,
+            }),
+            potentialRow({
+              dutyFamily: "full_kitchen",
+              slot: null,
+              columnLabel: "מטבח מלא 2",
+              status: "covered",
+              sourceConflict: null,
+              actualAssignees: [{ personId: "p_martin", personName: "מרטין בדיקה", certainty: "confirmed" }],
+            }),
+          ],
+        }),
+      ),
+    );
+    await renderPage();
+    expect(screen.getAllByText("אוקסיד 3").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("מטבח מלא 2").length).toBeGreaterThan(0);
+    // The bare family label alone (without its Potential-side number) is never shown for these rows.
+    expect(screen.queryByText("אוקסיד", { exact: true })).toBeNull();
+    expect(screen.queryByText("מטבח מלא", { exact: true })).toBeNull();
+  });
+
   it("preserves multiple people on the same shift, never collapsed to one", async () => {
     getRequestManagerOverview.mockResolvedValue(
       okResult(

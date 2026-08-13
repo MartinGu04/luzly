@@ -253,3 +253,51 @@ describe("parsePotentialSheet — structural edge cases", () => {
     expect(JSON.stringify(sheet)).toBe(before);
   });
 });
+
+describe("parsePotentialSheet — duplicate person names never resolve arbitrarily", () => {
+  function sheetWithAllocation(cellValue: string): RawSheet {
+    return {
+      name: 'פוטנציאל תקש"אס 1-6/2026',
+      values: [
+        ["תאריך", "יום", "שומר 1"],
+        ["23/08/2026", "א", cellValue],
+      ],
+    };
+  }
+
+  it("a unique exact name match resolves to that person", () => {
+    const [allocation] = parsePotentialSheet(sheetWithAllocation("מרטין בדיקה"), personnel);
+    expect(allocation.resolvedSourcePersonId).toBe(MARTIN.id);
+  });
+
+  it("an unknown name resolves to null", () => {
+    const [allocation] = parsePotentialSheet(sheetWithAllocation("מישהו שלא קיים"), personnel);
+    expect(allocation.resolvedSourcePersonId).toBeNull();
+  });
+
+  it("two personnel entries sharing the same normalized name resolve to null -- never an arbitrary pick", () => {
+    const dup1 = syntheticPerson("כפול כפולי");
+    const dup2 = { ...syntheticPerson("כפול כפולי"), id: "id_כפול_2" };
+    const ambiguousPersonnel = [...personnel, dup1, dup2];
+
+    const [allocation] = parsePotentialSheet(sheetWithAllocation("כפול כפולי"), ambiguousPersonnel);
+
+    expect(allocation.resolvedSourcePersonId).toBeNull();
+    expect(allocation.sourceAllocationLabel).toBe("כפול כפולי"); // the honest label is still preserved
+  });
+
+  it("whitespace normalization still resolves a unique match", () => {
+    const [allocation] = parsePotentialSheet(sheetWithAllocation("  מרטין   בדיקה  "), personnel);
+    expect(allocation.resolvedSourcePersonId).toBe(MARTIN.id);
+  });
+
+  it("whitespace normalization does not accidentally break ambiguity safety (two names differing only by whitespace still collide safely)", () => {
+    const dup1 = syntheticPerson("כפול  כפולי"); // double space
+    const dup2 = { ...syntheticPerson("כפול כפולי"), id: "id_כפול_2" }; // single space, normalizes the same
+    const ambiguousPersonnel = [...personnel, dup1, dup2];
+
+    const [allocation] = parsePotentialSheet(sheetWithAllocation("כפול כפולי"), ambiguousPersonnel);
+
+    expect(allocation.resolvedSourcePersonId).toBeNull();
+  });
+});
