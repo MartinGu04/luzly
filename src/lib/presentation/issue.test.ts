@@ -138,27 +138,33 @@ describe("issueSummaryLabel", () => {
     expect(issueSummaryLabel([])).toBeNull();
   });
 
-  it("critical only, singular", () => {
-    expect(issueSummaryLabel([{ severity: "critical" }])).toBe("1 דחוף");
+  it("critical only -- null, the group heading already says this", () => {
+    expect(issueSummaryLabel([{ severity: "critical" }])).toBeNull();
+    expect(issueSummaryLabel([{ severity: "critical" }, { severity: "critical" }])).toBeNull();
   });
 
-  it("critical only, plural", () => {
-    expect(issueSummaryLabel([{ severity: "critical" }, { severity: "critical" }])).toBe("2 דחופים");
+  it("review only -- null", () => {
+    expect(issueSummaryLabel([{ severity: "review" }])).toBeNull();
+    expect(issueSummaryLabel([{ severity: "review" }, { severity: "review" }])).toBeNull();
   });
 
-  it("critical + review combined, in severity order", () => {
+  it("info only -- null", () => {
+    expect(issueSummaryLabel([{ severity: "info" }])).toBeNull();
+  });
+
+  it("critical + review combined -- present, in severity order", () => {
     expect(
       issueSummaryLabel([{ severity: "critical" }, { severity: "critical" }, { severity: "review" }]),
     ).toBe("2 דחופים · 1 לבדיקה");
   });
 
-  it("only shows meaningful non-zero counts -- review-only never mentions critical", () => {
-    const summary = issueSummaryLabel([{ severity: "review" }]);
-    expect(summary).toBe("1 לבדיקה");
+  it("review + info combined -- present, never mentions critical", () => {
+    const summary = issueSummaryLabel([{ severity: "review" }, { severity: "info" }]);
+    expect(summary).toBe("1 לבדיקה · 1 לתשומת לב");
     expect(summary).not.toContain("דחוף");
   });
 
-  it("is forward-compatible with info severity", () => {
+  it("all three severities -- present, forward-compatible with info", () => {
     expect(
       issueSummaryLabel([{ severity: "critical" }, { severity: "review" }, { severity: "info" }]),
     ).toBe("1 דחוף · 1 לבדיקה · 1 לתשומת לב");

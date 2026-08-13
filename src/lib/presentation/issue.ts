@@ -85,9 +85,12 @@ function infoCountLabel(count: number): string {
 
 /**
  * "2 דחופים · 1 לבדיקה" -- a restrained inline summary of non-zero
- * severity counts only, in critical/review/info order. Null once there's
- * nothing to summarize (never rendered alongside the empty-state hero
- * anyway).
+ * severity counts, in critical/review/info order. Null when there's
+ * nothing to summarize, and ALSO null when every visible issue already
+ * belongs to a single severity bucket -- the group heading right below it
+ * (e.g. "דחוף · 3") already says the same thing, so the summary would be
+ * pure duplication. Only renders once it's telling the reader something
+ * the group headings alone don't: how the total splits across severities.
  */
 export function issueSummaryLabel(issues: readonly Pick<PersonalIssue, "severity">[]): string | null {
   const counts: Record<IssueSeverity, number> = { critical: 0, review: 0, info: 0 };
@@ -98,5 +101,5 @@ export function issueSummaryLabel(issues: readonly Pick<PersonalIssue, "severity
   if (counts.review > 0) parts.push(reviewCountLabel(counts.review));
   if (counts.info > 0) parts.push(infoCountLabel(counts.info));
 
-  return parts.length > 0 ? parts.join(" · ") : null;
+  return parts.length > 1 ? parts.join(" · ") : null;
 }

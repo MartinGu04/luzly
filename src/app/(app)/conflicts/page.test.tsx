@@ -84,21 +84,22 @@ describe("ConflictsPage — empty state", () => {
 });
 
 describe("ConflictsPage — severity grouping", () => {
-  it("critical only: shows the critical section and the summary strip, no review/info sections", async () => {
+  it("critical only: shows the critical section, no review/info sections, no redundant summary strip", async () => {
     getRequestPersonalSchedule.mockResolvedValue(okResult(model({ issues: [issue({ severity: "critical" })] })));
     render(await ConflictsPage());
     expect(screen.getByText("דחוף")).toBeInTheDocument();
-    expect(screen.getByText("1 דחוף")).toBeInTheDocument();
     expect(screen.queryByText("לבדיקה")).toBeNull();
+    expect(screen.queryByText("1 דחוף")).toBeNull();
   });
 
-  it("review only", async () => {
+  it("review only: no redundant summary strip either", async () => {
     getRequestPersonalSchedule.mockResolvedValue(
       okResult(model({ issues: [issue({ severity: "review", reason: "invalid_shift_time" })] })),
     );
     render(await ConflictsPage());
     expect(screen.getByText("לבדיקה")).toBeInTheDocument();
     expect(screen.queryByText("דחוף")).toBeNull();
+    expect(screen.queryByText("1 לבדיקה")).toBeNull();
   });
 
   it("critical + review: both sections render, in critical-then-review order", async () => {
@@ -118,6 +119,7 @@ describe("ConflictsPage — severity grouping", () => {
     const reviewIndex = headings.findIndex((h) => h?.includes("לבדיקה"));
     expect(criticalIndex).toBeGreaterThanOrEqual(0);
     expect(reviewIndex).toBeGreaterThan(criticalIndex);
+    expect(screen.getByText("1 דחוף · 1 לבדיקה")).toBeInTheDocument();
   });
 
   it("info is forward-compatible: renders its own section when present, without a machine enum leaking", async () => {
@@ -142,6 +144,87 @@ describe("ConflictsPage — severity grouping", () => {
     );
     const { container } = render(await ConflictsPage());
     expect(container.querySelectorAll("li").length).toBe(2);
+  });
+});
+
+describe("ConflictsPage — summary strip presence", () => {
+  it("critical only (even with multiple issues): no summary, the group heading already says '3 דחופים' worth of info", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(
+      okResult(
+        model({
+          issues: [
+            issue({ severity: "critical", reason: "shift_coverage_missing", date: "2026-08-13" }),
+            issue({ severity: "critical", reason: "shift_coverage_partial", date: "2026-08-13" }),
+            issue({ severity: "critical", reason: "invalid_shift_time", date: "2026-08-14" }),
+          ],
+        }),
+      ),
+    );
+    render(await ConflictsPage());
+    expect(screen.queryByText("3 דחופים")).toBeNull();
+    expect(screen.getByText("· 3")).toBeInTheDocument();
+  });
+
+  it("review only: no summary", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(
+      okResult(model({ issues: [issue({ severity: "review", reason: "invalid_shift_time" })] })),
+    );
+    render(await ConflictsPage());
+    expect(screen.queryByText("1 לבדיקה")).toBeNull();
+  });
+
+  it("info only: no summary", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(
+      okResult(model({ issues: [issue({ severity: "info", reason: "role_capability_mismatch" })] })),
+    );
+    render(await ConflictsPage());
+    expect(screen.queryByText("1 לתשומת לב")).toBeNull();
+  });
+
+  it("critical + review: summary present", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(
+      okResult(
+        model({
+          issues: [
+            issue({ severity: "critical" }),
+            issue({ severity: "review", reason: "invalid_shift_time" }),
+          ],
+        }),
+      ),
+    );
+    render(await ConflictsPage());
+    expect(screen.getByText("1 דחוף · 1 לבדיקה")).toBeInTheDocument();
+  });
+
+  it("review + info: summary present", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(
+      okResult(
+        model({
+          issues: [
+            issue({ severity: "review", reason: "invalid_shift_time" }),
+            issue({ severity: "info", reason: "role_capability_mismatch" }),
+          ],
+        }),
+      ),
+    );
+    render(await ConflictsPage());
+    expect(screen.getByText("1 לבדיקה · 1 לתשומת לב")).toBeInTheDocument();
+  });
+
+  it("all three severities: summary present", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(
+      okResult(
+        model({
+          issues: [
+            issue({ severity: "critical" }),
+            issue({ severity: "review", reason: "invalid_shift_time" }),
+            issue({ severity: "info", reason: "role_capability_mismatch" }),
+          ],
+        }),
+      ),
+    );
+    render(await ConflictsPage());
+    expect(screen.getByText("1 דחוף · 1 לבדיקה · 1 לתשומת לב")).toBeInTheDocument();
   });
 });
 
