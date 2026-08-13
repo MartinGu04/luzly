@@ -18,12 +18,25 @@ function renderWithTheme(ui: ReactElement) {
 }
 
 describe("Sidebar", () => {
-  it("renders /duties, /schedule, /with-me, and / as real enabled links", () => {
+  it("renders /duties, /schedule, /with-me, /conflicts, and / as real enabled links", () => {
     renderWithTheme(<Sidebar />);
     expect(screen.getByRole("link", { name: /תורנויות/ })).toHaveAttribute("href", "/duties");
     expect(screen.getByRole("link", { name: /לוח משמרות/ })).toHaveAttribute("href", "/schedule");
     expect(screen.getByRole("link", { name: /מי איתי/ })).toHaveAttribute("href", "/with-me");
+    expect(screen.getByRole("link", { name: /התנגשויות/ })).toHaveAttribute("href", "/conflicts");
     expect(screen.getByRole("link", { name: /לוח בקרה/ })).toHaveAttribute("href", "/");
+  });
+
+  it("marks /conflicts as the active route with aria-current", () => {
+    usePathname.mockReturnValue("/conflicts");
+    renderWithTheme(<Sidebar />);
+    expect(screen.getByRole("link", { name: /התנגשויות/ })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("does not mark /conflicts as active when viewing a different route", () => {
+    usePathname.mockReturnValue("/duties");
+    renderWithTheme(<Sidebar />);
+    expect(screen.getByRole("link", { name: /התנגשויות/ })).not.toHaveAttribute("aria-current");
   });
 
   it("marks /duties as the active route with aria-current", () => {

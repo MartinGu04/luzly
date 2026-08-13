@@ -14,9 +14,10 @@ afterEach(() => {
 describe("BottomNav", () => {
   it("34. any disabled bottom-nav item renders no clickable link -- no dead routes", () => {
     render(<BottomNav />);
-    // The curated bottom-nav set (/, /schedule, /duties, /with-me) is fully
-    // enabled today, so this may currently iterate zero items -- it's a
-    // forward-looking safety net for whenever a future item is disabled.
+    // The curated bottom-nav set (/, /schedule, /duties, /with-me,
+    // /conflicts) is fully enabled today, so this may currently iterate
+    // zero items -- it's a forward-looking safety net for whenever a
+    // future item is disabled.
     const disabledItems = navItems.filter((item) => item.inBottomNav && !item.enabled);
     for (const item of disabledItems) {
       expect(screen.queryByRole("link", { name: item.label })).toBeNull();
@@ -58,10 +59,34 @@ describe("BottomNav", () => {
     expect(withMeLink).not.toHaveAttribute("aria-current");
   });
 
-  it("other future routes (conflicts, manager, reminders, sync) are not part of the bottom nav at all", () => {
+  it("the conflicts route is enabled: a real link, not aria-current on a different pathname", () => {
+    render(<BottomNav />);
+    const conflictsLink = screen.getByRole("link", { name: "בדיקות" });
+    expect(conflictsLink).toHaveAttribute("href", "/conflicts");
+    expect(conflictsLink).not.toHaveAttribute("aria-current");
+  });
+
+  it("marks /conflicts as the current page when that's the active pathname", () => {
+    usePathname.mockReturnValue("/conflicts");
+    render(<BottomNav />);
+    const conflictsLink = screen.getByRole("link", { current: "page" });
+    expect(conflictsLink).toHaveAttribute("href", "/conflicts");
+  });
+
+  it("uses the compact 'בדיקות' short label on mobile, not the full desktop label", () => {
     render(<BottomNav />);
     expect(screen.queryByText("התנגשויות")).toBeNull();
+    expect(screen.getByText("בדיקות")).toBeInTheDocument();
+  });
+
+  it("still disabled future routes (manager, reminders, sync) are not part of the bottom nav at all", () => {
+    render(<BottomNav />);
     expect(screen.queryByText("מנהל")).toBeNull();
+  });
+
+  it("renders exactly five bottom-nav items", () => {
+    const { container } = render(<BottomNav />);
+    expect(container.querySelectorAll("li").length).toBe(5);
   });
 
   it("marks /duties as the current page when that's the active pathname", () => {

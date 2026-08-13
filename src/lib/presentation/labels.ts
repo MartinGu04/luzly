@@ -1,5 +1,5 @@
 import type { DutyFamily, EventPeriod, EventRole } from "@/lib/domain/event";
-import type { IssueReason, IssueSeverity } from "@/lib/domain/operationalIssues";
+import type { IssueReason, IssueSeverity, RoleCapabilityMismatchMetadata } from "@/lib/domain/operationalIssues";
 import type { CoverageStatus } from "@/lib/domain/shiftCoverage";
 
 /** Pure machine-reason -> friendly Hebrew copy mappings. Never render an `IssueReason`/`CoverageStatus` value directly in the UI. */
@@ -64,4 +64,15 @@ const COVERAGE_STATUS_LABELS: Record<CoverageStatus, string> = {
 
 export function coverageStatusLabel(status: CoverageStatus): string {
   return COVERAGE_STATUS_LABELS[status];
+}
+
+/**
+ * "אחמ"ש" / "טכנאי" for a `role_capability_mismatch` issue's
+ * `requiredCapability` -- never the internal `isSupervisor`/`isTechnician`
+ * metadata key itself.
+ */
+export function requiredCapabilityLabel(
+  capability: RoleCapabilityMismatchMetadata["requiredCapability"],
+): string {
+  return capability === "isSupervisor" ? 'אחמ"ש' : "טכנאי";
 }
