@@ -175,14 +175,29 @@ no Google API calls and no spreadsheet-cell access.
   5. Otherwise `unknown` — fails closed, excluded from Manager Overview,
      never guessed either way.
   `isManagerOwnedPotentialAllocation` is `true` only for `team_alias`/
-  `team_person`. `buildManagerOverviewReadModel.ts` filters
-  `potentialAllocations` through it BEFORE calling
-  `reconcilePotentialAllocations` — an external/unknown source therefore
-  never produces a `"missing"` row, never contributes to any manager
-  problem/attention count, and never reaches reconciliation at all. This
-  is a Manager Overview PROJECTION rule only: `parsePotentialSheet` and
+  `team_person` -- a simple boolean convenience for a caller that doesn't
+  need enrichment (see below). `parsePotentialSheet` and
   `PotentialAllocation.resolvedSourcePersonId` (exact full-name only, used
   for `sourceConflict`) are both left exactly as they were — this
   classifier does its own independent person resolution rather than
-  changing the parser's. `/manager/fairness` is a separate person-based
+  changing the parser's.
+
+  `scopeManagerPotentialAllocation(allocation, personnel)` is what
+  `buildManagerOverviewReadModel.ts` actually calls, once per allocation
+  (hardening pass -- classifying the same allocation twice, once via
+  `isManagerOwnedPotentialAllocation` and again separately, is exactly
+  what this consolidates away). It both scopes AND enriches:
+  `team_alias` passes the allocation through unchanged; `team_person`
+  returns a COPY with `resolvedSourcePersonId` set to the classifier's
+  resolved person id (closing a real gap -- a short/annotated person
+  source like "מרטין" or "מארק - הוקפץ מא" would otherwise reach
+  `reconcilePotentialAllocations` with `resolvedSourcePersonId: null` from
+  the parser and silently lose `sourceConflict` detection, since that
+  check reads `resolvedSourcePersonId` only); `external`/`unknown` both
+  return `null`. Never mutates its input. `buildManagerOverviewReadModel.ts`
+  filters `potentialAllocations` through it BEFORE calling
+  `reconcilePotentialAllocations` — an external/unknown source therefore
+  never produces a `"missing"` row, never contributes to any manager
+  problem/attention count, and never reaches reconciliation at all.
+  `/manager/fairness` is a separate person-based
   domain (PR #15) and is NOT scoped by this filter.

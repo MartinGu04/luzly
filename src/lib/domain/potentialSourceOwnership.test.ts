@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
+import type { PotentialAllocation } from "./potentialAllocation";
 import type { Person } from "./types";
-import { classifyPotentialSourceOwnership, isManagerOwnedPotentialAllocation } from "./potentialSourceOwnership";
+import {
+  classifyPotentialSourceOwnership,
+  isManagerOwnedPotentialAllocation,
+  scopeManagerPotentialAllocation,
+} from "./potentialSourceOwnership";
 
 function person(overrides: Partial<Person> = {}): Person {
   return {
@@ -177,5 +182,72 @@ describe("isManagerOwnedPotentialAllocation", () => {
 
   it("false for an unknown source", () => {
     expect(isManagerOwnedPotentialAllocation("משהו שלא קיים", PERSONNEL)).toBe(false);
+  });
+});
+
+function allocation(overrides: Partial<PotentialAllocation> = {}): PotentialAllocation {
+  return {
+    date: "2026-08-13",
+    dutyFamily: "evacuation_on_call",
+    slot: null,
+    sourceSlot: null,
+    columnLabel: "כונן פינויים",
+    sourceAllocationLabel: "מרטין",
+    resolvedSourcePersonId: null,
+    sourceSheet: 'פוטנציאל תקש"אס 1-6/2026',
+    sourceCell: "Z1",
+    ...overrides,
+  };
+}
+
+describe("scopeManagerPotentialAllocation — PR #16 hardening (short/annotated person enrichment)", () => {
+  it("team_alias: the allocation passes through unchanged", () => {
+    const source = allocation({ sourceAllocationLabel: 'תקש"ל', resolvedSourcePersonId: null });
+    expect(scopeManagerPotentialAllocation(source, PERSONNEL)).toEqual(source);
+  });
+
+  it("team_person via a SHORT name: resolvedSourcePersonId is enriched from null to the resolved person", () => {
+    const source = allocation({ sourceAllocationLabel: "מרטין", resolvedSourcePersonId: null });
+    const result = scopeManagerPotentialAllocation(source, PERSONNEL);
+    expect(result?.resolvedSourcePersonId).toBe(MARTIN.id);
+    // Every other field is preserved untouched.
+    expect(result?.date).toBe(source.date);
+    expect(result?.sourceAllocationLabel).toBe(source.sourceAllocationLabel);
+  });
+
+  it("team_person via an ANNOTATED name: resolvedSourcePersonId is enriched from the leading token", () => {
+    const source = allocation({ sourceAllocationLabel: "מארק - הוקפץ מא", resolvedSourcePersonId: null });
+    const result = scopeManagerPotentialAllocation(source, PERSONNEL);
+    expect(result?.resolvedSourcePersonId).toBe(MARK.id);
+  });
+
+  it("team_person via an EXACT full name: resolvedSourcePersonId already matches, stays the same value", () => {
+    const source = allocation({ sourceAllocationLabel: MARTIN.name, resolvedSourcePersonId: MARTIN.id });
+    const result = scopeManagerPotentialAllocation(source, PERSONNEL);
+    expect(result?.resolvedSourcePersonId).toBe(MARTIN.id);
+  });
+
+  it("external: returns null, regardless of any pre-existing resolvedSourcePersonId", () => {
+    const source = allocation({ sourceAllocationLabel: "איתן מרכז", resolvedSourcePersonId: null });
+    expect(scopeManagerPotentialAllocation(source, PERSONNEL)).toBeNull();
+  });
+
+  it("unknown: returns null", () => {
+    const source = allocation({ sourceAllocationLabel: "משהו שלא קיים", resolvedSourcePersonId: null });
+    expect(scopeManagerPotentialAllocation(source, PERSONNEL)).toBeNull();
+  });
+
+  it("a former team member no longer in personnel stays unresolved/excluded -- no special-casing required", () => {
+    const source = allocation({ sourceAllocationLabel: "סטיבן", resolvedSourcePersonId: null });
+    // PERSONNEL here still includes STEVEN; a roster WITHOUT him must exclude the allocation.
+    const currentPersonnel = PERSONNEL.filter((p) => p.id !== STEVEN.id);
+    expect(scopeManagerPotentialAllocation(source, currentPersonnel)).toBeNull();
+  });
+
+  it("never mutates the input allocation", () => {
+    const source = allocation({ sourceAllocationLabel: "מרטין", resolvedSourcePersonId: null });
+    const before = JSON.stringify(source);
+    scopeManagerPotentialAllocation(source, PERSONNEL);
+    expect(JSON.stringify(source)).toBe(before);
   });
 });

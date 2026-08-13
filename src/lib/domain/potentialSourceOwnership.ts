@@ -1,3 +1,4 @@
+import type { PotentialAllocation } from "./potentialAllocation";
 import type { Person } from "./types";
 
 /**
@@ -162,11 +163,53 @@ export function classifyPotentialSourceOwnership(
   return { kind: "unknown" };
 }
 
-/** True only for `team_alias`/`team_person` -- `external` and `unknown` are both excluded from Manager Overview's Potential scope (PR #16 §13, fail-closed). */
+/** True only for `team_alias`/`team_person` -- `external` and `unknown` are both excluded from Manager Overview's Potential scope (PR #16 §13, fail-closed). A simple boolean-only convenience for callers that don't need `scopeManagerPotentialAllocation`'s enrichment -- see that function's doc for why the two should never both run against the SAME allocation (that would classify it twice). */
 export function isManagerOwnedPotentialAllocation(
   sourceAllocationLabel: string,
   personnel: readonly Person[],
 ): boolean {
   const ownership = classifyPotentialSourceOwnership(sourceAllocationLabel, personnel);
   return ownership.kind === "team_alias" || ownership.kind === "team_person";
+}
+
+/**
+ * Manager Overview's scope + enrichment step for ONE `PotentialAllocation`
+ * -- classifies it exactly once (never call this alongside
+ * `isManagerOwnedPotentialAllocation`/`classifyPotentialSourceOwnership`
+ * again for the same allocation) and returns either the allocation to
+ * feed into `reconcilePotentialAllocations`, or `null` to exclude it.
+ *
+ * This exists because `parsePotentialSheet` only ever resolves
+ * `resolvedSourcePersonId` from an EXACT full-name match (PR #15) --
+ * intentionally left unchanged here (see `lib/parsers/potential.ts`).
+ * `classifyPotentialSourceOwnership` additionally recognizes a unique
+ * SHORT first name or an annotated label ("מרטין", "מארק - הוקפץ מא") as
+ * team-owned, but the original allocation's `resolvedSourcePersonId`
+ * stays `null` for those. Without this enrichment step, such a
+ * short/annotated person source would be correctly INCLUDED in Manager
+ * Overview yet silently lose `sourceConflict` detection downstream in
+ * `potentialReconciliation.ts` (which reads `resolvedSourcePersonId`
+ * only). This function closes that gap:
+ *
+ * - `team_alias`: the allocation, unchanged.
+ * - `team_person`: a COPY of the allocation with `resolvedSourcePersonId`
+ *   set to the classifier's resolved person id (overwriting a `null` from
+ *   the parser -- never overwriting an already-resolved id with a
+ *   different one, since an exact full-name match is classified before
+ *   short-name resolution and would already equal this same person).
+ * - `external`/`unknown`: `null`.
+ *
+ * Never mutates the input allocation.
+ */
+export function scopeManagerPotentialAllocation(
+  allocation: PotentialAllocation,
+  personnel: readonly Person[],
+): PotentialAllocation | null {
+  const ownership = classifyPotentialSourceOwnership(allocation.sourceAllocationLabel, personnel);
+
+  if (ownership.kind === "team_alias") return allocation;
+  if (ownership.kind === "team_person") {
+    return { ...allocation, resolvedSourcePersonId: ownership.personId };
+  }
+  return null;
 }
