@@ -75,6 +75,27 @@ export function formatHebrewMonthYear(year: number, month: number): string | nul
   return `${MONTH_LABELS[month - 1]} ${year}`;
 }
 
+/**
+ * A natural-reading Hebrew date or date range, for a single duty/shift
+ * block: a single day reads as its full weekday+date ("יום רביעי · 19
+ * באוגוסט"); a multi-day range within one Gregorian month is compact
+ * ("19–21 באוגוסט"); a range crossing a Gregorian month gives each end its
+ * own month name ("31 באוגוסט – 2 בספטמבר"). Returns null for unparseable
+ * input, never throws.
+ */
+export function formatDateRange(startDate: string, endDate: string): string | null {
+  if (startDate === endDate) return formatHebrewWeekdayAndDate(startDate);
+
+  const start = parseCalendarDate(startDate);
+  const end = parseCalendarDate(endDate);
+  if (!start || !end) return null;
+
+  if (start.year === end.year && start.month === end.month) {
+    return `${start.day}–${end.day} ב${MONTH_LABELS[start.month - 1]}`;
+  }
+  return `${start.day} ב${MONTH_LABELS[start.month - 1]} – ${end.day} ב${MONTH_LABELS[end.month - 1]}`;
+}
+
 export type RelativeDayLabel = "today" | "tomorrow" | "other";
 
 /** Whether `dateStr` is `todayStr`, the calendar day right after it, or neither -- pure string/date-table comparison, no Date/UTC. */
