@@ -671,6 +671,59 @@ describe("buildManagerOverviewReadModel — PR #16 manager Potential scope", () 
     expect(model.potentialRequirements).toHaveLength(0);
   });
 
+  it("תקש\"ל אתרים: נדב/יובל are RETAINED in scope even though absent from current personnel, with resolvedSourcePersonId null and sourceConflict null (PR #16 hardening §1/§6/§8)", () => {
+    const model = buildModel({
+      // MANAGER/MARTIN/EITAN/NOA only -- נדב and יובל are deliberately absent from current personnel.
+      potentialAllocations: [
+        allocation({ sourceAllocationLabel: "נדב", resolvedSourcePersonId: null, dutyFamily: "oxid", sourceSlot: 1, date: "2026-08-13" }),
+        allocation({ sourceAllocationLabel: "יובל", resolvedSourcePersonId: null, dutyFamily: "oxid", sourceSlot: 2, date: "2026-08-13" }),
+      ],
+    });
+
+    expect(model.potentialRequirements).toHaveLength(2);
+    for (const requirement of model.potentialRequirements) {
+      expect(["נדב", "יובל"]).toContain(requirement.sourceAllocationLabel);
+      expect(requirement.resolvedSourcePersonId).toBeNull();
+      expect(requirement.resolvedSourcePersonName).toBeNull();
+      // No app Person is resolved, so a blocking-absence sourceConflict can never be fabricated for them.
+      expect(requirement.sourceConflict).toBeNull();
+    }
+  });
+
+  it("נדב stays excluded when the label doesn't match at all (e.g. misspelled) -- only the exact canonical token is recognized, no fuzzy matching", () => {
+    const model = buildModel({
+      potentialAllocations: [
+        allocation({ sourceAllocationLabel: "נדבים", resolvedSourcePersonId: null, dutyFamily: "evacuation_on_call", date: "2026-08-13" }),
+      ],
+    });
+    expect(model.potentialRequirements).toHaveLength(0);
+  });
+
+  it("if נדב is later added to current personnel, he resolves as a normal team_person with a real resolvedSourcePersonId, and sourceConflict works again", () => {
+    const nadav = person({ id: "p_nadav", name: "נדב פרידמן" });
+    const model = buildModel({
+      people: [MANAGER, MARTIN, EITAN, NOA, nadav],
+      potentialAllocations: [
+        allocation({ sourceAllocationLabel: "נדב", resolvedSourcePersonId: null, dutyFamily: "evacuation_on_call", date: "2026-08-13" }),
+      ],
+      events: [
+        event({
+          personId: nadav.id,
+          personName: nadav.name,
+          date: "2026-08-13",
+          category: "absence",
+          role: null,
+          period: "unspecified",
+          absenceKind: "vacation",
+        }),
+      ],
+    });
+
+    expect(model.potentialRequirements).toHaveLength(1);
+    expect(model.potentialRequirements[0].resolvedSourcePersonId).toBe(nadav.id);
+    expect(model.potentialRequirements[0].sourceConflict).toBe("blocking_absence");
+  });
+
   it("an ambiguous short first name (two roster members sharing it) is excluded, not guessed", () => {
     const dup1 = person({ id: "p_d1", name: "דניאל א" });
     const dup2 = person({ id: "p_d2", name: "דניאל ב" });

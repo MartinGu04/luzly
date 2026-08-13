@@ -146,6 +146,43 @@ describe("classifyPotentialSourceOwnership — ambiguous short first names never
   });
 });
 
+describe("classifyPotentialSourceOwnership — תקש\"ל אתרים unresolved team persons (PR #16 hardening §1-4)", () => {
+  it.each(["נדב", "יובל"])(
+    '"%s" is team_unresolved_person when absent from current personnel -- included in scope, no fabricated personId',
+    (label) => {
+      expect(classifyPotentialSourceOwnership(label, PERSONNEL)).toEqual({ kind: "team_unresolved_person" });
+    },
+  );
+
+  it("סטיבן (a FORMER team member) stays unknown, never team_unresolved_person -- this list is current responsibility only", () => {
+    expect(classifyPotentialSourceOwnership("סטיבן", PERSONNEL.filter((p) => p.id !== STEVEN.id))).toEqual({
+      kind: "unknown",
+    });
+  });
+
+  it("if נדב is later added to כ\"א with a real personnel record, the exact/short-name checks resolve him as a real team_person instead", () => {
+    const NADAV = person({ id: "p_nadav", name: "נדב פרידמן" });
+    const personnelWithNadav = [...PERSONNEL, NADAV];
+    expect(classifyPotentialSourceOwnership("נדב", personnelWithNadav)).toEqual({
+      kind: "team_person",
+      personId: NADAV.id,
+    });
+  });
+
+  it("if יובל is later added to כ\"א, he resolves as a real team_person too", () => {
+    const YUVAL = person({ id: "p_yuval", name: "יובל שמעוני" });
+    const personnelWithYuval = [...PERSONNEL, YUVAL];
+    expect(classifyPotentialSourceOwnership("יובל", personnelWithYuval)).toEqual({
+      kind: "team_person",
+      personId: YUVAL.id,
+    });
+  });
+
+  it("external precedence is untouched by the new state -- known external tokens still classify as external, not team_unresolved_person", () => {
+    expect(classifyPotentialSourceOwnership("איתן מרכז", PERSONNEL)).toEqual({ kind: "external" });
+  });
+});
+
 describe("classifyPotentialSourceOwnership — unknown sources fail closed (PR #16 §13)", () => {
   it("a genuinely unrecognized label is unknown, never external or team-owned", () => {
     expect(classifyPotentialSourceOwnership("משהו שלא קיים בכלל", PERSONNEL)).toEqual({ kind: "unknown" });
@@ -182,6 +219,15 @@ describe("isManagerOwnedPotentialAllocation", () => {
 
   it("false for an unknown source", () => {
     expect(isManagerOwnedPotentialAllocation("משהו שלא קיים", PERSONNEL)).toBe(false);
+  });
+
+  it("true for a known תקש\"ל אתרים unresolved person (נדב/יובל)", () => {
+    expect(isManagerOwnedPotentialAllocation("נדב", PERSONNEL)).toBe(true);
+    expect(isManagerOwnedPotentialAllocation("יובל", PERSONNEL)).toBe(true);
+  });
+
+  it("false for סטיבן, a former team member absent from current personnel", () => {
+    expect(isManagerOwnedPotentialAllocation("סטיבן", PERSONNEL.filter((p) => p.id !== STEVEN.id))).toBe(false);
   });
 });
 
@@ -249,5 +295,32 @@ describe("scopeManagerPotentialAllocation — PR #16 hardening (short/annotated 
     const before = JSON.stringify(source);
     scopeManagerPotentialAllocation(source, PERSONNEL);
     expect(JSON.stringify(source)).toBe(before);
+  });
+
+  it("team_unresolved_person (נדב/יובל): the allocation passes through INCLUDED, but resolvedSourcePersonId stays null -- no fabricated identity", () => {
+    const nadav = allocation({ sourceAllocationLabel: "נדב", resolvedSourcePersonId: null });
+    const yuval = allocation({ sourceAllocationLabel: "יובל", resolvedSourcePersonId: null });
+
+    const nadavResult = scopeManagerPotentialAllocation(nadav, PERSONNEL);
+    const yuvalResult = scopeManagerPotentialAllocation(yuval, PERSONNEL);
+
+    expect(nadavResult).toEqual(nadav);
+    expect(nadavResult?.resolvedSourcePersonId).toBeNull();
+    expect(yuvalResult).toEqual(yuval);
+    expect(yuvalResult?.resolvedSourcePersonId).toBeNull();
+  });
+
+  it("סטיבן stays excluded (null) -- a former team member is never treated as team_unresolved_person", () => {
+    const source = allocation({ sourceAllocationLabel: "סטיבן", resolvedSourcePersonId: null });
+    const currentPersonnel = PERSONNEL.filter((p) => p.id !== STEVEN.id);
+    expect(scopeManagerPotentialAllocation(source, currentPersonnel)).toBeNull();
+  });
+
+  it("if נדב is later added to כ\"א, scopeManagerPotentialAllocation enriches resolvedSourcePersonId with his real id automatically", () => {
+    const NADAV = person({ id: "p_nadav", name: "נדב פרידמן" });
+    const personnelWithNadav = [...PERSONNEL, NADAV];
+    const source = allocation({ sourceAllocationLabel: "נדב", resolvedSourcePersonId: null });
+    const result = scopeManagerPotentialAllocation(source, personnelWithNadav);
+    expect(result?.resolvedSourcePersonId).toBe(NADAV.id);
   });
 });
