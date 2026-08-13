@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
-import type { PersonalEventView, PersonalScheduleReadModel } from "@/lib/readModels/types";
+import { act, cleanup, render, screen } from "@testing-library/react";
+import type { PersonalAssignmentView, PersonalEventView, PersonalScheduleReadModel } from "@/lib/readModels/types";
 
 const getRequestPersonalSchedule = vi.fn();
 vi.mock("@/lib/readModels/getRequestPersonalSchedule", () => ({ getRequestPersonalSchedule }));
@@ -34,6 +34,10 @@ function shiftEvent(overrides: Partial<PersonalEventView> = {}): PersonalEventVi
     timing: { status: "not_evaluable" },
     ...overrides,
   };
+}
+
+function assignmentEvent(overrides: Partial<PersonalAssignmentView> = {}): PersonalAssignmentView {
+  return { ...shiftEvent(), temporalState: "current", ...overrides };
 }
 
 function model(overrides: Partial<PersonalScheduleReadModel> = {}): PersonalScheduleReadModel {
@@ -90,6 +94,111 @@ describe("SchedulePage — month resolution", () => {
     const element = await SchedulePage({ searchParams: searchParams("2026-13") });
     render(element);
     expect(screen.getByText("אוגוסט 2026")).toBeInTheDocument();
+  });
+});
+
+describe("SchedulePage — selected day resets on month change (regression)", () => {
+  it("does not carry a stale selected day forward when the parent re-renders with a new month's props", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(
+      okResult(
+        model({
+          shiftCalendarEvents: [
+            shiftEvent({ date: "2026-08-20", title: "משמרת אוגוסט מיוחדת" }),
+            shiftEvent({ date: "2026-09-01", title: "משמרת ספטמבר" }),
+          ],
+        }),
+      ),
+    );
+
+    // Render August (default month, since localNow.date is 2026-08-12) using the
+    // SAME parent composition the real app uses -- SchedulePage itself, which keys
+    // <ScheduleCalendar key={monthParam} .../> by the displayed month.
+    const augustElement = await SchedulePage({ searchParams: searchParams("2026-08") });
+    const { rerender } = render(augustElement);
+
+    // Select a day OTHER than August's default (today, the 12th).
+    act(() => {
+      screen.getByRole("button", { name: /20 באוגוסט/ }).click();
+    });
+    expect(screen.getByText("משמרת אוגוסט מיוחדת")).toBeInTheDocument();
+
+    // Transition to September via a rerender on the SAME mounted tree -- this is
+    // exactly the scenario a client-side Next.js navigation produces: new server
+    // props arrive, but nothing forces a remount unless the composition keys the
+    // client component by month.
+    const septemberElement = await SchedulePage({ searchParams: searchParams("2026-09") });
+    rerender(septemberElement);
+
+    // September's own default-selected day (the 1st, since today isn't in this
+    // month) must be shown -- never a leftover reference to August's selection.
+    expect(screen.getByText("משמרת ספטמבר")).toBeInTheDocument();
+    expect(screen.queryByText("משמרת אוגוסט מיוחדת")).toBeNull();
+  });
+});
+
+describe("SchedulePage — active shift accent is event-date-aware, not tied to civil today", () => {
+  it("a current same-day day shift: its own date gets the active accent", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(
+      okResult(
+        model({
+          localNow: { date: "2026-08-12", minuteOfDay: 600 },
+          shiftCalendarEvents: [shiftEvent({ date: "2026-08-12" })],
+          currentAssignments: [assignmentEvent({ date: "2026-08-12" })],
+        }),
+      ),
+    );
+    const element = await SchedulePage({ searchParams: searchParams("2026-08") });
+    render(element);
+    const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+    expect(cell.innerHTML).toMatch(/bg-primary/);
+  });
+
+  it("an overnight shift still current after midnight: the shift's OWN (previous) date gets the accent, not today's cell", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(
+      okResult(
+        model({
+          // "Now" is 02:00 on the 13th, but the still-running overnight shift's Event date is the 12th.
+          localNow: { date: "2026-08-13", minuteOfDay: 2 * 60 },
+          shiftCalendarEvents: [shiftEvent({ date: "2026-08-12", period: "night" })],
+          currentAssignments: [assignmentEvent({ date: "2026-08-12", period: "night" })],
+        }),
+      ),
+    );
+    const element = await SchedulePage({ searchParams: searchParams("2026-08") });
+    render(element);
+
+    const shiftDateCell = screen.getByRole("button", { name: /12 באוגוסט/ });
+    expect(shiftDateCell.innerHTML).toMatch(/bg-primary/);
+
+    const todayCell = screen.getByRole("button", { name: /13 באוגוסט/ });
+    expect(todayCell.innerHTML).toMatch(/ring-primary/);
+    expect(todayCell.innerHTML).not.toMatch(/bg-primary/);
+  });
+
+  it("no current shift: no cell gets the active-shift accent", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(
+      okResult(model({ localNow: { date: "2026-08-12", minuteOfDay: 600 }, currentAssignments: [] })),
+    );
+    const element = await SchedulePage({ searchParams: searchParams("2026-08") });
+    render(element);
+    const todayCell = screen.getByRole("button", { name: /12 באוגוסט/ });
+    expect(todayCell.innerHTML).toMatch(/ring-primary/);
+    expect(todayCell.innerHTML).not.toMatch(/bg-primary/);
+  });
+
+  it("a current DUTY (not a shift) never triggers the shift active-accent", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(
+      okResult(
+        model({
+          localNow: { date: "2026-08-12", minuteOfDay: 600 },
+          currentAssignments: [assignmentEvent({ date: "2026-08-12", category: "duty" })],
+        }),
+      ),
+    );
+    const element = await SchedulePage({ searchParams: searchParams("2026-08") });
+    render(element);
+    const todayCell = screen.getByRole("button", { name: /12 באוגוסט/ });
+    expect(todayCell.innerHTML).not.toMatch(/bg-primary/);
   });
 });
 

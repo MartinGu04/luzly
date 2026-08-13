@@ -66,7 +66,7 @@ describe("ScheduleCalendar", () => {
         days={weekDays()}
         monthEvents={[shiftEvent({ date: "2026-08-12" })]}
         defaultSelectedDate="2026-08-12"
-        hasActiveShiftToday={false}
+        activeShiftDates={[]}
       />,
     );
     expect(screen.getByText("טכנאי יום")).toBeInTheDocument();
@@ -82,7 +82,7 @@ describe("ScheduleCalendar", () => {
           shiftEvent({ date: "2026-08-13", title: "טכנאי לילה", period: "night" }),
         ]}
         defaultSelectedDate="2026-08-12"
-        hasActiveShiftToday={false}
+        activeShiftDates={[]}
       />,
     );
 
@@ -104,7 +104,7 @@ describe("ScheduleCalendar", () => {
         days={weekDays()}
         monthEvents={[]}
         defaultSelectedDate="2026-08-12"
-        hasActiveShiftToday={false}
+        activeShiftDates={[]}
       />,
     );
     expect(screen.getByText("אין לך משמרת ביום הזה 😌")).toBeInTheDocument();
@@ -117,7 +117,7 @@ describe("ScheduleCalendar", () => {
         days={weekDays()}
         monthEvents={[]}
         defaultSelectedDate={null}
-        hasActiveShiftToday={false}
+        activeShiftDates={[]}
       />,
     );
     expect(screen.queryByText("אין לך משמרת ביום הזה 😌")).toBeNull();
@@ -130,7 +130,7 @@ describe("ScheduleCalendar", () => {
         days={weekDays()}
         monthEvents={[shiftEvent({ date: "2026-08-12" })]}
         defaultSelectedDate="2026-08-12"
-        hasActiveShiftToday={false}
+        activeShiftDates={[]}
       />,
     );
     expect(container.textContent).not.toContain("@");

@@ -78,7 +78,15 @@ export default async function SchedulePage({ searchParams }: SchedulePageProps) 
     event.date.startsWith(`${monthParam}-`),
   );
 
-  const hasActiveShiftToday = model.currentAssignments.some((assignment) => assignment.category === "shift");
+  /**
+   * The Event *dates* of every currently-running personal shift -- not
+   * necessarily `localNow.date` itself. An overnight shift still active
+   * after midnight keeps its own (now-yesterday) Event date, so the "live"
+   * calendar accent belongs on that date, never smeared onto today's cell.
+   */
+  const activeShiftDates = model.currentAssignments
+    .filter((assignment) => assignment.category === "shift")
+    .map((assignment) => assignment.date);
 
   const defaultSelectedDate = days[model.localNow.date] ? model.localNow.date : (inMonthDates[0] ?? null);
 
@@ -102,11 +110,12 @@ export default async function SchedulePage({ searchParams }: SchedulePageProps) 
       </div>
 
       <ScheduleCalendar
+        key={monthParam}
         grid={grid}
         days={days}
         monthEvents={monthEvents}
         defaultSelectedDate={defaultSelectedDate}
-        hasActiveShiftToday={hasActiveShiftToday}
+        activeShiftDates={activeShiftDates}
       />
     </div>
   );

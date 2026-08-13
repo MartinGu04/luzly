@@ -13,24 +13,30 @@ interface ScheduleCalendarProps {
   /** The displayed month's own shift Events only -- never the full read model. */
   monthEvents: PersonalEventView[];
   defaultSelectedDate: string | null;
-  hasActiveShiftToday: boolean;
+  /** Event dates (not necessarily today) of every currently-running personal shift -- see CalendarGrid. */
+  activeShiftDates: string[];
 }
 
 /**
  * The only client boundary on `/schedule`: owns which day is selected.
  * Receives nothing beyond this month's already-safe shift Events and
  * presentation-safe calendar metadata (`DayMeta`) -- never the full
- * `PersonalScheduleReadModel`, never counterpart/coworker data. Switching
- * months is a normal server navigation (see `MonthNav`), so this component
- * is remounted fresh -- with a fresh `defaultSelectedDate` -- on every
- * month change rather than tracking month state itself.
+ * `PersonalScheduleReadModel`, never counterpart/coworker data.
+ *
+ * Switching months is a normal server navigation (see `MonthNav`), but a
+ * server-prop change alone does NOT guarantee this component's local
+ * `selectedDate` state resets -- React only recreates state when the
+ * component's *identity* changes. The page keys this component by the
+ * month param (`key={monthParam}`) specifically so a month change forces a
+ * fresh mount with a fresh `defaultSelectedDate`, rather than carrying the
+ * previous month's selected day forward.
  */
 export function ScheduleCalendar({
   grid,
   days,
   monthEvents,
   defaultSelectedDate,
-  hasActiveShiftToday,
+  activeShiftDates,
 }: ScheduleCalendarProps) {
   const [selectedDate, setSelectedDate] = useState<string | null>(defaultSelectedDate);
 
@@ -54,7 +60,7 @@ export function ScheduleCalendar({
           eventsByDate={eventsByDate}
           selectedDate={selectedDate}
           onSelectDate={setSelectedDate}
-          hasActiveShiftToday={hasActiveShiftToday}
+          activeShiftDates={activeShiftDates}
         />
       </Panel>
       <SelectedDayPanel dayMeta={selectedDayMeta} events={selectedDayEvents} />

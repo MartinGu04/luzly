@@ -10,8 +10,14 @@ interface CalendarGridProps {
   eventsByDate: Record<string, PersonalEventView[]>;
   selectedDate: string | null;
   onSelectDate: (date: string) => void;
-  /** Whether the person has a currently-running shift right now (only ever true for `isToday`'s cell). */
-  hasActiveShiftToday: boolean;
+  /**
+   * Event dates of every currently-running personal shift. Deliberately
+   * keyed by the shift's own Event date, not `localNow.date` -- an
+   * overnight shift still active after midnight keeps its (now-yesterday)
+   * date, so the live accent stays on that date's cell, never on "today"'s
+   * cell unless a shift's own date actually IS today.
+   */
+  activeShiftDates: string[];
 }
 
 /**
@@ -28,8 +34,10 @@ export function CalendarGrid({
   eventsByDate,
   selectedDate,
   onSelectDate,
-  hasActiveShiftToday,
+  activeShiftDates,
 }: CalendarGridProps) {
+  const activeShiftDateSet = new Set(activeShiftDates);
+
   return (
     <div>
       <div className="grid grid-cols-7 gap-1 px-0.5 pb-2 text-center text-[11px] font-medium text-muted-2 sm:text-xs">
@@ -50,7 +58,7 @@ export function CalendarGrid({
           );
           const hasTentative = dayEvents.some((event) => event.certainty === "tentative");
           const isSelected = date === selectedDate;
-          const isActiveToday = meta.isToday && hasActiveShiftToday;
+          const isActiveShiftDate = activeShiftDateSet.has(date);
 
           return (
             <button
@@ -67,7 +75,7 @@ export function CalendarGrid({
             >
               <span
                 className={`flex h-6 w-6 items-center justify-center rounded-full font-medium sm:h-7 sm:w-7 ${
-                  isActiveToday
+                  isActiveShiftDate
                     ? "bg-primary text-primary-foreground"
                     : meta.isToday
                       ? "text-primary ring-1 ring-primary"

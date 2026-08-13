@@ -73,7 +73,7 @@ describe("CalendarGrid", () => {
         eventsByDate={{}}
         selectedDate={null}
         onSelectDate={noop}
-        hasActiveShiftToday={false}
+        activeShiftDates={[]}
       />,
     );
     expect(screen.getAllByRole("button")).toHaveLength(7);
@@ -87,7 +87,7 @@ describe("CalendarGrid", () => {
         eventsByDate={{ "2026-08-12": [shiftEvent({ date: "2026-08-12", period: "day" })] }}
         selectedDate={null}
         onSelectDate={noop}
-        hasActiveShiftToday={false}
+        activeShiftDates={[]}
       />,
     );
     const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
@@ -102,7 +102,7 @@ describe("CalendarGrid", () => {
         eventsByDate={{ "2026-08-13": [shiftEvent({ date: "2026-08-13", period: "night" })] }}
         selectedDate={null}
         onSelectDate={noop}
-        hasActiveShiftToday={false}
+        activeShiftDates={[]}
       />,
     );
     const cell = screen.getByRole("button", { name: /13 באוגוסט/ });
@@ -122,7 +122,7 @@ describe("CalendarGrid", () => {
         }}
         selectedDate={null}
         onSelectDate={noop}
-        hasActiveShiftToday={false}
+        activeShiftDates={[]}
       />,
     );
     const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
@@ -138,7 +138,7 @@ describe("CalendarGrid", () => {
         eventsByDate={{ "2026-08-12": [shiftEvent({ date: "2026-08-12", certainty: "tentative" })] }}
         selectedDate={null}
         onSelectDate={noop}
-        hasActiveShiftToday={false}
+        activeShiftDates={[]}
       />,
     );
     expect(container.querySelector(".bg-warning")).not.toBeNull();
@@ -152,40 +152,74 @@ describe("CalendarGrid", () => {
         eventsByDate={{}}
         selectedDate={null}
         onSelectDate={noop}
-        hasActiveShiftToday={false}
+        activeShiftDates={[]}
       />,
     );
     const todayCell = screen.getByRole("button", { name: /12 באוגוסט/ });
     expect(todayCell.innerHTML).toMatch(/ring-primary|bg-primary/);
   });
 
-  it("gives today's cell a stronger accent when a shift is currently active, distinct from an ordinary today", () => {
-    const withActiveShift = render(
-      <CalendarGrid
-        grid={WEEK_GRID}
-        days={weekDays({ "2026-08-12": { isToday: true } })}
-        eventsByDate={{}}
-        selectedDate={null}
-        onSelectDate={noop}
-        hasActiveShiftToday
-      />,
-    );
-    const activeCell = screen.getByRole("button", { name: /12 באוגוסט/ });
-    expect(activeCell.innerHTML).toMatch(/bg-primary/);
-    withActiveShift.unmount();
+  describe("active-shift accent (event-date-aware, not tied to isToday)", () => {
+    it("1. a current same-day day shift: its own date gets the active accent", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays({ "2026-08-12": { isToday: true } })}
+          eventsByDate={{}}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={["2026-08-12"]}
+        />,
+      );
+      expect(screen.getByRole("button", { name: /12 באוגוסט/ }).innerHTML).toMatch(/bg-primary/);
+    });
 
-    render(
-      <CalendarGrid
-        grid={WEEK_GRID}
-        days={weekDays({ "2026-08-12": { isToday: true } })}
-        eventsByDate={{}}
-        selectedDate={null}
-        onSelectDate={noop}
-        hasActiveShiftToday={false}
-      />,
-    );
-    const plainTodayCell = screen.getByRole("button", { name: /12 באוגוסט/ });
-    expect(plainTodayCell.innerHTML).not.toMatch(/bg-primary/);
+    it("2. a previous-date overnight shift still current after midnight: the PREVIOUS date gets the active accent, not today's cell", () => {
+      // "Today" is the 13th, but the still-running overnight shift's own Event date is the 12th.
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays({ "2026-08-13": { isToday: true } })}
+          eventsByDate={{}}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={["2026-08-12"]}
+        />,
+      );
+      expect(screen.getByRole("button", { name: /12 באוגוסט/ }).innerHTML).toMatch(/bg-primary/);
+    });
+
+    it("3. civil today keeps the normal today ring but is NOT given the active-shift fill unless a shift actually belongs to that date", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays({ "2026-08-13": { isToday: true } })}
+          eventsByDate={{}}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={["2026-08-12"]}
+        />,
+      );
+      const todayCell = screen.getByRole("button", { name: /13 באוגוסט/ });
+      expect(todayCell.innerHTML).toMatch(/ring-primary/);
+      expect(todayCell.innerHTML).not.toMatch(/bg-primary/);
+    });
+
+    it("4. no current shift: no cell gets the active-shift accent", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays({ "2026-08-12": { isToday: true } })}
+          eventsByDate={{}}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const todayCell = screen.getByRole("button", { name: /12 באוגוסט/ });
+      expect(todayCell.innerHTML).toMatch(/ring-primary/);
+      expect(todayCell.innerHTML).not.toMatch(/bg-primary/);
+    });
   });
 
   it("visually quiets a past day", () => {
@@ -196,7 +230,7 @@ describe("CalendarGrid", () => {
         eventsByDate={{}}
         selectedDate={null}
         onSelectDate={noop}
-        hasActiveShiftToday={false}
+        activeShiftDates={[]}
       />,
     );
     expect(screen.getByRole("button", { name: /9 באוגוסט/ }).className).toMatch(/opacity-60/);
@@ -210,7 +244,7 @@ describe("CalendarGrid", () => {
         eventsByDate={{}}
         selectedDate={null}
         onSelectDate={noop}
-        hasActiveShiftToday={false}
+        activeShiftDates={[]}
       />,
     );
     expect(screen.getByRole("button", { name: /15 באוגוסט/ }).className).not.toMatch(/opacity-60/);
@@ -224,7 +258,7 @@ describe("CalendarGrid", () => {
         eventsByDate={{}}
         selectedDate={null}
         onSelectDate={noop}
-        hasActiveShiftToday={false}
+        activeShiftDates={[]}
       />,
     );
     const cell = screen.getByRole("button", { name: /14 באוגוסט/ });
@@ -240,7 +274,7 @@ describe("CalendarGrid", () => {
         eventsByDate={{}}
         selectedDate={null}
         onSelectDate={onSelectDate}
-        hasActiveShiftToday={false}
+        activeShiftDates={[]}
       />,
     );
     screen.getByRole("button", { name: /12 באוגוסט/ }).click();
@@ -255,7 +289,7 @@ describe("CalendarGrid", () => {
         eventsByDate={{}}
         selectedDate="2026-08-12"
         onSelectDate={noop}
-        hasActiveShiftToday={false}
+        activeShiftDates={[]}
       />,
     );
     expect(screen.getByRole("button", { name: /12 באוגוסט/ })).toHaveAttribute("aria-pressed", "true");
