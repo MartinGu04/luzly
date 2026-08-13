@@ -159,7 +159,7 @@ describe("ManagerFairnessPage — everyone view", () => {
     expect(screen.getByRole("img", { name: "חלוקת הניקוד הנוכחי בצוות" })).toBeInTheDocument();
   });
 
-  it("a totals discrepancy shows the manager-only warning", async () => {
+  it("a reported total that differs from the displayed-row sum NEVER shows a discrepancy/error warning (hardening pass)", async () => {
     getRequestManagerFairness.mockResolvedValue(
       okResult(
         model({
@@ -167,19 +167,22 @@ describe("ManagerFairnessPage — everyone view", () => {
             reportedPreviousTotal: 5,
             reportedCurrentTotal: 999,
             reportedWeekendTotal: 3,
-            computedPreviousTotal: 5.1,
-            computedCurrentTotal: 6.35,
-            computedWeekendTotal: 3,
-            hasDiscrepancy: true,
+            displayedPreviousSum: 5.1,
+            displayedCurrentSum: 6.35,
+            displayedWeekendSum: 3,
           },
         }),
       ),
     );
-    await renderPage();
-    expect(screen.getByText(/יש פער בין סכום השורות לסך הכל בגיליון/)).toBeInTheDocument();
+    const { container } = await renderPage();
+    expect(screen.queryByText(/יש פער בין סכום השורות/)).toBeNull();
+    expect(container.textContent).not.toContain("שגיאה");
+    expect(container.textContent).not.toContain("דיסקרפנסי");
+    // The source-reported total still shows through, unaltered, in the summary strip.
+    expect(container.textContent).toContain("999");
   });
 
-  it("matching totals show no discrepancy warning", async () => {
+  it("matching reported/displayed totals also never show a warning", async () => {
     getRequestManagerFairness.mockResolvedValue(
       okResult(
         model({
@@ -187,10 +190,9 @@ describe("ManagerFairnessPage — everyone view", () => {
             reportedPreviousTotal: 5.1,
             reportedCurrentTotal: 6.35,
             reportedWeekendTotal: 3,
-            computedPreviousTotal: 5.1,
-            computedCurrentTotal: 6.35,
-            computedWeekendTotal: 3,
-            hasDiscrepancy: false,
+            displayedPreviousSum: 5.1,
+            displayedCurrentSum: 6.35,
+            displayedWeekendSum: 3,
           },
         }),
       ),

@@ -3,7 +3,7 @@ import {
   computeNormalizedLoad,
   computeScoreDelta,
   resolveComparisonTarget,
-  validateFairnessTotals,
+  sumDisplayedFairnessRows,
 } from "@/lib/domain/fairnessAnalysis";
 import { resolveFairnessExemptions } from "@/lib/domain/fairnessExemptions";
 import { fairnessPeriodLabel, type FairnessPeriodKey } from "@/lib/domain/fairnessPeriod";
@@ -34,7 +34,12 @@ export interface BuildManagerFairnessReadModelInput {
  * Date/UTC, never mutates any input. The Google Sheet's `currentScore`
  * flows through untouched as the authoritative fairness score (PR #15
  * §10) -- every value this builder computes (delta/target/gap/normalized
- * load/totals validation) is analysis ON TOP of it, never a replacement.
+ * load) is analysis ON TOP of it, never a replacement. The reported
+ * "סך הכל:" total and the independently-computed sum of displayed rows
+ * are two separate facts (see `sumDisplayedFairnessRows`) -- this builder
+ * never compares them or derives a "discrepancy" conclusion, since the
+ * sheet's reported total can legitimately be built from a formula that
+ * doesn't equal a naive sum of every displayed row.
  */
 export function buildManagerFairnessReadModel(
   input: BuildManagerFairnessReadModelInput,
@@ -90,15 +95,14 @@ function toTotalsView(
   personRows: readonly FairnessPersonRow[],
   totals: NonNullable<FairnessTableParseResult["totals"]>,
 ): ManagerFairnessTotalsView {
-  const validation = validateFairnessTotals(personRows, totals);
+  const displayed = sumDisplayedFairnessRows(personRows);
   return {
     reportedPreviousTotal: totals.reportedPreviousTotal,
     reportedCurrentTotal: totals.reportedCurrentTotal,
     reportedWeekendTotal: totals.reportedWeekendTotal,
-    computedPreviousTotal: validation.computedPreviousTotal,
-    computedCurrentTotal: validation.computedCurrentTotal,
-    computedWeekendTotal: validation.computedWeekendTotal,
-    hasDiscrepancy: validation.hasDiscrepancy,
+    displayedPreviousSum: displayed.displayedPreviousSum,
+    displayedCurrentSum: displayed.displayedCurrentSum,
+    displayedWeekendSum: displayed.displayedWeekendSum,
   };
 }
 

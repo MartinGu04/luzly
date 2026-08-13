@@ -1,4 +1,4 @@
-import type { FairnessPersonRow, FairnessTargets, FairnessTotalsRow } from "./fairnessTable";
+import type { FairnessPersonRow, FairnessTargets } from "./fairnessTable";
 
 export type FairnessAllocationRole = "supervisor" | "technician";
 
@@ -56,53 +56,38 @@ export function computeNormalizedLoad(currentScore: number | null, comparisonTar
   return currentScore / comparisonTarget;
 }
 
-export interface FairnessTotalsValidation {
-  computedPreviousTotal: number;
-  computedCurrentTotal: number;
-  computedWeekendTotal: number;
-  previousMismatch: boolean;
-  currentMismatch: boolean;
-  weekendMismatch: boolean;
-  hasDiscrepancy: boolean;
+/**
+ * The independently computed sum of the currently parsed/displayed person
+ * rows. Deliberately NOT a "validation" of anything -- the real workbook's
+ * "סך הכל:" totals are backed by formulas Luzly never sees at runtime (the
+ * Google fetch renders formatted VALUES only, by design -- see
+ * `lib/google/fetchWorkbookSnapshot.ts`), and those formulas are not
+ * always a naive sum of every displayed row. A verified real example: the
+ * H1 previous-score total is `=SUM(Y9:Y19)/4*6`, not `=SUM(...)` of every
+ * row Luzly parses. A difference between this sum and the sheet's own
+ * reported total is therefore NOT evidence of an error and must never be
+ * labeled as a discrepancy/mismatch (PR #15 hardening pass).
+ */
+export interface FairnessDisplayedRowsSum {
+  displayedPreviousSum: number;
+  displayedCurrentSum: number;
+  displayedWeekendSum: number;
 }
-
-/** Small decimal tolerance -- the sheet's own rounding must never trip a false discrepancy warning. */
-const DECIMAL_TOLERANCE = 0.01;
 
 function sumNonNull(values: readonly (number | null)[]): number {
   return values.reduce<number>((sum, value) => (value === null ? sum : sum + value), 0);
 }
 
-function mismatches(reported: number | null, computed: number): boolean {
-  if (reported === null) return false;
-  return Math.abs(reported - computed) > DECIMAL_TOLERANCE;
-}
-
 /**
- * Independently sums the numeric person rows and compares each sum against
- * the sheet's own "סך הכל:" row (PR #15 §23) -- informational only, this
- * NEVER "fixes" the sheet's reported total. `null`/"-" rows are naturally
- * excluded by `sumNonNull`. Never mutates its inputs.
+ * Sums the numeric person rows currently parsed (`null`/"-" rows are
+ * naturally excluded). This is a separate fact from `FairnessTotalsRow`'s
+ * `reportedXTotal` fields -- the sheet's own "סך הכל:" row -- never a
+ * check of one against the other. Never mutates its input.
  */
-export function validateFairnessTotals(
-  rows: readonly FairnessPersonRow[],
-  totals: FairnessTotalsRow | null,
-): FairnessTotalsValidation {
-  const computedPreviousTotal = sumNonNull(rows.map((row) => row.previousScore));
-  const computedCurrentTotal = sumNonNull(rows.map((row) => row.currentScore));
-  const computedWeekendTotal = sumNonNull(rows.map((row) => row.weekendCount));
-
-  const previousMismatch = mismatches(totals?.reportedPreviousTotal ?? null, computedPreviousTotal);
-  const currentMismatch = mismatches(totals?.reportedCurrentTotal ?? null, computedCurrentTotal);
-  const weekendMismatch = mismatches(totals?.reportedWeekendTotal ?? null, computedWeekendTotal);
-
+export function sumDisplayedFairnessRows(rows: readonly FairnessPersonRow[]): FairnessDisplayedRowsSum {
   return {
-    computedPreviousTotal,
-    computedCurrentTotal,
-    computedWeekendTotal,
-    previousMismatch,
-    currentMismatch,
-    weekendMismatch,
-    hasDiscrepancy: previousMismatch || currentMismatch || weekendMismatch,
+    displayedPreviousSum: sumNonNull(rows.map((row) => row.previousScore)),
+    displayedCurrentSum: sumNonNull(rows.map((row) => row.currentScore)),
+    displayedWeekendSum: sumNonNull(rows.map((row) => row.weekendCount)),
   };
 }

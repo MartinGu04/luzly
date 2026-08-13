@@ -149,13 +149,13 @@ describe("buildManagerFairnessReadModel — sorting (PR #15 §31)", () => {
   });
 });
 
-describe("buildManagerFairnessReadModel — totals validation", () => {
+describe("buildManagerFairnessReadModel — totals (PR #15 hardening pass, no discrepancy concept)", () => {
   it("null totals from the parse result -> null totals view", () => {
     const model = build();
     expect(model.totals).toBeNull();
   });
 
-  it("matching totals -> no discrepancy", () => {
+  it("reported and displayed sums are two independent facts, never compared", () => {
     const model = build({
       parseResult: parseResult({
         personRows: [row({ previousScore: 5, currentScore: 6, weekendCount: 2 })],
@@ -168,10 +168,12 @@ describe("buildManagerFairnessReadModel — totals validation", () => {
         },
       }),
     });
-    expect(model.totals?.hasDiscrepancy).toBe(false);
+    expect(model.totals?.reportedCurrentTotal).toBe(6);
+    expect(model.totals?.displayedCurrentSum).toBe(6);
+    expect(model.totals).not.toHaveProperty("hasDiscrepancy");
   });
 
-  it("mismatched totals -> flagged, source total never silently corrected", () => {
+  it("a reported total that differs from the displayed-row sum is never flagged/labeled as wrong -- the reported value passes through completely untouched", () => {
     const model = build({
       parseResult: parseResult({
         personRows: [row({ previousScore: 5, currentScore: 6, weekendCount: 2 })],
@@ -184,9 +186,37 @@ describe("buildManagerFairnessReadModel — totals validation", () => {
         },
       }),
     });
-    expect(model.totals?.hasDiscrepancy).toBe(true);
     expect(model.totals?.reportedCurrentTotal).toBe(999);
-    expect(model.totals?.computedCurrentTotal).toBe(6);
+    expect(model.totals?.displayedCurrentSum).toBe(6);
+    expect(model.totals).not.toHaveProperty("hasDiscrepancy");
+    expect(model.totals).not.toHaveProperty("currentMismatch");
+  });
+
+  it("REAL-SHAPE REGRESSION (hardening §7): person rows extending one row beyond the source SUM range, and a previous-score total built from a formula no simple row-sum can reproduce -- never produces an error/warning conclusion, and the reported total is never altered", () => {
+    // Verified real H1 shape: `=SUM(Y9:Y19)/4*6` for the previous-score total.
+    // 12 displayed person rows (one more than a hypothetical 11-row SUM range),
+    // each previousScore=5 -> naive display sum is 60, but the sheet's own
+    // reported total reflects the real (unreproducible-by-summation) formula.
+    const rows = Array.from({ length: 12 }, (_, i) =>
+      row({ sourceName: `אדם ${i}`, resolvedPersonId: null, previousScore: 5, currentScore: 6, weekendCount: 1 }),
+    );
+    const model = build({
+      parseResult: parseResult({
+        personRows: rows,
+        totals: {
+          reportedPreviousTotal: 90, // =SUM(Y9:Y19)/4*6 style result, not 12*5=60
+          reportedCurrentTotal: 72,
+          reportedWeekendTotal: 12,
+          sourceSheet: 'פוטנציאל תקש"אס 1-6/2026',
+          sourceCell: "Y20",
+        },
+      }),
+    });
+
+    expect(model.totals?.reportedPreviousTotal).toBe(90); // unchanged, exactly as reported
+    expect(model.totals?.displayedPreviousSum).toBe(60); // independent fact, plain sum
+    expect(model.totals).not.toHaveProperty("hasDiscrepancy");
+    expect(model.rows).toHaveLength(12); // no row silently dropped for sitting outside a SUM range
   });
 });
 

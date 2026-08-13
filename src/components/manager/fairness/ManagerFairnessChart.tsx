@@ -35,8 +35,16 @@ interface PreparedSlice {
   colorIndex: number | null; // null -> the neutral "אחרים" (other) fold
 }
 
+/**
+ * At most `MAX_NAMED_SLICES` (7) slices ever get a named color -- exactly
+ * as many `--fairness-series-N` CSS variables as are defined below. A
+ * slice count of exactly `MAX_NAMED_SLICES + 1` (8) is NOT a special case
+ * that keeps every slice named (that previously produced an undefined
+ * `--fairness-series-8` reference) -- it folds the 8th slice into the same
+ * "אחרים" aggregate as any larger count.
+ */
 function prepareSlices(slices: readonly ManagerFairnessChartSlice[]): PreparedSlice[] {
-  if (slices.length <= MAX_NAMED_SLICES + 1) {
+  if (slices.length <= MAX_NAMED_SLICES) {
     return slices.map((slice, index) => ({ ...slice, colorIndex: index }));
   }
 

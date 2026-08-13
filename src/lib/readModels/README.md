@@ -193,10 +193,15 @@ giant read model.
   label gets `null`, never invented), `computeScoreDelta` (`null` when
   there's no previous score, never treated as 0), `computeGapToTarget`,
   `computeNormalizedLoad` (`currentScore / target`, letting roles with
-  different target scales compare fairly), and
-  `validateFairnessTotals` (independently sums the person rows and
-  compares against the sheet's own reported total within decimal
-  tolerance — informational only, never "fixes" the sheet).
+  different target scales compare fairly), and `sumDisplayedFairnessRows`
+  (the independently computed sum of the currently parsed person rows).
+  This last one is deliberately NOT a validation of the sheet's own
+  reported "סך הכל:" total — the real workbook's totals can be built from
+  a formula that doesn't equal a naive sum of every displayed row (a
+  verified real example: H1's previous-score total is
+  `=SUM(Y9:Y19)/4*6`), so `reportedXTotal` (from the parser) and
+  `displayedXSum` (from this function) are two independent facts, never
+  compared, never producing a "discrepancy"/"mismatch" conclusion.
 - **`lib/domain/fairnessPeriod.ts`** — `FairnessPeriodKey` ("h1"/"h2"),
   `resolveFairnessPeriod` (Jan-Jun → h1, Jul-Dec → h2 from
   `LocalNow.date`, never a browser-local date; an invalid/missing

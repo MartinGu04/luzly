@@ -44,15 +44,23 @@ export interface ManagerFairnessTargetsView {
   technicianTarget: number | null;
 }
 
+/**
+ * Two independent facts about the fairness table's totals -- never
+ * compared/validated against each other (hardening pass). `reportedX`
+ * fields are the sheet's own "סך הכל:" row, which may be built from a
+ * formula that intentionally doesn't sum every displayed row (e.g. the
+ * real H1 previous-score total is `=SUM(Y9:Y19)/4*6`). `displayedXSum`
+ * fields are the independently computed sum of the currently parsed
+ * person rows -- useful context, but never labeled "correct" while the
+ * reported total is labeled "wrong", or vice versa.
+ */
 export interface ManagerFairnessTotalsView {
   reportedPreviousTotal: number | null;
   reportedCurrentTotal: number | null;
   reportedWeekendTotal: number | null;
-  computedPreviousTotal: number;
-  computedCurrentTotal: number;
-  computedWeekendTotal: number;
-  /** True when any reported total differs from the independently computed sum beyond decimal tolerance -- manager-only informational warning, never a sheet "fix". */
-  hasDiscrepancy: boolean;
+  displayedPreviousSum: number;
+  displayedCurrentSum: number;
+  displayedWeekendSum: number;
 }
 
 /** The ONLY shape the chart's tiny client component may ever receive (PR #15 §28) -- never the full read model, never raw sheet cells. */

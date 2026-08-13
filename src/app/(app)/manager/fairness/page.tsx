@@ -11,7 +11,6 @@ import {
 } from "@/components/manager/fairness/ManagerFairnessPersonDetail";
 import { ManagerFairnessTable } from "@/components/manager/fairness/ManagerFairnessTable";
 import { ManagerFairnessTargetsNote } from "@/components/manager/fairness/ManagerFairnessTargetsNote";
-import { ManagerFairnessTotalsNote } from "@/components/manager/fairness/ManagerFairnessTotalsNote";
 import type { ManagerFairnessRowCardView } from "@/components/manager/fairness/types";
 import { Panel } from "@/components/ui/Panel";
 import {
@@ -123,7 +122,6 @@ export default async function ManagerFairnessPage({ searchParams }: ManagerFairn
       </div>
 
       {summary ? <ManagerSummaryStrip summary={summary} /> : null}
-      {model.totals ? <ManagerFairnessTotalsNote totals={model.totals} /> : null}
 
       <Panel variant="panel">
         <h2 className="text-sm font-semibold text-foreground">חלוקת הניקוד הנוכחי בצוות</h2>

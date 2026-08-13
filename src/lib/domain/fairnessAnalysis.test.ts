@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { FairnessPersonRow, FairnessTotalsRow } from "./fairnessTable";
+import type { FairnessPersonRow } from "./fairnessTable";
 import {
   computeGapToTarget,
   computeNormalizedLoad,
   computeScoreDelta,
   resolveComparisonTarget,
   resolveFairnessAllocationRole,
-  validateFairnessTotals,
+  sumDisplayedFairnessRows,
 } from "./fairnessAnalysis";
 
 describe("resolveFairnessAllocationRole — exact deterministic mapping only", () => {
@@ -119,64 +119,54 @@ function personRow(overrides: Partial<FairnessPersonRow> = {}): FairnessPersonRo
   };
 }
 
-function totalsRow(overrides: Partial<FairnessTotalsRow> = {}): FairnessTotalsRow {
-  return {
-    reportedPreviousTotal: 10,
-    reportedCurrentTotal: 12,
-    reportedWeekendTotal: 4,
-    sourceSheet: "sheet",
-    sourceCell: "A9",
-    ...overrides,
-  };
-}
-
-describe("validateFairnessTotals — PR #15 §23/§43", () => {
-  it("computed totals equal source totals -> no discrepancy", () => {
-    const rows = [personRow({ previousScore: 5, currentScore: 6, weekendCount: 2 }), personRow({ previousScore: 5, currentScore: 6, weekendCount: 2 })];
-    const totals = totalsRow({ reportedPreviousTotal: 10, reportedCurrentTotal: 12, reportedWeekendTotal: 4 });
-    const result = validateFairnessTotals(rows, totals);
-    expect(result.hasDiscrepancy).toBe(false);
-    expect(result.computedPreviousTotal).toBe(10);
-    expect(result.computedCurrentTotal).toBe(12);
-    expect(result.computedWeekendTotal).toBe(4);
+describe("sumDisplayedFairnessRows — PR #15 hardening pass (never a validation)", () => {
+  it("sums the numeric fields of the currently displayed/parsed rows", () => {
+    const rows = [
+      personRow({ previousScore: 5, currentScore: 6, weekendCount: 2 }),
+      personRow({ previousScore: 5, currentScore: 6, weekendCount: 2 }),
+    ];
+    const result = sumDisplayedFairnessRows(rows);
+    expect(result).toEqual({ displayedPreviousSum: 10, displayedCurrentSum: 12, displayedWeekendSum: 4 });
   });
 
-  it("a real mismatch is flagged", () => {
-    const rows = [personRow({ previousScore: 5, currentScore: 6, weekendCount: 2 })];
-    const totals = totalsRow({ reportedCurrentTotal: 99 });
-    const result = validateFairnessTotals(rows, totals);
-    expect(result.currentMismatch).toBe(true);
-    expect(result.hasDiscrepancy).toBe(true);
+  it("null/'-' rows are excluded from the sum, never treated as 0", () => {
+    const rows = [
+      personRow({ previousScore: null, currentScore: 6, weekendCount: null }),
+      personRow({ previousScore: 5, currentScore: 6, weekendCount: 2 }),
+    ];
+    const result = sumDisplayedFairnessRows(rows);
+    expect(result).toEqual({ displayedPreviousSum: 5, displayedCurrentSum: 12, displayedWeekendSum: 2 });
   });
 
-  it("a tiny decimal difference within tolerance is not flagged", () => {
-    const rows = [personRow({ previousScore: 5.001, currentScore: 6, weekendCount: 2 })];
-    const totals = totalsRow({ reportedPreviousTotal: 5, reportedCurrentTotal: 6, reportedWeekendTotal: 2 });
-    const result = validateFairnessTotals(rows, totals);
-    expect(result.hasDiscrepancy).toBe(false);
+  it("empty rows -> all-zero sums, never a crash", () => {
+    expect(sumDisplayedFairnessRows([])).toEqual({
+      displayedPreviousSum: 0,
+      displayedCurrentSum: 0,
+      displayedWeekendSum: 0,
+    });
   });
 
-  it("null/'-' rows are excluded from the computed sum, never treated as 0 contributing a false mismatch", () => {
-    const rows = [personRow({ previousScore: null, currentScore: 6, weekendCount: null }), personRow({ previousScore: 5, currentScore: 6, weekendCount: 2 })];
-    const totals = totalsRow({ reportedPreviousTotal: 5, reportedCurrentTotal: 12, reportedWeekendTotal: 2 });
-    const result = validateFairnessTotals(rows, totals);
-    expect(result.hasDiscrepancy).toBe(false);
-  });
-
-  it("null totals row -> no discrepancy computed (nothing to compare against), computed sums still returned", () => {
-    const rows = [personRow({ previousScore: 5, currentScore: 6, weekendCount: 2 })];
-    const result = validateFairnessTotals(rows, null);
-    expect(result.hasDiscrepancy).toBe(false);
-    expect(result.computedCurrentTotal).toBe(6);
-  });
-
-  it("never mutates the input rows/totals", () => {
+  it("never mutates the input rows", () => {
     const rows = [personRow()];
-    const totals = totalsRow();
-    const rowsBefore = JSON.stringify(rows);
-    const totalsBefore = JSON.stringify(totals);
-    validateFairnessTotals(rows, totals);
-    expect(JSON.stringify(rows)).toBe(rowsBefore);
-    expect(JSON.stringify(totals)).toBe(totalsBefore);
+    const before = JSON.stringify(rows);
+    sumDisplayedFairnessRows(rows);
+    expect(JSON.stringify(rows)).toBe(before);
+  });
+
+  it("REAL-SHAPE REGRESSION (PR #15 hardening §7): a source-reported total built from a formula that does not equal a naive row sum is simply a DIFFERENT fact, never a discrepancy -- this function only ever computes the displayed-row sum and never looks at (or compares against) any reported total at all", () => {
+    // Verified real H1 shape: the previous-score total is `=SUM(Y9:Y19)/4*6`,
+    // not a plain sum of the displayed rows. Twelve synthetic person rows,
+    // each previousScore=5 -> naive sum would be 60, but the real formula's
+    // result (60/4*6=90) is a completely different, unrelated number.
+    const rows = Array.from({ length: 12 }, (_, i) => personRow({ sourceName: `אדם ${i}`, previousScore: 5 }));
+    const result = sumDisplayedFairnessRows(rows);
+
+    // The displayed-row sum is exactly what it claims to be: a plain sum.
+    expect(result.displayedPreviousSum).toBe(60);
+    // It carries no knowledge of, and makes no claim about, the sheet's
+    // own reported total (90 in this scenario) -- there is no field here
+    // that could even represent a "mismatch"/"discrepancy" conclusion.
+    expect(result).not.toHaveProperty("hasDiscrepancy");
+    expect(result).not.toHaveProperty("previousMismatch");
   });
 });
