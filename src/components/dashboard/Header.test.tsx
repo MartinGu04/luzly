@@ -6,6 +6,13 @@ afterEach(() => {
   cleanup();
 });
 
+describe("Header — no duplicate clock (Design Pass PR #19)", () => {
+  it("no longer renders its own live clock -- the app shell owns the one shared clock", () => {
+    const { container } = render(<Header personName="דני בדיקה" localNow={{ date: "2026-08-12", minuteOfDay: 10 * 60 }} />);
+    expect(container.querySelector("time")).toBeNull();
+  });
+});
+
 describe("Header — date line", () => {
   it("shows the Gregorian weekday/date and the Hebrew calendar date together", () => {
     render(<Header personName="דני בדיקה" localNow={{ date: "2026-08-12", minuteOfDay: 10 * 60 }} />);

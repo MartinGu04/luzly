@@ -17,6 +17,7 @@ vi.mock("@/lib/readModels/getRequestPersonalSchedule", () => ({ getRequestPerson
 vi.mock("next/navigation", () => ({ redirect, usePathname: () => "/" }));
 
 const { default: ProtectedLayout } = await import("./layout");
+const { AppShell } = await import("@/components/layout/AppShell");
 
 function profile(overrides: Partial<PersonalProfile> = {}): PersonalProfile {
   return {
@@ -169,6 +170,31 @@ describe("(app) layout — server-side auth gating", () => {
 
     expect(screen.getByText("DASHBOARD_CONTENT_AREA")).toBeInTheDocument();
     expect(screen.getAllByText("נועה דוגמה").length).toBeGreaterThan(0);
+  });
+
+  it("derives the shell's live clock initial time from the SAME already-resolved localNow -- no extra Google/request-loader call", async () => {
+    // minuteOfDay: 600 === 10:00, per okResult()'s fixture localNow.
+    getRequestPersonalSchedule.mockResolvedValue(okResult(profile()));
+
+    const element = await ProtectedLayout({ children: <div>x</div> });
+
+    expect(element.type).toBe(AppShell);
+    expect(element.props.initialClockTime).toBe("10:00:00");
+    expect(getRequestPersonalSchedule).toHaveBeenCalledTimes(1);
+  });
+
+  it("a configuration_error render has no localNow to derive a clock from -- passes null, never throws, never a client-only Date.now() guess", async () => {
+    getRequestPersonalSchedule.mockResolvedValue({
+      status: "configuration_error",
+      message: "Missing shift start time configuration.",
+      person: profile(),
+    });
+
+    const element = await ProtectedLayout({ children: <div>x</div> });
+
+    expect(element.type).toBe(AppShell);
+    expect(element.props.initialClockTime).toBeNull();
+    expect(() => renderWithTheme(element)).not.toThrow();
   });
 
   it("never renders the raw configuration_error message text", async () => {

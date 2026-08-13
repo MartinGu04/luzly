@@ -1,17 +1,21 @@
 # components
 
 - `layout/` — app shell, right-side desktop `Sidebar`, mobile `BottomNav`
-  (replacing the old hamburger/drawer), `IdentityFooter`.
+  (replacing the old hamburger/drawer), `IdentityFooter`, `ShellUtilityBar`
+  (the desktop-only top utility row hosting the app's one live clock —
+  Design Pass PR #19).
 - `ui/` — small generic building blocks (`Panel` surface variants, `Badge`,
-  `Avatar`, `Card`, `DataFreshnessStatus` — see `ui/README.md`).
+  `Avatar`, `Card`, `DataFreshnessStatus`, `LiveClock` — see `ui/README.md`).
 - `auth/` — login-screen components (e.g. `GoogleSignInButton`). Client
   components only talk to `lib/supabase/client.ts`; identity/personnel
   resolution stays server-side in `lib/auth`.
 - `dashboard/` — the personal dashboard. Server Components by default;
-  only genuinely interactive pieces are client components (`LiveClock`,
-  `ShiftProgress`, and the nav's active-route highlighting). Everything
-  renders the already-safe `PersonalScheduleReadModel` (`lib/readModels`)
-  — never raw `Event`/`Person` objects, never re-parsed spreadsheet text.
+  only genuinely interactive pieces are client components (`ShiftProgress`
+  and the nav's active-route highlighting — the live clock moved to the
+  shell's `ShellUtilityBar`/`ui/LiveClock`, so the dashboard's own `Header`
+  never renders a second one). Everything renders the already-safe
+  `PersonalScheduleReadModel` (`lib/readModels`) — never raw `Event`/
+  `Person` objects, never re-parsed spreadsheet text.
 - `schedule/` — the personal monthly shift calendar (`/schedule`). Server
   Components (`ScheduleHeader`, `MonthNav`) render the page chrome and
   month navigation as plain links — switching months is a normal

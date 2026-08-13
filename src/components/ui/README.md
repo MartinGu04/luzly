@@ -2,7 +2,17 @@
 
 Small, generic building blocks reused across feature areas: `Panel`
 surface variants, `Badge`, `Avatar`, `Card`, `CoverageBadge`,
-`IssueSeverityBadge`.
+`IssueSeverityBadge`, `LiveClock`.
+
+- `LiveClock.tsx` — the one live Asia/Jerusalem clock in the app (Design
+  Pass PR #19; previously dashboard-only). Its only current caller is
+  `layout/ShellUtilityBar.tsx` (the app shell's desktop-only top utility
+  row), so it never appears twice on one page. Presentation-only: it never
+  makes a network request and is never a source of scheduling truth (the
+  read model's `LocalNow` remains that). `initialTime` is `null` when no
+  server-derived value is available (e.g. a `configuration_error` shell
+  render) — the component renders nothing until its own first client-side
+  tick, which stays hydration-safe by construction.
 
 ## Data freshness + manual refresh (PR #17)
 

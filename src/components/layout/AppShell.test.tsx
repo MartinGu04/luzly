@@ -96,6 +96,46 @@ describe("AppShell — sign-out looks destructive", () => {
   });
 });
 
+describe("AppShell — shell utility bar / live clock (Design Pass PR #19)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("renders exactly one live clock, in Asia/Jerusalem time", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-12T07:00:00.000Z")); // 10:00:00 in Asia/Jerusalem (UTC+3, DST)
+
+    renderWithTheme(
+      <AppShell person={{ name: "דני בדיקה", isManager: false }} initialClockTime="00:00:00">
+        <div>content</div>
+      </AppShell>,
+    );
+    const clocks = document.querySelectorAll("time");
+    expect(clocks).toHaveLength(1);
+    expect(clocks[0].textContent).toBe("10:00:00");
+  });
+
+  it("never crashes with no server-derived clock time (configuration_error shell render)", () => {
+    expect(() =>
+      renderWithTheme(
+        <AppShell person={{ name: "דני בדיקה", isManager: false }} initialClockTime={null}>
+          <div>content</div>
+        </AppShell>,
+      ),
+    ).not.toThrow();
+  });
+
+  it("omitting initialClockTime entirely behaves the same as null -- no crash", () => {
+    expect(() =>
+      renderWithTheme(
+        <AppShell person={{ name: "דני בדיקה", isManager: false }}>
+          <div>content</div>
+        </AppShell>,
+      ),
+    ).not.toThrow();
+  });
+});
+
 describe("AppShell — theme control", () => {
   it("renders the theme toggle in both the desktop sidebar and the mobile identity bar", () => {
     renderWithTheme(

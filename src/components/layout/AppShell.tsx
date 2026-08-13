@@ -1,11 +1,19 @@
 import type { ReactNode } from "react";
 import { BottomNav } from "./BottomNav";
 import { MobileIdentityBar } from "./MobileIdentityBar";
+import { ShellUtilityBar } from "./ShellUtilityBar";
 import { Sidebar } from "./Sidebar";
 
 interface AppShellProps {
   children: ReactNode;
   person?: { name: string; isManager: boolean };
+  /**
+   * Same "HH:mm:ss" (or `null`) contract as `LiveClock.initialTime`, passed
+   * straight through to `ShellUtilityBar` -- `null` whenever the caller has
+   * no server-derived `localNow` to offer (e.g. a `configuration_error`
+   * render), never a client-only `Date.now()` guess.
+   */
+  initialClockTime?: string | null;
 }
 
 /**
@@ -28,13 +36,18 @@ interface AppShellProps {
  * large monitors get real usable canvas instead of a narrow centered
  * column with wasted space either side -- still with sensible horizontal
  * padding, not edge-to-edge.
+ *
+ * `ShellUtilityBar` (desktop-only, above `main`) is the app shell's ONE
+ * live clock -- see there and `LiveClock` for why individual pages
+ * (the dashboard included) must never render a second one.
  */
-export function AppShell({ children, person }: AppShellProps) {
+export function AppShell({ children, person, initialClockTime = null }: AppShellProps) {
   return (
     <div className="flex min-h-screen bg-background text-foreground">
       <Sidebar person={person} />
       <div className="flex min-h-screen w-full flex-1 flex-col">
         {person ? <MobileIdentityBar name={person.name} isManager={person.isManager} /> : null}
+        <ShellUtilityBar initialClockTime={initialClockTime} />
         <main className="flex-1 px-4 pt-6 pb-28 sm:px-6 lg:px-10 lg:pt-10 lg:pb-10">
           <div className="mx-auto w-full max-w-[1440px]">{children}</div>
         </main>
