@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { APP_NAME } from "@/lib/config/productName";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
-import { navItems } from "./nav-items";
+import { visibleNavItems } from "./nav-items";
 import { IdentityFooter } from "./IdentityFooter";
 
 interface SidebarProps {
@@ -17,6 +17,7 @@ interface SidebarProps {
  */
 export function Sidebar({ person }: SidebarProps) {
   const pathname = usePathname();
+  const items = visibleNavItems(person?.isManager ?? false);
 
   return (
     <aside className="relative hidden w-[264px] shrink-0 flex-col border-e border-sidebar-border bg-sidebar text-sidebar-foreground lg:flex">
@@ -26,7 +27,7 @@ export function Sidebar({ person }: SidebarProps) {
       </div>
 
       <nav className="flex flex-1 flex-col gap-1 px-3" aria-label="ניווט ראשי">
-        {navItems.map((item) => {
+        {items.map((item) => {
           const Icon = item.icon;
           const isActive = item.enabled && pathname === item.href;
 

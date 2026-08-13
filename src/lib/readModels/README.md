@@ -60,3 +60,82 @@ layer's safe projections may.
 
 No public API route consumes this yet — PR #9's dashboard calls
 `getRequestPersonalSchedule()` directly from Server Components.
+
+## Manager overview (PR #14)
+
+`ManagerOverviewReadModel` is a SEPARATE, manager-only read model —
+`PersonalScheduleReadModel` above stays personal-only and is never
+expanded to carry unit-wide data. The manager screen (`/manager`) is the
+first feature that intentionally broadens scope beyond the authenticated
+person's own schedule, and that broader scope is authorized, not assumed:
+
+- `managerTypes.ts` — `ManagerOverviewReadModel` and every safe
+  projection it's built from (`ManagerPersonSummary` — no email;
+  `ManagerIssue` — global operational issues with `personId`/`personName`
+  added, still no `sourceSheet`/`sourceCell`/raw evidence `Event[]`;
+  `ManagerShiftOverviewEntry` — unit-wide coverage grouped by date+period,
+  preserving every assigned person, never collapsed to one;
+  `ManagerDutyEntry`/`ManagerAbsenceEntry`; `ManagerPotentialRequirementView`
+  — reconciled Potential-vs-internal rows). Manager scope is broader than
+  personal scope, but it is still a typed, explicitly safe projection —
+  raw workbook structures, the spreadsheet ID, and Google API objects
+  never reach it.
+- `buildManagerOverviewReadModel.ts` — the pure, deterministic builder.
+  Takes the authenticated manager `Person`, the full parsed
+  `people`/`events`, combined H1+H2 `PotentialAllocation[]`, a
+  `ShiftSchedule`, an explicit `LocalNow`, the resolved `ManagerDateRange`,
+  and a raw (unvalidated) `selectedPersonId` — no network, no auth, no
+  `Date`/UTC. Runs `detectOperationalIssues()` on the FULL manager-side
+  parsed schedule (never the already-person-filtered
+  `PersonalScheduleReadModel.issues`), builds the unit-wide coverage
+  overview by reusing `analyzeShiftCounterparts` per date+period group
+  (never a reinvented coverage algorithm), and reconciles Potential
+  allocations via `lib/domain/potentialReconciliation.ts`. The selected-
+  person section reuses `buildPersonalScheduleReadModel()` OUTRIGHT from
+  the same in-memory `people`/`events`/`shiftSchedule` snapshot — no
+  per-person Google fetch, no reimplemented current/next/counterpart/
+  duty/issue logic. An invalid/unknown `selectedPersonId` falls back
+  safely to the "everyone" scope rather than crashing.
+- `managerOverviewParams.ts` — `parseManagerOverviewSearchParams`, strict
+  parsing of `/manager`'s `?person=`/`?range=`/`?month=`/`?problems=`
+  query params into typed, defaulted values. `person` omitted or `"all"`
+  means everyone; `problems=1` is the only value that turns on the
+  problems-only filter.
+- `managerOverview.ts` — `loadManagerOverviewReadModel()`, the
+  server-only orchestration layer and the security-critical piece of
+  PR #14:
+  1. Reuses `getRequestPersonalSchedule()` (the SAME request-scoped
+     result the protected layout already computed) as the first
+     authorization gate — every existing auth/config state passes
+     through unchanged.
+  2. ONLY once that's `"ok"` AND `model.person.isManager === true` does
+     this fetch the manager-only batch (`personnel` + `schedule` +
+     `settings` + `potentialH1` + `potentialH2`) — one additional Google
+     request, NEVER performed for a normal user or for a non-manager
+     hitting `/manager` (which gets `{status: "forbidden"}` immediately,
+     no manager fetch at all).
+  3. Defense in depth: re-resolves the authenticated identity against the
+     FRESH manager snapshot's own freshly-parsed personnel sheet and
+     re-checks `isManager` there too. If that second check fails for any
+     reason, this fails closed as `"forbidden"` — the already-fetched
+     manager data is discarded, never rendered. Manager authorization is
+     `person.isManager === true` ONLY; supervisor/technician/
+     personnelType/route-visibility are never treated as equivalent.
+- `getRequestManagerOverview.ts` — `cache(loadManagerOverviewReadModel)`,
+  keyed on primitive `(personId, range, month, problemsOnly)` args (not
+  one object literal) so React's `cache()` per-argument identity
+  comparison actually dedupes multiple Server Components on the same
+  `/manager` render.
+
+**Fetch count by viewer:** a normal user (any page) → 1 Google batch
+fetch (`personnel`+`schedule`+`settings`). A non-manager hitting
+`/manager` → still 1 (the shared personal-loader fetch; forbidden before
+any manager-only fetch). A manager hitting `/manager` → 2 (the shared
+personal-loader fetch, reused via `cache()` with the layout, PLUS the one
+manager-only batch above). Security boundary matters more than
+minimizing this count further.
+
+The client only ever receives safe roster `{id, name}[]` (see
+`ManagerPersonSelector`, the one narrow Client Component this screen
+uses) — never the full `ManagerOverviewReadModel`, never raw personnel
+rows, never raw Potential sheets.

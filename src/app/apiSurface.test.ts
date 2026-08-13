@@ -31,8 +31,11 @@ const FORBIDDEN_PATTERNS = [
   /parsePersonnelSheet/,
   /parseScheduleSheet/,
   /parseSettingsSheet/,
+  /parsePotentialSheet/,
   /loadPersonalScheduleReadModel/,
   /buildPersonalScheduleReadModel/,
+  /loadManagerOverviewReadModel/,
+  /buildManagerOverviewReadModel/,
 ];
 
 describe("route handler data-exposure guard", () => {
@@ -57,6 +60,47 @@ describe("37. no public schedule/personnel API route exists yet", () => {
   it("there is no src/app/api directory", () => {
     const apiDir = path.resolve(__dirname, "api");
     expect(fs.existsSync(apiDir)).toBe(false);
+  });
+});
+
+describe("manager client-boundary guard (PR #14 §36)", () => {
+  function findComponentFiles(dir: string): string[] {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    let results: string[] = [];
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        results = results.concat(findComponentFiles(fullPath));
+      } else if (/\.tsx$/.test(entry.name) && !/\.test\.tsx$/.test(entry.name)) {
+        results.push(fullPath);
+      }
+    }
+    return results;
+  }
+
+  const componentsRoot = path.resolve(__dirname, "..", "components");
+  const clientComponentFiles = findComponentFiles(componentsRoot).filter((file) =>
+    fs.readFileSync(file, "utf8").startsWith('"use client"'),
+  );
+
+  it("finds at least one client component (sanity check the scan itself works)", () => {
+    expect(clientComponentFiles.length).toBeGreaterThan(0);
+  });
+
+  it("no client component ('use client') ever imports the full ManagerOverviewReadModel/raw manager data types", () => {
+    const FORBIDDEN_CLIENT_PATTERNS = [
+      /ManagerOverviewReadModel/,
+      /RawWorkbookSnapshot/,
+      /RawSheet/,
+      /PotentialAllocation/,
+      /fetchRawWorkbookSnapshot/,
+    ];
+    for (const file of clientComponentFiles) {
+      const content = fs.readFileSync(file, "utf8");
+      for (const pattern of FORBIDDEN_CLIENT_PATTERNS) {
+        expect(content).not.toMatch(pattern);
+      }
+    }
   });
 });
 

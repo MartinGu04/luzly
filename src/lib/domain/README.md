@@ -84,3 +84,29 @@ no Google API calls and no spreadsheet-cell access.
   start/end/duration. The dashboard's live progress bar only ever
   advances this forward using elapsed wall-clock time; it never
   re-derives the underlying scheduling rules client-side.
+- `dateRange.ts` — PR #14's `/manager` date-range machinery:
+  `parseManagerRangeParam` (strict `?range=` allowlist, falls back to
+  `"7d"`) and `resolveManagerDateRange`, which turns
+  `today`/`7d`/`30d`/`month` + `LocalNow` into the concrete civil dates
+  covered (`"month"` defaults to the month containing `LocalNow.date` on
+  an invalid/missing `?month=`, via `parseMonthParam`). `addCalendarDays`/
+  `formatCalendarDate` are plain integer arithmetic on `CalendarDate` —
+  no `Date`/UTC, leap years and year boundaries handled correctly.
+- `potentialReconciliation.ts` — PR #14's Potential-vs-internal
+  reconciliation. **Potential is the source/framework allocation, never
+  the internal actual schedule** — this never converts a
+  `PotentialAllocation` into an `Event` and never merges the two arrays.
+  `reconcilePotentialAllocation` is deliberately conservative: the real
+  workbook's requirement-column → duty/requirement-family mapping isn't
+  known yet (see PR #14's report), so `"covered"`/`"partial"` are kept as
+  real, forward-compatible `ManagerRequirementStatus` values but are
+  never actually produced today. An organizational/source-label
+  allocation (no resolved person) is always `"not_evaluable"` — there's
+  no deterministic identity to check an internal schedule against, and
+  this never fuzzy-matches raw text to guess one. The only conflict this
+  domain currently proves is the one PR #14 explicitly sanctions: a
+  NAMED-PERSON requirement (identity via the personnel-roster join done
+  in `lib/parsers/potential.ts`, never text similarity) whose target has
+  a blocking absence internally the same date → `"missing"`. Every other
+  named-person allocation stays `"not_evaluable"` too, rather than
+  guessing "covered" from an unrelated internal assignment.
