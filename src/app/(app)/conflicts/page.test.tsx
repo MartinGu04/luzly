@@ -4,6 +4,10 @@ import type { PersonalIssue, PersonalScheduleReadModel } from "@/lib/readModels/
 
 const getRequestPersonalSchedule = vi.fn();
 vi.mock("@/lib/readModels/getRequestPersonalSchedule", () => ({ getRequestPersonalSchedule }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+vi.mock("@/components/ui/DataFreshnessStatus", () => ({
+  DataFreshnessStatus: ({ fetchedAt }: { fetchedAt: string }) => <div data-testid="freshness">{fetchedAt}</div>,
+}));
 
 const { default: ConflictsPage } = await import("./page");
 
@@ -544,5 +548,13 @@ describe("ConflictsPage — privacy", () => {
     getRequestPersonalSchedule.mockResolvedValue(okResult(model()));
     const { container } = render(await ConflictsPage());
     expect(container.querySelector("aside")).toBeNull();
+  });
+});
+
+describe("ConflictsPage — data freshness uses PersonalScheduleReadModel.fetchedAt (PR #17 §10/§19)", () => {
+  it("the freshness status receives this page's own model.fetchedAt", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(okResult(model({ fetchedAt: "2026-08-13T10:45:00.000Z" })));
+    render(await ConflictsPage());
+    expect(screen.getByTestId("freshness")).toHaveTextContent("2026-08-13T10:45:00.000Z");
   });
 });

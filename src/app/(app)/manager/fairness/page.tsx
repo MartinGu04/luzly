@@ -12,6 +12,7 @@ import {
 import { ManagerFairnessTable } from "@/components/manager/fairness/ManagerFairnessTable";
 import { ManagerFairnessTargetsNote } from "@/components/manager/fairness/ManagerFairnessTargetsNote";
 import type { ManagerFairnessRowCardView } from "@/components/manager/fairness/types";
+import { DataFreshnessStatus } from "@/components/ui/DataFreshnessStatus";
 import { Panel } from "@/components/ui/Panel";
 import {
   exemptionBadgeLabel,
@@ -99,6 +100,7 @@ export default async function ManagerFairnessPage({ searchParams }: ManagerFairn
       return (
         <div className="flex flex-col gap-6">
           <ManagerFairnessHeader periodLabel={model.period.label} />
+          <DataFreshnessStatus fetchedAt={model.fetchedAt} />
           <ManagerFairnessPersonDetail view={buildPersonDetailView(selectedRow, model.period)} />
           <ManagerSourceOfTruthNote />
         </div>
@@ -112,6 +114,7 @@ export default async function ManagerFairnessPage({ searchParams }: ManagerFairn
   return (
     <div className="flex flex-col gap-6">
       <ManagerFairnessHeader periodLabel={model.period.label} />
+      <DataFreshnessStatus fetchedAt={model.fetchedAt} />
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <ManagerFairnessPeriodSelector current={model.period.key} />

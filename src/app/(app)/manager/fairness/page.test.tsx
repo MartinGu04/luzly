@@ -4,6 +4,10 @@ import type { ManagerFairnessPersonRowView, ManagerFairnessReadModel } from "@/l
 
 const getRequestManagerFairness = vi.fn();
 vi.mock("@/lib/readModels/getRequestManagerFairness", () => ({ getRequestManagerFairness }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+vi.mock("@/components/ui/DataFreshnessStatus", () => ({
+  DataFreshnessStatus: ({ fetchedAt }: { fetchedAt: string }) => <div data-testid="freshness">{fetchedAt}</div>,
+}));
 
 const { default: ManagerFairnessPage } = await import("./page");
 
@@ -241,6 +245,22 @@ describe("ManagerFairnessPage — selected person drill-down", () => {
     getRequestManagerFairness.mockResolvedValue(okResult(model({ selectedPersonId: "p_martin" })));
     const { container } = await renderPage({ person: "p_martin" });
     expect(container.textContent).not.toMatch(/שמירות \+\d/);
+  });
+});
+
+describe("ManagerFairnessPage — data freshness uses ManagerFairnessReadModel.fetchedAt (PR #17 §10/§19)", () => {
+  it("everyone view: the freshness status receives the fairness model's own fetchedAt", async () => {
+    getRequestManagerFairness.mockResolvedValue(okResult(model({ fetchedAt: "2026-08-13T11:15:00.000Z" })));
+    await renderPage();
+    expect(screen.getByTestId("freshness")).toHaveTextContent("2026-08-13T11:15:00.000Z");
+  });
+
+  it("selected-person view: still uses the same fairness model fetchedAt", async () => {
+    getRequestManagerFairness.mockResolvedValue(
+      okResult(model({ fetchedAt: "2026-08-13T11:15:00.000Z", selectedPersonId: "p_martin" })),
+    );
+    await renderPage({ person: "p_martin" });
+    expect(screen.getByTestId("freshness")).toHaveTextContent("2026-08-13T11:15:00.000Z");
   });
 });
 

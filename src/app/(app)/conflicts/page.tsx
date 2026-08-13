@@ -4,6 +4,7 @@ import { ConflictsSummary } from "@/components/conflicts/ConflictsSummary";
 import { IssueSeverityGroup } from "@/components/conflicts/IssueSeverityGroup";
 import type { ConflictIssueView } from "@/components/conflicts/types";
 import { ConfigurationErrorState } from "@/components/dashboard/ConfigurationErrorState";
+import { DataFreshnessStatus } from "@/components/ui/DataFreshnessStatus";
 import type { IssueSeverity } from "@/lib/domain/operationalIssues";
 import {
   issueDateLabel,
@@ -64,6 +65,7 @@ export default async function ConflictsPage() {
   return (
     <div className="flex flex-col gap-6">
       <ConflictsHeader />
+      <DataFreshnessStatus fetchedAt={model.fetchedAt} />
 
       {views.length === 0 ? (
         <ConflictsEmptyState />

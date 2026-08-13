@@ -24,3 +24,12 @@ own pure calendar functions (`lib/domain/dutyBlocks.ts`'s
   `CoverageStatus`. The UI must never render a raw machine value from
   these enums directly.
 - `avatar.ts` — `initialsOf`, for the generated circular avatar.
+- `dataFreshness.ts` — `formatDataFreshnessLabel(fetchedAt, now)` (PR
+  #17): a deterministic relative-age label ("עודכן עכשיו" / "עודכן לפני 4
+  דקות" / "עודכן לפני שעה") for a read model's `fetchedAt` -- explicitly
+  takes `now` as a parameter rather than reading the clock itself, so
+  it's testable without real `Date.now()`, and is only ever called
+  client-side after mount (see `components/ui/DataFreshnessStatus.tsx`)
+  to avoid a hydration mismatch. Fails safe (a generic fallback label,
+  never a crash/`NaN`) on an unparseable timestamp; a negative elapsed
+  duration (clock skew) reads as "just now", never a negative number.
