@@ -19,151 +19,215 @@ const MARTIN = syntheticPerson("מרטין בדיקה");
 const EITAN = syntheticPerson("איתן דוגמה");
 const personnel = [MARTIN, EITAN];
 
-/**
- * Synthetic H1-shaped fixture: date + day columns, two requirement
- * columns ("כונן פינויים", "מטבח"), then a fairness/scoring side-table
- * sharing the same header row (שם, הקצאה, ניקוד הפוטנציאל הקודם, ניקוד
- * לפוטנציאל הנוכחי, סופ"שים, פטורים). Purely synthetic — never real
- * operational/personnel data.
- */
-const h1Sheet: RawSheet = {
-  name: 'פוטנציאל תקש"אס 1-6/2026',
-  values: [
-    [
-      "תאריך",
-      "יום",
-      "כונן פינויים",
-      "מטבח",
-      "שם",
-      "הקצאה",
-      "ניקוד הפוטנציאל הקודם",
-      "ניקוד לפוטנציאל הנוכחי",
-      'סופ"שים',
-      "פטורים",
+// The verified real row-1 operational header layout, columns A:T, shared by both H1 and H2.
+const REAL_HEADER_ROW = [
+  "תאריך",
+  "יום",
+  "שומר 1",
+  "שומר 2",
+  "שומר 3",
+  "שומר 4",
+  "עתודה 1",
+  "עתודה 2",
+  "אוקסיד 1",
+  "אוקסיד 2",
+  "אוקסיד 3",
+  "כונן פינויים",
+  "מטבח יומי 1",
+  "מטבח יומי 2",
+  "מטבח מלא 1",
+  "מטבח מלא 2",
+  "מטבח מלא 3",
+  'רס"ר 1',
+  'רס"ר 2',
+  "הערות",
+];
+
+/** One fully-populated data row exercising every mapped column, plus the placeholder and a blank. Purely synthetic (fictional) allocation values -- never real operational data. */
+function fullDataRow(date: string) {
+  return [
+    date,
+    "א",
+    "סייבר", // שומר 1
+    "מרטין בדיקה", // שומר 2 -- named source
+    "///////////////////", // שומר 3 -- structural placeholder
+    "", // שומר 4 -- blank
+    "מבצעים", // עתודה 1
+    "רוקם", // עתודה 2
+    "סייבר", // אוקסיד 1
+    "מבצעים", // אוקסיד 2
+    "רוקם", // אוקסיד 3
+    "איתן מרכז", // כונן פינויים
+    "יחידה א", // מטבח יומי 1
+    "יחידה ב", // מטבח יומי 2
+    "יחידה ג", // מטבח מלא 1
+    "יחידה ד", // מטבח מלא 2
+    "יחידה ה", // מטבח מלא 3
+    "יחידה ו", // רס"ר 1
+    "יחידה ז", // רס"ר 2
+    "הערה חופשית שלא אמורה להפוך לדרישה", // הערות
+  ];
+}
+
+function h1Sheet(): RawSheet {
+  return {
+    name: 'פוטנציאל תקש"אס 1-6/2026',
+    values: [REAL_HEADER_ROW, fullDataRow("23/08/2026")],
+  };
+}
+
+// Fairness/scoring side-table, verified to live on LATER rows, further right (not row 1) -- a separate title row, then a separate header row, then score data rows. Purely synthetic values.
+function h1SheetWithFairnessTable(): RawSheet {
+  const blankPad = (n: number) => Array.from({ length: n }, () => "");
+  return {
+    name: 'פוטנציאל תקש"אס 1-6/2026',
+    values: [
+      REAL_HEADER_ROW,
+      fullDataRow("23/08/2026"),
+      fullDataRow("24/08/2026"),
+      [], // blank separator row
+      ["", ...blankPad(21), 'טבלת צדק - מחצית 1'], // fairness title, far right
+      [
+        "",
+        ...blankPad(21),
+        "שם",
+        "הקצאה",
+        "ניקוד הפוטנציאל הקודם",
+        "ניקוד לפוטנציאל הנוכחי",
+        'סופ"שים',
+        "פטורים",
+      ],
+      ["", ...blankPad(21), "מרטין בדיקה", "5", "12", "14", "3", "1"],
+      ["", ...blankPad(21), "איתן דוגמה", "4", "10", "11", "2", "0"],
     ],
-    ["23/08/2026", "א", "מרטין בדיקה", "יחידה א", "מרטין בדיקה", "5", "12", "14", "3", "1"],
-    ["24/08/2026", "ב", "", "יחידה ב", "איתן דוגמה", "4", "10", "11", "2", "0"],
-    ["not-a-date", "ג", "מרטין בדיקה", "", "", "", "", "", "", ""],
-  ],
-};
+  };
+}
 
-/**
- * Synthetic H2-shaped fixture: structurally different from H1 -- no
- * adjacent "יום" day column (date column inferred purely from parseable
- * dates below it), different requirement columns ("רס\"ר", "אוקסיד"),
- * and a smaller fairness side-table (only שם + סופ"שים present). Proves
- * the parser tolerates H1/H2 shape differences rather than hardcoding one
- * fixed layout.
- */
-const h2Sheet: RawSheet = {
-  name: 'פוטנציאל תקש"אס 7-12/2026',
-  values: [
-    ["תאריך", 'רס"ר', "אוקסיד", "שם", 'סופ"שים'],
-    ["01/09/2026", "איתן דוגמה", "יחידה ג", "איתן דוגמה", "6"],
-    ["02/09/2026", "", "", "מרטין בדיקה", "5"],
-  ],
-};
+describe("parsePotentialSheet — verified real schema (H1)", () => {
+  const allocations = parsePotentialSheet(h1Sheet(), personnel);
 
-describe("parsePotentialSheet — H1 shape", () => {
-  const allocations = parsePotentialSheet(h1Sheet, personnel);
-
-  it("extracts one allocation per non-empty operational cell", () => {
-    // row1: 2 cells (כונן פינויים, מטבח); row2: 1 cell (מטבח only); row3: malformed date -> skipped entirely.
-    expect(allocations).toHaveLength(3);
+  it("maps שומר 1..4 to guard with the exact slot, skipping placeholder/blank", () => {
+    const guard = allocations.filter((a) => a.dutyFamily === "guard");
+    expect(guard.map((a) => a.slot).sort()).toEqual([1, 2]); // 3=placeholder, 4=blank, both skipped
+    expect(guard.find((a) => a.slot === 1)?.sourceAllocationLabel).toBe("סייבר");
+    expect(guard.find((a) => a.slot === 2)?.resolvedSourcePersonId).toBe(MARTIN.id);
   });
 
-  it("resolves a cell that exactly matches a known person's name", () => {
-    const named = allocations.find((a) => a.columnLabel === "כונן פינויים" && a.date === "2026-08-23");
-    expect(named?.resolvedPersonId).toBe(MARTIN.id);
-    expect(named?.rawValue).toBe("מרטין בדיקה");
+  it("maps עתודה 1..2 to reserve with the exact slot", () => {
+    const reserve = allocations.filter((a) => a.dutyFamily === "reserve");
+    expect(reserve.map((a) => a.slot).sort()).toEqual([1, 2]);
+    expect(reserve.every((a) => a.resolvedSourcePersonId === null)).toBe(true);
   });
 
-  it("keeps an organizational/source label as a label, never a guessed person", () => {
-    const label = allocations.find((a) => a.columnLabel === "מטבח" && a.date === "2026-08-23");
-    expect(label?.rawValue).toBe("יחידה א");
-    expect(label?.resolvedPersonId).toBeNull();
+  it("maps אוקסיד 1..3 to oxid with source slot, null exact slot", () => {
+    const oxid = allocations.filter((a) => a.dutyFamily === "oxid");
+    expect(oxid.map((a) => a.sourceSlot).sort()).toEqual([1, 2, 3]);
+    expect(oxid.every((a) => a.slot === null)).toBe(true);
   });
 
-  it("skips a blank allocation cell entirely (no fabricated empty row)", () => {
-    const missing = allocations.find((a) => a.columnLabel === "כונן פינויים" && a.date === "2026-08-24");
-    expect(missing).toBeUndefined();
+  it("maps כונן פינויים to evacuation_on_call with null slot and null sourceSlot", () => {
+    const evac = allocations.find((a) => a.dutyFamily === "evacuation_on_call");
+    expect(evac?.slot).toBeNull();
+    expect(evac?.sourceSlot).toBeNull();
+    expect(evac?.sourceAllocationLabel).toBe("איתן מרכז");
   });
 
-  it("skips a malformed/unparseable date row without crashing", () => {
-    expect(allocations.some((a) => a.rawValue === "מרטין בדיקה" && a.date === "not-a-date")).toBe(false);
+  it("maps מטבח יומי 1..2 to daily_kitchen with source slot", () => {
+    const dailyKitchen = allocations.filter((a) => a.dutyFamily === "daily_kitchen");
+    expect(dailyKitchen.map((a) => a.sourceSlot).sort()).toEqual([1, 2]);
+  });
+
+  it("maps מטבח מלא 1..3 to full_kitchen with source slot", () => {
+    const fullKitchen = allocations.filter((a) => a.dutyFamily === "full_kitchen");
+    expect(fullKitchen.map((a) => a.sourceSlot).sort()).toEqual([1, 2, 3]);
+  });
+
+  it('maps רס"ר 1..2 to rasar with source slot', () => {
+    const rasar = allocations.filter((a) => a.dutyFamily === "rasar");
+    expect(rasar.map((a) => a.sourceSlot).sort()).toEqual([1, 2]);
+  });
+
+  it("excludes הערות entirely -- never a requirement", () => {
+    expect(allocations.some((a) => a.columnLabel === "הערות")).toBe(false);
+    expect(allocations.some((a) => a.sourceAllocationLabel.includes("הערה חופשית"))).toBe(false);
+  });
+
+  it("excludes the structural /////////////////// placeholder", () => {
+    expect(allocations.some((a) => a.sourceAllocationLabel === "///////////////////")).toBe(false);
+  });
+
+  it("excludes blank cells", () => {
+    const guardSlot4 = allocations.find((a) => a.dutyFamily === "guard" && a.slot === 4);
+    expect(guardSlot4).toBeUndefined();
   });
 
   it("carries sourceSheet/sourceCell for internal traceability", () => {
-    const named = allocations.find((a) => a.columnLabel === "כונן פינויים" && a.date === "2026-08-23");
-    expect(named?.sourceSheet).toBe(h1Sheet.name);
-    expect(named?.sourceCell).toBe("C2");
+    const guard1 = allocations.find((a) => a.dutyFamily === "guard" && a.slot === 1);
+    expect(guard1?.sourceSheet).toBe('פוטנציאל תקש"אס 1-6/2026');
+    expect(guard1?.sourceCell).toBe("C2");
   });
 
-  it("preserves deterministic top-to-bottom, left-to-right ordering", () => {
-    expect(allocations.map((a) => `${a.date}:${a.columnLabel}`)).toEqual([
-      "2026-08-23:כונן פינויים",
-      "2026-08-23:מטבח",
-      "2026-08-24:מטבח",
-    ]);
+  it("produces exactly 15 allocations from a fully-populated row (17 mapped columns minus 1 placeholder minus 1 blank)", () => {
+    expect(allocations).toHaveLength(15);
   });
 });
 
-describe("parsePotentialSheet — fairness side-table exclusion", () => {
-  const allocations = parsePotentialSheet(h1Sheet, personnel);
+describe("parsePotentialSheet — H2 shares the same verified schema", () => {
+  const h2Sheet: RawSheet = {
+    name: 'פוטנציאל תקש"אס 7-12/2026',
+    values: [REAL_HEADER_ROW, fullDataRow("01/09/2026")],
+  };
+  const allocations = parsePotentialSheet(h2Sheet, personnel);
 
-  it("never produces an allocation from the fairness/scoring columns", () => {
-    const fairnessLabels = new Set([
-      "שם",
-      "הקצאה",
-      "ניקוד הפוטנציאל הקודם",
-      "ניקוד לפוטנציאל הנוכחי",
-      'סופ"שים',
-      "פטורים",
-    ]);
+  it("parses identically to H1's schema", () => {
+    expect(allocations).toHaveLength(15);
+    expect(allocations.some((a) => a.dutyFamily === "guard" && a.slot === 1)).toBe(true);
+    expect(allocations.some((a) => a.dutyFamily === "rasar")).toBe(true);
+  });
+});
+
+describe("parsePotentialSheet — fairness side-table exclusion (verified real position)", () => {
+  const allocations = parsePotentialSheet(h1SheetWithFairnessTable(), personnel);
+
+  it("never produces an allocation from the fairness title row", () => {
+    expect(allocations.some((a) => a.sourceAllocationLabel.includes("טבלת צדק"))).toBe(false);
+  });
+
+  it("never produces an allocation from the fairness header row (שם/הקצאה/ניקוד/סופ״שים/פטורים)", () => {
+    const fairnessLabels = ["שם", "הקצאה", "ניקוד הפוטנציאל הקודם", "ניקוד לפוטנציאל הנוכחי", 'סופ"שים', "פטורים"];
     for (const allocation of allocations) {
-      expect(fairnessLabels.has(allocation.columnLabel)).toBe(false);
+      expect(fairnessLabels).not.toContain(allocation.columnLabel);
     }
   });
 
   it("never leaks a raw fairness score value anywhere in the output", () => {
-    const rawValues = allocations.map((a) => a.rawValue);
-    // The fairness row's numeric scores (12, 14, 3, 1, 10, 11, 2, 0) must never appear as an allocation rawValue.
+    const rawValues = allocations.map((a) => a.sourceAllocationLabel);
     expect(rawValues).not.toContain("12");
     expect(rawValues).not.toContain("14");
     expect(rawValues).not.toContain("10");
   });
 
-  it("only recognizes requirement columns strictly left of the fairness boundary", () => {
-    const labels = new Set(allocations.map((a) => a.columnLabel));
-    expect(labels).toEqual(new Set(["כונן פינויים", "מטבח"]));
+  it("still parses the real operational dates correctly despite the fairness rows below", () => {
+    expect(allocations.some((a) => a.date === "2026-08-23")).toBe(true);
+    expect(allocations.some((a) => a.date === "2026-08-24")).toBe(true);
+  });
+
+  it("only 2 operational data rows produce allocations (fairness rows never parse as dates)", () => {
+    const dates = new Set(allocations.map((a) => a.date));
+    expect(dates.size).toBe(2);
   });
 });
 
-describe("parsePotentialSheet — H2 shape (no day column, smaller fairness table)", () => {
-  const allocations = parsePotentialSheet(h2Sheet, personnel);
-
-  it("infers the date column without an explicit adjacent day header", () => {
-    expect(allocations.some((a) => a.date === "2026-09-01")).toBe(true);
+describe("parsePotentialSheet — deterministic ordering", () => {
+  it("preserves top-to-bottom, left-to-right ordering", () => {
+    const allocations = parsePotentialSheet(h1Sheet(), personnel);
+    const guardIndex = allocations.findIndex((a) => a.dutyFamily === "guard" && a.slot === 1);
+    const reserveIndex = allocations.findIndex((a) => a.dutyFamily === "reserve" && a.sourceSlot === 1);
+    expect(guardIndex).toBeLessThan(reserveIndex);
   });
 
-  it("extracts allocations for its own distinct requirement columns", () => {
-    const labels = new Set(allocations.map((a) => a.columnLabel));
-    expect(labels).toEqual(new Set(['רס"ר', "אוקסיד"]));
-  });
-
-  it("resolves a named-person allocation", () => {
-    const named = allocations.find((a) => a.columnLabel === 'רס"ר');
-    expect(named?.resolvedPersonId).toBe(EITAN.id);
-  });
-
-  it("excludes the smaller two-column fairness table too", () => {
-    const labels = new Set(allocations.map((a) => a.columnLabel));
-    expect(labels.has("שם")).toBe(false);
-    expect(labels.has('סופ"שים')).toBe(false);
-  });
-
-  it("never leaks the fairness column's raw values (5, 6) as allocations", () => {
-    expect(allocations.some((a) => a.rawValue === "6")).toBe(false);
+  it("is pure -- calling it twice with the same input gives the same result", () => {
+    expect(parsePotentialSheet(h1Sheet(), personnel)).toEqual(parsePotentialSheet(h1Sheet(), personnel));
   });
 });
 
@@ -173,26 +237,19 @@ describe("parsePotentialSheet — structural edge cases", () => {
     expect(parsePotentialSheet(sheet, personnel)).toEqual([]);
   });
 
-  it("returns an empty array when every allocation column has a blank header", () => {
-    const sheet: RawSheet = {
-      name: "blank-headers",
-      values: [["תאריך", "יום", "", ""], ["23/08/2026", "א", "מרטין בדיקה", "יחידה א"]],
-    };
-    expect(parsePotentialSheet(sheet, personnel)).toEqual([]);
+  it("returns an empty array for a completely empty sheet", () => {
+    expect(parsePotentialSheet({ name: "totally-empty", values: [] }, personnel)).toEqual([]);
   });
 
-  it("does not crash on a completely empty sheet", () => {
-    const sheet: RawSheet = { name: "totally-empty", values: [] };
+  it("skips a malformed/unparseable date row without crashing", () => {
+    const sheet: RawSheet = { name: "x", values: [REAL_HEADER_ROW, fullDataRow("not-a-date")] };
     expect(parsePotentialSheet(sheet, personnel)).toEqual([]);
-  });
-
-  it("is pure -- calling it twice with the same input gives the same result", () => {
-    expect(parsePotentialSheet(h1Sheet, personnel)).toEqual(parsePotentialSheet(h1Sheet, personnel));
   });
 
   it("never mutates the input sheet", () => {
-    const before = JSON.stringify(h1Sheet);
-    parsePotentialSheet(h1Sheet, personnel);
-    expect(JSON.stringify(h1Sheet)).toBe(before);
+    const sheet = h1Sheet();
+    const before = JSON.stringify(sheet);
+    parsePotentialSheet(sheet, personnel);
+    expect(JSON.stringify(sheet)).toBe(before);
   });
 });

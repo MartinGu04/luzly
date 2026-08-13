@@ -88,14 +88,17 @@ person's own schedule, and that broader scope is authorized, not assumed:
   `Date`/UTC. Runs `detectOperationalIssues()` on the FULL manager-side
   parsed schedule (never the already-person-filtered
   `PersonalScheduleReadModel.issues`), builds the unit-wide coverage
-  overview by reusing `analyzeShiftCounterparts` per date+period group
-  (never a reinvented coverage algorithm), and reconciles Potential
-  allocations via `lib/domain/potentialReconciliation.ts`. The selected-
-  person section reuses `buildPersonalScheduleReadModel()` OUTRIGHT from
-  the same in-memory `people`/`events`/`shiftSchedule` snapshot — no
-  per-person Google fetch, no reimplemented current/next/counterpart/
-  duty/issue logic. An invalid/unknown `selectedPersonId` falls back
-  safely to the "everyone" scope rather than crashing.
+  overview by reusing `analyzeUnitShiftCoverage` per date+period group —
+  a PURE, person-order-independent group coverage algorithm (never an
+  arbitrarily-chosen "target" person's perspective, and never a
+  reinvented coverage algorithm) — and reconciles Potential allocations
+  via `lib/domain/potentialReconciliation.ts` against the verified real
+  requirement schema. The selected-person section reuses
+  `buildPersonalScheduleReadModel()` OUTRIGHT from the same in-memory
+  `people`/`events`/`shiftSchedule` snapshot — no per-person Google
+  fetch, no reimplemented current/next/counterpart/duty/issue logic. An
+  invalid/unknown `selectedPersonId` falls back safely to the "everyone"
+  scope rather than crashing.
 - `managerOverviewParams.ts` — `parseManagerOverviewSearchParams`, strict
   parsing of `/manager`'s `?person=`/`?range=`/`?month=`/`?problems=`
   query params into typed, defaulted values. `person` omitted or `"all"`

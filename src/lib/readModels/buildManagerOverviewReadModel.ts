@@ -6,12 +6,12 @@ import {
   type IssueSeverity,
   type OperationalIssue,
 } from "@/lib/domain/operationalIssues";
-import type { PotentialAllocation } from "@/lib/parsers/potential";
+import type { PotentialAllocation } from "@/lib/domain/potentialAllocation";
 import {
   reconcilePotentialAllocations,
   type ManagerRequirementReconciliation,
 } from "@/lib/domain/potentialReconciliation";
-import { analyzeShiftCounterparts } from "@/lib/domain/shiftCoverage";
+import { analyzeUnitShiftCoverage } from "@/lib/domain/shiftCoverage";
 import type { ShiftSchedule } from "@/lib/domain/shiftSchedule";
 import type { Person } from "@/lib/domain/types";
 import { buildPersonalScheduleReadModel } from "./buildPersonalScheduleReadModel";
@@ -193,7 +193,7 @@ function toManagerIssue(issue: OperationalIssue, peopleById: ReadonlyMap<string,
 
 const PERIOD_ORDER: Record<string, number> = { day: 0, night: 1, morning: 2, unspecified: 3 };
 
-/** Deterministic tiebreak for both group ordering and target selection -- personId first, then sourceSheet/sourceCell (never exposed on the output type). */
+/** Deterministic ordering for the displayed people lists within a group -- personId first, then sourceSheet/sourceCell (never exposed on the output type). Coverage itself (`analyzeUnitShiftCoverage`) doesn't depend on this order at all. */
 function compareEventsStable(a: Event, b: Event): number {
   if (a.personId !== b.personId) return a.personId < b.personId ? -1 : 1;
   if (a.sourceSheet !== b.sourceSheet) return a.sourceSheet < b.sourceSheet ? -1 : 1;
@@ -213,16 +213,13 @@ function toShiftGroupPerson(event: Event): ManagerShiftGroupPerson {
 /**
  * Groups every shift Event within `rangeDates` by date+period, preserving
  * EVERY assigned person (never collapsed to one). `coverageStatus`/
- * `missingIntervals` reuse `analyzeShiftCounterparts` -- the exact same
- * domain algorithm the personal read model and `/with-me` use -- called
- * once per group against a deterministically-chosen target Event (sorted
- * by personId, then sourceSheet/sourceCell). This is a pragmatic
- * simplification for the group-level summary: in the overwhelming common
- * case every same-role person on a given date/period shares the same
- * canonical (non-overridden) interval, so the choice of target doesn't
- * change the computed status. A per-person override that disagrees with
- * the canonical window would only affect that one row's own personal
- * view, not this unit-wide summary.
+ * `missingIntervals` reuse `analyzeUnitShiftCoverage` -- a PURE,
+ * person-order-independent group coverage algorithm (see
+ * `lib/domain/shiftCoverage.ts`) that evaluates the canonical shift
+ * window against both roles' merged intervals. This deliberately does
+ * NOT pick an arbitrary "target" person the way `analyzeShiftCounterparts`
+ * does — the result is identical regardless of `personId`/`sourceCell`
+ * ordering.
  */
 function buildCoverageOverview(
   events: readonly Event[],
@@ -250,8 +247,7 @@ function buildCoverageOverview(
     const shadowTechnicians = sortedGroup.filter((e) => e.role === "technician" && e.shadow).map(toShiftGroupPerson);
     const shadowSupervisors = sortedGroup.filter((e) => e.role === "supervisor" && e.shadow).map(toShiftGroupPerson);
 
-    const target = sortedGroup[0];
-    const analysis = analyzeShiftCounterparts(target, sortedGroup, shiftSchedule);
+    const analysis = analyzeUnitShiftCoverage(period, sortedGroup, shiftSchedule);
 
     entries.push({
       date,
@@ -318,13 +314,16 @@ function toManagerPotentialRequirementView(
 ): ManagerPotentialRequirementView {
   return {
     date: reconciliation.date,
+    dutyFamily: reconciliation.dutyFamily,
+    slot: reconciliation.slot,
     columnLabel: reconciliation.columnLabel,
-    sourceRawValue: reconciliation.sourceRawValue,
-    resolvedPersonId: reconciliation.resolvedPersonId,
-    resolvedPersonName: reconciliation.resolvedPersonId
-      ? (peopleById.get(reconciliation.resolvedPersonId)?.name ?? null)
+    sourceAllocationLabel: reconciliation.sourceAllocationLabel,
+    resolvedSourcePersonId: reconciliation.resolvedSourcePersonId,
+    resolvedSourcePersonName: reconciliation.resolvedSourcePersonId
+      ? (peopleById.get(reconciliation.resolvedSourcePersonId)?.name ?? null)
       : null,
     status: reconciliation.status,
-    namedPersonBlockingAbsence: reconciliation.namedPersonBlockingAbsence,
+    actualAssignees: reconciliation.actualAssignees,
+    sourceConflict: reconciliation.sourceConflict,
   };
 }

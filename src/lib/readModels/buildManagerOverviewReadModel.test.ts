@@ -4,7 +4,7 @@ import type { Event } from "@/lib/domain/event";
 import type { LocalNow } from "@/lib/domain/localNow";
 import { buildShiftSchedule } from "@/lib/domain/shiftSchedule";
 import type { Person } from "@/lib/domain/types";
-import type { PotentialAllocation } from "@/lib/parsers/potential";
+import type { PotentialAllocation } from "@/lib/domain/potentialAllocation";
 import { buildManagerOverviewReadModel } from "./buildManagerOverviewReadModel";
 
 // day 07:30-19:30, night 19:30-07:30(+1)
@@ -62,9 +62,12 @@ function event(overrides: Partial<Event> = {}): Event {
 function allocation(overrides: Partial<PotentialAllocation> = {}): PotentialAllocation {
   return {
     date: "2026-08-13",
+    dutyFamily: "evacuation_on_call",
+    slot: null,
+    sourceSlot: null,
     columnLabel: "כונן פינויים",
-    rawValue: "מרטין בדיקה",
-    resolvedPersonId: MARTIN.id,
+    sourceAllocationLabel: "מרטין בדיקה",
+    resolvedSourcePersonId: MARTIN.id,
     sourceSheet: 'פוטנציאל תקש"אס 1-6/2026',
     sourceCell: nextCell(),
     ...overrides,
@@ -206,6 +209,48 @@ describe("buildManagerOverviewReadModel — coverage overview", () => {
     const model = buildModel({ events });
     expect(model.coverageOverview.every((g) => g.date === "2026-08-13")).toBe(true);
   });
+
+  it("group coverage status is independent of which person's id sorts first (regression for the old sortedGroup[0] bug)", () => {
+    // Two technicians, one full-day and one partial; a naive "pick sortedGroup[0]" implementation would have
+    // reported the group's status/missingIntervals purely from whichever technician happened to sort first.
+    const eventsAsc: Event[] = [
+      event({ personId: "p_aaa", personName: "טכנאי א", date: "2026-08-13", role: "technician", period: "day", endTimeOverride: "12:00" }),
+      event({ personId: "p_zzz", personName: "טכנאי ב", date: "2026-08-13", role: "technician", period: "day", sourceCell: nextCell() }),
+      event({ personId: EITAN.id, personName: EITAN.name, date: "2026-08-13", role: "supervisor", period: "day", sourceCell: nextCell() }),
+    ];
+    const eventsDesc = [...eventsAsc].reverse();
+
+    const groupAsc = buildModel({ events: eventsAsc }).coverageOverview.find(
+      (g) => g.date === "2026-08-13" && g.period === "day",
+    );
+    const groupDesc = buildModel({ events: eventsDesc }).coverageOverview.find(
+      (g) => g.date === "2026-08-13" && g.period === "day",
+    );
+
+    expect(groupAsc?.coverageStatus).toBe(groupDesc?.coverageStatus);
+    expect(groupAsc?.missingIntervals).toEqual(groupDesc?.missingIntervals);
+    // Full: technician A covers 07:30-12:00, technician B (no override) covers the whole day -- combined, full.
+    expect(groupAsc?.coverageStatus).toBe("full");
+  });
+
+  it("reports partial coverage (not full) when the supervisor role has a real gap, regardless of technician full coverage", () => {
+    const events: Event[] = [
+      event({ personId: MARTIN.id, personName: MARTIN.name, date: "2026-08-13", role: "technician", period: "day" }),
+      event({
+        personId: EITAN.id,
+        personName: EITAN.name,
+        date: "2026-08-13",
+        role: "supervisor",
+        period: "day",
+        endTimeOverride: "12:00",
+        sourceCell: nextCell(),
+      }),
+    ];
+    const model = buildModel({ events });
+    const group = model.coverageOverview.find((g) => g.date === "2026-08-13" && g.period === "day");
+    expect(group?.coverageStatus).toBe("partial");
+    expect(group?.missingIntervals).toEqual([{ startMinute: 720, endMinute: 1170 }]); // 12:00-19:30
+  });
 });
 
 describe("buildManagerOverviewReadModel — duties", () => {
@@ -251,14 +296,36 @@ describe("buildManagerOverviewReadModel — absences", () => {
 });
 
 describe("buildManagerOverviewReadModel — potential vs internal", () => {
-  it("reconciles allocations within range and attaches the resolved person's name", () => {
+  it("reconciles allocations within range: no matching internal duty -> missing, and attaches the resolved source person's name + conflict", () => {
     const model = buildModel({
       events: [event({ personId: MARTIN.id, personName: MARTIN.name, date: "2026-08-13", category: "absence", role: null, absenceKind: "vacation" })],
-      potentialAllocations: [allocation({ date: "2026-08-13", resolvedPersonId: MARTIN.id })],
+      potentialAllocations: [allocation({ date: "2026-08-13", resolvedSourcePersonId: MARTIN.id })],
     });
     expect(model.potentialRequirements).toHaveLength(1);
     expect(model.potentialRequirements[0].status).toBe("missing");
-    expect(model.potentialRequirements[0].resolvedPersonName).toBe(MARTIN.name);
+    expect(model.potentialRequirements[0].resolvedSourcePersonName).toBe(MARTIN.name);
+    expect(model.potentialRequirements[0].sourceConflict).toBe("blocking_absence");
+  });
+
+  it("a matching internal duty Event makes the requirement covered, with the actual performer attached", () => {
+    const model = buildModel({
+      events: [
+        event({
+          personId: EITAN.id,
+          personName: EITAN.name,
+          date: "2026-08-13",
+          category: "duty",
+          role: null,
+          period: "unspecified",
+          dutyFamily: "evacuation_on_call",
+        }),
+      ],
+      potentialAllocations: [allocation({ date: "2026-08-13" })],
+    });
+    expect(model.potentialRequirements[0].status).toBe("covered");
+    expect(model.potentialRequirements[0].actualAssignees).toEqual([
+      { personId: EITAN.id, personName: EITAN.name, certainty: "confirmed" },
+    ]);
   });
 
   it("filters potential requirements to the selected range", () => {
@@ -271,12 +338,25 @@ describe("buildManagerOverviewReadModel — potential vs internal", () => {
     expect(model.potentialRequirements.every((r) => r.date === "2026-08-13")).toBe(true);
   });
 
-  it("an organizational label never resolves a person name", () => {
+  it("an organizational label never resolves a source person name, but still reconciles structurally", () => {
     const model = buildModel({
-      potentialAllocations: [allocation({ resolvedPersonId: null, rawValue: "יחידה א" })],
+      events: [
+        event({
+          personId: EITAN.id,
+          personName: EITAN.name,
+          date: "2026-08-13",
+          category: "duty",
+          role: null,
+          period: "unspecified",
+          dutyFamily: "evacuation_on_call",
+        }),
+      ],
+      potentialAllocations: [
+        allocation({ resolvedSourcePersonId: null, sourceAllocationLabel: "יחידה א", date: "2026-08-13" }),
+      ],
     });
-    expect(model.potentialRequirements[0].resolvedPersonName).toBeNull();
-    expect(model.potentialRequirements[0].status).toBe("not_evaluable");
+    expect(model.potentialRequirements[0].resolvedSourcePersonName).toBeNull();
+    expect(model.potentialRequirements[0].status).toBe("covered");
   });
 });
 

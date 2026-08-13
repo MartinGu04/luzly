@@ -2,7 +2,7 @@ import type { AbsenceKind, DutyFamily, EventCertainty, EventPeriod } from "@/lib
 import type { LocalNow } from "@/lib/domain/localNow";
 import type { IssueReason, IssueSeverity, RoleCapabilityMismatchMetadata } from "@/lib/domain/operationalIssues";
 import type { ManagerRangeKey } from "@/lib/domain/dateRange";
-import type { ManagerRequirementStatus } from "@/lib/domain/potentialReconciliation";
+import type { ManagerRequirementStatus, ManagerSourceConflict } from "@/lib/domain/potentialReconciliation";
 import type { CoverageStatus } from "@/lib/domain/shiftCoverage";
 import type { MinuteInterval } from "@/lib/domain/shiftSchedule";
 import type { PersonalIssueTargetSummary, PersonalScheduleReadModel } from "./types";
@@ -103,23 +103,37 @@ export interface ManagerAbsenceEntry {
   certainty: EventCertainty;
 }
 
+/** The internal Event(s) that actually fulfill a `ManagerPotentialRequirementView` -- who really performs it, independent of who the Potential SOURCE said would supply it. */
+export interface ManagerRequirementActualAssignee {
+  personId: string;
+  personName: string;
+  certainty: EventCertainty;
+}
+
 /**
  * One reconciled Potential requirement row -- "פוטנציאל מול סידור". Built
- * from `PotentialAllocation` + `reconcilePotentialAllocation()`, never
- * from raw sheet cells. `resolvedPersonName` is looked up from the
- * manager-safe roster (never a second identity guess). See
- * `lib/domain/potentialReconciliation.ts` for exactly which statuses this
- * domain can currently prove -- `not_evaluable` is a real, expected state,
- * not a bug.
+ * from `PotentialAllocation` + `reconcilePotentialAllocations()`, never
+ * from raw sheet cells. `resolvedSourcePersonName` is looked up from the
+ * manager-safe roster (never a second identity guess). `actualAssignees`
+ * is the SAFE, sanitized internal match — no email, no
+ * `sourceSheet`/`sourceCell`. See `lib/domain/potentialReconciliation.ts`
+ * for exactly how `status` is determined (date + typed duty requirement,
+ * never by the source label matching a person) and what `sourceConflict`
+ * means (independent of `status` — a requirement can be `covered` by a
+ * replacement while still carrying a source conflict worth surfacing).
  */
 export interface ManagerPotentialRequirementView {
   date: string;
+  dutyFamily: DutyFamily;
+  /** The exact internal slot this requirement was matched against (guard/reserve only). Null for every other family. */
+  slot: number | null;
   columnLabel: string;
-  sourceRawValue: string;
-  resolvedPersonId: string | null;
-  resolvedPersonName: string | null;
+  sourceAllocationLabel: string;
+  resolvedSourcePersonId: string | null;
+  resolvedSourcePersonName: string | null;
   status: ManagerRequirementStatus;
-  namedPersonBlockingAbsence: boolean;
+  actualAssignees: ManagerRequirementActualAssignee[];
+  sourceConflict: ManagerSourceConflict | null;
 }
 
 /**

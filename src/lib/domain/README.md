@@ -28,7 +28,21 @@ no Google API calls and no spreadsheet-cell access.
   coverage only — certainty (confirmed/tentative) is preserved
   untouched; whether tentative coverage should count as operationally
   confirmed is left to a future rules engine, not decided here. No
-  alert/severity logic.
+  alert/severity logic. Also exports `analyzeUnitShiftCoverage` (PR #14) —
+  the manager overview's UNIT-WIDE date+period group coverage, evaluated
+  against the canonical shift window from both roles' merged intervals
+  together. Deliberately independent of any single person's identity —
+  it never picks an arbitrary "target" Event the way
+  `analyzeShiftCounterparts` does, so the result never depends on
+  `personId`/`sourceCell` ordering. `"full"` only when both roles cover
+  the whole canonical window; `"missing"` if either role has zero
+  coverage at all (even if the other role is fully covered); `"partial"`
+  otherwise, with `missingIntervals` being the merged union of both
+  roles' own gaps; `"not_evaluable"` when an unresolved/invalid Event
+  makes a role's true coverage impossible to honestly determine (unless
+  resolved coverage alone already proves that role's window is fully
+  covered — an extra unresolved duplicate Event never invalidates an
+  already-provably-full result).
 - `operationalIssues.ts` — `detectOperationalIssues`, the first
   deterministic rules engine: blocking absence + active assignment,
   shift coverage missing/partial (reusing `analyzeShiftCounterparts`,
@@ -92,21 +106,35 @@ no Google API calls and no spreadsheet-cell access.
   an invalid/missing `?month=`, via `parseMonthParam`). `addCalendarDays`/
   `formatCalendarDate` are plain integer arithmetic on `CalendarDate` —
   no `Date`/UTC, leap years and year boundaries handled correctly.
+- `potentialAllocation.ts` — the domain-owned `PotentialAllocation` shape
+  (the same convention as `Event`: domain defines the type,
+  `lib/parsers/potential.ts` only produces values of it — domain never
+  imports from `lib/parsers`).
 - `potentialReconciliation.ts` — PR #14's Potential-vs-internal
-  reconciliation. **Potential is the source/framework allocation, never
-  the internal actual schedule** — this never converts a
-  `PotentialAllocation` into an `Event` and never merges the two arrays.
-  `reconcilePotentialAllocation` is deliberately conservative: the real
-  workbook's requirement-column → duty/requirement-family mapping isn't
-  known yet (see PR #14's report), so `"covered"`/`"partial"` are kept as
-  real, forward-compatible `ManagerRequirementStatus` values but are
-  never actually produced today. An organizational/source-label
-  allocation (no resolved person) is always `"not_evaluable"` — there's
-  no deterministic identity to check an internal schedule against, and
-  this never fuzzy-matches raw text to guess one. The only conflict this
-  domain currently proves is the one PR #14 explicitly sanctions: a
-  NAMED-PERSON requirement (identity via the personnel-roster join done
-  in `lib/parsers/potential.ts`, never text similarity) whose target has
-  a blocking absence internally the same date → `"missing"`. Every other
-  named-person allocation stays `"not_evaluable"` too, rather than
-  guessing "covered" from an unrelated internal assignment.
+  reconciliation, now against the VERIFIED real requirement schema (see
+  `lib/parsers/potential.ts`'s `REQUIREMENT_COLUMNS`). **Potential is the
+  source/framework allocation, never the internal actual schedule** —
+  this never converts a `PotentialAllocation` into an `Event` and never
+  merges the two arrays. Coverage is decided by DATE + TYPED DUTY
+  REQUIREMENT, never by `sourceAllocationLabel` matching a person:
+  - `guard`/`reserve` (exact-slotted internally) match by date + family +
+    the EXACT internal `Event.slot`.
+  - `evacuation_on_call` (single, unslotted) matches by date + family.
+  - `oxid`/`daily_kitchen`/`full_kitchen`/`rasar` (numbered on the
+    Potential side, but internally unslotted) reconcile by date + family
+    MULTIPLICITY: every requirement for that date+family, sorted by its
+    own `sourceSlot`, is paired positionally against every matching
+    internal Event, sorted by a stable order (`personId`, then
+    `sourceSheet`/`sourceCell`) — never a fake exact-slot identity, never
+    dependent on input array order.
+  `"covered"`/`"missing"` are real, produced statuses now that the schema
+  is known; `"partial"` stays a real, forward-compatible status with no
+  honest partial-duty semantic today; `"not_evaluable"` is reserved for a
+  genuinely unknown/unsupported requirement family (defensive only — the
+  parser never emits one). `sourceConflict` (a NAMED source person with a
+  blocking absence the same date — identity via the personnel-roster join
+  in `lib/parsers/potential.ts`, never text similarity) is computed
+  INDEPENDENTLY of `status`: a requirement covered by a replacement
+  internal performer stays `"covered"` even while carrying a source
+  conflict worth the manager's attention — a source conflict never by
+  itself downgrades an otherwise-covered requirement to `"missing"`.

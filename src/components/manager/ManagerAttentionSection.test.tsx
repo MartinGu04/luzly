@@ -27,11 +27,11 @@ function potentialView(overrides: Partial<ManagerPotentialRowView> = {}): Manage
   return {
     key: "p1",
     dateLabel: "היום",
-    columnLabel: "כונן פינויים",
-    sourceRawValue: "מרטין בדיקה",
-    resolvedPersonName: "מרטין בדיקה",
+    requirementTitle: "כונן פינויים",
+    sourceAllocationLabel: "מרטין בדיקה",
+    actualAssigneeNames: [],
     status: "missing",
-    namedPersonBlockingAbsence: true,
+    sourceConflictNote: "מקור ההקצאה (מרטין בדיקה) נמצא/ת בהיעדרות חוסמת באותו יום בסידור הפנימי.",
     ...overrides,
   };
 }

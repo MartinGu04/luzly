@@ -1,82 +1,82 @@
 import type { RawCellValue, RawSheet } from "@/lib/google";
+import type { DutyFamily } from "@/lib/domain/event";
+import type { PotentialAllocation } from "@/lib/domain/potentialAllocation";
 import type { Person } from "@/lib/domain/types";
 import { parseLocalDate } from "./date";
 import { cellToString, cellToTrimmedString, gridWidth, toA1Cell } from "./sheetGrid";
+
+/** Re-exported for convenience -- the type itself is domain-owned (see `lib/domain/potentialAllocation.ts`); this parser only produces values of that shape. */
+export type { PotentialAllocation } from "@/lib/domain/potentialAllocation";
 
 const DATE_HEADER_LABELS = ["תאריך"];
 const DAY_HEADER_LABELS = ["יום"];
 
 /**
- * The Potential sheet's own separate fairness/scoring side-table (see
- * `lib/domain/README.md` and PR #14's discovery notes) — a completely
- * different concept from the operational allocation table this parser
- * reads. The first header cell (left-to-right within the identified
- * header row) matching any of these labels marks where the operational
- * table ends; that column and everything after it is never read as an
- * allocation column. `סופ"שים`/`פטורים` in particular are fairness-only
- * concepts and must never be mistaken for a requirement column.
+ * Cell text used by the real workbook to mark a structurally
+ * disabled/not-applicable Potential slot for that date (e.g. a guard slot
+ * that doesn't run that day). Exact match only — never a requirement.
  */
-const FAIRNESS_TABLE_HEADER_LABELS = new Set([
-  "שם",
-  "הקצאה",
-  "ניקוד הפוטנציאל הקודם",
-  "ניקוד לפוטנציאל הנוכחי",
-  'סופ"שים',
-  "פטורים",
-]);
+const STRUCTURAL_PLACEHOLDER = "///////////////////";
 
 /**
- * One non-empty allocation cell from the Potential sheet's operational
- * table: a source/framework requirement for `date`, under whichever
- * column (`columnLabel`, the column's own header text) it was found in.
+ * The verified, centralized requirement-column schema for BOTH real
+ * Potential sheets (`פוטנציאל תקש"אס 1-6/2026` / `7-12/2026`, confirmed
+ * identical row-1 operational header layout, columns A:T). The exact
+ * Hebrew header text IS the structural schema — this is the only place
+ * column identity is ever decided; never scattered `if (column === "L")`
+ * logic in React. Any header not in this map (including `הערות`, and the
+ * fairness/scoring side-table's headers, which live on a different row
+ * further right) is never a requirement column and never produces a
+ * `PotentialAllocation`.
  *
- * `resolvedPersonId` is set ONLY when `rawValue` (whitespace-normalized)
- * exactly equals a known `Person.name` — never a fuzzy/partial match.
- * Null means the cell is an organizational/source allocation label, e.g.
- * a role or unit name that isn't a specific known person; `rawValue` is
- * always preserved honestly either way, never discarded or reinterpreted.
- *
- * Deliberately NOT an `Event` — Potential is the source/framework
- * allocation, never the internal actual schedule (see PR #14 /
- * `lib/domain/README.md`'s Potential-vs-internal note). Reconciliation
- * against internal `Event[]` happens in `lib/domain/potentialReconciliation.ts`,
- * never here.
+ * `slot` is the EXACT internal `Event.slot` to match — only guard/reserve
+ * have a real numbered slot on the internal side (`event.ts`'s
+ * `GUARD_RE`/`RESERVE_RE`). `sourceSlot` is the Potential column's own
+ * numbering (e.g. "אוקסיד 2" → 2) — used only for deterministic
+ * multiplicity-based pairing in `lib/domain/potentialReconciliation.ts`,
+ * never matched against an internal slot (oxid/kitchen/rasar internal
+ * Events don't carry one).
  */
-export interface PotentialAllocation {
-  /** Calendar date, "YYYY-MM-DD". */
-  date: string;
-  /** The requirement column's own header text, verbatim (trimmed) — the only stable identity a column has; see the parser-level doc comment for why this is never mapped to an invented duty/requirement enum. */
-  columnLabel: string;
-  rawValue: string;
-  resolvedPersonId: string | null;
-  sourceSheet: string;
-  sourceCell: string;
+interface RequirementColumnSchema {
+  dutyFamily: DutyFamily;
+  slot: number | null;
+  sourceSlot: number | null;
 }
+
+const REQUIREMENT_COLUMNS: Readonly<Record<string, RequirementColumnSchema>> = {
+  "שומר 1": { dutyFamily: "guard", slot: 1, sourceSlot: 1 },
+  "שומר 2": { dutyFamily: "guard", slot: 2, sourceSlot: 2 },
+  "שומר 3": { dutyFamily: "guard", slot: 3, sourceSlot: 3 },
+  "שומר 4": { dutyFamily: "guard", slot: 4, sourceSlot: 4 },
+  "עתודה 1": { dutyFamily: "reserve", slot: 1, sourceSlot: 1 },
+  "עתודה 2": { dutyFamily: "reserve", slot: 2, sourceSlot: 2 },
+  "אוקסיד 1": { dutyFamily: "oxid", slot: null, sourceSlot: 1 },
+  "אוקסיד 2": { dutyFamily: "oxid", slot: null, sourceSlot: 2 },
+  "אוקסיד 3": { dutyFamily: "oxid", slot: null, sourceSlot: 3 },
+  "כונן פינויים": { dutyFamily: "evacuation_on_call", slot: null, sourceSlot: null },
+  "מטבח יומי 1": { dutyFamily: "daily_kitchen", slot: null, sourceSlot: 1 },
+  "מטבח יומי 2": { dutyFamily: "daily_kitchen", slot: null, sourceSlot: 2 },
+  "מטבח מלא 1": { dutyFamily: "full_kitchen", slot: null, sourceSlot: 1 },
+  "מטבח מלא 2": { dutyFamily: "full_kitchen", slot: null, sourceSlot: 2 },
+  "מטבח מלא 3": { dutyFamily: "full_kitchen", slot: null, sourceSlot: 3 },
+  'רס"ר 1': { dutyFamily: "rasar", slot: null, sourceSlot: 1 },
+  'רס"ר 2': { dutyFamily: "rasar", slot: null, sourceSlot: 2 },
+};
 
 /**
  * Structurally parses one Potential sheet ("פוטנציאל תקש\"אס 1-6/2026" /
- * "פוטנציאל תקש\"אס 7-12/2026") into `PotentialAllocation[]`.
- *
- * KNOWN STRUCTURAL ASSUMPTIONS (from the product-supplied discovery notes,
- * not a live inspection of the real workbook — see PR #14's report):
- * - the operational allocation table is a single date/day block on the
- *   left side of the sheet, in the same date+day+columns shape as
- *   "משמרות + תורנויות"'s blocks (`schedule.ts`) — NOT multiple
- *   side-by-side blocks like that sheet. If the real workbook turns out
- *   to have more than one Potential block, this needs revisiting.
- * - a fairness/scoring side-table shares the SAME header row, to the
- *   right of the operational table (see `FAIRNESS_TABLE_HEADER_LABELS`).
- * - every requirement/allocation column has non-blank header text acting
- *   as its stable identity (`columnLabel`). A column with a blank header
- *   is skipped — there's no stable identity to attach its cells to. This
- *   also means no invented duty/requirement-family mapping is applied to
- *   any column (see the module doc comment and PR #14's report for the
- *   explicit "not enough structure to type this yet" call-out) — a
- *   future PR can add one once the real header labels are confirmed.
- *
- * Deliberately conservative: never iterates "every non-empty cell", never
- * fuzzy-matches text against personnel, and structurally excludes the
- * fairness/scoring area rather than trying to interpret it.
+ * "פוטנציאל תקש\"אס 7-12/2026") into `PotentialAllocation[]`, using the
+ * VERIFIED real schema (see `REQUIREMENT_COLUMNS`): a single operational
+ * date/day block on row 1, columns A:T. The sheet's separate fairness/
+ * scoring side-table lives on a LATER row, further right (title around
+ * column W, headers around W:AB) — it is structurally excluded simply by
+ * never matching `REQUIREMENT_COLUMNS` (its headers aren't in the map)
+ * AND by never sharing a row with a parseable operational date (every
+ * data row here requires `rowCells[dateCol]` to parse as a date; a
+ * fairness title/header/score row won't). `הערות` and any other
+ * unrecognized header are never treated as a requirement. Blank cells and
+ * the exact `///////////////////` structural placeholder are both
+ * skipped — neither produces a `PotentialAllocation`.
  */
 export function parsePotentialSheet(sheet: RawSheet, personnel: readonly Person[]): PotentialAllocation[] {
   const headerRowIndex = sheet.values.findIndex((row) =>
@@ -93,41 +93,44 @@ export function parsePotentialSheet(sheet: RawSheet, personnel: readonly Person[
 
   const hasDayCol = DAY_HEADER_LABELS.includes(cellToTrimmedString(headerRow[dateCol + 1]));
   const allocationZoneStart = dateCol + (hasDayCol ? 2 : 1);
-
   const width = Math.max(gridWidth(sheet.values), headerRow.length);
-  const allocationZoneEnd = findFairnessTableBoundary(headerRow, allocationZoneStart, width);
+
+  const columns: { col: number; label: string; schema: RequirementColumnSchema }[] = [];
+  for (let col = allocationZoneStart; col < width; col++) {
+    const label = cellToTrimmedString(headerRow[col]);
+    const schema = REQUIREMENT_COLUMNS[label];
+    if (!schema) continue; // not a recognized requirement column (הערות, fairness headers, unknown text) -- never guessed.
+    columns.push({ col, label, schema });
+  }
+  if (columns.length === 0) return [];
 
   const personByNormalizedName = new Map<string, Person>();
   for (const person of personnel) {
     personByNormalizedName.set(normalizeAllocationText(person.name), person);
   }
 
-  const columns: { col: number; label: string }[] = [];
-  for (let col = allocationZoneStart; col < allocationZoneEnd; col++) {
-    const label = cellToTrimmedString(headerRow[col]);
-    if (label === "") continue; // no stable identity for this column -- never guessed.
-    columns.push({ col, label });
-  }
-  if (columns.length === 0) return [];
-
   const allocations: PotentialAllocation[] = [];
 
   for (let row = headerRowIndex + 1; row < sheet.values.length; row++) {
     const rowCells = sheet.values[row] ?? [];
     const date = parseLocalDate(cellToTrimmedString(rowCells[dateCol]));
-    if (!date) continue; // malformed/blank date row -- skipped, never guessed.
+    if (!date) continue; // malformed/blank date row (also structurally protects against the fairness section below) -- skipped, never guessed.
 
-    for (const { col, label } of columns) {
+    for (const { col, label, schema } of columns) {
       const rawValue = cellToString(rowCells[col]);
-      if (rawValue.trim() === "") continue;
+      const trimmed = rawValue.trim();
+      if (trimmed === "" || trimmed === STRUCTURAL_PLACEHOLDER) continue;
 
       const resolvedPerson = personByNormalizedName.get(normalizeAllocationText(rawValue));
 
       allocations.push({
         date,
+        dutyFamily: schema.dutyFamily,
+        slot: schema.slot,
+        sourceSlot: schema.sourceSlot,
         columnLabel: label,
-        rawValue,
-        resolvedPersonId: resolvedPerson?.id ?? null,
+        sourceAllocationLabel: rawValue,
+        resolvedSourcePersonId: resolvedPerson?.id ?? null,
         sourceSheet: sheet.name,
         sourceCell: toA1Cell(row, col),
       });
@@ -143,8 +146,8 @@ export function parsePotentialSheet(sheet: RawSheet, personnel: readonly Person[
  * reliably-labeled "יום" column right after it is used to infer it (the
  * candidate one column to its left, accepted if it says "תאריך" too, or
  * the rows below it actually parse as dates). Only the first such column
- * is used here — Potential is assumed to be a single block (see the
- * module doc comment).
+ * is used here — the verified real workbook has a single operational
+ * block, not multiple side-by-side blocks like "משמרות + תורנויות".
  */
 function findPotentialDateColumn(
   values: RawCellValue[][],
@@ -175,14 +178,6 @@ function columnHasParseableDate(values: RawCellValue[][], headerRowIndex: number
     if (text !== "" && parseLocalDate(text) !== null) return true;
   }
   return false;
-}
-
-/** The first fairness-table header column at or after `from`, or `end` (the sheet's own width) when none is found. */
-function findFairnessTableBoundary(headerRow: RawCellValue[], from: number, end: number): number {
-  for (let col = from; col < end; col++) {
-    if (FAIRNESS_TABLE_HEADER_LABELS.has(cellToTrimmedString(headerRow[col]))) return col;
-  }
-  return end;
 }
 
 function normalizeAllocationText(text: string): string {

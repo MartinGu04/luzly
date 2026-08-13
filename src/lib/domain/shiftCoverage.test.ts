@@ -3,6 +3,7 @@ import type { Event } from "./event";
 import { buildShiftSchedule } from "./shiftSchedule";
 import {
   analyzeShiftCounterparts,
+  analyzeUnitShiftCoverage,
   clipInterval,
   computeMissingIntervals,
   mergeIntervals,
@@ -356,5 +357,119 @@ describe("interval math helpers", () => {
     expect(
       computeMissingIntervals({ startMinute: 450, endMinute: 1170 }, [{ startMinute: 450, endMinute: 1170 }]),
     ).toEqual([]);
+  });
+});
+
+describe("analyzeUnitShiftCoverage — unit-wide group coverage (PR #14 hardening)", () => {
+  it("A. full technician + full supervisor => full", () => {
+    const tech = technicianDay();
+    const sup = supervisorDay();
+    const result = analyzeUnitShiftCoverage("day", [tech, sup], schedule);
+    expect(result.coverageStatus).toBe("full");
+    expect(result.missingIntervals).toEqual([]);
+  });
+
+  it("B. full technician + supervisor until 12:00 => partial, 12:00-19:30 missing", () => {
+    const tech = technicianDay();
+    const sup = supervisorDay({ endTimeOverride: "12:00" });
+    const result = analyzeUnitShiftCoverage("day", [tech, sup], schedule);
+    expect(result.coverageStatus).toBe("partial");
+    expect(result.missingIntervals).toEqual([{ startMinute: 720, endMinute: 1170 }]); // 12:00-19:30
+  });
+
+  it("C. technician from 12:00 + full supervisor => partial, 07:30-12:00 missing", () => {
+    const tech = technicianDay({ startTimeOverride: "12:00" });
+    const sup = supervisorDay();
+    const result = analyzeUnitShiftCoverage("day", [tech, sup], schedule);
+    expect(result.coverageStatus).toBe("partial");
+    expect(result.missingIntervals).toEqual([{ startMinute: 450, endMinute: 720 }]); // 07:30-12:00
+  });
+
+  it("D. two partial technician Events combine to cover the full shift + full supervisor => full", () => {
+    const tech1 = technicianDay({ endTimeOverride: "13:00" });
+    const tech2 = technicianDay({ startTimeOverride: "13:00" });
+    const sup = supervisorDay();
+    const result = analyzeUnitShiftCoverage("day", [tech1, tech2, sup], schedule);
+    expect(result.coverageStatus).toBe("full");
+    expect(result.missingIntervals).toEqual([]);
+  });
+
+  it("E. no supervisor at all => missing, even though technician is fully covered", () => {
+    const tech = technicianDay();
+    const result = analyzeUnitShiftCoverage("day", [tech], schedule);
+    expect(result.coverageStatus).toBe("missing");
+    expect(result.missingIntervals).toEqual([{ startMinute: 450, endMinute: 1170 }]);
+  });
+
+  it("F. shadow supervisor only => missing (shadow never counts as coverage)", () => {
+    const tech = technicianDay();
+    const shadowSup = supervisorDay({ shadow: true });
+    const result = analyzeUnitShiftCoverage("day", [tech, shadowSup], schedule);
+    expect(result.coverageStatus).toBe("missing");
+  });
+
+  it("F2. shadow people are excluded from coverage math but this doesn't crash when they're the only events", () => {
+    const shadowTech = technicianDay({ shadow: true });
+    const shadowSup = supervisorDay({ shadow: true });
+    const result = analyzeUnitShiftCoverage("day", [shadowTech, shadowSup], schedule);
+    expect(result.coverageStatus).toBe("missing");
+    expect(result.missingIntervals).toEqual([{ startMinute: 450, endMinute: 1170 }]);
+  });
+
+  it("G. identical status + intervals regardless of person id / input order", () => {
+    const tech = technicianDay({ endTimeOverride: "12:00" });
+    const sup = supervisorDay();
+    const forward = analyzeUnitShiftCoverage("day", [tech, sup], schedule);
+    const reversed = analyzeUnitShiftCoverage("day", [sup, tech], schedule);
+    expect(forward).toEqual(reversed);
+  });
+
+  it("G2. group coverage never depends on which person happens to sort first (regression for the old sortedGroup[0] bug)", () => {
+    // Two technicians with different ids/sourceCells; only one has a partial override. The group result must be
+    // identical no matter which one a naive "pick sortedGroup[0]" implementation would have chosen as its target.
+    const techA = technicianDay({ personId: "p_a", sourceCell: "A1", endTimeOverride: "12:00" });
+    const techB = technicianDay({ personId: "p_b", sourceCell: "B1", startTimeOverride: "12:00" });
+    const sup = supervisorDay({ personId: "p_c", sourceCell: "C1" });
+    const orderA = analyzeUnitShiftCoverage("day", [techA, techB, sup], schedule);
+    const orderB = analyzeUnitShiftCoverage("day", [techB, techA, sup], schedule);
+    expect(orderA).toEqual(orderB);
+    expect(orderA.coverageStatus).toBe("full");
+  });
+
+  it("H. night shift partial coverage across midnight (>1440) computed correctly", () => {
+    const tech = shiftEvent({ role: "technician", period: "night" }); // full night: 19:30-07:30(+1)
+    const sup = shiftEvent({ role: "supervisor", period: "night", endTimeOverride: "01:30" });
+    const result = analyzeUnitShiftCoverage("night", [tech, sup], schedule);
+    expect(result.coverageStatus).toBe("partial");
+    // 19:30=1170, 01:30(+1)=1530, 07:30(+1)=1890
+    expect(result.missingIntervals).toEqual([{ startMinute: 1530, endMinute: 1890 }]);
+  });
+
+  it("I. an invalid/unresolvable Event never fabricates a full or missing result -- not_evaluable instead", () => {
+    const tech = technicianDay({ startTimeOverride: "99:99" }); // invalid override -> unresolvable
+    const sup = supervisorDay();
+    const result = analyzeUnitShiftCoverage("day", [tech, sup], schedule);
+    expect(result.coverageStatus).toBe("not_evaluable");
+    expect(result.missingIntervals).toEqual([]);
+  });
+
+  it("I2. an unresolved duplicate Event does NOT invalidate an already-provably-full result", () => {
+    const techResolved = technicianDay();
+    const techInvalid = technicianDay({ startTimeOverride: "99:99" });
+    const sup = supervisorDay();
+    const result = analyzeUnitShiftCoverage("day", [techResolved, techInvalid, sup], schedule);
+    expect(result.coverageStatus).toBe("full");
+    expect(result.missingIntervals).toEqual([]);
+  });
+
+  it("a period with no canonical window (morning/unspecified) is always not_evaluable", () => {
+    const tech = technicianDay({ period: "morning" });
+    const result = analyzeUnitShiftCoverage("morning", [tech], schedule);
+    expect(result.coverageStatus).toBe("not_evaluable");
+  });
+
+  it("an empty group (no events at all) is missing, not a crash", () => {
+    const result = analyzeUnitShiftCoverage("day", [], schedule);
+    expect(result.coverageStatus).toBe("missing");
   });
 });

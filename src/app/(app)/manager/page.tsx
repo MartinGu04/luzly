@@ -114,11 +114,14 @@ function buildManagerPotentialRowView(
   return {
     key: `${row.date}-${row.columnLabel}-${index}`,
     dateLabel: issueDateLabel(row.date, todayDate),
-    columnLabel: row.columnLabel,
-    sourceRawValue: row.sourceRawValue,
-    resolvedPersonName: row.resolvedPersonName,
+    requirementTitle: dutyBlockTitle({ dutyFamily: row.dutyFamily, slot: row.slot }),
+    sourceAllocationLabel: row.sourceAllocationLabel,
+    actualAssigneeNames: row.actualAssignees.map((assignee) => assignee.personName),
     status: row.status,
-    namedPersonBlockingAbsence: row.namedPersonBlockingAbsence,
+    sourceConflictNote:
+      row.sourceConflict === "blocking_absence" && row.resolvedSourcePersonName
+        ? `מקור ההקצאה (${row.resolvedSourcePersonName}) נמצא/ת בהיעדרות חוסמת באותו יום בסידור הפנימי.`
+        : null,
   };
 }
 
@@ -276,7 +279,7 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
     buildManagerPotentialRowView(row, todayDate, index),
   );
   const potentialProblemViews = potentialRowViews.filter(
-    (row) => row.status === "missing" || row.status === "partial",
+    (row) => row.status === "missing" || row.status === "partial" || row.sourceConflictNote !== null,
   );
 
   return (

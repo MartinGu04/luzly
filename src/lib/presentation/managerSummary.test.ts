@@ -57,8 +57,8 @@ describe("managerSummaryLabel", () => {
     const model = {
       ...emptyModel(),
       potentialRequirements: [
-        { date: "2026-08-13", columnLabel: "x", sourceRawValue: "y", resolvedPersonId: "a", resolvedPersonName: "a", status: "missing" as const, namedPersonBlockingAbsence: true },
-        { date: "2026-08-13", columnLabel: "x", sourceRawValue: "z", resolvedPersonId: null, resolvedPersonName: null, status: "not_evaluable" as const, namedPersonBlockingAbsence: false },
+        { date: "2026-08-13", dutyFamily: "guard" as const, slot: 1, columnLabel: "x", sourceAllocationLabel: "y", resolvedSourcePersonId: "a", resolvedSourcePersonName: "a", status: "missing" as const, actualAssignees: [], sourceConflict: "blocking_absence" as const },
+        { date: "2026-08-13", dutyFamily: "guard" as const, slot: 2, columnLabel: "x", sourceAllocationLabel: "z", resolvedSourcePersonId: null, resolvedSourcePersonName: null, status: "not_evaluable" as const, actualAssignees: [], sourceConflict: null },
       ],
     };
     expect(managerSummaryLabel(model)).toBe("דרישת Potential אחת חסרה");
@@ -68,8 +68,8 @@ describe("managerSummaryLabel", () => {
     const model = {
       ...emptyModel(),
       potentialRequirements: [
-        { date: "2026-08-13", columnLabel: "x", sourceRawValue: "y", resolvedPersonId: "a", resolvedPersonName: "a", status: "missing" as const, namedPersonBlockingAbsence: true },
-        { date: "2026-08-14", columnLabel: "x", sourceRawValue: "y", resolvedPersonId: "a", resolvedPersonName: "a", status: "partial" as const, namedPersonBlockingAbsence: false },
+        { date: "2026-08-13", dutyFamily: "guard" as const, slot: 1, columnLabel: "x", sourceAllocationLabel: "y", resolvedSourcePersonId: "a", resolvedSourcePersonName: "a", status: "missing" as const, actualAssignees: [], sourceConflict: "blocking_absence" as const },
+        { date: "2026-08-14", dutyFamily: "guard" as const, slot: 2, columnLabel: "x", sourceAllocationLabel: "y", resolvedSourcePersonId: "a", resolvedSourcePersonName: "a", status: "partial" as const, actualAssignees: [], sourceConflict: null },
       ],
     };
     expect(managerSummaryLabel(model)).toBe("2 דרישות Potential חסרות");

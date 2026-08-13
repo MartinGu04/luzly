@@ -86,12 +86,15 @@ function absence(overrides: Partial<ManagerAbsenceEntry> = {}): ManagerAbsenceEn
 function potentialRow(overrides: Partial<ManagerPotentialRequirementView> = {}): ManagerPotentialRequirementView {
   return {
     date: "2026-08-13",
+    dutyFamily: "evacuation_on_call",
+    slot: null,
     columnLabel: "כונן פינויים",
-    sourceRawValue: "מרטין בדיקה",
-    resolvedPersonId: "p_martin",
-    resolvedPersonName: "מרטין בדיקה",
+    sourceAllocationLabel: "מרטין בדיקה",
+    resolvedSourcePersonId: "p_martin",
+    resolvedSourcePersonName: "מרטין בדיקה",
     status: "missing",
-    namedPersonBlockingAbsence: true,
+    actualAssignees: [],
+    sourceConflict: "blocking_absence",
     ...overrides,
   };
 }
@@ -205,19 +208,58 @@ describe("ManagerPage — everyone view", () => {
     expect(container.textContent).not.toContain("שלך");
   });
 
-  it("shows full Potential coverage as a row with the covered/not-yet-evaluable state", async () => {
+  it("shows a covered Potential requirement with its actual internal assignee", async () => {
     getRequestManagerOverview.mockResolvedValue(
-      okResult(model({ potentialRequirements: [potentialRow({ status: "not_evaluable", namedPersonBlockingAbsence: false })] })),
+      okResult(
+        model({
+          potentialRequirements: [
+            potentialRow({
+              status: "covered",
+              sourceConflict: null,
+              actualAssignees: [{ personId: "p_eitan", personName: "איתן דוגמה", certainty: "confirmed" }],
+            }),
+          ],
+        }),
+      ),
+    );
+    await renderPage();
+    expect(screen.getAllByText(/מכוסה/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/איתן דוגמה/).length).toBeGreaterThan(0);
+  });
+
+  it("shows the not_evaluable state for a genuinely unsupported requirement schema", async () => {
+    getRequestManagerOverview.mockResolvedValue(
+      okResult(model({ potentialRequirements: [potentialRow({ status: "not_evaluable", sourceConflict: null })] })),
     );
     await renderPage();
     expect(screen.getAllByText(/לא ניתן להצליב אוטומטית/).length).toBeGreaterThan(0);
   });
 
-  it("shows a missing Potential requirement with the named-person conflict note", async () => {
+  it("shows a missing Potential requirement with the named-source conflict note", async () => {
     getRequestManagerOverview.mockResolvedValue(okResult(model({ potentialRequirements: [potentialRow()] })));
     await renderPage();
-    expect(screen.getAllByText(/דורש בדיקה/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/חסר/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/היעדרות חוסמת/).length).toBeGreaterThan(0);
+  });
+
+  it("never shows the Potential source label as the actual scheduled person", async () => {
+    getRequestManagerOverview.mockResolvedValue(
+      okResult(
+        model({
+          potentialRequirements: [
+            potentialRow({
+              status: "covered",
+              sourceConflict: null,
+              sourceAllocationLabel: "סייבר",
+              actualAssignees: [{ personId: "p_eitan", personName: "איתן דוגמה", certainty: "confirmed" }],
+            }),
+          ],
+        }),
+      ),
+    );
+    await renderPage();
+    expect(screen.getAllByText("סייבר").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/איתן דוגמה/).length).toBeGreaterThan(0);
   });
 
   it("preserves multiple people on the same shift, never collapsed to one", async () => {

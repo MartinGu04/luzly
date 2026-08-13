@@ -20,12 +20,15 @@ export interface ManagerIssueRowView {
 export interface ManagerPotentialRowView {
   key: string;
   dateLabel: string;
-  columnLabel: string;
-  /** The Potential cell's own honest text (a person's name, or an organizational/source label). */
-  sourceRawValue: string;
-  resolvedPersonName: string | null;
+  /** "דרישה" -- e.g. "שמירה 2" (dutyFamily + slot, when present). */
+  requirementTitle: string;
+  /** "מקור" -- the Potential cell's own honest text (a person's name, or an organizational/source label). Never treated as the actual performer. */
+  sourceAllocationLabel: string;
+  /** "בסידור בפועל" -- every internal person who actually fulfills this requirement; empty when nobody does. */
+  actualAssigneeNames: string[];
   status: ManagerRequirementStatus;
-  namedPersonBlockingAbsence: boolean;
+  /** Set only when the named SOURCE person has a blocking absence internally the same date -- independent of `status` (PR #14 §10). */
+  sourceConflictNote: string | null;
 }
 
 /** Presentation-ready view of one `ManagerShiftOverviewEntry` date+period group. */

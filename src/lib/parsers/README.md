@@ -25,17 +25,31 @@ sees output from here.
 - `types.ts` — `RawAssignment`.
 - `potential.ts` — PR #14's `parsePotentialSheet`, a structural parser
   for the Potential sheets (`פוטנציאל תקש"אס 1-6/2026` /
-  `פוטנציאל תקש"אס 7-12/2026`). Locates the operational date/day block the
-  same way `schedule.ts` does, and identifies each requirement/allocation
-  column by its own header text (`columnLabel`) rather than any invented
-  duty/requirement mapping — the real workbook wasn't available to
-  inspect for this PR, only qualitative discovery notes (see PR #14's
-  report), so this deliberately never guesses column semantics beyond
-  what's structurally certain. The sheet's separate fairness/scoring
-  side-table (`שם`, `הקצאה`, `ניקוד הפוטנציאל הקודם`, `ניקוד לפוטנציאל
-  הנוכחי`, `סופ"שים`, `פטורים`) is structurally excluded — the first
-  fairness-labeled header column (searching the same header row,
-  left-to-right) marks where the operational table ends. A cell resolves
-  to a known `Person` ONLY on an exact (whitespace-normalized) name
-  match — never fuzzy/partial matching; otherwise it stays an honest
-  organizational/source label (`resolvedPersonId: null`).
+  `פוטנציאל תקש"אס 7-12/2026`). The real workbook structure has since been
+  verified externally: BOTH sheets share the identical row-1 operational
+  header layout, columns A:T (`תאריך`, `יום`, then `שומר 1..4`,
+  `עתודה 1..2`, `אוקסיד 1..3`, `כונן פינויים`, `מטבח יומי 1..2`,
+  `מטבח מלא 1..3`, `רס"ר 1..2`, `הערות`). The exact Hebrew header text is
+  the ONLY structural schema — centralized in the `REQUIREMENT_COLUMNS`
+  map (never scattered `if (column === "L")` logic in React) — mapping
+  each header to a typed `dutyFamily` + `slot` (the exact internal
+  `Event.slot` to match, guard/reserve only) + `sourceSlot` (the
+  Potential column's own numbering, used only for deterministic
+  multiplicity-based pairing in `lib/domain/potentialReconciliation.ts`).
+  `הערות` and any other unrecognized header are never a requirement.
+  The exact `///////////////////` structural placeholder cell value (a
+  disabled/not-applicable slot for that date) is skipped alongside blank
+  cells, both via exact matching only. The sheet's separate fairness/
+  scoring side-table (title `"טבלת צדק - ..."`, headers `שם`, `הקצאה`,
+  `ניקוד הפוטנציאל הקודם`, `ניקוד לפוטנציאל הנוכחי`, `סופ"שים`, `פטורים`)
+  is verified to live on a LATER row, further right (NOT row 1) — it is
+  structurally excluded simply by never matching `REQUIREMENT_COLUMNS`
+  and by never sharing a row with a parseable operational date (every
+  data row requires its date cell to parse; a fairness title/header/score
+  row won't). Fairness itself remains intentionally out of scope for
+  PR #14. A cell resolves to a known `Person` (`resolvedSourcePersonId`)
+  ONLY on an exact (whitespace-normalized) name match — never
+  fuzzy/partial matching; otherwise it stays an honest
+  organizational/source label. That source label is NEVER automatically
+  the actual performer — see `potentialReconciliation.ts` for how the
+  internal schedule determines who really does it.
