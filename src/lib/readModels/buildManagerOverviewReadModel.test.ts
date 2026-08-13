@@ -353,7 +353,7 @@ describe("buildManagerOverviewReadModel — potential vs internal", () => {
       dutyFamily: "guard",
       slot: 1,
       columnLabel: "שומר 1",
-      sourceAllocationLabel: "סייבר H1",
+      sourceAllocationLabel: 'תקש"ל',
       resolvedSourcePersonId: null,
     });
     const h2Allocation = allocation({
@@ -364,7 +364,7 @@ describe("buildManagerOverviewReadModel — potential vs internal", () => {
       slot: 1,
       sourceSlot: 1,
       columnLabel: "עתודה 1",
-      sourceAllocationLabel: "סייבר H2",
+      sourceAllocationLabel: 'תקש"ל',
       resolvedSourcePersonId: null,
     });
 
@@ -409,7 +409,7 @@ describe("buildManagerOverviewReadModel — potential vs internal", () => {
         }),
       ],
       potentialAllocations: [
-        allocation({ resolvedSourcePersonId: null, sourceAllocationLabel: "יחידה א", date: "2026-08-13" }),
+        allocation({ resolvedSourcePersonId: null, sourceAllocationLabel: 'תקש"ל', date: "2026-08-13" }),
       ],
     });
     expect(model.potentialRequirements[0].resolvedSourcePersonName).toBeNull();
@@ -497,5 +497,256 @@ describe("buildManagerOverviewReadModel — problemsOnly / range echo", () => {
     expect(model.problemsOnly).toBe(true);
     expect(model.range.key).toBe("7d");
     expect(model.range.startDate).toBe("2026-08-13");
+  });
+});
+
+describe("buildManagerOverviewReadModel — PR #16 manager Potential scope", () => {
+  it("a mixed fixture: only the team alias + team person requirements appear, every external source is excluded", () => {
+    const model = buildModel({
+      potentialAllocations: [
+        allocation({ sourceAllocationLabel: 'תקש"ל', dutyFamily: "evacuation_on_call", date: "2026-08-13" }),
+        allocation({ sourceAllocationLabel: "מרטין", resolvedSourcePersonId: null, dutyFamily: "oxid", sourceSlot: 1, date: "2026-08-13" }),
+        allocation({ sourceAllocationLabel: "איתן מרכז", resolvedSourcePersonId: null, dutyFamily: "rasar", sourceSlot: 1, date: "2026-08-13" }),
+        allocation({ sourceAllocationLabel: "רוקם", resolvedSourcePersonId: null, dutyFamily: "daily_kitchen", sourceSlot: 1, date: "2026-08-13" }),
+        allocation({ sourceAllocationLabel: "סייבר", resolvedSourcePersonId: null, dutyFamily: "full_kitchen", sourceSlot: 1, date: "2026-08-13" }),
+        allocation({ sourceAllocationLabel: 'אמל"ח קצה', resolvedSourcePersonId: null, dutyFamily: "oxid", sourceSlot: 2, date: "2026-08-13" }),
+        allocation({ sourceAllocationLabel: 'מ"א', resolvedSourcePersonId: null, dutyFamily: "rasar", sourceSlot: 2, date: "2026-08-13" }),
+      ],
+    });
+
+    expect(model.potentialRequirements).toHaveLength(2);
+    const labels = model.potentialRequirements.map((r) => r.sourceAllocationLabel).sort();
+    expect(labels).toEqual(['מרטין', 'תקש"ל'].sort());
+    expect(model.potentialRequirements.some((r) => r.sourceAllocationLabel === "איתן מרכז")).toBe(false);
+    expect(model.potentialRequirements.some((r) => r.sourceAllocationLabel === "סייבר")).toBe(false);
+  });
+
+  it("mixed missing counts: 5 external missing + 1 team missing -> only 1 relevant missing requirement, never 6", () => {
+    const externalLabels = ["איתן מרכז", "רוקם", "סייבר", "מבצעים", 'אמל"ח קצה'];
+    const model = buildModel({
+      potentialAllocations: [
+        allocation({ sourceAllocationLabel: 'תקש"ל', dutyFamily: "evacuation_on_call", date: "2026-08-13" }),
+        ...externalLabels.map((label, index) =>
+          allocation({
+            sourceAllocationLabel: label,
+            resolvedSourcePersonId: null,
+            dutyFamily: "oxid",
+            sourceSlot: index + 1,
+            date: "2026-08-13",
+          }),
+        ),
+      ],
+    });
+
+    const missing = model.potentialRequirements.filter((r) => r.status === "missing");
+    expect(missing).toHaveLength(1);
+    expect(missing[0].sourceAllocationLabel).toBe('תקש"ל');
+  });
+
+  it("problemsOnly=1: an external missing requirement never contributes a problem -- it was excluded before reconciliation, regardless of mode", () => {
+    const model = buildModel({
+      problemsOnly: true,
+      potentialAllocations: [
+        allocation({ sourceAllocationLabel: 'תקש"ל', dutyFamily: "evacuation_on_call", date: "2026-08-13" }),
+        allocation({
+          sourceAllocationLabel: "איתן מרכז",
+          resolvedSourcePersonId: null,
+          dutyFamily: "oxid",
+          sourceSlot: 1,
+          date: "2026-08-13",
+        }),
+      ],
+      events: [
+        event({
+          personId: MARTIN.id,
+          personName: MARTIN.name,
+          date: "2026-08-13",
+          category: "duty",
+          role: null,
+          period: "unspecified",
+          dutyFamily: "evacuation_on_call",
+        }),
+      ],
+    });
+
+    expect(model.potentialRequirements).toHaveLength(1);
+    expect(model.potentialRequirements[0].status).toBe("covered");
+    expect(model.potentialRequirements.some((r) => r.status === "missing")).toBe(false);
+  });
+
+  it("sourceConflict still works for a team-owned, exact-name-resolved source after scope filtering", () => {
+    const model = buildModel({
+      potentialAllocations: [
+        allocation({
+          sourceAllocationLabel: MARTIN.name,
+          resolvedSourcePersonId: MARTIN.id,
+          dutyFamily: "evacuation_on_call",
+          date: "2026-08-13",
+        }),
+      ],
+      events: [
+        event({
+          personId: MARTIN.id,
+          personName: MARTIN.name,
+          date: "2026-08-13",
+          category: "absence",
+          role: null,
+          period: "unspecified",
+          absenceKind: "vacation",
+        }),
+      ],
+    });
+
+    expect(model.potentialRequirements).toHaveLength(1);
+    expect(model.potentialRequirements[0].sourceConflict).toBe("blocking_absence");
+  });
+
+  it("sourceConflict works for a SHORT-NAME-resolved source too (PR #16 hardening §4) -- the label is the short name, not the full name", () => {
+    const model = buildModel({
+      potentialAllocations: [
+        allocation({
+          sourceAllocationLabel: "מרטין", // short first name only -- NOT MARTIN.name
+          resolvedSourcePersonId: null, // as parsePotentialSheet would leave it (exact-name-only resolution)
+          dutyFamily: "evacuation_on_call",
+          date: "2026-08-13",
+        }),
+      ],
+      events: [
+        event({
+          personId: MARTIN.id,
+          personName: MARTIN.name,
+          date: "2026-08-13",
+          category: "absence",
+          role: null,
+          period: "unspecified",
+          absenceKind: "vacation",
+        }),
+      ],
+    });
+
+    // The requirement remains included (short-name team-person ownership)...
+    expect(model.potentialRequirements).toHaveLength(1);
+    // ...AND the enriched resolvedSourcePersonId lets sourceConflict fire.
+    expect(model.potentialRequirements[0].resolvedSourcePersonId).toBe(MARTIN.id);
+    expect(model.potentialRequirements[0].sourceConflict).toBe("blocking_absence");
+  });
+
+  it("sourceConflict works for an ANNOTATED-NAME-resolved source too (PR #16 hardening §5)", () => {
+    const mark = person({ id: "p_mark", name: "מארק ישראלי" });
+    const model = buildModel({
+      people: [MANAGER, MARTIN, EITAN, NOA, mark],
+      potentialAllocations: [
+        allocation({
+          sourceAllocationLabel: "מארק - הוקפץ מא",
+          resolvedSourcePersonId: null,
+          dutyFamily: "evacuation_on_call",
+          date: "2026-08-13",
+        }),
+      ],
+      events: [
+        event({
+          personId: mark.id,
+          personName: mark.name,
+          date: "2026-08-13",
+          category: "absence",
+          role: null,
+          period: "unspecified",
+          absenceKind: "vacation",
+        }),
+      ],
+    });
+
+    expect(model.potentialRequirements).toHaveLength(1);
+    expect(model.potentialRequirements[0].resolvedSourcePersonId).toBe(mark.id);
+    expect(model.potentialRequirements[0].sourceConflict).toBe("blocking_absence");
+  });
+
+  it("a former team member (e.g. סטיבן) not present in current personnel stays excluded -- no special-casing, fails closed like any other unknown source", () => {
+    const model = buildModel({
+      // MANAGER/MARTIN/EITAN/NOA only -- סטיבן is deliberately absent from current personnel.
+      potentialAllocations: [
+        allocation({ sourceAllocationLabel: "סטיבן", resolvedSourcePersonId: null, dutyFamily: "evacuation_on_call", date: "2026-08-13" }),
+      ],
+    });
+    expect(model.potentialRequirements).toHaveLength(0);
+  });
+
+  it("תקש\"ל אתרים: נדב/יובל are RETAINED in scope even though absent from current personnel, with resolvedSourcePersonId null and sourceConflict null (PR #16 hardening §1/§6/§8)", () => {
+    const model = buildModel({
+      // MANAGER/MARTIN/EITAN/NOA only -- נדב and יובל are deliberately absent from current personnel.
+      potentialAllocations: [
+        allocation({ sourceAllocationLabel: "נדב", resolvedSourcePersonId: null, dutyFamily: "oxid", sourceSlot: 1, date: "2026-08-13" }),
+        allocation({ sourceAllocationLabel: "יובל", resolvedSourcePersonId: null, dutyFamily: "oxid", sourceSlot: 2, date: "2026-08-13" }),
+      ],
+    });
+
+    expect(model.potentialRequirements).toHaveLength(2);
+    for (const requirement of model.potentialRequirements) {
+      expect(["נדב", "יובל"]).toContain(requirement.sourceAllocationLabel);
+      expect(requirement.resolvedSourcePersonId).toBeNull();
+      expect(requirement.resolvedSourcePersonName).toBeNull();
+      // No app Person is resolved, so a blocking-absence sourceConflict can never be fabricated for them.
+      expect(requirement.sourceConflict).toBeNull();
+    }
+  });
+
+  it("נדב stays excluded when the label doesn't match at all (e.g. misspelled) -- only the exact canonical token is recognized, no fuzzy matching", () => {
+    const model = buildModel({
+      potentialAllocations: [
+        allocation({ sourceAllocationLabel: "נדבים", resolvedSourcePersonId: null, dutyFamily: "evacuation_on_call", date: "2026-08-13" }),
+      ],
+    });
+    expect(model.potentialRequirements).toHaveLength(0);
+  });
+
+  it("if נדב is later added to current personnel, he resolves as a normal team_person with a real resolvedSourcePersonId, and sourceConflict works again", () => {
+    const nadav = person({ id: "p_nadav", name: "נדב פרידמן" });
+    const model = buildModel({
+      people: [MANAGER, MARTIN, EITAN, NOA, nadav],
+      potentialAllocations: [
+        allocation({ sourceAllocationLabel: "נדב", resolvedSourcePersonId: null, dutyFamily: "evacuation_on_call", date: "2026-08-13" }),
+      ],
+      events: [
+        event({
+          personId: nadav.id,
+          personName: nadav.name,
+          date: "2026-08-13",
+          category: "absence",
+          role: null,
+          period: "unspecified",
+          absenceKind: "vacation",
+        }),
+      ],
+    });
+
+    expect(model.potentialRequirements).toHaveLength(1);
+    expect(model.potentialRequirements[0].resolvedSourcePersonId).toBe(nadav.id);
+    expect(model.potentialRequirements[0].sourceConflict).toBe("blocking_absence");
+  });
+
+  it("an ambiguous short first name (two roster members sharing it) is excluded, not guessed", () => {
+    const dup1 = person({ id: "p_d1", name: "דניאל א" });
+    const dup2 = person({ id: "p_d2", name: "דניאל ב" });
+    const model = buildModel({
+      people: [MANAGER, MARTIN, EITAN, NOA, dup1, dup2],
+      potentialAllocations: [
+        allocation({ sourceAllocationLabel: "דניאל", resolvedSourcePersonId: null, dutyFamily: "evacuation_on_call", date: "2026-08-13" }),
+      ],
+    });
+    expect(model.potentialRequirements).toHaveLength(0);
+  });
+
+  it("does not affect internal roster/schedule/duties/absences/coverage/issues -- only Potential requirements are scoped", () => {
+    const model = buildModel({
+      events: [
+        event({ personId: EITAN.id, personName: EITAN.name, date: "2026-08-13", category: "duty", role: null, period: "unspecified", dutyFamily: "oxid" }),
+      ],
+      potentialAllocations: [
+        allocation({ sourceAllocationLabel: "סייבר", resolvedSourcePersonId: null, dutyFamily: "oxid", sourceSlot: 1, date: "2026-08-13" }),
+      ],
+    });
+    expect(model.potentialRequirements).toHaveLength(0);
+    expect(model.duties.some((d) => d.personId === EITAN.id)).toBe(true);
+    expect(model.roster).toHaveLength(4);
   });
 });

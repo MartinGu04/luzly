@@ -93,7 +93,18 @@ person's own schedule, and that broader scope is authorized, not assumed:
   arbitrarily-chosen "target" person's perspective, and never a
   reinvented coverage algorithm) — and reconciles Potential allocations
   via `lib/domain/potentialReconciliation.ts` against the verified real
-  requirement schema. The selected-person section reuses
+  requirement schema. Before reconciliation (PR #16), `potentialAllocations`
+  is mapped through `lib/domain/potentialSourceOwnership.ts`'s
+  `scopeManagerPotentialAllocation` (classifying each allocation exactly
+  once) so only this team's own Potential responsibility (תקש"ל/תקשאס
+  aliases + resolvable team members, short-name/annotated sources
+  included) ever reaches `reconcilePotentialAllocations` — an external
+  organizational source (איתן/רוקם/מבצעים/סייבר/מ"א/אמל"ח קצה/מנהלה/...)
+  never produces a `"missing"` row and never affects any problem/attention
+  count derived from `potentialRequirements`. That same step also enriches
+  a short/annotated source's `resolvedSourcePersonId` (the parser only
+  resolves exact full names) so `sourceConflict` keeps working for it. The
+  selected-person section reuses
   `buildPersonalScheduleReadModel()` OUTRIGHT from the same in-memory
   `people`/`events`/`shiftSchedule` snapshot — no per-person Google
   fetch, no reimplemented current/next/counterpart/duty/issue logic. An

@@ -142,3 +142,80 @@ no Google API calls and no spreadsheet-cell access.
   internal performer stays `"covered"` even while carrying a source
   conflict worth the manager's attention — a source conflict never by
   itself downgrades an otherwise-covered requirement to `"missing"`.
+- `potentialSourceOwnership.ts` — PR #16's Manager Overview scope
+  cleanup. The Potential sheet contains requirements for MANY
+  organizational sources (this team's own, plus others like איתן/רוקם/
+  מבצעים/סייבר/מ"א/אמל"ח קצה/מנהלה) — `lib/parsers/potential.ts` keeps
+  parsing all of them (broad, unchanged), but Manager Overview is
+  intentionally scoped to only תקש"ל / תקשאס responsibility.
+  `classifyPotentialSourceOwnership(sourceAllocationLabel, personnel)` is
+  the single centralized classifier (`team_alias` / `team_person` /
+  `team_unresolved_person` / `external` / `unknown`), checked in this
+  order:
+  1. Exact team-alias match, quote-insensitive canonical comparison
+     (תקש"ל / תקש״ל / תקשל all canonicalize the same; likewise
+     תקשאס-family). No fuzzy matching — only quote characters are
+     stripped before comparison.
+  2. Exact full personnel-name match (whitespace-normalized) — the
+     strongest person evidence, so it is resolved BEFORE the external
+     check below (an exact full name is not a coincidental collision).
+  3. A known external organizational token as the label's LEADING word
+     (איתן/רוקם/מבצעים/סייבר/מא/אמלח/מנהלה) — this makes "איתן מרכז",
+     "איתן צפון", "איתן דרום", bare "איתן", and "סייבר החלפה איתן" all
+     `external`, even though a real team member's first name happens to
+     be איתן. External-label classification always wins over
+     short-name/annotated-name PERSON SHORTHAND from this point on
+     (`isManagerOwnedPotentialAllocation`'s whole reason for existing).
+  4. A unique short first name as the label's leading token (מרטין/איתי/
+     גדעון/מארק/טוביה/...) — covers both a bare short name and a
+     "name + annotation" label ("מארק - הוקפץ מא", "טוביה - החלפה
+     סייבר") since only the LEADING token is ever used to resolve a
+     person; no natural-language parsing beyond that. Two personnel
+     sharing the same first name never resolve (fails closed, same
+     convention as `lib/parsers/potential.ts`'s exact-name resolution).
+  5. A known תקש"ל אתרים (a sub-team within our overall responsibility)
+     unresolved-person label as the leading token — currently נדב/יובל, a
+     small explicit canonical set (never fuzzy matching). They appear in
+     Potential without a current `כ"א` record — real domain structure, not
+     stale data — so they resolve to `team_unresolved_person`, checked
+     AFTER current-personnel short-name resolution: if either name is
+     later added to `כ"א`, step 4 resolves them as a real `team_person`
+     there instead, and this state stops applying to that name
+     automatically. `סטיבן` is deliberately NOT in this set — he
+     previously belonged to the team but has since moved elsewhere, so
+     "סטיבן" with no personnel match correctly falls through to
+     `unknown` (current responsibility only, never historical).
+  6. Otherwise `unknown` — fails closed, excluded from Manager Overview,
+     never guessed either way.
+  `isManagerOwnedPotentialAllocation` is `true` for `team_alias`/
+  `team_person`/`team_unresolved_person` -- a simple boolean convenience
+  for a caller that doesn't need enrichment (see below). `parsePotentialSheet`
+  and `PotentialAllocation.resolvedSourcePersonId` (exact full-name only,
+  used for `sourceConflict`) are both left exactly as they were — this
+  classifier does its own independent person resolution rather than
+  changing the parser's.
+
+  `scopeManagerPotentialAllocation(allocation, personnel)` is what
+  `buildManagerOverviewReadModel.ts` actually calls, once per allocation
+  (hardening pass -- classifying the same allocation twice, once via
+  `isManagerOwnedPotentialAllocation` and again separately, is exactly
+  what this consolidates away). It both scopes AND enriches:
+  `team_alias`/`team_unresolved_person` pass the allocation through
+  unchanged (a `team_unresolved_person`'s `resolvedSourcePersonId` stays
+  whatever it already was -- `null`, coming from the parser -- since there
+  is no app `Person` to enrich it with; NEVER a fabricated personId, and
+  `sourceConflict` downstream correctly stays `null` too, since that check
+  requires a resolved person to prove a blocking absence against);
+  `team_person` returns a COPY with `resolvedSourcePersonId` set to the
+  classifier's resolved person id (closing a real gap -- a short/annotated
+  person source like "מרטין" or "מארק - הוקפץ מא" would otherwise reach
+  `reconcilePotentialAllocations` with `resolvedSourcePersonId: null` from
+  the parser and silently lose `sourceConflict` detection, since that
+  check reads `resolvedSourcePersonId` only); `external`/`unknown` both
+  return `null`. Never mutates its input. `buildManagerOverviewReadModel.ts`
+  filters `potentialAllocations` through it BEFORE calling
+  `reconcilePotentialAllocations` — an external/unknown source therefore
+  never produces a `"missing"` row, never contributes to any manager
+  problem/attention count, and never reaches reconciliation at all.
+  `/manager/fairness` is a separate person-based
+  domain (PR #15) and is NOT scoped by this filter.
