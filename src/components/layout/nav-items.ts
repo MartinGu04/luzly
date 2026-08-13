@@ -21,13 +21,14 @@ export interface NavItem {
   inBottomNav: boolean;
 }
 
-// Only "dashboard" is a real, working route today. Everything else previews
-// modules that will be built once further Google Sheets features exist, so
-// they are rendered as disabled placeholders rather than dead links.
+// "dashboard", "schedule", and "duties" are real, working routes today.
+// Everything else previews modules that will be built once further Google
+// Sheets features exist, so they are rendered as disabled placeholders
+// rather than dead links.
 export const navItems: NavItem[] = [
   { label: "לוח בקרה", shortLabel: "היום שלי", href: "/", enabled: true, icon: LayoutDashboard, inBottomNav: true },
   { label: "לוח משמרות", shortLabel: "משמרות", href: "/schedule", enabled: true, icon: CalendarDays, inBottomNav: true },
-  { label: "תורנויות", shortLabel: "תורנויות", href: "/duties", enabled: false, icon: ShieldCheck, inBottomNav: true },
+  { label: "תורנויות", shortLabel: "תורנויות", href: "/duties", enabled: true, icon: ShieldCheck, inBottomNav: true },
   { label: "מי איתי", shortLabel: "מי איתי", href: "/with-me", enabled: false, icon: Users, inBottomNav: true },
   { label: "התנגשויות", shortLabel: "התנגשויות", href: "/conflicts", enabled: false, icon: AlertTriangle, inBottomNav: false },
   { label: "מול מנהל", shortLabel: "מנהל", href: "/manager", enabled: false, icon: UserCog, inBottomNav: false },

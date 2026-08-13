@@ -3,10 +3,12 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { BottomNav } from "./BottomNav";
 import { navItems } from "./nav-items";
 
-vi.mock("next/navigation", () => ({ usePathname: () => "/" }));
+const usePathname = vi.fn(() => "/");
+vi.mock("next/navigation", () => ({ usePathname: () => usePathname() }));
 
 afterEach(() => {
   cleanup();
+  usePathname.mockReturnValue("/");
 });
 
 describe("BottomNav", () => {
@@ -40,10 +42,23 @@ describe("BottomNav", () => {
     expect(scheduleLink).not.toHaveAttribute("aria-current");
   });
 
-  it("other future routes (duties, with-me) remain disabled", () => {
+  it("the duties route is enabled: a real link, not aria-current on a different pathname", () => {
     render(<BottomNav />);
-    expect(screen.queryByRole("link", { name: "תורנויות" })).toBeNull();
+    const dutiesLink = screen.getByRole("link", { name: "תורנויות" });
+    expect(dutiesLink).toHaveAttribute("href", "/duties");
+    expect(dutiesLink).not.toHaveAttribute("aria-current");
+  });
+
+  it("other future routes (with-me) remain disabled", () => {
+    render(<BottomNav />);
     expect(screen.queryByRole("link", { name: "מי איתי" })).toBeNull();
+  });
+
+  it("marks /duties as the current page when that's the active pathname", () => {
+    usePathname.mockReturnValue("/duties");
+    render(<BottomNav />);
+    const dutiesLink = screen.getByRole("link", { current: "page" });
+    expect(dutiesLink).toHaveAttribute("href", "/duties");
   });
 
   it("disabled entries are marked aria-disabled, genuinely non-interactive", () => {
