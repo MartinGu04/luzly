@@ -142,3 +142,100 @@ The client only ever receives safe roster `{id, name}[]` (see
 `ManagerPersonSelector`, the one narrow Client Component this screen
 uses) — never the full `ManagerOverviewReadModel`, never raw personnel
 rows, never raw Potential sheets.
+
+## Manager Fairness (PR #15)
+
+`ManagerFairnessReadModel` is a SEPARATE, manager-only read model from
+`ManagerOverviewReadModel` — Fairness and Potential reconciliation happen
+to live on the same sheet tabs (`פוטנציאל תקש"אס 1-6/2026` /
+`7-12/2026`) but are two different domains and are never merged into one
+giant read model.
+
+- **Shared auth/fetch boundary.** `managerWorkbookContext.ts` extracts
+  PR #14's manager authorization + manager-wide fetch boundary out of
+  `managerOverview.ts` into `loadManagerWorkbookContext()`, reused by
+  BOTH Manager Overview and Manager Fairness. It performs the exact same
+  security sequence PR #14 established (personal-loader gate →
+  `isManager` check → the ONE manager batch fetch, personnel + schedule +
+  settings + potentialH1 + potentialH2 → fresh re-verification against
+  the snapshot's own personnel sheet → fail closed), then returns the
+  re-verified manager `Person`, the full parsed roster, and the raw
+  `RawWorkbookSnapshot` for the caller to parse further sheets from.
+  `managerOverview.ts` now only does what's Overview-specific (settings →
+  shift schedule, schedule → events, Potential reconciliation);
+  `managerFairness.ts` only picks the ONE Potential sheet the resolved
+  period needs and parses its Fairness table. Neither caller ever
+  triggers a second/third Google fetch — a manager hitting
+  `/manager/fairness` costs exactly the same 2 fetches (1 personal-loader
+  + 1 manager batch) as hitting `/manager`.
+- **`lib/domain/fairnessTable.ts`** — `FairnessPersonRow` /
+  `FairnessTotalsRow` / `FairnessTargets`, the domain-owned shapes
+  `lib/parsers/fairness.ts` produces (same convention as
+  `PotentialAllocation`/`lib/parsers/potential.ts`).
+- **`lib/parsers/fairness.ts`** — locates each Potential sheet's separate
+  Fairness table ("טבלת צדק") STRUCTURALLY, by its exact six header
+  labels (שם / הקצאה / ניקוד הפוטנציאל הקודם / ניקוד לפוטנציאל הנוכחי /
+  סופ"שים / פטורים) appearing together on one row — never a hard-coded
+  W:AB column range. Parses person rows until the "סך הכל:" row, parses
+  that total row separately, and locates the period-specific X/2X target
+  note below the table by regex over each row's joined cell text (so the
+  note parses whether it's one cell or split across several) — a
+  missing/malformed note returns `null` targets, never a guessed default.
+  "-" always means unavailable (`null`), never silently 0.
+- **`lib/domain/fairnessExemptions.ts`** — centralized, exact-match-only
+  known exemption → affected `DutyFamily[]` mapping (שמירות → guard;
+  מטבח → daily_kitchen/full_kitchen/weekend_kitchen; רס"ר → rasar). An
+  unknown exemption label is preserved raw with an empty
+  `affectedDutyFamilies` — never fuzzy-matched, never dropped.
+- **`lib/domain/fairnessAnalysis.ts`** — pure analysis over the sheet's
+  own `currentScore`, which is NEVER replaced: `resolveComparisonTarget`
+  (only טכנאי/אחמ"ש get a deterministic target — every other allocation
+  label gets `null`, never invented), `computeScoreDelta` (`null` when
+  there's no previous score, never treated as 0), `computeGapToTarget`,
+  `computeNormalizedLoad` (`currentScore / target`, letting roles with
+  different target scales compare fairly), and `sumDisplayedFairnessRows`
+  (the independently computed sum of the currently parsed person rows).
+  This last one is deliberately NOT a validation of the sheet's own
+  reported "סך הכל:" total — the real workbook's totals can be built from
+  a formula that doesn't equal a naive sum of every displayed row (a
+  verified real example: H1's previous-score total is
+  `=SUM(Y9:Y19)/4*6`), so `reportedXTotal` (from the parser) and
+  `displayedXSum` (from this function) are two independent facts, never
+  compared, never producing a "discrepancy"/"mismatch" conclusion.
+- **`lib/domain/fairnessPeriod.ts`** — `FairnessPeriodKey` ("h1"/"h2"),
+  `resolveFairnessPeriod` (Jan-Jun → h1, Jul-Dec → h2 from
+  `LocalNow.date`, never a browser-local date; an invalid/missing
+  `?period=` falls back to the period containing `now`), and
+  `fairnessPeriodLabel` (year read from `now`, never hard-coded).
+- **`managerFairnessTypes.ts`** — `ManagerFairnessReadModel` and its safe
+  projections (`ManagerFairnessPersonRowView`,
+  `ManagerFairnessExemptionView`, `ManagerFairnessTotalsView`,
+  `ManagerFairnessChartSlice`). Never carries email,
+  `sourceSheet`/`sourceCell`, raw Google rows, or the spreadsheet id.
+  `ManagerFairnessChartSlice` (`{id, name, score, percentage}`) is the
+  ONLY shape the chart's client-safe rendering ever touches.
+- **`buildManagerFairnessReadModel.ts`** — the pure, deterministic
+  builder: projects each `FairnessPersonRow` through the analysis
+  functions above, sorts rows by normalized load ascending (rows without
+  one sort after, stable tiebreak by source name) — this is relative-load
+  ordering only, NEVER labeled "next up"/"recommended" (that's PR #16's
+  job) — and builds the raw-`currentScore` chart slices (null-score rows
+  excluded; an all-null/zero team produces an empty chart, never a
+  division by zero).
+- **`managerFairnessParams.ts`** — strict `?period=`/`?person=` parsing,
+  same convention as `managerOverviewParams.ts`.
+- **`managerFairness.ts`** — `loadManagerFairnessReadModel()`, the
+  server-only orchestration layer: `loadManagerWorkbookContext()` →
+  resolve the period → pick that one Potential sheet →
+  `parseFairnessTable()` → `buildManagerFairnessReadModel()`.
+- **`getRequestManagerFairness.ts`** — `cache(loadManagerFairnessReadModel)`,
+  keyed on primitive `(period, personId)` args, same convention as
+  `getRequestManagerOverview.ts`.
+
+`/manager/fairness` (`app/(app)/manager/fairness/page.tsx`) renders this
+read model entirely server-side. The only client-safe payload that ever
+reaches a narrower surface is `ManagerFairnessChartSlice[]` for the donut
+chart — implemented as plain server-rendered SVG (no chart library, no
+client component at all). PR #15 never recommends who should be assigned
+next ("הבא בתור") — that is explicitly out of scope, reserved for a
+future PR #16 that adds assignment-specific eligibility.
