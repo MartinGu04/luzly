@@ -12,10 +12,12 @@ afterEach(() => {
 });
 
 describe("BottomNav", () => {
-  it("34. disabled items render no clickable link -- no dead routes", () => {
+  it("34. any disabled bottom-nav item renders no clickable link -- no dead routes", () => {
     render(<BottomNav />);
+    // The curated bottom-nav set (/, /schedule, /duties, /with-me) is fully
+    // enabled today, so this may currently iterate zero items -- it's a
+    // forward-looking safety net for whenever a future item is disabled.
     const disabledItems = navItems.filter((item) => item.inBottomNav && !item.enabled);
-    expect(disabledItems.length).toBeGreaterThan(0);
     for (const item of disabledItems) {
       expect(screen.queryByRole("link", { name: item.label })).toBeNull();
     }
@@ -49,9 +51,17 @@ describe("BottomNav", () => {
     expect(dutiesLink).not.toHaveAttribute("aria-current");
   });
 
-  it("other future routes (with-me) remain disabled", () => {
+  it("the with-me route is enabled: a real link, not aria-current on a different pathname", () => {
     render(<BottomNav />);
-    expect(screen.queryByRole("link", { name: "מי איתי" })).toBeNull();
+    const withMeLink = screen.getByRole("link", { name: "מי איתי" });
+    expect(withMeLink).toHaveAttribute("href", "/with-me");
+    expect(withMeLink).not.toHaveAttribute("aria-current");
+  });
+
+  it("other future routes (conflicts, manager, reminders, sync) are not part of the bottom nav at all", () => {
+    render(<BottomNav />);
+    expect(screen.queryByText("התנגשויות")).toBeNull();
+    expect(screen.queryByText("מנהל")).toBeNull();
   });
 
   it("marks /duties as the current page when that's the active pathname", () => {
@@ -61,10 +71,16 @@ describe("BottomNav", () => {
     expect(dutiesLink).toHaveAttribute("href", "/duties");
   });
 
-  it("disabled entries are marked aria-disabled, genuinely non-interactive", () => {
+  it("marks /with-me as the current page when that's the active pathname", () => {
+    usePathname.mockReturnValue("/with-me");
+    render(<BottomNav />);
+    const withMeLink = screen.getByRole("link", { current: "page" });
+    expect(withMeLink).toHaveAttribute("href", "/with-me");
+  });
+
+  it("any currently-disabled bottom-nav entry would be marked aria-disabled, genuinely non-interactive", () => {
     const { container } = render(<BottomNav />);
     const disabled = container.querySelectorAll('[aria-disabled="true"]');
-    expect(disabled.length).toBeGreaterThan(0);
     disabled.forEach((el) => expect(el.tagName).not.toBe("A"));
   });
 });

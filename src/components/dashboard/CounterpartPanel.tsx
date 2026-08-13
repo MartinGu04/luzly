@@ -1,26 +1,13 @@
-import { CircleAlert, CircleCheck, CircleHelp, UserRound } from "lucide-react";
+import { UserRound } from "lucide-react";
 import type { PersonalCounterpart, PersonalShiftContext } from "@/lib/readModels/types";
-import { coverageStatusLabel, periodLabel, roleLabel } from "@/lib/presentation/labels";
+import { periodLabel, roleLabel } from "@/lib/presentation/labels";
 import { Badge } from "@/components/ui/Badge";
+import { CoverageBadge } from "@/components/ui/CoverageBadge";
 
 interface CounterpartPanelProps {
   context: PersonalShiftContext;
   compact?: boolean;
 }
-
-const COVERAGE_TONE = {
-  full: "success",
-  partial: "warning",
-  missing: "critical",
-  not_evaluable: "neutral",
-} as const;
-
-const COVERAGE_ICON = {
-  full: CircleCheck,
-  partial: CircleAlert,
-  missing: CircleAlert,
-  not_evaluable: CircleHelp,
-} as const;
 
 /**
  * "מי איתי?" -- contextual to one shift, never a standalone list of every
@@ -31,31 +18,12 @@ const COVERAGE_ICON = {
  */
 export function CounterpartPanel({ context, compact = false }: CounterpartPanelProps) {
   const hasCounterparts = context.primaryCounterparts.length > 0 || context.shadowCounterparts.length > 0;
-  const CoverageIcon = COVERAGE_ICON[context.coverageStatus];
-  const tone = COVERAGE_TONE[context.coverageStatus];
 
   return (
     <div className={compact ? "space-y-3" : "space-y-4"}>
       <div className="flex items-center justify-between gap-3">
         <h3 className="text-sm font-semibold text-foreground">מי איתי?</h3>
-        <span
-          className={`flex items-center gap-1.5 text-xs font-medium ${
-            tone === "success"
-              ? "text-success"
-              : tone === "warning"
-                ? "text-warning"
-                : tone === "critical"
-                  ? "text-critical"
-                  : "text-muted"
-          }`}
-        >
-          <CoverageIcon
-            className={`h-3.5 w-3.5 ${tone === "critical" ? "animate-issue-pulse" : ""}`}
-            aria-hidden="true"
-            strokeWidth={2}
-          />
-          {coverageStatusLabel(context.coverageStatus)}
-        </span>
+        <CoverageBadge status={context.coverageStatus} />
       </div>
 
       {hasCounterparts ? (
