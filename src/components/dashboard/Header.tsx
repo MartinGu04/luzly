@@ -28,7 +28,7 @@ export function Header({ personName, localNow }: HeaderProps) {
   return (
     <header className="animate-fade-up flex items-start justify-between gap-4">
       <div className="min-w-0">
-        <h1 className="flex items-center gap-2 truncate text-2xl font-bold text-foreground sm:text-3xl">
+        <h1 className="flex items-center gap-2 truncate text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
           <span>
             {greeting}
             {firstName ? `, ${firstName}` : ""}

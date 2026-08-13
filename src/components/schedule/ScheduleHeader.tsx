@@ -7,7 +7,7 @@ interface ScheduleHeaderProps {
 export function ScheduleHeader({ monthLabel, monthRangeSubtitle }: ScheduleHeaderProps) {
   return (
     <div className="min-w-0">
-      <h1 className="text-2xl font-bold text-foreground sm:text-3xl">לוח משמרות</h1>
+      <h1 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">לוח משמרות</h1>
       {monthLabel ? <p className="mt-1.5 text-lg font-semibold text-foreground sm:text-xl">{monthLabel}</p> : null}
       {monthRangeSubtitle ? <p className="mt-0.5 text-xs text-muted">{monthRangeSubtitle}</p> : null}
     </div>

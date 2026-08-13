@@ -1,5 +1,6 @@
 "use client";
 
+import { Bell } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { APP_NAME } from "@/lib/config/productName";
@@ -14,19 +15,37 @@ interface SidebarProps {
 /**
  * Desktop-only right-side navigation surface (renders first in the RTL flex
  * row -- see AppShell). Hidden below `lg`, where `BottomNav` takes over.
+ *
+ * A proper app-shell rail (Design Pass PR #19): `sticky top-0` with an
+ * explicit `h-dvh` so it never stretches to match tall page content --
+ * only the nav list itself scrolls internally (`overflow-y-auto`) if it
+ * ever outgrows the viewport, while the top identity block and
+ * `IdentityFooter` stay pinned to the top/bottom of the viewport.
  */
 export function Sidebar({ person }: SidebarProps) {
   const pathname = usePathname();
   const items = visibleNavItems(person?.isManager ?? false);
 
   return (
-    <aside className="relative hidden w-[264px] shrink-0 flex-col border-e border-sidebar-border bg-sidebar text-sidebar-foreground lg:flex">
-      <div className="flex items-center justify-between px-6 py-6">
-        <span className="text-lg font-bold tracking-tight text-sidebar-foreground">{APP_NAME}</span>
-        <ThemeToggle />
+    <aside className="sticky top-0 hidden h-dvh w-[300px] shrink-0 flex-col border-e border-sidebar-border bg-sidebar text-sidebar-foreground lg:flex">
+      <div className="flex flex-col gap-3 px-5 pt-6 pb-4">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xl font-bold tracking-tight text-sidebar-foreground">{APP_NAME}</span>
+          <button
+            type="button"
+            disabled
+            aria-disabled="true"
+            aria-label="התראות (בקרוב)"
+            title="התראות -- בקרוב"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sidebar-muted opacity-60 disabled:cursor-not-allowed"
+          >
+            <Bell className="h-[16px] w-[16px]" aria-hidden="true" strokeWidth={1.75} />
+          </button>
+        </div>
+        <ThemeToggle variant="sidebar" />
       </div>
 
-      <nav className="flex flex-1 flex-col gap-1 px-3" aria-label="ניווט ראשי">
+      <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-3 py-2" aria-label="ניווט ראשי">
         {items.map((item) => {
           const Icon = item.icon;
           const isActive = item.enabled && pathname === item.href;
@@ -36,13 +55,13 @@ export function Sidebar({ person }: SidebarProps) {
               <div
                 key={item.href}
                 aria-disabled="true"
-                className="flex items-center justify-between gap-2 rounded-xl px-3 py-2.5 text-sm font-medium text-sidebar-muted"
+                className="flex min-h-[46px] items-center justify-between gap-2 rounded-xl px-3 py-2.5 text-[15px] font-medium text-sidebar-muted opacity-70"
               >
                 <span className="flex items-center gap-3">
-                  <Icon className="h-[18px] w-[18px] opacity-60" aria-hidden="true" strokeWidth={1.75} />
+                  <Icon className="h-[20px] w-[20px] opacity-70" aria-hidden="true" strokeWidth={1.75} />
                   {item.label}
                 </span>
-                <span className="rounded-full bg-overlay-soft px-2 py-0.5 text-[10px] text-sidebar-muted">בקרוב</span>
+                <span className="rounded-full bg-sidebar-hover px-2 py-0.5 text-[10px] text-sidebar-muted">בקרוב</span>
               </div>
             );
           }
@@ -52,10 +71,10 @@ export function Sidebar({ person }: SidebarProps) {
               key={item.href}
               href={item.href}
               aria-current={isActive ? "page" : undefined}
-              className={`group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors duration-200 ${
+              className={`group relative flex min-h-[46px] items-center gap-3 rounded-xl px-3 py-2.5 text-[15px] font-medium transition-colors duration-200 ${
                 isActive
-                  ? "bg-overlay-strong text-sidebar-foreground"
-                  : "text-sidebar-foreground hover:bg-overlay-soft"
+                  ? "bg-sidebar-active text-sidebar-foreground ring-1 ring-sidebar-active-ring"
+                  : "text-sidebar-foreground hover:bg-sidebar-hover"
               }`}
             >
               {isActive ? (
@@ -65,7 +84,7 @@ export function Sidebar({ person }: SidebarProps) {
                 />
               ) : null}
               <Icon
-                className={`h-[18px] w-[18px] ${isActive ? "text-primary" : "opacity-80"}`}
+                className={`h-[20px] w-[20px] shrink-0 ${isActive ? "text-primary" : "opacity-80"}`}
                 aria-hidden="true"
                 strokeWidth={1.75}
               />

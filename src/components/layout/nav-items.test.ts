@@ -64,3 +64,15 @@ describe("navItems — obsolete sync placeholder removed (PR #18)", () => {
     expect(visibleNavItems(true).some((item) => item.href === "/manager")).toBe(true);
   });
 });
+
+describe("navItems — manager nav label rename (Design Pass, PR #19)", () => {
+  it('the /manager nav label is "אזור מנהל", not the old "מול מנהל"', () => {
+    const manager = navItems.find((item) => item.href === "/manager");
+    expect(manager?.label).toBe("אזור מנהל");
+  });
+
+  it("the /manager route itself is unchanged -- this is a wording-only rename", () => {
+    const manager = navItems.find((item) => item.label === "אזור מנהל");
+    expect(manager?.href).toBe("/manager");
+  });
+});
