@@ -79,6 +79,19 @@ export default async function DutiesPage({ searchParams }: DutiesPageProps) {
 
   const focusDate = focus.status === "active" ? todayDate : (focus.blocks[0]?.startDate ?? null);
 
+  /**
+   * When there's no focus duty AND nothing else upcoming, the hero empty
+   * state ("אין לך תורנויות קרובות 🎉") already says everything -- a second
+   * "אין תורנויות נוספות באופק הקרוב." panel right below it would just
+   * repeat the same fact. This never applies to the history view (which
+   * always renders its own list/empty state), and never applies when a
+   * focus duty exists but nothing else is upcoming -- there, the second
+   * panel adds real information ("nothing beyond what's already shown
+   * above").
+   */
+  const suppressRedundantUpcomingEmptyState =
+    view === "upcoming" && focus.status === "none" && upcomingList.length === 0;
+
   return (
     <div className="flex flex-col gap-6">
       <DutiesHeader />
@@ -94,13 +107,15 @@ export default async function DutiesPage({ searchParams }: DutiesPageProps) {
         <DutyViewToggle view={view} />
       </div>
 
-      <DutyBlockList
-        blocks={listBlocks.map((block) => buildDutyBlockView(block, model.dutyActions, model.localNow))}
-        title={view === "history" ? "היסטוריה אחרונה" : undefined}
-        emptyMessage={
-          view === "history" ? "אין עדיין היסטוריית תורנויות." : "אין תורנויות נוספות באופק הקרוב."
-        }
-      />
+      {suppressRedundantUpcomingEmptyState ? null : (
+        <DutyBlockList
+          blocks={listBlocks.map((block) => buildDutyBlockView(block, model.dutyActions, model.localNow))}
+          title={view === "history" ? "היסטוריה אחרונה" : undefined}
+          emptyMessage={
+            view === "history" ? "אין עדיין היסטוריית תורנויות." : "אין תורנויות נוספות באופק הקרוב."
+          }
+        />
+      )}
     </div>
   );
 }

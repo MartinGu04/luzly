@@ -166,6 +166,67 @@ describe("DutiesPage — focus section", () => {
   });
 });
 
+describe("DutiesPage — no duplicate empty state", () => {
+  it("regression: the upcoming view shows the hero empty state only ONCE when there is no focus and nothing upcoming, never a second redundant panel", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(okResult(model({ dutyBlocks: [] })));
+    const element = await DutiesPage({ searchParams: searchParams() });
+    render(element);
+
+    expect(screen.getByText("אין לך תורנויות קרובות")).toBeInTheDocument();
+    expect(screen.queryByText("אין תורנויות נוספות באופק הקרוב.")).toBeNull();
+  });
+
+  it("keeps the view toggle visible even when the redundant panel is suppressed, so history is still reachable", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(okResult(model({ dutyBlocks: [] })));
+    const element = await DutiesPage({ searchParams: searchParams() });
+    render(element);
+
+    expect(screen.getByRole("link", { name: "קרובות" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "היסטוריה" })).toBeInTheDocument();
+  });
+
+  it("keeps the 'nothing else upcoming' panel when a focus duty EXISTS but there is nothing beyond it -- there it adds real information", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(
+      okResult(
+        model({
+          dutyBlocks: [dutyBlock({ dates: ["2026-08-12", "2026-08-13", "2026-08-14"] })], // active, the only block
+        }),
+      ),
+    );
+    const element = await DutiesPage({ searchParams: searchParams() });
+    render(element);
+
+    expect(screen.getByText("בתורנות עכשיו")).toBeInTheDocument();
+    expect(screen.getByText("אין תורנויות נוספות באופק הקרוב.")).toBeInTheDocument();
+  });
+
+  it("the history view still renders its own empty state, unaffected by the upcoming-view suppression", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(okResult(model({ dutyBlocks: [] })));
+    const element = await DutiesPage({ searchParams: searchParams("history") });
+    render(element);
+
+    expect(screen.getByText("אין לך תורנויות קרובות")).toBeInTheDocument();
+    expect(screen.getByText("אין עדיין היסטוריית תורנויות.")).toBeInTheDocument();
+  });
+
+  it("the history view still renders its list even when the upcoming view would suppress the panel", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(
+      okResult(
+        model({
+          dutyBlocks: [
+            dutyBlock({ startDate: "2026-08-01", endDate: "2026-08-02", dates: ["2026-08-01", "2026-08-02"] }),
+          ],
+        }),
+      ),
+    );
+    const element = await DutiesPage({ searchParams: searchParams("history") });
+    render(element);
+
+    expect(screen.getByText("שמירה 2")).toBeInTheDocument();
+    expect(screen.getByText("היסטוריה אחרונה")).toBeInTheDocument();
+  });
+});
+
 describe("DutiesPage — upcoming/history lists", () => {
   it("the remaining upcoming list excludes the focus block, never repeating it", async () => {
     getRequestPersonalSchedule.mockResolvedValue(
@@ -191,13 +252,15 @@ describe("DutiesPage — upcoming/history lists", () => {
         model({
           dutyBlocks: [
             dutyBlock({ startDate: "2026-08-01", endDate: "2026-08-02", dates: ["2026-08-01", "2026-08-02"] }),
+            dutyBlock({ dutyFamily: "reserve", slot: 3, startDate: "2026-08-20", endDate: "2026-08-20", dates: ["2026-08-20"] }),
           ],
         }),
       ),
     );
     const element = await DutiesPage({ searchParams: searchParams() });
     render(element);
-    expect(screen.getByText("אין תורנויות נוספות באופק הקרוב.")).toBeInTheDocument();
+    expect(screen.queryByText("שמירה 2")).toBeNull();
+    expect(screen.getByText("עתודה 3")).toBeInTheDocument();
   });
 
   it("a completed block appears in the history view", async () => {
