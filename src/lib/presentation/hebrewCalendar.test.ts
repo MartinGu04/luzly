@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatHebrewCalendarDate, getHolidayContext } from "./hebrewCalendar";
+import { formatHebrewCalendarDate, formatHebrewMonthRange, getHolidayContext } from "./hebrewCalendar";
 
 describe("formatHebrewCalendarDate", () => {
   it("formats an ordinary date in Hebrew gematriya", () => {
@@ -88,5 +88,30 @@ describe("getHolidayContext", () => {
 
   it("returns null for an unparseable date, never throws", () => {
     expect(getHolidayContext("not-a-date")).toBeNull();
+  });
+});
+
+describe("formatHebrewMonthRange", () => {
+  it("spans two Hebrew months within the same Hebrew year", () => {
+    expect(formatHebrewMonthRange(2026, 8)).toBe("אב–אלול תשפ״ו");
+  });
+
+  it("collapses to a single Hebrew month when the whole Gregorian month sits inside it", () => {
+    // February 2025 (1st through 28th) falls entirely within Shvat 5785.
+    expect(formatHebrewMonthRange(2025, 2)).toBe("שבט תשפ״ה");
+  });
+
+  it("returns null when the Gregorian month crosses a Hebrew year boundary (around Rosh Hashana)", () => {
+    // September 2026 runs from Elul 5786 into Tishrei 5787.
+    expect(formatHebrewMonthRange(2026, 9)).toBeNull();
+  });
+
+  it("returns null for an out-of-range month", () => {
+    expect(formatHebrewMonthRange(2026, 0)).toBeNull();
+    expect(formatHebrewMonthRange(2026, 13)).toBeNull();
+  });
+
+  it("is deterministic", () => {
+    expect(formatHebrewMonthRange(2026, 8)).toBe(formatHebrewMonthRange(2026, 8));
   });
 });

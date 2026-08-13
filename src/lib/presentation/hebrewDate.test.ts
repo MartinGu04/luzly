@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   formatCompactDate,
+  formatHebrewMonthYear,
   formatHebrewWeekday,
   formatHebrewWeekdayAndDate,
   formatShortWeekday,
   relativeDayLabel,
+  SHORT_WEEKDAY_LABELS,
 } from "./hebrewDate";
 
 describe("formatHebrewWeekdayAndDate", () => {
@@ -45,6 +47,25 @@ describe("formatCompactDate", () => {
 
   it("returns null for an invalid date", () => {
     expect(formatCompactDate("bad")).toBeNull();
+  });
+});
+
+describe("formatHebrewMonthYear", () => {
+  it("formats a month/year header label", () => {
+    expect(formatHebrewMonthYear(2026, 8)).toBe("אוגוסט 2026");
+  });
+
+  it("returns null for an out-of-range month", () => {
+    expect(formatHebrewMonthYear(2026, 0)).toBeNull();
+    expect(formatHebrewMonthYear(2026, 13)).toBeNull();
+  });
+});
+
+describe("SHORT_WEEKDAY_LABELS", () => {
+  it("is Sunday-first with 7 entries, matching dayOfWeek's 0=Sunday convention", () => {
+    expect(SHORT_WEEKDAY_LABELS).toHaveLength(7);
+    expect(SHORT_WEEKDAY_LABELS[0]).toBe("א׳");
+    expect(SHORT_WEEKDAY_LABELS[6]).toBe("ש׳");
   });
 });
 

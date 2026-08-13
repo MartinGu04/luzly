@@ -67,6 +67,10 @@ export function buildPersonalScheduleReadModel(
     .filter((event) => isEventStillRelevant(event, shiftSchedule, now))
     .map((event) => toEventView(event, shiftSchedule, now));
 
+  const shiftCalendarEvents = sortedPersonEvents
+    .filter((event) => event.category === "shift")
+    .map((event) => toEventView(event, shiftSchedule, now));
+
   const assignmentEvents = sortedPersonEvents.filter(isAssignmentEvent);
 
   const currentAssignments = assignmentEvents
@@ -116,6 +120,7 @@ export function buildPersonalScheduleReadModel(
     localNow: now,
     todayEvents,
     upcomingEvents,
+    shiftCalendarEvents,
     currentAssignments,
     nextAssignmentGroup,
     currentShiftContexts,

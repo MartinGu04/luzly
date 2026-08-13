@@ -19,6 +19,7 @@ describe("3. layout/page reuse the same request-scoped loader, never a second di
   const appDir = path.resolve(__dirname, "(app)");
   const layoutSource = fs.readFileSync(path.join(appDir, "layout.tsx"), "utf8");
   const pageSource = fs.readFileSync(path.join(appDir, "page.tsx"), "utf8");
+  const scheduleSource = fs.readFileSync(path.join(appDir, "schedule", "page.tsx"), "utf8");
 
   const FORBIDDEN_DIRECT_CALLS = [/resolveCurrentPerson/, /\bloadPersonalScheduleReadModel\b/];
 
@@ -33,6 +34,13 @@ describe("3. layout/page reuse the same request-scoped loader, never a second di
     expect(pageSource).toContain("getRequestPersonalSchedule");
     for (const pattern of FORBIDDEN_DIRECT_CALLS) {
       expect(pageSource).not.toMatch(pattern);
+    }
+  });
+
+  it("the schedule page only imports getRequestPersonalSchedule, not the raw loader -- same request-scoped load as the layout, no second Google request", () => {
+    expect(scheduleSource).toContain("getRequestPersonalSchedule");
+    for (const pattern of FORBIDDEN_DIRECT_CALLS) {
+      expect(scheduleSource).not.toMatch(pattern);
     }
   });
 });
