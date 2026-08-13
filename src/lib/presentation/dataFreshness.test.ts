@@ -48,14 +48,58 @@ describe("formatDataFreshnessLabel — deterministic boundaries (PR #17 §17)", 
     expect(formatDataFreshnessLabel(fetchedSecondsAgo(3 * 60 * 60), NOW)).toBe("עודכן לפני 3 שעות");
   });
 
-  it("many hours (e.g. 30) -> עודכן לפני 30 שעות, a restrained representation with no invented day bucket", () => {
-    expect(formatDataFreshnessLabel(fetchedSecondsAgo(30 * 60 * 60), NOW)).toBe("עודכן לפני 30 שעות");
+  it("23 hours (still within the hour bucket, just under a day) -> עודכן לפני 23 שעות", () => {
+    expect(formatDataFreshnessLabel(fetchedSecondsAgo(23 * 60 * 60), NOW)).toBe("עודכן לפני 23 שעות");
+  });
+});
+
+describe("formatDataFreshnessLabel — day boundaries (PR #18 §2/§4)", () => {
+  it("23h59m -> still עודכן לפני 23 שעות, one minute short of a day", () => {
+    expect(formatDataFreshnessLabel(fetchedSecondsAgo(23 * 3600 + 59 * 60), NOW)).toBe("עודכן לפני 23 שעות");
+  });
+
+  it("24h -> עודכן לפני יום", () => {
+    expect(formatDataFreshnessLabel(fetchedSecondsAgo(24 * 3600), NOW)).toBe("עודכן לפני יום");
+  });
+
+  it("30h -> still עודכן לפני יום", () => {
+    expect(formatDataFreshnessLabel(fetchedSecondsAgo(30 * 3600), NOW)).toBe("עודכן לפני יום");
+  });
+
+  it("47h59m -> still עודכן לפני יום, one minute short of two days", () => {
+    expect(formatDataFreshnessLabel(fetchedSecondsAgo(47 * 3600 + 59 * 60), NOW)).toBe("עודכן לפני יום");
+  });
+
+  it("48h -> עודכן לפני יומיים", () => {
+    expect(formatDataFreshnessLabel(fetchedSecondsAgo(48 * 3600), NOW)).toBe("עודכן לפני יומיים");
+  });
+
+  it("60h -> still עודכן לפני יומיים", () => {
+    expect(formatDataFreshnessLabel(fetchedSecondsAgo(60 * 3600), NOW)).toBe("עודכן לפני יומיים");
+  });
+
+  it("71h59m -> still עודכן לפני יומיים, one minute short of three days", () => {
+    expect(formatDataFreshnessLabel(fetchedSecondsAgo(71 * 3600 + 59 * 60), NOW)).toBe("עודכן לפני יומיים");
+  });
+
+  it("72h -> עודכן לפני 3 ימים", () => {
+    expect(formatDataFreshnessLabel(fetchedSecondsAgo(72 * 3600), NOW)).toBe("עודכן לפני 3 ימים");
+  });
+
+  it("96h -> עודכן לפני 4 ימים", () => {
+    expect(formatDataFreshnessLabel(fetchedSecondsAgo(96 * 3600), NOW)).toBe("עודכן לפני 4 ימים");
+  });
+
+  it("never invents a week/month bucket, no matter how old", () => {
+    const label = formatDataFreshnessLabel(fetchedSecondsAgo(400 * 24 * 3600), NOW);
+    expect(label).toBe("עודכן לפני 400 ימים");
+    expect(label).not.toMatch(/שבוע|שבועות|חודש|חודשים|שנה|שנים/);
   });
 });
 
 describe("formatDataFreshnessLabel — never accusatory, never claims sync/save", () => {
   it("does not contain misleading sync/save language at any age", () => {
-    for (const seconds of [0, 90, 3600, 7200]) {
+    for (const seconds of [0, 90, 3600, 7200, 25 * 3600, 96 * 3600]) {
       const label = formatDataFreshnessLabel(fetchedSecondsAgo(seconds), NOW);
       expect(label).not.toContain("מסונכרן");
       expect(label).not.toContain("נשמר");

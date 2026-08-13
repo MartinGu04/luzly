@@ -3,7 +3,6 @@ import {
   Bell,
   CalendarDays,
   LayoutDashboard,
-  RefreshCw,
   ShieldCheck,
   UserCog,
   Users,
@@ -44,7 +43,6 @@ export const navItems: NavItem[] = [
   { label: "התנגשויות", shortLabel: "בדיקות", href: "/conflicts", enabled: true, icon: AlertTriangle, inBottomNav: true },
   { label: "מול מנהל", shortLabel: "מנהל", href: "/manager", enabled: true, icon: UserCog, inBottomNav: false, managerOnly: true },
   { label: "תזכורות", shortLabel: "תזכורות", href: "/reminders", enabled: false, icon: Bell, inBottomNav: false },
-  { label: "סנכרון", shortLabel: "סנכרון", href: "/sync", enabled: false, icon: RefreshCw, inBottomNav: false },
 ];
 
 /** The nav items a given viewer may see at all -- `managerOnly` items are omitted entirely (never shown disabled) for a non-manager. */

@@ -79,7 +79,7 @@ describe("BottomNav", () => {
     expect(screen.getByText("בדיקות")).toBeInTheDocument();
   });
 
-  it("still disabled future routes (manager, reminders, sync) are not part of the bottom nav at all", () => {
+  it("still disabled/manager-only routes (manager, reminders) are not part of the bottom nav at all", () => {
     render(<BottomNav />);
     expect(screen.queryByText("מנהל")).toBeNull();
   });
