@@ -15,11 +15,15 @@ vi.mock("@/lib/readModels/getRequestManagerOverview", () => ({ getRequestManager
 
 const usePathname = vi.fn(() => "/manager");
 const useSearchParams = vi.fn(() => new URLSearchParams());
-const useRouter = vi.fn(() => ({ push: vi.fn() }));
+const useRouter = vi.fn(() => ({ push: vi.fn(), refresh: vi.fn() }));
 vi.mock("next/navigation", () => ({
   usePathname: () => usePathname(),
   useSearchParams: () => useSearchParams(),
   useRouter: () => useRouter(),
+}));
+
+vi.mock("@/components/ui/DataFreshnessStatus", () => ({
+  DataFreshnessStatus: ({ fetchedAt }: { fetchedAt: string }) => <div data-testid="freshness">{fetchedAt}</div>,
 }));
 
 const { default: ManagerPage } = await import("./page");
@@ -102,7 +106,10 @@ function potentialRow(overrides: Partial<ManagerPotentialRequirementView> = {}):
 function personalModel(overrides: Partial<PersonalScheduleReadModel> = {}): PersonalScheduleReadModel {
   return {
     person: { id: "p_martin", name: "מרטין בדיקה", isManager: false, isTechnician: true, isSupervisor: false, personnelType: null },
-    fetchedAt: "2026-08-13T08:00:00.000Z",
+    // Deliberately DIFFERENT from the manager model's own fetchedAt below --
+    // proves the freshness status never accidentally borrows this nested
+    // personal timestamp (PR #17 §10/§19).
+    fetchedAt: "2026-08-13T07:00:00.000Z",
     localNow: { date: "2026-08-13", minuteOfDay: 600 },
     todayEvents: [],
     upcomingEvents: [],
@@ -405,6 +412,29 @@ describe("ManagerPage — selected person view", () => {
     const { container } = await renderPage({ person: "p_martin" });
     expect(screen.queryByRole("button", { name: "התנתקות" })).toBeNull();
     expect(container.querySelector("aside")).toBeNull();
+  });
+});
+
+describe("ManagerPage — data freshness uses ManagerOverviewReadModel.fetchedAt (PR #17 §10/§19)", () => {
+  it("everyone view: the freshness status receives the manager model's own fetchedAt", async () => {
+    getRequestManagerOverview.mockResolvedValue(okResult(model({ fetchedAt: "2026-08-13T09:30:00.000Z" })));
+    await renderPage();
+    expect(screen.getByTestId("freshness")).toHaveTextContent("2026-08-13T09:30:00.000Z");
+  });
+
+  it("selected-person view: STILL uses the manager model's own fetchedAt, never the nested selectedPerson's personal timestamp", async () => {
+    getRequestManagerOverview.mockResolvedValue(
+      okResult(
+        model({
+          fetchedAt: "2026-08-13T09:30:00.000Z",
+          selectedPersonId: "p_martin",
+          selectedPerson: personalModel({ fetchedAt: "2026-08-13T01:00:00.000Z" }),
+        }),
+      ),
+    );
+    await renderPage({ person: "p_martin" });
+    expect(screen.getByTestId("freshness")).toHaveTextContent("2026-08-13T09:30:00.000Z");
+    expect(screen.queryByText("2026-08-13T01:00:00.000Z")).toBeNull();
   });
 });
 

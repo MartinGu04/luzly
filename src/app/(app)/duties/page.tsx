@@ -4,6 +4,7 @@ import { DutyBlockList } from "@/components/duties/DutyBlockList";
 import { DutyFocusSection } from "@/components/duties/DutyFocusSection";
 import { DutyViewToggle } from "@/components/duties/DutyViewToggle";
 import type { DutyBlockView } from "@/components/duties/types";
+import { DataFreshnessStatus } from "@/components/ui/DataFreshnessStatus";
 import type { LocalNow } from "@/lib/domain/localNow";
 import {
   actionsForBlock,
@@ -95,6 +96,7 @@ export default async function DutiesPage({ searchParams }: DutiesPageProps) {
   return (
     <div className="flex flex-col gap-6">
       <DutiesHeader />
+      <DataFreshnessStatus fetchedAt={model.fetchedAt} />
 
       <DutyFocusSection
         status={focus.status}

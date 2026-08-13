@@ -10,6 +10,9 @@ import type {
 import { Dashboard } from "./Dashboard";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+vi.mock("@/components/ui/DataFreshnessStatus", () => ({
+  DataFreshnessStatus: ({ fetchedAt }: { fetchedAt: string }) => <div data-testid="freshness">{fetchedAt}</div>,
+}));
 
 afterEach(() => {
   cleanup();
@@ -219,5 +222,12 @@ describe("Dashboard composition — vacation state wiring", () => {
 
     expect(screen.queryByText("היום שלך פנוי")).toBeNull();
     expect(screen.getByText("הכול שקט כרגע")).toBeInTheDocument();
+  });
+});
+
+describe("Dashboard — data freshness uses PersonalScheduleReadModel.fetchedAt (PR #17 §10/§19)", () => {
+  it("the freshness status receives this model's own fetchedAt", () => {
+    render(<Dashboard model={model({ fetchedAt: "2026-08-13T10:45:00.000Z" })} />);
+    expect(screen.getByTestId("freshness")).toHaveTextContent("2026-08-13T10:45:00.000Z");
   });
 });

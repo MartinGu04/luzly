@@ -3,6 +3,7 @@ import { EmptyTeamState } from "@/components/with-me/EmptyTeamState";
 import { ShiftContextCard } from "@/components/with-me/ShiftContextCard";
 import type { ShiftContextView } from "@/components/with-me/types";
 import { WithMeHeader } from "@/components/with-me/WithMeHeader";
+import { DataFreshnessStatus } from "@/components/ui/DataFreshnessStatus";
 import type { CoverageStatus } from "@/lib/domain/shiftCoverage";
 import { assignmentEmoji } from "@/lib/presentation/emoji";
 import { formatHebrewCalendarDate } from "@/lib/presentation/hebrewCalendar";
@@ -88,6 +89,7 @@ export default async function WithMePage() {
   return (
     <div className="flex flex-col gap-6">
       <WithMeHeader />
+      <DataFreshnessStatus fetchedAt={model.fetchedAt} />
 
       {hasCurrent ? (
         <section className="flex flex-col gap-4">

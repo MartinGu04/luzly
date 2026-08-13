@@ -16,6 +16,7 @@ import {
 } from "@/components/manager/ManagerSelectedPersonView";
 import { ManagerSourceOfTruthNote } from "@/components/manager/ManagerSourceOfTruthNote";
 import { ManagerSummaryStrip } from "@/components/manager/ManagerSummaryStrip";
+import { DataFreshnessStatus } from "@/components/ui/DataFreshnessStatus";
 import type {
   ManagerAbsenceRowView,
   ManagerDutyRowView,
@@ -249,6 +250,7 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
     return (
       <div className="flex flex-col gap-6">
         <ManagerHeader />
+        <DataFreshnessStatus fetchedAt={model.fetchedAt} />
         {controls}
         <ManagerSelectedPersonView
           person={{
@@ -288,6 +290,7 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
   return (
     <div className="flex flex-col gap-6">
       <ManagerHeader />
+      <DataFreshnessStatus fetchedAt={model.fetchedAt} />
       {controls}
       {summary ? <ManagerSummaryStrip summary={summary} /> : null}
 

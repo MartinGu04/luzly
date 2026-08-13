@@ -3,7 +3,7 @@
 - `layout/` — app shell, right-side desktop `Sidebar`, mobile `BottomNav`
   (replacing the old hamburger/drawer), `IdentityFooter`.
 - `ui/` — small generic building blocks (`Panel` surface variants, `Badge`,
-  `Avatar`, `Card`).
+  `Avatar`, `Card`, `DataFreshnessStatus` — see `ui/README.md`).
 - `auth/` — login-screen components (e.g. `GoogleSignInButton`). Client
   components only talk to `lib/supabase/client.ts`; identity/personnel
   resolution stays server-side in `lib/auth`.

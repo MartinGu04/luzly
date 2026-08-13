@@ -4,6 +4,10 @@ import type { PersonalDutyAction, PersonalDutyBlock, PersonalScheduleReadModel }
 
 const getRequestPersonalSchedule = vi.fn();
 vi.mock("@/lib/readModels/getRequestPersonalSchedule", () => ({ getRequestPersonalSchedule }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+vi.mock("@/components/ui/DataFreshnessStatus", () => ({
+  DataFreshnessStatus: ({ fetchedAt }: { fetchedAt: string }) => <div data-testid="freshness">{fetchedAt}</div>,
+}));
 
 const { default: DutiesPage } = await import("./page");
 
@@ -317,5 +321,14 @@ describe("DutiesPage — security", () => {
     const element = await DutiesPage({ searchParams: searchParams() });
     const { container } = render(element);
     expect(container.querySelector("aside")).toBeNull();
+  });
+});
+
+describe("DutiesPage — data freshness uses PersonalScheduleReadModel.fetchedAt (PR #17 §10/§19)", () => {
+  it("the freshness status receives this page's own model.fetchedAt", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(okResult(model({ fetchedAt: "2026-08-13T10:45:00.000Z" })));
+    const element = await DutiesPage({ searchParams: searchParams() });
+    render(element);
+    expect(screen.getByTestId("freshness")).toHaveTextContent("2026-08-13T10:45:00.000Z");
   });
 });

@@ -1,4 +1,5 @@
 import { BLOCKING_ABSENCE_KINDS } from "@/lib/domain/operationalIssues";
+import { DataFreshnessStatus } from "@/components/ui/DataFreshnessStatus";
 import type { PersonalEventView, PersonalScheduleReadModel } from "@/lib/readModels/types";
 import { Header } from "./Header";
 import { Hero } from "./Hero";
@@ -55,6 +56,7 @@ export function Dashboard({ model }: DashboardProps) {
   return (
     <div className="flex flex-col gap-6">
       <Header personName={model.person.name} localNow={model.localNow} />
+      <DataFreshnessStatus fetchedAt={model.fetchedAt} />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="flex flex-col gap-6 lg:order-1">

@@ -3,6 +3,7 @@ import { MonthNav } from "@/components/schedule/MonthNav";
 import { ScheduleCalendar } from "@/components/schedule/ScheduleCalendar";
 import { ScheduleHeader } from "@/components/schedule/ScheduleHeader";
 import type { DayMeta } from "@/components/schedule/types";
+import { DataFreshnessStatus } from "@/components/ui/DataFreshnessStatus";
 import {
   buildMonthGrid,
   formatMonthParam,
@@ -108,6 +109,8 @@ export default async function SchedulePage({ searchParams }: SchedulePageProps) 
           isOnCurrentMonth={isOnCurrentMonth}
         />
       </div>
+
+      <DataFreshnessStatus fetchedAt={model.fetchedAt} />
 
       <ScheduleCalendar
         key={monthParam}
