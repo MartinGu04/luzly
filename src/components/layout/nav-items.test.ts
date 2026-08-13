@@ -35,3 +35,32 @@ describe("visibleNavItems", () => {
     }
   });
 });
+
+describe("navItems — obsolete sync placeholder removed (PR #18)", () => {
+  it('"סנכרון" is not in navItems anymore', () => {
+    expect(navItems.some((item) => item.label === "סנכרון" || item.shortLabel === "סנכרון")).toBe(false);
+  });
+
+  it('"/sync" is not in navItems anymore', () => {
+    expect(navItems.some((item) => item.href === "/sync")).toBe(false);
+  });
+
+  it('"תזכורות" remains as the existing disabled future placeholder', () => {
+    const reminders = navItems.find((item) => item.href === "/reminders");
+    expect(reminders).toBeDefined();
+    expect(reminders?.label).toBe("תזכורות");
+    expect(reminders?.enabled).toBe(false);
+  });
+
+  it("every other enabled route is unchanged", () => {
+    const enabledHrefs = navItems.filter((item) => item.enabled).map((item) => item.href);
+    expect(enabledHrefs).toEqual(["/", "/schedule", "/duties", "/with-me", "/conflicts", "/manager"]);
+  });
+
+  it("manager visibility rules are unchanged", () => {
+    const manager = navItems.find((item) => item.href === "/manager");
+    expect(manager?.managerOnly).toBe(true);
+    expect(visibleNavItems(false).some((item) => item.href === "/manager")).toBe(false);
+    expect(visibleNavItems(true).some((item) => item.href === "/manager")).toBe(true);
+  });
+});

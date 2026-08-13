@@ -102,10 +102,11 @@ describe("Sidebar", () => {
       expect(screen.getByRole("link", { name: /התנגשויות/ })).toHaveAttribute("href", "/conflicts");
     });
 
-    it("/reminders and /sync remain disabled placeholders for a manager too", () => {
+    it("/reminders remains a disabled placeholder for a manager too, and the removed sync item never renders", () => {
       renderWithTheme(<Sidebar person={{ name: "דני מנהל", isManager: true }} />);
       expect(screen.queryByRole("link", { name: "תזכורות" })).toBeNull();
       expect(screen.queryByRole("link", { name: "סנכרון" })).toBeNull();
+      expect(screen.queryByText("סנכרון")).toBeNull();
     });
   });
 });
