@@ -71,4 +71,41 @@ describe("Sidebar", () => {
       expect(screen.queryByRole("link", { name: item.label })).toBeNull();
     }
   });
+
+  describe("manager-only navigation", () => {
+    it("a non-manager sees no /manager link at all -- not even disabled", () => {
+      renderWithTheme(<Sidebar person={{ name: "דני עובד", isManager: false }} />);
+      expect(screen.queryByRole("link", { name: /מול מנהל/ })).toBeNull();
+      expect(screen.queryByText("מול מנהל")).toBeNull();
+    });
+
+    it("no person prop at all (defensive default) also hides /manager", () => {
+      renderWithTheme(<Sidebar />);
+      expect(screen.queryByText("מול מנהל")).toBeNull();
+    });
+
+    it("a manager sees /manager as a real enabled link", () => {
+      renderWithTheme(<Sidebar person={{ name: "דני מנהל", isManager: true }} />);
+      const link = screen.getByRole("link", { name: /מול מנהל/ });
+      expect(link).toHaveAttribute("href", "/manager");
+    });
+
+    it("marks /manager as the active route with aria-current for a manager", () => {
+      usePathname.mockReturnValue("/manager");
+      renderWithTheme(<Sidebar person={{ name: "דני מנהל", isManager: true }} />);
+      expect(screen.getByRole("link", { name: /מול מנהל/ })).toHaveAttribute("aria-current", "page");
+    });
+
+    it("existing enabled routes remain visible for a manager too", () => {
+      renderWithTheme(<Sidebar person={{ name: "דני מנהל", isManager: true }} />);
+      expect(screen.getByRole("link", { name: /תורנויות/ })).toHaveAttribute("href", "/duties");
+      expect(screen.getByRole("link", { name: /התנגשויות/ })).toHaveAttribute("href", "/conflicts");
+    });
+
+    it("/reminders and /sync remain disabled placeholders for a manager too", () => {
+      renderWithTheme(<Sidebar person={{ name: "דני מנהל", isManager: true }} />);
+      expect(screen.queryByRole("link", { name: "תזכורות" })).toBeNull();
+      expect(screen.queryByRole("link", { name: "סנכרון" })).toBeNull();
+    });
+  });
 });

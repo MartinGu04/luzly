@@ -1,4 +1,4 @@
-import type { DutyFamily, EventPeriod, EventRole } from "@/lib/domain/event";
+import type { AbsenceKind, DutyFamily, EventPeriod, EventRole } from "@/lib/domain/event";
 import type { IssueReason, IssueSeverity, RoleCapabilityMismatchMetadata } from "@/lib/domain/operationalIssues";
 import type { CoverageStatus } from "@/lib/domain/shiftCoverage";
 
@@ -45,6 +45,25 @@ export function issueReasonLabel(reason: IssueReason): string {
   return ISSUE_REASON_LABELS[reason];
 }
 
+/**
+ * Third-person variant of `issueReasonLabel` for the manager overview,
+ * where an issue belongs to someone other than the viewer -- the personal
+ * "שלך" ("your") phrasing above would be grammatically wrong once a
+ * `personName` is displayed alongside it. Same reasons, same meaning,
+ * neutral wording only.
+ */
+const MANAGER_ISSUE_REASON_LABELS: Record<IssueReason, string> = {
+  blocking_absence_with_assignment: "קיימת חפיפה בין היעדרות לשיבוץ",
+  shift_coverage_missing: "חסר כיסוי למשמרת",
+  shift_coverage_partial: "הכיסוי למשמרת חלקי",
+  invalid_shift_time: "שעות המשמרת דורשות בדיקה",
+  role_capability_mismatch: "השיבוץ דורש בדיקת תפקיד",
+};
+
+export function managerIssueReasonLabel(reason: IssueReason): string {
+  return MANAGER_ISSUE_REASON_LABELS[reason];
+}
+
 const ISSUE_SEVERITY_LABELS: Record<IssueSeverity, string> = {
   critical: "דחוף",
   review: "לבדיקה",
@@ -75,4 +94,17 @@ export function requiredCapabilityLabel(
   capability: RoleCapabilityMismatchMetadata["requiredCapability"],
 ): string {
   return capability === "isSupervisor" ? 'אחמ"ש' : "טכנאי";
+}
+
+/** The exact Hebrew phrase `event.ts` itself recognizes for each `AbsenceKind` -- the inverse of its `ABSENCE_KIND_BY_PHRASE` classification map. */
+const ABSENCE_KIND_LABELS: Record<AbsenceKind, string> = {
+  vacation: "חופש",
+  abroad: 'חו"ל',
+  medical: "גימלים",
+  day_off: "יום ד",
+  after: "אפטר",
+};
+
+export function absenceKindLabel(kind: AbsenceKind): string {
+  return ABSENCE_KIND_LABELS[kind];
 }
