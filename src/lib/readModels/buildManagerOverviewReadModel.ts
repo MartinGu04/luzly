@@ -11,6 +11,7 @@ import {
   reconcilePotentialAllocations,
   type ManagerRequirementReconciliation,
 } from "@/lib/domain/potentialReconciliation";
+import { isManagerOwnedPotentialAllocation } from "@/lib/domain/potentialSourceOwnership";
 import { analyzeUnitShiftCoverage } from "@/lib/domain/shiftCoverage";
 import type { ShiftSchedule } from "@/lib/domain/shiftSchedule";
 import type { Person } from "@/lib/domain/types";
@@ -34,7 +35,13 @@ export interface BuildManagerOverviewReadModelInput {
   people: readonly Person[];
   /** Full parsed internal Event[] (every person). */
   events: readonly Event[];
-  /** Combined H1 + H2 Potential allocations, structurally parsed, never fuzzy-matched. */
+  /**
+   * Combined H1 + H2 Potential allocations, structurally parsed, never
+   * fuzzy-matched -- covers EVERY organizational source on the sheet, not
+   * just this team's. This builder narrows that down to this team's own
+   * responsibility before reconciliation (PR #16 §5/§27) -- see
+   * `isManagerOwnedPotentialAllocation` below.
+   */
   potentialAllocations: readonly PotentialAllocation[];
   shiftSchedule: ShiftSchedule;
   fetchedAt: string;
@@ -94,8 +101,19 @@ export function buildManagerOverviewReadModel(
     .map((event) => toManagerAbsenceEntry(event, peopleById))
     .sort(compareAbsenceEntries);
 
+  // Manager Overview is intentionally scoped to this team's own Potential
+  // responsibility (PR #16) -- filtered BEFORE reconciliation, so an
+  // external organizational source (or a genuinely unrecognized one) never
+  // reaches `reconcilePotentialAllocations`, never contributes a "missing"
+  // row, and never affects any problem/attention count derived from it.
+  // The parser itself stays broad (`parsePotentialSheet` parses every
+  // source); only this manager-facing projection narrows the scope.
   const potentialRequirements: ManagerPotentialRequirementView[] = reconcilePotentialAllocations(
-    potentialAllocations.filter((allocation) => rangeDates.has(allocation.date)),
+    potentialAllocations.filter(
+      (allocation) =>
+        rangeDates.has(allocation.date) &&
+        isManagerOwnedPotentialAllocation(allocation.sourceAllocationLabel, people),
+    ),
     events,
   ).map((reconciliation) => toManagerPotentialRequirementView(reconciliation, peopleById));
 
