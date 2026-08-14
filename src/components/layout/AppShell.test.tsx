@@ -1,8 +1,13 @@
 import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ThemeProvider } from "@/lib/theme/ThemeProvider";
 import { AppShell } from "./AppShell";
+
+/** Opens the mobile header's profile menu, which now hides the sign-out affordance/theme action until the Avatar trigger is clicked. */
+function openMobileProfileMenu() {
+  fireEvent.click(screen.getByRole("button", { name: /תפריט פרופיל/ }));
+}
 
 vi.mock("next/navigation", () => ({ usePathname: () => "/" }));
 
@@ -15,22 +20,30 @@ function renderWithTheme(ui: ReactElement) {
 }
 
 describe("AppShell — mobile identity/sign-out", () => {
-  it("renders a mobile sign-out affordance alongside the desktop Sidebar's IdentityFooter", () => {
+  it("the desktop Sidebar's sign-out is immediately visible; the mobile one is reachable behind the profile menu", () => {
     renderWithTheme(
       <AppShell person={{ name: "דני בדיקה", isManager: false }}>
         <div>DASHBOARD_CONTENT</div>
       </AppShell>,
     );
-    // Two sign-out buttons: one in the mobile identity bar, one in the desktop Sidebar's IdentityFooter.
-    expect(screen.getAllByRole("button", { name: "התנתקות" })).toHaveLength(2);
+    // Only the desktop IdentityFooter's sign-out is visible before the mobile profile menu opens.
+    expect(screen.getAllByRole("button", { name: "התנתקות" })).toHaveLength(1);
+    expect(screen.queryByRole("menuitem", { name: "התנתקות" })).toBeNull();
+
+    openMobileProfileMenu();
+
+    // Once open, the mobile profile menu's own sign-out (role="menuitem") joins the desktop one (role="button").
+    expect(screen.getAllByRole("button", { name: "התנתקות" })).toHaveLength(1);
+    expect(screen.getByRole("menuitem", { name: "התנתקות" })).toBeInTheDocument();
   });
 
-  it("the mobile identity bar shows the safe person name", () => {
+  it("the safe person name is reachable via the mobile profile menu, not permanently in the header", () => {
     renderWithTheme(
       <AppShell person={{ name: "דני בדיקה", isManager: false }}>
         <div>content</div>
       </AppShell>,
     );
+    openMobileProfileMenu();
     expect(screen.getAllByText("דני בדיקה").length).toBeGreaterThan(0);
   });
 
@@ -85,7 +98,12 @@ describe("AppShell — sign-out looks destructive", () => {
         <div>content</div>
       </AppShell>,
     );
-    const buttons = screen.getAllByRole("button", { name: "התנתקות" });
+    openMobileProfileMenu();
+
+    const buttons = [
+      ...screen.getAllByRole("button", { name: "התנתקות" }),
+      ...screen.getAllByRole("menuitem", { name: "התנתקות" }),
+    ];
     expect(buttons).toHaveLength(2);
     for (const button of buttons) {
       expect(button.className).toMatch(/text-critical/);
@@ -137,13 +155,23 @@ describe("AppShell — shell utility bar / live clock (Design Pass PR #19)", () 
 });
 
 describe("AppShell — theme control", () => {
-  it("renders the theme toggle in both the desktop sidebar and the mobile identity bar", () => {
+  it("renders the 3-option theme toggle only in the desktop sidebar, not the mobile header (Design Pass PR #22)", () => {
     renderWithTheme(
       <AppShell person={{ name: "דני בדיקה", isManager: false }}>
         <div>content</div>
       </AppShell>,
     );
-    // Two radiogroups: one in Sidebar, one in MobileIdentityBar.
-    expect(screen.getAllByRole("radiogroup", { name: "ערכת נושא" })).toHaveLength(2);
+    expect(screen.getAllByRole("radiogroup", { name: "ערכת נושא" })).toHaveLength(1);
+  });
+
+  it("the mobile profile menu offers a single binary light/dark action instead", () => {
+    renderWithTheme(
+      <AppShell person={{ name: "דני בדיקה", isManager: false }}>
+        <div>content</div>
+      </AppShell>,
+    );
+    openMobileProfileMenu();
+    const toggle = screen.getByRole("menuitem", { name: /עבור למצב/ });
+    expect(toggle).toBeInTheDocument();
   });
 });

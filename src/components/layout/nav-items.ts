@@ -40,7 +40,7 @@ export const navItems: NavItem[] = [
   { label: "לוח משמרות", shortLabel: "משמרות", href: "/schedule", enabled: true, icon: CalendarDays, inBottomNav: true },
   { label: "תורנויות", shortLabel: "תורנויות", href: "/duties", enabled: true, icon: ShieldCheck, inBottomNav: true },
   { label: "מי איתי", shortLabel: "מי איתי", href: "/with-me", enabled: true, icon: Users, inBottomNav: true },
-  { label: "התנגשויות", shortLabel: "בדיקות", href: "/conflicts", enabled: true, icon: AlertTriangle, inBottomNav: true },
+  { label: "התנגשויות", shortLabel: "התנגשויות", href: "/conflicts", enabled: true, icon: AlertTriangle, inBottomNav: true },
   { label: "אזור מנהל", shortLabel: "מנהל", href: "/manager", enabled: true, icon: UserCog, inBottomNav: false, managerOnly: true },
   { label: "תזכורות", shortLabel: "תזכורות", href: "/reminders", enabled: false, icon: Bell, inBottomNav: false },
 ];

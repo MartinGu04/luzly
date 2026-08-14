@@ -61,7 +61,7 @@ describe("BottomNav", () => {
 
   it("the conflicts route is enabled: a real link, not aria-current on a different pathname", () => {
     render(<BottomNav />);
-    const conflictsLink = screen.getByRole("link", { name: "בדיקות" });
+    const conflictsLink = screen.getByRole("link", { name: "התנגשויות" });
     expect(conflictsLink).toHaveAttribute("href", "/conflicts");
     expect(conflictsLink).not.toHaveAttribute("aria-current");
   });
@@ -73,10 +73,10 @@ describe("BottomNav", () => {
     expect(conflictsLink).toHaveAttribute("href", "/conflicts");
   });
 
-  it("uses the compact 'בדיקות' short label on mobile, not the full desktop label", () => {
+  it("the conflicts item's bottom-nav label matches its full nav label -- \"התנגשויות\" (Design Pass PR #22)", () => {
     render(<BottomNav />);
-    expect(screen.queryByText("התנגשויות")).toBeNull();
-    expect(screen.getByText("בדיקות")).toBeInTheDocument();
+    expect(screen.getByText("התנגשויות")).toBeInTheDocument();
+    expect(screen.queryByText("בדיקות")).toBeNull();
   });
 
   it("still disabled/manager-only routes (manager, reminders) are not part of the bottom nav at all", () => {

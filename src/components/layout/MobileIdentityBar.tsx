@@ -1,8 +1,6 @@
-import { LogOut, UserCog } from "lucide-react";
-import Link from "next/link";
-import { signOutAction } from "@/lib/auth/actions";
-import { Avatar } from "@/components/ui/Avatar";
-import { ThemeToggle } from "@/components/theme/ThemeToggle";
+import { Bell } from "lucide-react";
+import { APP_NAME } from "@/lib/config/productName";
+import { MobileProfileMenu } from "./MobileProfileMenu";
 
 interface MobileIdentityBarProps {
   name: string;
@@ -10,47 +8,44 @@ interface MobileIdentityBarProps {
 }
 
 /**
- * The only mobile sign-out affordance: below `lg`, `Sidebar` (and its
- * `IdentityFooter`) is hidden and `BottomNav` has no identity slot, so
- * without this a signed-in mobile user would have no way to sign out.
- * Also the mobile home for the theme control (no new route, no drawer),
- * and -- for a manager only -- the mobile entry point to `/manager`. The
- * five-item BottomNav deliberately never grows a sixth entry for it; this
- * compact shortcut is the mobile equivalent of the desktop Sidebar's
- * manager-only link. Uses only the already-safe name/isManager passed
- * down from the app shell (the same identity the request-scoped read
- * model already resolved) -- no email, no extra Google/auth fetch.
+ * The mobile app header (Design Pass PR #22 "mobile header polish") --
+ * replaces the old identity ROW (name, role, manager shortcut, 3-button
+ * theme control, and logout all visible at once) with a clean product
+ * header: the `APP_NAME` wordmark on the physical right, and a compact
+ * [Bell, Avatar] cluster on the physical left -- the Avatar is the single
+ * entry point into everything the old row exposed permanently (identity,
+ * "אזור מנהל" for a manager, theme, sign-out), now behind
+ * `MobileProfileMenu`.
+ *
+ * Still the only mobile sign-out affordance (below `lg`, `Sidebar`/
+ * `IdentityFooter` is hidden and `BottomNav` has no identity slot) and
+ * still the mobile entry point to `/manager` (the five-item `BottomNav`
+ * deliberately never grows a sixth entry for it) -- both now reached via
+ * the profile menu instead of being permanently visible. The Bell is the
+ * same "future affordance, no fake data" convention as the desktop
+ * `Sidebar`'s own bell: disabled, no unread count, no new route/fetch.
+ *
+ * Uses only the already-safe name/isManager passed down from the app
+ * shell (the same identity the request-scoped read model already
+ * resolved) -- no email, no extra Google/auth fetch.
  */
 export function MobileIdentityBar({ name, isManager }: MobileIdentityBarProps) {
   return (
     <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-2.5 lg:hidden">
-      <div className="flex min-w-0 items-center gap-2.5">
-        <Avatar name={name} size="sm" />
-        <div className="min-w-0">
-          <p className="truncate text-xs font-medium text-foreground">{name}</p>
-          {isManager ? <p className="text-[10px] text-muted">מנהל/ת</p> : null}
-        </div>
-      </div>
+      <span className="text-sm font-bold tracking-wide text-foreground">{APP_NAME}</span>
+
       <div className="flex shrink-0 items-center gap-1.5">
-        {isManager ? (
-          <Link
-            href="/manager"
-            aria-label="מבט מנהל"
-            className="flex h-9 w-9 items-center justify-center rounded-lg text-muted transition-colors duration-200 hover:bg-overlay-soft hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-          >
-            <UserCog className="h-[16px] w-[16px]" aria-hidden="true" strokeWidth={1.75} />
-          </Link>
-        ) : null}
-        <ThemeToggle />
-        <form action={signOutAction}>
-          <button
-            type="submit"
-            aria-label="התנתקות"
-            className="flex h-9 w-9 items-center justify-center rounded-lg text-critical/80 transition-colors duration-200 hover:bg-critical/10 hover:text-critical focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-critical"
-          >
-            <LogOut className="h-[16px] w-[16px]" aria-hidden="true" strokeWidth={1.75} />
-          </button>
-        </form>
+        <button
+          type="button"
+          disabled
+          aria-disabled="true"
+          aria-label="התראות (בקרוב)"
+          title="התראות -- בקרוב"
+          className="flex h-9 w-9 items-center justify-center rounded-lg text-muted opacity-60 disabled:cursor-not-allowed"
+        >
+          <Bell className="h-[16px] w-[16px]" aria-hidden="true" strokeWidth={1.75} />
+        </button>
+        <MobileProfileMenu name={name} isManager={isManager} />
       </div>
     </div>
   );

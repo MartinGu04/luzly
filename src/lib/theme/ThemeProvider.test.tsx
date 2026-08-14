@@ -1,15 +1,31 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
-import { ThemeProvider, useTheme } from "./ThemeProvider";
+import { ThemeProvider, useEffectiveTheme, useTheme } from "./ThemeProvider";
 import { THEME_STORAGE_KEY } from "./themeScript";
+
+function mockMatchMedia(prefersDark: boolean) {
+  const mql = {
+    matches: prefersDark,
+    media: "(prefers-color-scheme: dark)",
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  };
+  vi.stubGlobal(
+    "matchMedia",
+    vi.fn().mockImplementation(() => mql),
+  );
+  return mql;
+}
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
 });
 
 beforeEach(() => {
   window.localStorage.clear();
   document.documentElement.removeAttribute("data-theme");
+  mockMatchMedia(false);
 });
 
 function Consumer() {
@@ -124,5 +140,45 @@ describe("ThemeProvider", () => {
       return null;
     }
     expect(() => render(<Broken />)).toThrow("useTheme must be used within a ThemeProvider");
+  });
+});
+
+function EffectiveConsumer() {
+  const effective = useEffectiveTheme();
+  return <p data-testid="effective">{effective}</p>;
+}
+
+describe("useEffectiveTheme", () => {
+  it('an explicit "dark" preference resolves to "dark" regardless of the system preference', () => {
+    mockMatchMedia(false);
+    window.localStorage.setItem(THEME_STORAGE_KEY, "dark");
+    render(<EffectiveConsumer />);
+    expect(screen.getByTestId("effective")).toHaveTextContent("dark");
+  });
+
+  it('an explicit "light" preference resolves to "light" regardless of the system preference', () => {
+    mockMatchMedia(true);
+    window.localStorage.setItem(THEME_STORAGE_KEY, "light");
+    render(<EffectiveConsumer />);
+    expect(screen.getByTestId("effective")).toHaveTextContent("light");
+  });
+
+  it('"system" resolves to "dark" when the OS currently prefers dark', () => {
+    mockMatchMedia(true);
+    render(<EffectiveConsumer />);
+    expect(screen.getByTestId("effective")).toHaveTextContent("dark");
+  });
+
+  it('"system" resolves to "light" when the OS currently prefers light', () => {
+    mockMatchMedia(false);
+    render(<EffectiveConsumer />);
+    expect(screen.getByTestId("effective")).toHaveTextContent("light");
+  });
+
+  it("only ever renders exactly light or dark, never system, as an actual value", () => {
+    mockMatchMedia(false);
+    render(<EffectiveConsumer />);
+    const value = screen.getByTestId("effective").textContent;
+    expect(["light", "dark"]).toContain(value);
   });
 });
