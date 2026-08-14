@@ -23,4 +23,11 @@ describe("ManagerSubNav", () => {
     render(<ManagerSubNav active="overview" />);
     expect(screen.queryByText("מנהל")).toBeNull();
   });
+
+  it("never stretches to the full width of a flex flex-col parent -- sized to its own content (Design Pass PR #21 follow-up hardening)", () => {
+    render(<ManagerSubNav active="overview" />);
+    const nav = screen.getByRole("navigation", { name: "ניווט אזור מנהל" });
+    expect(nav).toHaveClass("w-fit");
+    expect(nav).toHaveClass("self-start");
+  });
 });

@@ -33,7 +33,13 @@ const LISTBOX_ID = "manager-person-listbox";
  * (`bg-surface-2`/`text-foreground`/etc, same tokens as the rest of the
  * app) instead. Full keyboard support: ArrowUp/ArrowDown/Home/End move the
  * highlight, Enter/Space selects, Escape closes and returns focus to the
- * trigger button, and a pointer click outside closes it too.
+ * trigger button, a pointer click outside closes it too, and Tab/Shift+Tab
+ * away from the open listbox closes it rather than leaving it visually
+ * open with no keyboard path back into it (see `handleListBlur`). The
+ * trigger button's own accessible name is contextual -- "בחירת איש/אשת
+ * צוות: <current selection>" -- rather than relying on its bare visible
+ * text ("כולם"/a person's name), which alone wouldn't tell an AT user what
+ * the control does.
  *
  * Selecting a person only ever changes the `?person=` URL param -- every
  * other param (range/month/problems) is preserved untouched, and the
@@ -111,6 +117,24 @@ export function ManagerPersonSelector({ people, selectedId }: ManagerPersonSelec
     }
   }
 
+  /**
+   * The listbox has `tabIndex={-1}` -- reachable via `.focus()` but never
+   * part of the page's natural Tab sequence -- so pressing Tab moves focus
+   * to whatever comes next in DOM order after it, and Shift+Tab moves
+   * BACKWARD to the trigger button itself (the nearest preceding tabbable
+   * element). Either way, focus leaves the listbox without going through
+   * our own Escape/select handlers, so it must close itself here rather
+   * than staying visually open with no keyboard path back into it (Design
+   * Pass PR #21 follow-up). Unconditional: even the Shift+Tab-back-to-
+   * trigger case should close it -- there's no reason to leave the menu
+   * open once focus is back on its own trigger, and our own
+   * `closeMenu(true)` calls (Escape/select) already set `open` to `false`
+   * before triggering this same blur, so it's a harmless no-op then.
+   */
+  function handleListBlur() {
+    setOpen(false);
+  }
+
   function handleListKeyDown(event: React.KeyboardEvent<HTMLUListElement>) {
     if (event.key === "Escape") {
       event.preventDefault();
@@ -151,6 +175,7 @@ export function ManagerPersonSelector({ people, selectedId }: ManagerPersonSelec
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={LISTBOX_ID}
+        aria-label={`בחירת איש/אשת צוות: ${selectedOption.label}`}
         onClick={() => (open ? closeMenu(false) : openMenu())}
         onKeyDown={handleButtonKeyDown}
         className="flex items-center gap-1.5 rounded-full bg-overlay-soft px-3.5 py-1.5 text-sm font-medium text-foreground ring-1 ring-border transition-colors duration-200 hover:bg-overlay-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
@@ -168,6 +193,7 @@ export function ManagerPersonSelector({ people, selectedId }: ManagerPersonSelec
           aria-activedescendant={`${LISTBOX_ID}-option-${highlightedIndex}`}
           tabIndex={-1}
           onKeyDown={handleListKeyDown}
+          onBlur={handleListBlur}
           className="absolute z-20 mt-1.5 max-h-72 w-56 overflow-y-auto rounded-2xl bg-surface-2 p-1.5 shadow-[var(--shadow-hero)] ring-1 ring-border-strong focus:outline-none"
         >
           {options.map((option, index) => {

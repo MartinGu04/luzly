@@ -38,10 +38,10 @@ export function ManagerAttentionSection({
     <div className="flex flex-col gap-4">
       {criticalIssues.length > 0 ? (
         <section>
-          <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+          <h2 className="flex items-center gap-2 text-lg font-bold text-foreground sm:text-xl">
             <IssueSeverityBadge severity="critical" className="h-4 w-4" />
             {issueSeverityLabel("critical")}
-            <span className="font-normal text-muted-2">· {criticalIssues.length}</span>
+            <span className="text-sm font-normal text-muted-2">· {criticalIssues.length}</span>
           </h2>
           <Panel variant="panel" className="mt-2">
             <ul className="divide-y divide-border">
@@ -55,10 +55,10 @@ export function ManagerAttentionSection({
 
       {reviewIssues.length > 0 ? (
         <section>
-          <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+          <h2 className="flex items-center gap-2 text-lg font-bold text-foreground sm:text-xl">
             <IssueSeverityBadge severity="review" className="h-4 w-4" />
             {issueSeverityLabel("review")}
-            <span className="font-normal text-muted-2">· {reviewIssues.length}</span>
+            <span className="text-sm font-normal text-muted-2">· {reviewIssues.length}</span>
           </h2>
           <Panel variant="panel" className="mt-2">
             <ul className="divide-y divide-border">
@@ -72,9 +72,9 @@ export function ManagerAttentionSection({
 
       {potentialProblems.length > 0 ? (
         <section>
-          <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+          <h2 className="flex items-center gap-2 text-lg font-bold text-foreground sm:text-xl">
             דרישות Potential שדורשות בדיקה
-            <span className="font-normal text-muted-2">· {potentialProblems.length}</span>
+            <span className="text-sm font-normal text-muted-2">· {potentialProblems.length}</span>
           </h2>
           <Panel variant="panel" className="mt-2">
             <ul className="divide-y divide-border">

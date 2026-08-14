@@ -28,7 +28,7 @@ export function ManagerFairnessTable({ rows }: ManagerFairnessTableProps) {
     <div className="flex flex-col gap-5">
       {groups.map((group) => (
         <div key={group.key}>
-          <h3 className="mb-2 text-xs font-semibold text-muted-2">
+          <h3 className="mb-2 text-[13px] font-semibold text-muted-2">
             {group.label} <span className="font-normal text-muted-2">· {group.rows.length}</span>
           </h3>
           <ul className="flex flex-col gap-2.5">

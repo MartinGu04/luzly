@@ -61,7 +61,7 @@ describe("ManagerFairnessChart — populated", () => {
   });
 });
 
-describe("ManagerFairnessChart — hover/keyboard-focus tooltip (Design Pass PR #21 §33/§34)", () => {
+describe("ManagerFairnessChart — pointer hover on slices, keyboard on legend (Design Pass PR #21 follow-up hardening)", () => {
   const slices = [
     { id: "p_a", name: "מרטין בדיקה", score: 6, percentage: 60 },
     { id: "p_b", name: "איתן דוגמה", score: 4, percentage: 40 },
@@ -72,22 +72,35 @@ describe("ManagerFairnessChart — hover/keyboard-focus tooltip (Design Pass PR 
     return container.querySelectorAll("g circle")[index + 1] as SVGCircleElement;
   }
 
-  it("each segment carries an aria-label with name/score/percentage -- keyboard focus alone exposes equivalent info", () => {
+  function legendButtonFor(index: number) {
+    return screen.getAllByRole("button")[index];
+  }
+
+  it("SVG segments never carry fake button semantics -- no role, no tabIndex, no aria-label", () => {
     const { container } = render(<ManagerFairnessChart slices={slices} />);
-    const first = segmentFor(container, 0);
-    expect(first).toHaveAttribute("aria-label", "מרטין בדיקה · 6 · 60%");
+    const segment = segmentFor(container, 0);
+    expect(segment).not.toHaveAttribute("role");
+    expect(segment).not.toHaveAttribute("tabindex");
+    expect(segment).not.toHaveAttribute("aria-label");
+    expect(segment).toHaveAttribute("aria-hidden", "true");
   });
 
-  it("hovering a segment shows its name/score/percentage in the visual readout", () => {
+  it("legend rows are real <button> elements -- natively focusable, no ARIA role-faking", () => {
+    render(<ManagerFairnessChart slices={slices} />);
+    const buttons = screen.getAllByRole("button");
+    expect(buttons).toHaveLength(slices.length);
+    expect(buttons[0].tagName).toBe("BUTTON");
+  });
+
+  it("each legend button carries an aria-label with name/score/percentage -- keyboard focus alone exposes equivalent info", () => {
+    render(<ManagerFairnessChart slices={slices} />);
+    expect(legendButtonFor(0)).toHaveAttribute("aria-label", "מרטין בדיקה · 6 · 60%");
+  });
+
+  it("hovering a slice segment (pointer) shows its name/score/percentage in the visual readout", () => {
     const { container } = render(<ManagerFairnessChart slices={slices} />);
     fireEvent.mouseEnter(segmentFor(container, 0));
     expect(screen.getByText("מרטין בדיקה · 6 · 60%")).toBeInTheDocument();
-  });
-
-  it("focusing a segment (keyboard) shows the same readout as hover", () => {
-    const { container } = render(<ManagerFairnessChart slices={slices} />);
-    fireEvent.focus(segmentFor(container, 1));
-    expect(screen.getByText("איתן דוגמה · 4 · 40%")).toBeInTheDocument();
   });
 
   it("mouse leaving the segment clears the readout -- never trapped open", () => {
@@ -99,21 +112,27 @@ describe("ManagerFairnessChart — hover/keyboard-focus tooltip (Design Pass PR 
     expect(screen.queryByText("מרטין בדיקה · 6 · 60%")).toBeNull();
   });
 
-  it("blur (focus leaving) clears the readout -- never trapped open", () => {
-    const { container } = render(<ManagerFairnessChart slices={slices} />);
-    const segment = segmentFor(container, 1);
-    fireEvent.focus(segment);
+  it("focusing a legend button (keyboard) shows the same readout as hovering its slice", () => {
+    render(<ManagerFairnessChart slices={slices} />);
+    fireEvent.focus(legendButtonFor(1));
     expect(screen.getByText("איתן דוגמה · 4 · 40%")).toBeInTheDocument();
-    fireEvent.blur(segment);
+  });
+
+  it("blurring the legend button (focus leaving) clears the readout -- never trapped open", () => {
+    render(<ManagerFairnessChart slices={slices} />);
+    const button = legendButtonFor(1);
+    fireEvent.focus(button);
+    expect(screen.getByText("איתן דוגמה · 4 · 40%")).toBeInTheDocument();
+    fireEvent.blur(button);
     expect(screen.queryByText("איתן דוגמה · 4 · 40%")).toBeNull();
   });
 
-  it("Escape closes the readout while a segment is focused", () => {
-    const { container } = render(<ManagerFairnessChart slices={slices} />);
-    const segment = segmentFor(container, 0);
-    fireEvent.focus(segment);
+  it("Escape closes the readout while a legend button is focused", () => {
+    render(<ManagerFairnessChart slices={slices} />);
+    const button = legendButtonFor(0);
+    fireEvent.focus(button);
     expect(screen.getByText("מרטין בדיקה · 6 · 60%")).toBeInTheDocument();
-    fireEvent.keyDown(segment, { key: "Escape" });
+    fireEvent.keyDown(button, { key: "Escape" });
     expect(screen.queryByText("מרטין בדיקה · 6 · 60%")).toBeNull();
   });
 

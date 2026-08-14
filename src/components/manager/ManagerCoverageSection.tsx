@@ -7,10 +7,10 @@ interface ManagerCoverageSectionProps {
 }
 
 const ROLE_TONE_CLASS: Record<ManagerRoleCoverageRowView["status"], string> = {
-  full: "text-muted",
-  partial: "text-warning font-medium",
-  missing: "text-critical font-medium",
-  not_evaluable: "text-muted",
+  full: "text-xs text-muted",
+  partial: "text-sm font-medium text-warning",
+  missing: "text-sm font-medium text-critical",
+  not_evaluable: "text-xs text-muted",
 };
 
 function ShadowList({ label, names }: { label: string; names: string[] }) {
@@ -49,7 +49,7 @@ function RoleCoverageLine({
   }
 
   return (
-    <p className={`text-xs ${ROLE_TONE_CLASS[coverage.status]}`}>
+    <p className={ROLE_TONE_CLASS[coverage.status]}>
       {coverage.message}
       {names.length > 0 ? <span className="text-muted-2"> · {names.join(", ")}</span> : null}
     </p>

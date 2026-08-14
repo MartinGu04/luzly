@@ -126,4 +126,49 @@ describe("ManagerPersonSelector", () => {
     const listbox = screen.getByRole("listbox");
     expect(button.getAttribute("aria-controls")).toBe(listbox.id);
   });
+
+  it("the trigger's accessible name is contextual, not just the bare visible selection text", () => {
+    render(<ManagerPersonSelector people={PEOPLE} selectedId={null} />);
+    expect(screen.getByRole("button")).toHaveAttribute("aria-label", "בחירת איש/אשת צוות: כולם");
+  });
+
+  it("the trigger's contextual label updates to reflect the selected person", () => {
+    render(<ManagerPersonSelector people={PEOPLE} selectedId="p_eitan" />);
+    expect(screen.getByRole("button")).toHaveAttribute("aria-label", "בחירת איש/אשת צוות: איתן דוגמה");
+  });
+
+  it("Tab (focus leaving the listbox to an element outside the component) closes the menu", () => {
+    render(<ManagerPersonSelector people={PEOPLE} selectedId={null} />);
+    openListbox();
+    const listbox = screen.getByRole("listbox");
+    const outsideElement = document.createElement("div");
+    document.body.appendChild(outsideElement);
+    fireEvent.blur(listbox, { relatedTarget: outsideElement });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    document.body.removeChild(outsideElement);
+  });
+
+  it("Shift+Tab (focus leaving backward) closes the menu the same way", () => {
+    render(<ManagerPersonSelector people={PEOPLE} selectedId={null} />);
+    openListbox();
+    const listbox = screen.getByRole("listbox");
+    fireEvent.blur(listbox, { relatedTarget: document.body });
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
+  it("closing via Tab never navigates -- it's a pure focus event, not a selection", () => {
+    render(<ManagerPersonSelector people={PEOPLE} selectedId={null} />);
+    openListbox();
+    fireEvent.blur(screen.getByRole("listbox"), { relatedTarget: document.body });
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it("Shift+Tab back onto the trigger button also closes the menu -- no reason to leave it open once focus returns to its own trigger", () => {
+    render(<ManagerPersonSelector people={PEOPLE} selectedId={null} />);
+    openListbox();
+    const listbox = screen.getByRole("listbox");
+    const button = screen.getByRole("button");
+    expect(() => fireEvent.blur(listbox, { relatedTarget: button })).not.toThrow();
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
 });

@@ -18,11 +18,19 @@ const ITEMS: { key: ManagerSubNavKey; label: string; href: string }[] = [
  * is a manager sub-screen, not a sixth main navigation module, so it's not
  * added to `BottomNav`/`nav-items.ts` -- and it never carries its own
  * "מנהל" badge, since `ManagerHeader` already establishes the manager scope
- * once for both screens.
+ * once for both screens. `w-fit`/`self-start` guard against the pill
+ * stretching to the full width of its `flex flex-col` page container
+ * (the default cross-axis `stretch` alignment would otherwise size this
+ * `nav` to 100% width even though it's internally `inline-flex`) --
+ * without them the rounded pill background would span far past its two
+ * links.
  */
 export function ManagerSubNav({ active }: ManagerSubNavProps) {
   return (
-    <nav aria-label="ניווט אזור מנהל" className="inline-flex items-center gap-1 rounded-full bg-overlay-soft p-1">
+    <nav
+      aria-label="ניווט אזור מנהל"
+      className="inline-flex w-fit shrink-0 items-center gap-1 self-start rounded-full bg-overlay-soft p-1"
+    >
       {ITEMS.map((item) => {
         const isActive = item.key === active;
         return (
