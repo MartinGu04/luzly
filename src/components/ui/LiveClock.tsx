@@ -29,9 +29,13 @@ interface LiveClockProps {
    * for a quieter chrome context like `ShellUtilityBar`; "hero" is the
    * large split HH:mm/:ss treatment for the login page's visual identity
    * side (Design Pass PR #22) -- seconds render as a smaller secondary
-   * token instead of matching the main digits' size/weight.
+   * token instead of matching the main digits' size/weight. "hero-lg" is
+   * the same split treatment at a larger scale, for the login page's
+   * desktop text-column clock readout only -- the login page's mobile
+   * (inside-the-ring) readout stays on "hero" so mobile sizing never
+   * shifts when the desktop scale changes.
    */
-  size?: "sm" | "md" | "hero";
+  size?: "sm" | "md" | "hero" | "hero-lg";
   className?: string;
 }
 
@@ -64,16 +68,19 @@ export function LiveClock({ initialTime, size = "md", className = "" }: LiveCloc
     return null;
   }
 
-  if (size === "hero") {
+  if (size === "hero" || size === "hero-lg") {
     const [hoursMinutes, seconds] = [time.slice(0, 5), time.slice(6, 8)];
+    const primaryClass =
+      size === "hero-lg" ? "text-[clamp(3rem,5.2vw,6.5rem)] leading-none font-bold" : "text-[clamp(2.25rem,6.5vw,5rem)] leading-none font-bold";
+    const secondaryClass = size === "hero-lg" ? "text-3xl leading-none font-semibold opacity-60" : "text-xl leading-none font-semibold opacity-60";
     return (
       <time
         dir="ltr"
         dateTime={time}
         className={`font-variant-numeric tabular-nums inline-flex items-baseline gap-1.5 ${className}`}
       >
-        <span className="text-[clamp(2.25rem,6.5vw,5rem)] leading-none font-bold">{hoursMinutes}</span>
-        <span className="text-xl leading-none font-semibold opacity-60">:{seconds}</span>
+        <span className={primaryClass}>{hoursMinutes}</span>
+        <span className={secondaryClass}>:{seconds}</span>
       </time>
     );
   }

@@ -1,0 +1,93 @@
+import { Shield } from "lucide-react";
+import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
+import { LOGIN_AUTH_NOTE, LOGIN_HERO_EYEBROW, LOGIN_HERO_HEADLINE, LOGIN_HERO_SUBTEXT } from "@/lib/config/loginCopy";
+import { LoginClockReadout } from "./LoginClockReadout";
+import { LoginErrorNotice } from "./LoginErrorNotice";
+import { LoginFeatureStrip } from "./LoginFeatureStrip";
+import { LoginHeaderLogo } from "./LoginHeaderLogo";
+import { LoginScheduleRing } from "./LoginScheduleRing";
+
+interface LoginHeroProps {
+  initialClockTime: string;
+  weekdayLabel: string | null;
+  dayNumber: number | null;
+  monthLabel: string | null;
+  hasAuthError: boolean;
+}
+
+/**
+ * The login route's complete content composition (visual reference
+ * supplied directly for this redesign) -- one continuous dark canvas at
+ * every viewport size, no light/dark switch, no separate "card" surface.
+ *
+ * Desktop uses a 2-column CSS grid (ring on the start/right... actually
+ * inline-start side, text column on it too -- see below) where the text
+ * column's three stacked pieces (headline block, clock readout, CTA) are
+ * three separate grid items placed in the SAME column via explicit
+ * `col-start`/`row-start`, while the ring occupies the other column,
+ * row-spanned to center beside all three. Below `lg`, the grid collapses
+ * to one column and `order-*` sequences the pieces into the mobile
+ * reference's actual order (headline block, then the ring -- with the
+ * live clock moved inside it -- then the CTA) -- a genuine reflow, not
+ * the desktop layout merely scaled down.
+ */
+export function LoginHero({ initialClockTime, weekdayLabel, dayNumber, monthLabel, hasAuthError }: LoginHeroProps) {
+  return (
+    <div className="relative mx-auto flex w-full max-w-[1680px] flex-1 flex-col px-6 pb-10 pt-6 sm:px-10 sm:pt-8 lg:px-16 lg:py-10 xl:px-24">
+      <div className="flex justify-center lg:justify-start">
+        <LoginHeaderLogo />
+      </div>
+
+      <div className="mt-10 grid grid-cols-1 gap-y-9 sm:mt-12 lg:mt-14 lg:grid-cols-[1fr_1fr] lg:items-center lg:gap-x-16 lg:gap-y-8 xl:gap-x-24">
+        <div className="order-1 flex flex-col items-center text-center lg:order-none lg:col-start-2 lg:row-start-1 lg:items-start lg:text-start">
+          <p className="text-sm font-semibold text-[#b39bfa] sm:text-base lg:text-xl lg:tracking-wide">
+            {LOGIN_HERO_EYEBROW}
+          </p>
+          <h1 className="mt-2 max-w-md text-[clamp(1.75rem,4.4vw,2.75rem)] leading-[1.15] font-bold text-white lg:mt-4 lg:max-w-xl lg:text-[clamp(3rem,3.6vw,4.75rem)] lg:leading-[1.08]">
+            {LOGIN_HERO_HEADLINE}
+          </h1>
+          <p className="mt-3 max-w-sm text-base leading-relaxed text-white/75 lg:mt-5 lg:max-w-lg lg:text-xl lg:text-white/60">
+            {LOGIN_HERO_SUBTEXT}
+          </p>
+        </div>
+
+        <div className="order-2 flex justify-center lg:order-none lg:col-start-1 lg:row-span-3 lg:row-start-1 lg:justify-start">
+          <LoginScheduleRing>
+            <LoginClockReadout
+              variant="stacked"
+              initialClockTime={initialClockTime}
+              weekdayLabel={weekdayLabel}
+              dayNumber={dayNumber}
+              monthLabel={monthLabel}
+            />
+          </LoginScheduleRing>
+        </div>
+
+        <div className="hidden lg:col-start-2 lg:row-start-2 lg:block">
+          <LoginClockReadout
+            variant="panel"
+            initialClockTime={initialClockTime}
+            weekdayLabel={weekdayLabel}
+            dayNumber={dayNumber}
+            monthLabel={monthLabel}
+          />
+        </div>
+
+        <div className="order-3 flex w-full flex-col items-center lg:order-none lg:col-start-2 lg:row-start-3 lg:items-start">
+          <div className="w-full max-w-sm lg:max-w-md">
+            {hasAuthError ? <LoginErrorNotice className="mb-4" /> : null}
+            <GoogleSignInButton />
+            <p className="mt-4 flex items-center justify-center gap-1.5 text-sm text-white/65 lg:mt-5 lg:justify-start lg:text-sm lg:text-white/50">
+              <Shield className="h-4 w-4" aria-hidden="true" strokeWidth={1.75} />
+              {LOGIN_AUTH_NOTE}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-12 lg:mt-auto lg:pt-16">
+        <LoginFeatureStrip />
+      </div>
+    </div>
+  );
+}

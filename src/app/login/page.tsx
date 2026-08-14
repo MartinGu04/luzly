@@ -1,7 +1,6 @@
-import { LoginAuthPanel } from "@/components/login/LoginAuthPanel";
-import { LoginVisualPanel } from "@/components/login/LoginVisualPanel";
-import { formatHebrewCalendarDate } from "@/lib/presentation/hebrewCalendar";
-import { formatHebrewWeekdayAndDate } from "@/lib/presentation/hebrewDate";
+import { LoginHero } from "@/components/login/LoginHero";
+import { parseCalendarDate } from "@/lib/domain/dutyBlocks";
+import { formatHebrewMonthName, formatHebrewWeekday } from "@/lib/presentation/hebrewDate";
 import { formatScheduleMinute } from "@/lib/presentation/scheduleTime";
 import { getJerusalemLocalNow } from "@/lib/time/jerusalemClock";
 
@@ -19,15 +18,23 @@ interface LoginPageProps {
 }
 
 /**
- * The app's entry experience (Design Pass PR #22) -- deliberately outside
- * the `(app)` route group, so it never renders Sidebar/BottomNav and is
- * never subject to that group's auth gate (see root layout.tsx). Google
- * OAuth via `GoogleSignInButton` (inside `LoginAuthPanel`) is the only real
+ * The app's entry experience -- deliberately outside the `(app)` route
+ * group, so it never renders Sidebar/BottomNav and is never subject to
+ * that group's auth gate (see root layout.tsx). Google OAuth via
+ * `GoogleSignInButton` (inside `LoginHero`) is the only real
  * authentication action; everything else on this page is presentation.
  *
+ * This route uses ONE fixed dark canvas regardless of the app's light/
+ * dark preference -- no theme toggle, no theme-responsive tokens anywhere
+ * on this page (unlike the rest of the app, which follows the user's
+ * Light/Dark choice once signed in). The composition itself (visual
+ * reference supplied directly) lives in `LoginHero` and the components it
+ * assembles; this file only computes the safe, presentation-only Asia/
+ * Jerusalem clock/date props and paints the shared ambient background.
+ *
  * `?error=auth` is the existing contract from `/auth/callback` on a failed
- * code exchange -- previously silently dropped, now surfaced as a restrained
- * inline notice rather than nothing.
+ * code exchange -- surfaced as a restrained inline notice rather than
+ * nothing.
  */
 export default async function LoginPage({ searchParams }: LoginPageProps) {
   const params = await searchParams;
@@ -35,19 +42,12 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
 
   const localNow = getJerusalemLocalNow();
   const initialClockTime = `${formatScheduleMinute(localNow.minuteOfDay)}:00`;
-  const gregorianDateLabel = formatHebrewWeekdayAndDate(localNow.date);
-  const hebrewCalendarLabel = formatHebrewCalendarDate(localNow.date);
+  const weekdayLabel = formatHebrewWeekday(localNow.date);
+  const monthLabel = formatHebrewMonthName(localNow.date);
+  const dayNumber = parseCalendarDate(localNow.date)?.day ?? null;
 
   return (
-    <div className="relative isolate flex min-h-dvh flex-col overflow-hidden bg-[#05070d] lg:flex-row">
-      {/* The shared midnight canvas (Design Pass PR #22 "immersive composition"
-          pass): below `lg` this is the ONE continuous dark background behind
-          both the hero content and the auth card -- LoginAuthPanel has no
-          opaque background of its own at that width, so this shows straight
-          through with no seam. At `lg`+, LoginAuthPanel reasserts its own
-          theme-responsive `bg-surface-3` over the right 38%, covering this
-          same layer -- so this only ever has to paint the left/hero side on
-          desktop, exactly as before. */}
+    <div className="relative isolate flex min-h-dvh flex-col overflow-hidden bg-[#05070d]">
       <div aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10">
         <div className="absolute -top-24 -start-20 h-[26rem] w-[26rem] rounded-full bg-[#241a45]/50 blur-3xl animate-ambient-glow" />
         <div
@@ -65,12 +65,13 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         />
       </div>
 
-      <LoginVisualPanel
+      <LoginHero
         initialClockTime={initialClockTime}
-        gregorianDateLabel={gregorianDateLabel}
-        hebrewCalendarLabel={hebrewCalendarLabel}
+        weekdayLabel={weekdayLabel}
+        dayNumber={dayNumber}
+        monthLabel={monthLabel}
+        hasAuthError={hasAuthError}
       />
-      <LoginAuthPanel hasAuthError={hasAuthError} />
     </div>
   );
 }

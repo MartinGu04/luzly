@@ -16,12 +16,12 @@ interface GoogleSignInButtonProps {
  * behavior itself (provider, redirect target, Supabase flow) is unchanged
  * from before the Design Pass -- this only redresses the button.
  *
- * Two visual treatments, chosen for contrast against their surroundings
- * (Design Pass PR #22 "immersive composition" pass, §6): below `lg`, the
- * login canvas is always dark, so the CTA is a light/milky surface with a
- * dark label -- a clear focal point against the midnight background and
- * glass card. At `lg`+ (the approved desktop split, theme-responsive auth
- * side), it reverts to the violet product-accent treatment.
+ * One visual treatment at every viewport size (login redesign, real
+ * production reference) -- the login route now uses a single fixed dark
+ * canvas regardless of the app's light/dark preference, so the CTA never
+ * needs a theme-responsive variant: a light/milky surface with a dark
+ * label, a clear focal point against the midnight background at every
+ * width.
  */
 export function GoogleSignInButton({ className = "" }: GoogleSignInButtonProps) {
   const [pending, setPending] = useState(false);
@@ -42,16 +42,16 @@ export function GoogleSignInButton({ className = "" }: GoogleSignInButtonProps) 
       onClick={handleSignIn}
       disabled={pending}
       aria-busy={pending}
-      className={`flex h-[52px] w-full items-center justify-center gap-2.5 rounded-xl bg-[var(--login-cta-fixed-bg)] px-4 text-[15px] font-semibold text-[var(--login-cta-fixed-text)] shadow-[var(--shadow-login-cta-fixed)] transition-all duration-200 hover:bg-[var(--login-cta-fixed-bg-hover)] hover:shadow-[var(--shadow-login-cta-fixed-hover)] active:scale-[0.985] active:shadow-[var(--shadow-login-cta-fixed-active)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-70 disabled:shadow-[var(--shadow-login-cta-fixed)] disabled:hover:bg-[var(--login-cta-fixed-bg)] disabled:active:scale-100 lg:bg-primary lg:text-primary-foreground lg:shadow-[var(--shadow-login-cta)] lg:hover:bg-primary-strong lg:hover:shadow-[var(--shadow-login-cta-hover)] lg:active:shadow-[var(--shadow-login-cta-active)] lg:disabled:shadow-[var(--shadow-login-cta)] lg:disabled:hover:bg-primary ${className}`}
+      className={`flex h-[52px] w-full items-center justify-center gap-2.5 rounded-xl bg-[var(--login-cta-fixed-bg)] px-4 text-[15px] font-semibold text-[var(--login-cta-fixed-text)] shadow-[var(--shadow-login-cta-fixed)] transition-all duration-200 hover:bg-[var(--login-cta-fixed-bg-hover)] hover:shadow-[var(--shadow-login-cta-fixed-hover)] active:scale-[0.985] active:shadow-[var(--shadow-login-cta-fixed-active)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-70 disabled:shadow-[var(--shadow-login-cta-fixed)] disabled:hover:bg-[var(--login-cta-fixed-bg)] disabled:active:scale-100 lg:h-14 lg:gap-3 lg:rounded-2xl lg:px-5 lg:text-base xl:h-16 xl:px-6 xl:text-lg ${className}`}
     >
       {pending ? (
         <>
-          <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" strokeWidth={2} />
+          <Loader2 className="h-5 w-5 animate-spin xl:h-6 xl:w-6" aria-hidden="true" strokeWidth={2} />
           <span>מתחבר...</span>
         </>
       ) : (
         <>
-          <GoogleGlyph className="h-5 w-5" />
+          <GoogleGlyph className="h-5 w-5 xl:h-6 xl:w-6" />
           <span>המשך עם Google</span>
         </>
       )}
