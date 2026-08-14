@@ -8,8 +8,8 @@ interface BrandMarkProps {
 }
 
 const SIZE_CLASSES = {
-  sm: { icon: "h-6 w-6", text: "text-sm" },
-  md: { icon: "h-7 w-7", text: "text-xl" },
+  sm: { icon: "h-8 w-8", text: "text-base", gap: "gap-2.5" },
+  md: { icon: "h-10 w-10", text: "text-2xl", gap: "gap-3" },
 } as const;
 
 /**
@@ -25,7 +25,7 @@ const SIZE_CLASSES = {
 export function BrandMark({ size = "md", className = "" }: BrandMarkProps) {
   const sizes = SIZE_CLASSES[size];
   return (
-    <span className={`flex items-center gap-2 ${className}`}>
+    <span className={`flex items-center ${sizes.gap} ${className}`}>
       <Image
         src={BRAND_SYMBOL.src}
         alt=""

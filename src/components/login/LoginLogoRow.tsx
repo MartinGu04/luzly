@@ -16,9 +16,9 @@ export function LoginLogoRow({ primary, secondary }: LoginLogoRowProps) {
   if (!primary && !secondary) return null;
 
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex items-center gap-4 lg:gap-5">
       {primary}
-      {primary && secondary ? <span aria-hidden="true" className="h-6 w-px bg-white/20" /> : null}
+      {primary && secondary ? <span aria-hidden="true" className="h-8 w-px bg-white/20 lg:h-12" /> : null}
       {secondary}
     </div>
   );

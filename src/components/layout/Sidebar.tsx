@@ -33,7 +33,7 @@ export function Sidebar({ person }: SidebarProps) {
 
   return (
     <aside className="sticky top-0 hidden h-dvh w-[320px] shrink-0 flex-col border-e border-sidebar-border bg-sidebar text-sidebar-foreground lg:flex">
-      <div className="flex items-center justify-between gap-2 px-6 pt-7 pb-5">
+      <div className="flex items-center justify-between gap-3 px-6 pt-8 pb-6">
         <BrandMark size="md" className="text-sidebar-foreground" />
         <button
           type="button"

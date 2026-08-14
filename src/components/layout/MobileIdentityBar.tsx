@@ -33,7 +33,7 @@ interface MobileIdentityBarProps {
  */
 export function MobileIdentityBar({ name, isManager, avatarUrl }: MobileIdentityBarProps) {
   return (
-    <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-2.5 lg:hidden">
+    <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3 lg:hidden">
       <BrandMark size="sm" className="text-foreground" />
 
       <div className="flex shrink-0 items-center gap-1.5">

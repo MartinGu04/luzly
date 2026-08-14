@@ -20,14 +20,14 @@ import { BRAND_LOGO_WORDMARK } from "@/lib/config/brandAssets";
  */
 export function LoginBrandLogo() {
   return (
-    <div className="inline-flex rounded-[20px] bg-white/95 px-5 py-3 shadow-[0_12px_28px_-10px_rgba(0,0,0,0.45)] ring-1 ring-black/5 backdrop-blur-sm">
+    <div className="inline-flex rounded-[20px] bg-white/95 px-6 py-4 shadow-[0_16px_36px_-12px_rgba(0,0,0,0.5)] ring-1 ring-black/5 backdrop-blur-sm sm:rounded-[24px] sm:px-7 sm:py-5 lg:rounded-[28px] lg:px-8 lg:py-6">
       <Image
         src={BRAND_LOGO_WORDMARK.src}
         alt="מי-מה-מו"
         width={BRAND_LOGO_WORDMARK.width}
         height={BRAND_LOGO_WORDMARK.height}
         priority
-        className="h-8 w-auto sm:h-10"
+        className="h-14 w-auto sm:h-[68px] lg:h-20"
       />
     </div>
   );

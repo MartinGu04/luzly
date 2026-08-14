@@ -35,12 +35,18 @@ export function LoginVisualPanel({ initialClockTime, gregorianDateLabel, hebrewC
       <div className="relative flex items-center justify-end gap-3">
         <LoginLogoRow
           primary={
+            // תקש"ל's circular patch sits on a taller canvas with more
+            // transparent padding above/below it than the strategic-comm
+            // patch does -- at an equal CSS height the patch itself would
+            // visibly read smaller, so this gets a taller container to
+            // compensate and land at the same optical size (see the two
+            // `alt`-matched images below).
             <Image
               src={ORG_LOGO_TAKSHAL.src}
               alt={ORG_LOGO_TAKSHAL.alt}
               width={ORG_LOGO_TAKSHAL.width}
               height={ORG_LOGO_TAKSHAL.height}
-              className="h-8 w-auto object-contain sm:h-9"
+              className="h-[52px] w-auto object-contain lg:h-[78px]"
             />
           }
           secondary={
@@ -49,7 +55,7 @@ export function LoginVisualPanel({ initialClockTime, gregorianDateLabel, hebrewC
               alt={ORG_LOGO_STRATEGIC_COMMUNICATION.alt}
               width={ORG_LOGO_STRATEGIC_COMMUNICATION.width}
               height={ORG_LOGO_STRATEGIC_COMMUNICATION.height}
-              className="h-8 w-auto object-contain sm:h-9"
+              className="h-10 w-auto object-contain lg:h-[60px]"
             />
           }
         />
@@ -58,7 +64,7 @@ export function LoginVisualPanel({ initialClockTime, gregorianDateLabel, hebrewC
       <div className="relative flex flex-col gap-4 py-5 sm:gap-6 sm:py-6 lg:flex-1 lg:justify-center lg:py-0">
         <div className="max-w-md">
           <LoginBrandLogo />
-          <h1 className="mt-4 text-[clamp(1.5rem,4.2vw,2.75rem)] leading-[1.15] font-bold text-white">
+          <h1 className="mt-5 text-[clamp(1.5rem,4.2vw,2.75rem)] leading-[1.15] font-bold text-white sm:mt-6 lg:mt-7">
             {LOGIN_HERO_HEADLINE}
           </h1>
           <p className="mt-3 hidden max-w-sm text-[15px] leading-relaxed text-white/60 sm:block">{LOGIN_HERO_SUBTEXT}</p>
