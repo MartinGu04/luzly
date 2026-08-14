@@ -190,15 +190,20 @@ describe("buildManagerOverviewReadModel — coverage overview", () => {
     const group = model.coverageOverview.find((g) => g.date === "2026-08-13" && g.period === "day");
     expect(group?.coverageStatus).toBe("full");
     expect(group?.missingIntervals).toEqual([]);
+    // roleCoverage (Design Pass PR #21 §11/§12) -- same computed diagnostic carried through, not a second algorithm.
+    expect(group?.roleCoverage.technician.status).toBe("full");
+    expect(group?.roleCoverage.supervisor.status).toBe("full");
   });
 
-  it("reports missing coverage when only one role is present", () => {
+  it("reports missing coverage when only one role is present -- roleCoverage names WHICH role is missing", () => {
     const events: Event[] = [
       event({ personId: MARTIN.id, personName: MARTIN.name, date: "2026-08-13", role: "technician", period: "day" }),
     ];
     const model = buildModel({ events });
     const group = model.coverageOverview.find((g) => g.date === "2026-08-13" && g.period === "day");
     expect(group?.coverageStatus).toBe("missing");
+    expect(group?.roleCoverage.technician.status).toBe("full");
+    expect(group?.roleCoverage.supervisor.status).toBe("missing");
   });
 
   it("filters coverage entries to the selected range", () => {
@@ -250,6 +255,9 @@ describe("buildManagerOverviewReadModel — coverage overview", () => {
     const group = model.coverageOverview.find((g) => g.date === "2026-08-13" && g.period === "day");
     expect(group?.coverageStatus).toBe("partial");
     expect(group?.missingIntervals).toEqual([{ startMinute: 720, endMinute: 1170 }]); // 12:00-19:30
+    expect(group?.roleCoverage.supervisor.status).toBe("partial");
+    expect(group?.roleCoverage.supervisor.missingIntervals).toEqual([{ startMinute: 720, endMinute: 1170 }]);
+    expect(group?.roleCoverage.technician.status).toBe("full");
   });
 });
 
@@ -671,7 +679,7 @@ describe("buildManagerOverviewReadModel — PR #16 manager Potential scope", () 
     expect(model.potentialRequirements).toHaveLength(0);
   });
 
-  it("תקש\"ל אתרים: נדב/יובל are RETAINED in scope even though absent from current personnel, with resolvedSourcePersonId null and sourceConflict null (PR #16 hardening §1/§6/§8)", () => {
+  it("נדב/יובל are EXCLUDED from Manager Overview scope when absent from current personnel -- no special team_unresolved_person ownership anymore (Design Pass PR #21 §23-25)", () => {
     const model = buildModel({
       // MANAGER/MARTIN/EITAN/NOA only -- נדב and יובל are deliberately absent from current personnel.
       potentialAllocations: [
@@ -680,14 +688,7 @@ describe("buildManagerOverviewReadModel — PR #16 manager Potential scope", () 
       ],
     });
 
-    expect(model.potentialRequirements).toHaveLength(2);
-    for (const requirement of model.potentialRequirements) {
-      expect(["נדב", "יובל"]).toContain(requirement.sourceAllocationLabel);
-      expect(requirement.resolvedSourcePersonId).toBeNull();
-      expect(requirement.resolvedSourcePersonName).toBeNull();
-      // No app Person is resolved, so a blocking-absence sourceConflict can never be fabricated for them.
-      expect(requirement.sourceConflict).toBeNull();
-    }
+    expect(model.potentialRequirements).toHaveLength(0);
   });
 
   it("נדב stays excluded when the label doesn't match at all (e.g. misspelled) -- only the exact canonical token is recognized, no fuzzy matching", () => {

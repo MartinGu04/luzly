@@ -1,22 +1,20 @@
 import { ConfigurationErrorState } from "@/components/dashboard/ConfigurationErrorState";
 import type { ConflictIssueView } from "@/components/conflicts/types";
 import { ManagerAttentionSection } from "@/components/manager/ManagerAttentionSection";
+import { ManagerCommandBar } from "@/components/manager/ManagerCommandBar";
 import { ManagerCoverageSection } from "@/components/manager/ManagerCoverageSection";
 import { ManagerDutiesAbsencesSection } from "@/components/manager/ManagerDutiesAbsencesSection";
 import { ManagerForbiddenState } from "@/components/manager/ManagerForbiddenState";
 import { ManagerHeader } from "@/components/manager/ManagerHeader";
-import { ManagerPersonSelector } from "@/components/manager/ManagerPersonSelector";
 import { ManagerPotentialSection } from "@/components/manager/ManagerPotentialSection";
-import { ManagerProblemsToggle } from "@/components/manager/ManagerProblemsToggle";
-import { ManagerRangeSelector } from "@/components/manager/ManagerRangeSelector";
 import { ManagerRosterSection } from "@/components/manager/ManagerRosterSection";
 import {
   ManagerSelectedPersonView,
   type ManagerSelectedPersonAssignmentView,
 } from "@/components/manager/ManagerSelectedPersonView";
 import { ManagerSourceOfTruthNote } from "@/components/manager/ManagerSourceOfTruthNote";
+import { ManagerSubNav } from "@/components/manager/ManagerSubNav";
 import { ManagerSummaryStrip } from "@/components/manager/ManagerSummaryStrip";
-import { DataFreshnessStatus } from "@/components/ui/DataFreshnessStatus";
 import type {
   ManagerAbsenceRowView,
   ManagerDutyRowView,
@@ -42,7 +40,9 @@ import {
   roleLabel,
 } from "@/lib/presentation/labels";
 import type { ManagerHrefParams } from "@/lib/presentation/managerUrl";
+import { managerIssueCoverageReasonLabel } from "@/lib/presentation/managerIssueCoverage";
 import { managerSummaryLabel } from "@/lib/presentation/managerSummary";
+import { roleCoverageMessage } from "@/lib/presentation/roleCoverage";
 import { formatMissingIntervals } from "@/lib/presentation/scheduleTime";
 import { getRequestManagerOverview } from "@/lib/readModels/getRequestManagerOverview";
 import { parseManagerOverviewSearchParams } from "@/lib/readModels/managerOverviewParams";
@@ -71,12 +71,42 @@ interface ManagerPageProps {
 // View builders (page-local, same convention as /duties, /with-me, /conflicts)
 // ---------------------------------------------------------------------------
 
-function buildManagerIssueRowView(issue: ManagerIssue, todayDate: string, index: number): ManagerIssueRowView {
+const COVERAGE_ISSUE_REASONS = new Set<ManagerIssue["reason"]>(["shift_coverage_missing", "shift_coverage_partial"]);
+
+/**
+ * Looks up the SAME `roleCoverage` diagnostic `ManagerCoverageSection`
+ * already renders for this shift (matched by date+period, the only keys
+ * `ManagerShiftOverviewEntry` groups by) and uses it to say explicitly
+ * which role is missing/partial for a coverage-reason issue -- instead of
+ * the generic "חסר כיסוי למשמרת" the two sections used to disagree on. Any
+ * other issue reason, or a coverage-reason issue whose shift isn't found
+ * in `coverageOverview`, falls back to the existing generic label
+ * unchanged.
+ */
+function managerIssueReasonLabelFor(
+  issue: ManagerIssue,
+  coverageByDatePeriod: ReadonlyMap<string, ManagerShiftOverviewEntry>,
+): string {
+  const fallback = managerIssueReasonLabel(issue.reason);
+  if (!COVERAGE_ISSUE_REASONS.has(issue.reason) || !issue.targetEvent) return fallback;
+
+  const group = coverageByDatePeriod.get(`${issue.date}|${issue.targetEvent.period}`);
+  if (!group) return fallback;
+
+  return managerIssueCoverageReasonLabel(group.roleCoverage, fallback);
+}
+
+function buildManagerIssueRowView(
+  issue: ManagerIssue,
+  todayDate: string,
+  index: number,
+  coverageByDatePeriod: ReadonlyMap<string, ManagerShiftOverviewEntry>,
+): ManagerIssueRowView {
   return {
     key: `${issue.personId}-${issue.reason}-${issue.date}-${index}`,
     personName: issue.personName,
     severity: issue.severity,
-    reasonLabel: managerIssueReasonLabel(issue.reason),
+    reasonLabel: managerIssueReasonLabelFor(issue, coverageByDatePeriod),
     dateLabel: issueDateLabel(issue.date, todayDate),
     targetEmoji: issue.targetEvent ? issueTargetEmoji(issue.targetEvent) : null,
     targetTitle: issue.targetEvent ? issueTargetTitle(issue.targetEvent) : null,
@@ -141,6 +171,14 @@ function buildManagerShiftGroupView(group: ManagerShiftOverviewEntry, todayDate:
     shadowSupervisorNames: group.shadowSupervisors.map((p) => p.personName),
     coverageStatus: group.coverageStatus,
     missingIntervalLabels: formatMissingIntervals(group.missingIntervals),
+    technicianCoverage: {
+      status: group.roleCoverage.technician.status,
+      message: roleCoverageMessage("technician", group.roleCoverage.technician),
+    },
+    supervisorCoverage: {
+      status: group.roleCoverage.supervisor.status,
+      message: roleCoverageMessage("supervisor", group.roleCoverage.supervisor),
+    },
   };
 }
 
@@ -151,6 +189,7 @@ function buildManagerDutyRowView(duty: ManagerDutyEntry, todayDate: string): Man
     dateLabel: issueDateLabel(duty.date, todayDate),
     emoji: dutyBlockEmoji(duty),
     title: dutyBlockTitle(duty),
+    dutyFamily: duty.dutyFamily,
   };
 }
 
@@ -166,6 +205,7 @@ function buildManagerAbsenceRowView(absence: ManagerAbsenceEntry, todayDate: str
       absenceKind: absence.absenceKind,
     }),
     label: absenceKindLabel(absence.absenceKind),
+    absenceKind: absence.absenceKind,
   };
 }
 
@@ -224,19 +264,7 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
   const { model } = result;
   const todayDate = model.localNow.date;
   const hrefParams = toHrefParams(model);
-
-  const controls = (
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <ManagerPersonSelector
-          people={model.roster.map((person) => ({ id: person.id, name: person.name }))}
-          selectedId={model.selectedPersonId}
-        />
-        <ManagerRangeSelector current={hrefParams} currentMonth={model.range.month} />
-      </div>
-      <ManagerProblemsToggle current={hrefParams} />
-    </div>
-  );
+  const people = model.roster.map((person) => ({ id: person.id, name: person.name }));
 
   if (model.selectedPersonId && model.selectedPerson) {
     const selected = model.selectedPerson;
@@ -250,8 +278,15 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
     return (
       <div className="flex flex-col gap-6">
         <ManagerHeader />
-        <DataFreshnessStatus fetchedAt={model.fetchedAt} />
-        {controls}
+        <ManagerSubNav active="overview" />
+        <ManagerCommandBar
+          people={people}
+          selectedPersonId={model.selectedPersonId}
+          current={hrefParams}
+          currentMonth={model.range.month}
+          fetchedAt={model.fetchedAt}
+          showProblemsToggle={false}
+        />
         <ManagerSelectedPersonView
           person={{
             name: selected.person.name,
@@ -276,7 +311,12 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
 
   const summary = managerSummaryLabel(model);
 
-  const issueViews = model.issues.map((issue, index) => buildManagerIssueRowView(issue, todayDate, index));
+  const coverageByDatePeriod = new Map(
+    model.coverageOverview.map((group) => [`${group.date}|${group.period}`, group]),
+  );
+  const issueViews = model.issues.map((issue, index) =>
+    buildManagerIssueRowView(issue, todayDate, index, coverageByDatePeriod),
+  );
   const criticalIssueViews = issueViews.filter((view) => view.severity === "critical");
   const reviewIssueViews = issueViews.filter((view) => view.severity === "review");
 
@@ -290,8 +330,15 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
   return (
     <div className="flex flex-col gap-6">
       <ManagerHeader />
-      <DataFreshnessStatus fetchedAt={model.fetchedAt} />
-      {controls}
+      <ManagerSubNav active="overview" />
+      <ManagerCommandBar
+        people={people}
+        selectedPersonId={model.selectedPersonId}
+        current={hrefParams}
+        currentMonth={model.range.month}
+        fetchedAt={model.fetchedAt}
+        showProblemsToggle
+      />
       {summary ? <ManagerSummaryStrip summary={summary} /> : null}
 
       <ManagerAttentionSection
@@ -303,14 +350,14 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
       {!model.problemsOnly ? (
         <>
           <section>
-            <h2 className="mb-2 text-sm font-semibold text-foreground">כיסוי משמרות</h2>
+            <h2 className="mb-2 text-lg font-bold text-foreground sm:text-xl">כיסוי משמרות</h2>
             <ManagerCoverageSection
               groups={model.coverageOverview.map((group) => buildManagerShiftGroupView(group, todayDate))}
             />
           </section>
 
           <section>
-            <h2 className="mb-2 text-sm font-semibold text-foreground">פוטנציאל מול סידור</h2>
+            <h2 className="mb-2 text-lg font-bold text-foreground sm:text-xl">פוטנציאל מול סידור</h2>
             <ManagerPotentialSection rows={potentialRowViews} />
           </section>
 

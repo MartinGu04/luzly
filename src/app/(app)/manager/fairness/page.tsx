@@ -1,6 +1,8 @@
 import { ConfigurationErrorState } from "@/components/dashboard/ConfigurationErrorState";
 import { ManagerForbiddenState } from "@/components/manager/ManagerForbiddenState";
+import { ManagerHeader } from "@/components/manager/ManagerHeader";
 import { ManagerSourceOfTruthNote } from "@/components/manager/ManagerSourceOfTruthNote";
+import { ManagerSubNav } from "@/components/manager/ManagerSubNav";
 import { ManagerSummaryStrip } from "@/components/manager/ManagerSummaryStrip";
 import { ManagerFairnessChart } from "@/components/manager/fairness/ManagerFairnessChart";
 import { ManagerFairnessHeader } from "@/components/manager/fairness/ManagerFairnessHeader";
@@ -99,6 +101,8 @@ export default async function ManagerFairnessPage({ searchParams }: ManagerFairn
     if (selectedRow) {
       return (
         <div className="flex flex-col gap-6">
+          <ManagerHeader />
+          <ManagerSubNav active="fairness" />
           <ManagerFairnessHeader periodLabel={model.period.label} />
           <DataFreshnessStatus fetchedAt={model.fetchedAt} />
           <ManagerFairnessPersonDetail view={buildPersonDetailView(selectedRow, model.period)} />
@@ -113,6 +117,8 @@ export default async function ManagerFairnessPage({ searchParams }: ManagerFairn
 
   return (
     <div className="flex flex-col gap-6">
+      <ManagerHeader />
+      <ManagerSubNav active="fairness" />
       <ManagerFairnessHeader periodLabel={model.period.label} />
       <DataFreshnessStatus fetchedAt={model.fetchedAt} />
 
@@ -127,7 +133,7 @@ export default async function ManagerFairnessPage({ searchParams }: ManagerFairn
       {summary ? <ManagerSummaryStrip summary={summary} /> : null}
 
       <Panel variant="panel">
-        <h2 className="text-sm font-semibold text-foreground">חלוקת הניקוד הנוכחי בצוות</h2>
+        <h2 className="text-lg font-bold text-foreground sm:text-xl">חלוקת הניקוד הנוכחי בצוות</h2>
         <p className="mt-1 text-xs text-muted">
           יעדי ההקצאה משתנים בין תפקידים; התרשים מציג את חלוקת הניקוד הגולמי בלבד.
         </p>
@@ -137,7 +143,7 @@ export default async function ManagerFairnessPage({ searchParams }: ManagerFairn
       </Panel>
 
       <section>
-        <h2 className="mb-2 text-sm font-semibold text-foreground">טבלת צדק</h2>
+        <h2 className="mb-2 text-lg font-bold text-foreground sm:text-xl">לפי איש/אשת צוות</h2>
         <ManagerFairnessTable rows={rowViews} />
       </section>
 

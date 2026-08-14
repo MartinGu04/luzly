@@ -91,12 +91,19 @@ describe("ManagerFairnessPage — request scope", () => {
 });
 
 describe("ManagerFairnessPage — everyone view", () => {
-  it("shows the page title, period label, and a back link to מבט מנהל", async () => {
+  it("shows the shared אזור מנהל title, the page-scoped טבלת צדק heading, and the period label", async () => {
     getRequestManagerFairness.mockResolvedValue(okResult(model()));
     await renderPage();
-    expect(screen.getByRole("heading", { name: "טבלת צדק", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "אזור מנהל", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "טבלת צדק", level: 2 })).toBeInTheDocument();
     expect(screen.getByText("7–12/2026")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /מבט מנהל/ })).toHaveAttribute("href", "/manager");
+  });
+
+  it("shows the shared subnav with טבלת צדק active and a real link back to סקירה", async () => {
+    getRequestManagerFairness.mockResolvedValue(okResult(model()));
+    await renderPage();
+    expect(screen.getByRole("link", { name: "סקירה" })).toHaveAttribute("href", "/manager");
+    expect(screen.getByRole("link", { name: "טבלת צדק" })).toHaveAttribute("aria-current", "page");
   });
 
   it("shows the parsed X/2X target context using the ACTUAL parsed values", async () => {
