@@ -78,7 +78,7 @@ export function ManagerRosterSection({ roster, current }: ManagerRosterSectionPr
       <div className="mt-3 flex flex-col gap-5">
         {groups.map((group) => (
           <div key={group.group}>
-            <h4 className="text-[13px] font-semibold text-muted-2">
+            <h4 className="text-[15px] font-semibold text-muted-2">
               {group.label} <span className="font-normal text-muted-2">· {groupCount(group)}</span>
             </h4>
 
@@ -86,7 +86,7 @@ export function ManagerRosterSection({ roster, current }: ManagerRosterSectionPr
               <div className="mt-2 flex flex-col gap-3">
                 {group.subgroups.map((subgroup) => (
                   <div key={subgroup.group}>
-                    <p className="text-xs font-medium text-muted-2">
+                    <p className="text-[13px] font-semibold text-muted-2">
                       {subgroup.label} · {subgroup.people.length}
                     </p>
                     <ul className="mt-1">
