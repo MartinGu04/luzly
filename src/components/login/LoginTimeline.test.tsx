@@ -22,6 +22,14 @@ describe("LoginTimeline", () => {
     expect(getByText("עכשיו")).toBeInTheDocument();
   });
 
+  it("compact mode still stays aria-hidden and shows the same abstract rhythm, just without the legend row", () => {
+    const { container, queryByText } = render(<LoginTimeline compact />);
+    expect(container.firstElementChild).toHaveAttribute("aria-hidden", "true");
+    expect(container.querySelectorAll(".rounded-full").length).toBeGreaterThan(0);
+    expect(queryByText("משמרת")).toBeNull();
+    expect(queryByText("עכשיו")).toBeNull();
+  });
+
   it("every motion class it uses is covered by the global prefers-reduced-motion rule", () => {
     const { container } = render(<LoginTimeline />);
     const usedAnimationClasses = ["animate-breathe", "animate-pulse-dot", "animate-pulse-ring", "animate-login-now-drift"];

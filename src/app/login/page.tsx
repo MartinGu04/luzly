@@ -39,7 +39,32 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   const hebrewCalendarLabel = formatHebrewCalendarDate(localNow.date);
 
   return (
-    <div className="flex min-h-dvh flex-col lg:flex-row">
+    <div className="relative isolate flex min-h-dvh flex-col overflow-hidden bg-[#05070d] lg:flex-row">
+      {/* The shared midnight canvas (Design Pass PR #22 "immersive composition"
+          pass): below `lg` this is the ONE continuous dark background behind
+          both the hero content and the auth card -- LoginAuthPanel has no
+          opaque background of its own at that width, so this shows straight
+          through with no seam. At `lg`+, LoginAuthPanel reasserts its own
+          theme-responsive `bg-surface-3` over the right 38%, covering this
+          same layer -- so this only ever has to paint the left/hero side on
+          desktop, exactly as before. */}
+      <div aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10">
+        <div className="absolute -top-24 -start-20 h-[26rem] w-[26rem] rounded-full bg-[#241a45]/50 blur-3xl animate-ambient-glow" />
+        <div
+          className="absolute -bottom-28 -end-16 h-[24rem] w-[24rem] rounded-full bg-[#0d2233]/60 blur-3xl animate-ambient-glow"
+          style={{ animationDelay: "2.5s" }}
+        />
+        <div
+          className="absolute inset-0 opacity-[0.05]"
+          style={{
+            backgroundImage:
+              "linear-gradient(to bottom, white 1px, transparent 1px), linear-gradient(to right, white 1px, transparent 1px)",
+            backgroundSize: "44px 44px",
+            maskImage: "radial-gradient(80% 55% at 50% 25%, black, transparent 85%)",
+          }}
+        />
+      </div>
+
       <LoginVisualPanel
         initialClockTime={initialClockTime}
         gregorianDateLabel={gregorianDateLabel}

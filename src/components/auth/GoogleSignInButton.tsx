@@ -15,6 +15,13 @@ interface GoogleSignInButtonProps {
  * the round trip to Google) can never fire `signInWithOAuth` twice. OAuth
  * behavior itself (provider, redirect target, Supabase flow) is unchanged
  * from before the Design Pass -- this only redresses the button.
+ *
+ * Two visual treatments, chosen for contrast against their surroundings
+ * (Design Pass PR #22 "immersive composition" pass, §6): below `lg`, the
+ * login canvas is always dark, so the CTA is a light/milky surface with a
+ * dark label -- a clear focal point against the midnight background and
+ * glass card. At `lg`+ (the approved desktop split, theme-responsive auth
+ * side), it reverts to the violet product-accent treatment.
  */
 export function GoogleSignInButton({ className = "" }: GoogleSignInButtonProps) {
   const [pending, setPending] = useState(false);
@@ -35,7 +42,7 @@ export function GoogleSignInButton({ className = "" }: GoogleSignInButtonProps) 
       onClick={handleSignIn}
       disabled={pending}
       aria-busy={pending}
-      className={`flex h-[52px] w-full items-center justify-center gap-2.5 rounded-xl bg-primary px-4 text-[15px] font-semibold text-primary-foreground shadow-[var(--shadow-login-cta)] transition-all duration-200 hover:bg-primary-strong hover:shadow-[var(--shadow-login-cta-hover)] active:scale-[0.985] active:shadow-[var(--shadow-login-cta-active)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-70 disabled:shadow-[var(--shadow-login-cta)] disabled:hover:bg-primary disabled:active:scale-100 ${className}`}
+      className={`flex h-[52px] w-full items-center justify-center gap-2.5 rounded-xl bg-[var(--login-cta-fixed-bg)] px-4 text-[15px] font-semibold text-[var(--login-cta-fixed-text)] shadow-[var(--shadow-login-cta-fixed)] transition-all duration-200 hover:bg-[var(--login-cta-fixed-bg-hover)] hover:shadow-[var(--shadow-login-cta-fixed-hover)] active:scale-[0.985] active:shadow-[var(--shadow-login-cta-fixed-active)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-70 disabled:shadow-[var(--shadow-login-cta-fixed)] disabled:hover:bg-[var(--login-cta-fixed-bg)] disabled:active:scale-100 lg:bg-primary lg:text-primary-foreground lg:shadow-[var(--shadow-login-cta)] lg:hover:bg-primary-strong lg:hover:shadow-[var(--shadow-login-cta-hover)] lg:active:shadow-[var(--shadow-login-cta-active)] lg:disabled:shadow-[var(--shadow-login-cta)] lg:disabled:hover:bg-primary ${className}`}
     >
       {pending ? (
         <>

@@ -1,5 +1,6 @@
 import { LiveClock } from "@/components/ui/LiveClock";
 import { LOGIN_HERO_HEADLINE, LOGIN_HERO_SUBTEXT } from "@/lib/config/loginCopy";
+import { APP_NAME } from "@/lib/config/productName";
 import { LoginLogoRow } from "./LoginLogoRow";
 import { LoginTimeline } from "./LoginTimeline";
 
@@ -13,14 +14,14 @@ interface LoginVisualPanelProps {
 }
 
 /**
- * The login route's visual-identity side (Design Pass PR #22) -- always
- * dark/midnight regardless of the active app theme, so its palette is
- * intentionally literal rather than read from the light/dark tokens in
- * globals.css (it deliberately does NOT follow `--background`/`--primary`
- * etc.). The exact hex values below mirror the dark theme's own
- * `--background`/`--background-glow-a`/`--background-glow-b`/`--primary`/
- * `--accent` (see globals.css) purely for palette consistency, not because
- * this panel reads those tokens.
+ * The login route's hero/identity content (Design Pass PR #22, recomposed
+ * for "immersive composition" so mobile reads as one continuous canvas
+ * rather than a separately-colored hero block). The dark midnight
+ * background itself now lives on the shared wrapper in `page.tsx` -- this
+ * component only renders content on top of it, using literal white/violet
+ * text colors (deliberately not the light/dark tokens in globals.css,
+ * since this identity content stays the same regardless of theme in both
+ * the desktop split and the mobile continuous canvas).
  *
  * Renders no authenticated data: the clock/date props are pure Asia/
  * Jerusalem presentation derived server-side from `getJerusalemLocalNow()`
@@ -28,29 +29,13 @@ interface LoginVisualPanelProps {
  */
 export function LoginVisualPanel({ initialClockTime, gregorianDateLabel, hebrewCalendarLabel }: LoginVisualPanelProps) {
   return (
-    <section className="relative isolate flex min-h-[34dvh] flex-col justify-between overflow-hidden bg-[#05070d] lg:min-h-dvh lg:w-[62%]">
-      <div aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10">
-        <div className="absolute -top-24 -start-20 h-[26rem] w-[26rem] rounded-full bg-[#241a45]/50 blur-3xl animate-ambient-glow" />
-        <div
-          className="absolute -bottom-28 -end-16 h-[24rem] w-[24rem] rounded-full bg-[#0d2233]/60 blur-3xl animate-ambient-glow"
-          style={{ animationDelay: "2.5s" }}
-        />
-        <div
-          className="absolute inset-0 opacity-[0.05]"
-          style={{
-            backgroundImage:
-              "linear-gradient(to bottom, white 1px, transparent 1px), linear-gradient(to right, white 1px, transparent 1px)",
-            backgroundSize: "44px 44px",
-            maskImage: "radial-gradient(80% 55% at 50% 25%, black, transparent 85%)",
-          }}
-        />
-      </div>
-
-      <div className="relative flex items-center px-6 pt-5 sm:px-10 sm:pt-6 lg:px-16 lg:pt-10">
+    <section className="relative flex flex-col px-6 pt-5 sm:px-10 sm:pt-6 lg:min-h-dvh lg:w-[62%] lg:justify-between lg:px-16 lg:pt-10">
+      <div className="relative flex items-center justify-between gap-3">
+        <span className="text-sm font-bold tracking-wide text-white/85">{APP_NAME}</span>
         <LoginLogoRow />
       </div>
 
-      <div className="relative flex flex-1 flex-col justify-center gap-4 px-6 py-5 sm:gap-6 sm:px-10 sm:py-6 lg:px-16">
+      <div className="relative flex flex-col gap-4 py-5 sm:gap-6 sm:py-6 lg:flex-1 lg:justify-center lg:py-0">
         <div className="max-w-md">
           <h1 className="text-[clamp(1.5rem,4.2vw,2.75rem)] leading-[1.15] font-bold text-white">
             {LOGIN_HERO_HEADLINE}
@@ -69,9 +54,11 @@ export function LoginVisualPanel({ initialClockTime, gregorianDateLabel, hebrewC
             </div>
           ) : null}
         </div>
+
+        <LoginTimeline className="lg:hidden" compact />
       </div>
 
-      <div className="relative hidden px-6 pb-8 sm:px-10 lg:block lg:px-16 lg:pb-12">
+      <div className="relative hidden pb-8 lg:block lg:pb-12">
         <LoginTimeline />
       </div>
     </section>

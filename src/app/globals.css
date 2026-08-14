@@ -185,6 +185,40 @@
 }
 
 /* ---------------------------------------------------------------------- */
+/* Login mobile canvas -- fixed, theme-independent tokens (Design Pass    */
+/* PR #22 "immersive composition" pass). Below `lg`, the login route is   */
+/* intentionally ONE continuous dark branded canvas in BOTH app themes    */
+/* (see LoginAuthPanel/LoginVisualPanel) -- unlike every token above,     */
+/* these never change with data-theme/prefers-color-scheme. They are the */
+/* mobile-only glass-card/text treatment; `lg:` classes revert to the     */
+/* normal theme-responsive tokens for the approved desktop split.         */
+/* ---------------------------------------------------------------------- */
+:root {
+  --login-glass-bg-fixed: rgba(46, 53, 87, 0.68);
+  --login-glass-border-fixed: rgba(139, 123, 245, 0.26);
+  --shadow-login-glass-fixed:
+    0 1px 0 0 rgba(255, 255, 255, 0.14) inset,
+    0 32px 64px -26px rgba(0, 0, 0, 0.55),
+    0 12px 28px -14px rgba(139, 123, 245, 0.28);
+
+  --login-fg-fixed: #eef0f6;
+  --login-muted-fixed: #8b93a8;
+  --login-muted-2-fixed: #6b7590;
+
+  /* The mobile-only light/milky Google CTA (Design Pass PR #22
+     "immersive composition" pass, §6) -- deliberately the inverse of the
+     desktop violet CTA, for contrast against the always-dark mobile
+     canvas. Text is a fixed dark neutral (never --foreground, which would
+     flip to light text in dark app theme and vanish on this light button). */
+  --login-cta-fixed-bg: rgba(255, 255, 255, 0.96);
+  --login-cta-fixed-bg-hover: rgba(255, 255, 255, 1);
+  --login-cta-fixed-text: #23283a;
+  --shadow-login-cta-fixed: 0 12px 28px -10px rgba(139, 123, 245, 0.45);
+  --shadow-login-cta-fixed-hover: 0 18px 38px -12px rgba(139, 123, 245, 0.55);
+  --shadow-login-cta-fixed-active: 0 6px 16px -8px rgba(139, 123, 245, 0.42);
+}
+
+/* ---------------------------------------------------------------------- */
 /* Derived tokens -- formulas over the palette above rather than literal  */
 /* colors, so they never need a separate light/dark definition: whichever */
 /* `--primary`/`--critical`/etc. is active at a given element is what     */

@@ -11,15 +11,20 @@ interface LoginAuthPanelProps {
 }
 
 /**
- * The login route's authentication side (Design Pass PR #22, hardened for
- * "auth glass presence" so it reads as a branded Luzly surface rather than
- * a generic auth card). Still follows the app's normal light/dark tokens --
- * no bespoke colors -- but the card itself is a translucent, backdrop-blurred
- * glass surface (`--login-glass-bg`/`--login-glass-border`/
- * `--shadow-login-glass` in globals.css, all `color-mix()` formulas over the
- * existing `--surface-2`/`--foreground`/`--primary` tokens) instead of the
- * shared `Panel`'s opaque surface, so it automatically reads as milky glass
- * in light and midnight glass in dark without any per-theme literals here.
+ * The login route's authentication content (Design Pass PR #22,
+ * recomposed for "immersive composition" -- the glass card now floats
+ * INSIDE the same continuous canvas as the hero, rather than sitting on a
+ * separately-colored section below it).
+ *
+ * Below `lg`, this panel has no opaque background of its own -- the
+ * shared midnight canvas painted by the root `page.tsx` wrapper shows
+ * straight through, and the card/text here use the FIXED (theme-
+ * independent) `--login-*-fixed` tokens from globals.css so the mobile
+ * login stays one consistent dark branded surface regardless of the
+ * user's Light/Dark preference (that preference still applies to the
+ * rest of the app once signed in). At `lg`+, every `lg:` class below
+ * reverts to the normal theme-responsive tokens for the approved desktop
+ * split, where the auth side legitimately follows Light/Dark.
  *
  * Google OAuth is the only real auth method here -- no email/password, no
  * registration, matching the read-only/Google-Sheets-source-of-truth
@@ -27,18 +32,30 @@ interface LoginAuthPanelProps {
  */
 export function LoginAuthPanel({ hasAuthError }: LoginAuthPanelProps) {
   return (
-    <section className="relative flex flex-1 flex-col overflow-hidden bg-surface-3 lg:w-[38%]">
+    <section className="relative flex flex-1 flex-col overflow-hidden lg:bg-surface-3 lg:w-[38%]">
+      {/* Desktop-only: an ambient violet glow anchored near this panel's
+          boundary-adjacent edge (physically its right edge -- this panel
+          renders second/left in the RTL split, so "near the hero" means
+          "near 100%" here), so some of the hero's own indigo/violet energy
+          visually bridges the seam instead of the auth side reading as a
+          flat isolated panel (Design Pass PR #22 "immersive composition"
+          pass, §10). */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute inset-0 -z-10"
+        className="pointer-events-none absolute inset-0 -z-10 hidden lg:block"
         style={{
           backgroundImage:
-            "radial-gradient(34rem 26rem at 50% 8%, color-mix(in srgb, var(--primary) 9%, transparent), transparent 65%)",
+            "radial-gradient(38rem 30rem at 88% 10%, color-mix(in srgb, var(--primary) 13%, transparent), transparent 62%)",
         }}
       />
 
       <div className="relative flex items-center justify-end px-6 pt-5 sm:px-10 lg:px-8">
-        <ThemeToggle />
+        <div className="lg:hidden">
+          <ThemeToggle variant="sidebar" />
+        </div>
+        <div className="hidden lg:block">
+          <ThemeToggle />
+        </div>
       </div>
 
       <div className="relative flex flex-1 flex-col items-center justify-center px-6 py-8 sm:px-10 lg:px-8">
@@ -49,10 +66,16 @@ export function LoginAuthPanel({ hasAuthError }: LoginAuthPanelProps) {
             style={{ background: "var(--login-glass-ambient)" }}
           />
 
-          <div className="rounded-[32px] bg-[var(--login-glass-bg)] p-6 shadow-[var(--shadow-login-glass)] ring-1 ring-[var(--login-glass-border)] backdrop-blur-xl sm:p-7">
-            <p className="text-sm font-semibold tracking-wide text-muted">{APP_NAME}</p>
-            <h2 className="mt-2 text-2xl font-bold text-foreground">{LOGIN_WELCOME_HEADING}</h2>
-            <p className="mt-2 text-sm leading-relaxed text-muted">{LOGIN_WELCOME_SUBTEXT}</p>
+          <div className="rounded-[32px] bg-[var(--login-glass-bg-fixed)] p-6 shadow-[var(--shadow-login-glass-fixed)] ring-1 ring-[var(--login-glass-border-fixed)] backdrop-blur-xl sm:p-7 lg:bg-[var(--login-glass-bg)] lg:shadow-[var(--shadow-login-glass)] lg:ring-[var(--login-glass-border)]">
+            <p className="text-sm font-semibold tracking-wide text-[var(--login-muted-fixed)] lg:text-muted">
+              {APP_NAME}
+            </p>
+            <h2 className="mt-2 text-2xl font-bold text-[var(--login-fg-fixed)] lg:text-foreground">
+              {LOGIN_WELCOME_HEADING}
+            </h2>
+            <p className="mt-2 text-sm leading-relaxed text-[var(--login-muted-fixed)] lg:text-muted">
+              {LOGIN_WELCOME_SUBTEXT}
+            </p>
 
             {hasAuthError ? <LoginErrorNotice className="mt-5" /> : null}
 
@@ -60,14 +83,14 @@ export function LoginAuthPanel({ hasAuthError }: LoginAuthPanelProps) {
               <GoogleSignInButton />
             </div>
 
-            <p className="mt-4 flex items-center justify-center gap-1.5 text-xs text-muted-2">
+            <p className="mt-4 flex items-center justify-center gap-1.5 text-xs text-[var(--login-muted-2-fixed)] lg:text-muted-2">
               <Lock className="h-3.5 w-3.5" aria-hidden="true" strokeWidth={1.75} />
               {LOGIN_AUTH_NOTE}
             </p>
           </div>
         </div>
 
-        <p className="mt-6 text-[11px] text-muted-2">
+        <p className="mt-6 text-[11px] text-[var(--login-muted-2-fixed)] lg:text-muted-2">
           {APP_NAME} · גרסה {APP_VERSION}
         </p>
       </div>
