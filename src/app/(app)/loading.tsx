@@ -15,7 +15,7 @@ export default function DashboardLoading() {
         <div className="skeleton h-6 w-16 rounded-lg" />
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="flex flex-col gap-6">
           <div className="skeleton h-56 rounded-3xl" />
           <div className="skeleton h-64 rounded-2xl" />

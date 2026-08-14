@@ -23,6 +23,11 @@ interface ScheduleCalendarProps {
  * presentation-safe calendar metadata (`DayMeta`) -- never the full
  * `PersonalScheduleReadModel`, never counterpart/coworker data.
  *
+ * Desktop: a two-column layout -- the calendar leads (roughly 70% of the
+ * width), the selected day's detail sits beside it in a ~380px side
+ * column, never as a giant full-width card stacked below. Mobile keeps
+ * the simpler stacked layout (detail below the calendar).
+ *
  * Switching months is a normal server navigation (see `MonthNav`), but a
  * server-prop change alone does NOT guarantee this component's local
  * `selectedDate` state resets -- React only recreates state when the
@@ -52,7 +57,7 @@ export function ScheduleCalendar({
   const selectedDayEvents = selectedDate ? (eventsByDate[selectedDate] ?? []) : [];
 
   return (
-    <div>
+    <div className="flex flex-col gap-4 lg:grid lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start lg:gap-6">
       <Panel variant="panel">
         <CalendarGrid
           grid={grid}

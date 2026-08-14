@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import type { PersonalAssignmentView, PersonalEventView, PersonalScheduleReadModel } from "@/lib/readModels/types";
 
 const getRequestPersonalSchedule = vi.fn();
@@ -71,6 +71,11 @@ function searchParams(month?: string) {
   return Promise.resolve(month ? { month } : {});
 }
 
+/** The selected-day detail panel only -- scoped so assertions never accidentally match the calendar grid's own in-cell event labels (Design Pass PR #20). */
+function selectedDayPanel() {
+  return within(screen.getByRole("region", { name: "פרטי היום הנבחר" }));
+}
+
 describe("SchedulePage — month resolution", () => {
   it("defaults to the month containing localNow.date when no month param is given", async () => {
     getRequestPersonalSchedule.mockResolvedValue(okResult(model()));
@@ -124,7 +129,7 @@ describe("SchedulePage — selected day resets on month change (regression)", ()
     act(() => {
       screen.getByRole("button", { name: /20 באוגוסט/ }).click();
     });
-    expect(screen.getByText("משמרת אוגוסט מיוחדת")).toBeInTheDocument();
+    expect(selectedDayPanel().getByText("משמרת אוגוסט מיוחדת")).toBeInTheDocument();
 
     // Transition to September via a rerender on the SAME mounted tree -- this is
     // exactly the scenario a client-side Next.js navigation produces: new server
@@ -135,8 +140,8 @@ describe("SchedulePage — selected day resets on month change (regression)", ()
 
     // September's own default-selected day (the 1st, since today isn't in this
     // month) must be shown -- never a leftover reference to August's selection.
-    expect(screen.getByText("משמרת ספטמבר")).toBeInTheDocument();
-    expect(screen.queryByText("משמרת אוגוסט מיוחדת")).toBeNull();
+    expect(selectedDayPanel().getByText("משמרת ספטמבר")).toBeInTheDocument();
+    expect(selectedDayPanel().queryByText("משמרת אוגוסט מיוחדת")).toBeNull();
   });
 });
 
@@ -227,7 +232,7 @@ describe("SchedulePage — content", () => {
     );
     const element = await SchedulePage({ searchParams: searchParams() });
     render(element);
-    expect(screen.getByText("טכנאי יום")).toBeInTheDocument();
+    expect(selectedDayPanel().getByText("טכנאי יום")).toBeInTheDocument();
   });
 
   it("does not render a shift from a different month", async () => {

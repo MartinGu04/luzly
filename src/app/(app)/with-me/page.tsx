@@ -86,30 +86,44 @@ export default async function WithMePage() {
     buildShiftContextView(context, todayDate, "next", index, !hasCurrent),
   );
 
+  const currentSection = (
+    <section className="flex flex-col gap-4">
+      <h2 className="text-sm font-semibold text-muted">איתך עכשיו</h2>
+      {currentViews.map((view) => (
+        <ShiftContextCard key={view.key} view={view} emphasized />
+      ))}
+    </section>
+  );
+
+  const nextSection = (
+    <section className="flex flex-col gap-4">
+      <h2 className="text-sm font-semibold text-muted">המשמרת הבאה</h2>
+      {nextViews.map((view) => (
+        <ShiftContextCard key={view.key} view={view} emphasized={!hasCurrent} />
+      ))}
+    </section>
+  );
+
   return (
     <div className="flex flex-col gap-6">
       <WithMeHeader />
       <DataFreshnessStatus fetchedAt={model.fetchedAt} />
 
-      {hasCurrent ? (
-        <section className="flex flex-col gap-4">
-          <h2 className="text-sm font-semibold text-muted">איתך עכשיו</h2>
-          {currentViews.map((view) => (
-            <ShiftContextCard key={view.key} view={view} emphasized />
-          ))}
-        </section>
-      ) : null}
-
-      {hasNext ? (
-        <section className="flex flex-col gap-4">
-          <h2 className="text-sm font-semibold text-muted">המשמרת הבאה</h2>
-          {nextViews.map((view) => (
-            <ShiftContextCard key={view.key} view={view} emphasized={!hasCurrent} />
-          ))}
-        </section>
-      ) : null}
-
-      {!hasCurrent && !hasNext ? <EmptyTeamState /> : null}
+      {hasCurrent && hasNext ? (
+        // Both exist: an intentional side-by-side context layout on desktop
+        // (current leads on the right in RTL, next beside it) rather than
+        // two full-width stacked cards -- stacks normally on mobile.
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 lg:items-start">
+          {currentSection}
+          {nextSection}
+        </div>
+      ) : hasCurrent ? (
+        <div className="lg:max-w-xl">{currentSection}</div>
+      ) : hasNext ? (
+        <div className="lg:max-w-xl">{nextSection}</div>
+      ) : (
+        <EmptyTeamState />
+      )}
     </div>
   );
 }

@@ -61,6 +61,7 @@ export default async function ConflictsPage() {
 
   const views = model.issues.map((issue, index) => buildConflictIssueView(issue, todayDate, index));
   const summary = issueSummaryLabel(model.issues);
+  const hasCritical = model.issues.some((issue) => issue.severity === "critical");
 
   return (
     <div className="flex flex-col gap-6">
@@ -71,7 +72,7 @@ export default async function ConflictsPage() {
         <ConflictsEmptyState />
       ) : (
         <>
-          {summary ? <ConflictsSummary summary={summary} /> : null}
+          {summary ? <ConflictsSummary summary={summary} hasCritical={hasCritical} /> : null}
           {SEVERITY_GROUP_ORDER.map((severity) => (
             <IssueSeverityGroup
               key={severity}

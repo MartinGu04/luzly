@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import type { PersonalEventView } from "@/lib/readModels/types";
 import { ScheduleCalendar } from "./ScheduleCalendar";
 import type { DayMeta } from "./types";
@@ -58,6 +58,11 @@ function shiftEvent(overrides: Partial<PersonalEventView> = {}): PersonalEventVi
   };
 }
 
+/** The selected-day detail panel only -- scoped so assertions never accidentally match the calendar grid's own in-cell event labels (Design Pass PR #20). */
+function selectedDayPanel() {
+  return within(screen.getByRole("region", { name: "פרטי היום הנבחר" }));
+}
+
 describe("ScheduleCalendar", () => {
   it("shows the default-selected day's details on first render", () => {
     render(
@@ -69,7 +74,7 @@ describe("ScheduleCalendar", () => {
         activeShiftDates={[]}
       />,
     );
-    expect(screen.getByText("טכנאי יום")).toBeInTheDocument();
+    expect(selectedDayPanel().getByText("טכנאי יום")).toBeInTheDocument();
   });
 
   it("clicking a different day updates the selected-day panel", () => {
@@ -86,15 +91,34 @@ describe("ScheduleCalendar", () => {
       />,
     );
 
-    expect(screen.getByText("טכנאי יום")).toBeInTheDocument();
-    expect(screen.queryByText("טכנאי לילה")).toBeNull();
+    expect(selectedDayPanel().getByText("טכנאי יום")).toBeInTheDocument();
+    expect(selectedDayPanel().queryByText("טכנאי לילה")).toBeNull();
 
     act(() => {
       screen.getByRole("button", { name: /13 באוגוסט/ }).click();
     });
 
-    expect(screen.getByText("טכנאי לילה")).toBeInTheDocument();
-    expect(screen.queryByText("טכנאי יום")).toBeNull();
+    expect(selectedDayPanel().getByText("טכנאי לילה")).toBeInTheDocument();
+    expect(selectedDayPanel().queryByText("טכנאי יום")).toBeNull();
+  });
+
+  it("still shows the calendar grid's own event label for a date, even once it's no longer selected", () => {
+    render(
+      <ScheduleCalendar
+        grid={WEEK_GRID}
+        days={weekDays()}
+        monthEvents={[shiftEvent({ date: "2026-08-12", title: "טכנאי יום" })]}
+        defaultSelectedDate="2026-08-12"
+        activeShiftDates={[]}
+      />,
+    );
+
+    act(() => {
+      screen.getByRole("button", { name: /13 באוגוסט/ }).click();
+    });
+
+    // The 12th's own cell still shows its event label; only the panel moved.
+    expect(screen.getByRole("button", { name: /12 באוגוסט/ }).textContent).toContain("טכנאי יום");
   });
 
   it("shows the empty-day message when the selected day has no shifts", () => {
@@ -107,7 +131,7 @@ describe("ScheduleCalendar", () => {
         activeShiftDates={[]}
       />,
     );
-    expect(screen.getByText("אין לך משמרת ביום הזה 😌")).toBeInTheDocument();
+    expect(selectedDayPanel().getByText("אין לך משמרת ביום הזה 😌")).toBeInTheDocument();
   });
 
   it("renders no selected-day panel when defaultSelectedDate is null", () => {
@@ -120,7 +144,7 @@ describe("ScheduleCalendar", () => {
         activeShiftDates={[]}
       />,
     );
-    expect(screen.queryByText("אין לך משמרת ביום הזה 😌")).toBeNull();
+    expect(screen.queryByRole("region", { name: "פרטי היום הנבחר" })).toBeNull();
   });
 
   it("only ever renders events belonging to this month's monthEvents prop -- no unrelated data", () => {
