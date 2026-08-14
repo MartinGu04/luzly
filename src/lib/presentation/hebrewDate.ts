@@ -55,6 +55,20 @@ export function formatHebrewWeekday(dateStr: string): string | null {
   return WEEKDAY_LABELS[dayOfWeek(parsed)];
 }
 
+/** Just the day-of-month and month label, e.g. "14 באוגוסט" -- no weekday, for a UI that already shows the weekday as its own separate element. */
+export function formatHebrewDayAndMonth(dateStr: string): string | null {
+  const parsed = parseCalendarDate(dateStr);
+  if (!parsed) return null;
+  return `${parsed.day} ב${MONTH_LABELS[parsed.month - 1]}`;
+}
+
+/** Just the month label with its "ב" prefix, e.g. "באוגוסט" -- for a UI that shows the day-of-month as its own separately styled element. */
+export function formatHebrewMonthName(dateStr: string): string | null {
+  const parsed = parseCalendarDate(dateStr);
+  if (!parsed) return null;
+  return `ב${MONTH_LABELS[parsed.month - 1]}`;
+}
+
 /** "ה׳" -- the standard single-letter Hebrew weekday abbreviation. */
 export function formatShortWeekday(dateStr: string): string | null {
   const parsed = parseCalendarDate(dateStr);

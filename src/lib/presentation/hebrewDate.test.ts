@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   formatCompactDate,
   formatDateRange,
+  formatHebrewDayAndMonth,
+  formatHebrewMonthName,
   formatHebrewMonthYear,
   formatHebrewWeekday,
   formatHebrewWeekdayAndDate,
@@ -28,6 +30,27 @@ describe("formatHebrewWeekdayAndDate", () => {
 describe("formatHebrewWeekday", () => {
   it("returns just the weekday label", () => {
     expect(formatHebrewWeekday("2026-08-13")).toBe("יום חמישי");
+  });
+});
+
+describe("formatHebrewDayAndMonth", () => {
+  it("formats the day-of-month and month without the weekday", () => {
+    expect(formatHebrewDayAndMonth("2026-08-14")).toBe("14 באוגוסט");
+  });
+
+  it("returns null for an unparseable date, never throws", () => {
+    expect(formatHebrewDayAndMonth("not-a-date")).toBeNull();
+  });
+});
+
+describe("formatHebrewMonthName", () => {
+  it("formats just the month label with its ב prefix", () => {
+    expect(formatHebrewMonthName("2026-08-14")).toBe("באוגוסט");
+    expect(formatHebrewMonthName("2026-01-01")).toBe("בינואר");
+  });
+
+  it("returns null for an unparseable date, never throws", () => {
+    expect(formatHebrewMonthName("not-a-date")).toBeNull();
   });
 });
 
