@@ -60,13 +60,17 @@ export function LoginClockReadout({
   }
 
   return (
-    <div className={`inline-flex items-center gap-4 rounded-2xl bg-white/[0.04] px-5 py-3.5 ring-1 ring-white/10 ${className}`}>
-      {iconBadge("h-10 w-10")}
-      <LiveClock initialTime={initialClockTime} size="hero" className="text-white" />
+    <div
+      className={`inline-flex items-center gap-4 rounded-2xl bg-white/[0.04] px-6 py-4 ring-1 ring-white/10 xl:gap-6 xl:rounded-3xl xl:px-8 xl:py-6 ${className}`}
+    >
+      {iconBadge("h-11 w-11 xl:h-14 xl:w-14")}
+      <LiveClock initialTime={initialClockTime} size="hero-lg" className="text-white" />
       {weekdayLabel ? (
-        <div className="flex flex-col gap-0.5 border-s border-white/10 ps-4 text-sm text-white/60">
+        <div className="flex flex-col gap-0.5 border-s border-white/10 ps-4 text-sm text-white/60 xl:gap-1 xl:ps-6 xl:text-base">
           <span>{weekdayLabel}</span>
-          {dayNumber !== null ? <span className="text-xl font-bold leading-tight text-white">{dayNumber}</span> : null}
+          {dayNumber !== null ? (
+            <span className="text-xl font-bold leading-tight text-white xl:text-3xl">{dayNumber}</span>
+          ) : null}
           {monthLabel ? <span>{monthLabel}</span> : null}
         </div>
       ) : null}

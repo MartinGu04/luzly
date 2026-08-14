@@ -71,17 +71,21 @@ function FloatingCard({ card }: { card: FloatingCardSpec }) {
   const { Icon } = card;
   return (
     <div
-      className={`absolute flex w-max max-w-[8.25rem] items-center gap-1.5 rounded-2xl bg-[#161227]/90 px-2 py-1.5 shadow-[0_16px_32px_-14px_rgba(0,0,0,0.6)] ring-1 ring-white/10 backdrop-blur-sm sm:max-w-[9.5rem] sm:gap-2 sm:px-2.5 sm:py-2 lg:max-w-[10rem] ${card.positionClassName}`}
+      className={`absolute flex w-max max-w-[8.25rem] items-center gap-1.5 rounded-2xl bg-[#161227]/90 px-2 py-1.5 shadow-[0_16px_32px_-14px_rgba(0,0,0,0.6)] ring-1 ring-white/10 backdrop-blur-sm sm:max-w-[9.5rem] sm:gap-2 sm:px-2.5 sm:py-2 lg:max-w-[10rem] lg:gap-2 lg:px-3 lg:py-2 xl:max-w-[13rem] xl:gap-3 xl:rounded-3xl xl:px-4 xl:py-3 ${card.positionClassName}`}
     >
-      <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-xl sm:h-8 sm:w-8 ${card.badgeClass}`}>
-        <Icon className="h-3.5 w-3.5 text-white sm:h-4 sm:w-4" aria-hidden="true" strokeWidth={1.75} />
+      <span
+        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-xl sm:h-8 sm:w-8 lg:h-9 lg:w-9 xl:h-11 xl:w-11 xl:rounded-2xl ${card.badgeClass}`}
+      >
+        <Icon className="h-3.5 w-3.5 text-white sm:h-4 sm:w-4 xl:h-5 xl:w-5" aria-hidden="true" strokeWidth={1.75} />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-1">
-          <span className="whitespace-nowrap text-[11px] font-semibold text-white sm:text-xs">{card.title}</span>
-          <span aria-hidden="true" className={`h-1.5 w-1.5 shrink-0 rounded-full ${card.dotClass}`} />
+        <span className="flex items-center gap-1 xl:gap-2">
+          <span className="whitespace-nowrap text-[11px] font-semibold text-white sm:text-xs lg:text-sm xl:text-base">
+            {card.title}
+          </span>
+          <span aria-hidden="true" className={`h-1.5 w-1.5 shrink-0 rounded-full xl:h-2 xl:w-2 ${card.dotClass}`} />
         </span>
-        <span dir="ltr" className="block whitespace-nowrap text-[10px] text-white/50 sm:text-[11px]">
+        <span dir="ltr" className="block whitespace-nowrap text-[10px] text-white/50 sm:text-[11px] xl:text-sm">
           {card.time}
         </span>
       </span>
@@ -131,7 +135,7 @@ interface LoginScheduleRingProps {
  */
 export function LoginScheduleRing({ children }: LoginScheduleRingProps) {
   return (
-    <div className="relative mx-auto w-[clamp(19rem,88vw,26rem)] lg:mx-0 lg:w-[clamp(22rem,30vw,28rem)]">
+    <div className="relative mx-auto w-[clamp(19rem,88vw,26rem)] lg:mx-0 lg:w-[clamp(24rem,32vw,30rem)] xl:w-[clamp(30rem,42vw,42rem)]">
       <div className="relative aspect-square w-full">
         <div
           aria-hidden="true"

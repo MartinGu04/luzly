@@ -42,16 +42,16 @@ export function GoogleSignInButton({ className = "" }: GoogleSignInButtonProps) 
       onClick={handleSignIn}
       disabled={pending}
       aria-busy={pending}
-      className={`flex h-[52px] w-full items-center justify-center gap-2.5 rounded-xl bg-[var(--login-cta-fixed-bg)] px-4 text-[15px] font-semibold text-[var(--login-cta-fixed-text)] shadow-[var(--shadow-login-cta-fixed)] transition-all duration-200 hover:bg-[var(--login-cta-fixed-bg-hover)] hover:shadow-[var(--shadow-login-cta-fixed-hover)] active:scale-[0.985] active:shadow-[var(--shadow-login-cta-fixed-active)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-70 disabled:shadow-[var(--shadow-login-cta-fixed)] disabled:hover:bg-[var(--login-cta-fixed-bg)] disabled:active:scale-100 ${className}`}
+      className={`flex h-[52px] w-full items-center justify-center gap-2.5 rounded-xl bg-[var(--login-cta-fixed-bg)] px-4 text-[15px] font-semibold text-[var(--login-cta-fixed-text)] shadow-[var(--shadow-login-cta-fixed)] transition-all duration-200 hover:bg-[var(--login-cta-fixed-bg-hover)] hover:shadow-[var(--shadow-login-cta-fixed-hover)] active:scale-[0.985] active:shadow-[var(--shadow-login-cta-fixed-active)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-70 disabled:shadow-[var(--shadow-login-cta-fixed)] disabled:hover:bg-[var(--login-cta-fixed-bg)] disabled:active:scale-100 lg:h-14 lg:gap-3 lg:rounded-2xl lg:px-5 lg:text-base xl:h-16 xl:px-6 xl:text-lg ${className}`}
     >
       {pending ? (
         <>
-          <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" strokeWidth={2} />
+          <Loader2 className="h-5 w-5 animate-spin xl:h-6 xl:w-6" aria-hidden="true" strokeWidth={2} />
           <span>מתחבר...</span>
         </>
       ) : (
         <>
-          <GoogleGlyph className="h-5 w-5" />
+          <GoogleGlyph className="h-5 w-5 xl:h-6 xl:w-6" />
           <span>המשך עם Google</span>
         </>
       )}

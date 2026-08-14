@@ -33,18 +33,22 @@ interface LoginHeroProps {
  */
 export function LoginHero({ initialClockTime, weekdayLabel, dayNumber, monthLabel, hasAuthError }: LoginHeroProps) {
   return (
-    <div className="relative mx-auto flex w-full max-w-6xl flex-1 flex-col px-6 pb-10 pt-6 sm:px-10 sm:pt-8 lg:px-16 lg:py-10">
+    <div className="relative mx-auto flex w-full max-w-[1680px] flex-1 flex-col px-6 pb-10 pt-6 sm:px-10 sm:pt-8 lg:px-16 lg:py-10 xl:px-24">
       <div className="flex justify-center lg:justify-start">
         <LoginHeaderLogo />
       </div>
 
-      <div className="mt-10 grid grid-cols-1 gap-y-9 sm:mt-12 lg:mt-16 lg:grid-cols-[1.05fr_1fr] lg:items-center lg:gap-x-14 lg:gap-y-6">
+      <div className="mt-10 grid grid-cols-1 gap-y-9 sm:mt-12 lg:mt-14 lg:grid-cols-[1fr_1fr] lg:items-center lg:gap-x-16 lg:gap-y-8 xl:gap-x-24">
         <div className="order-1 flex flex-col items-center text-center lg:order-none lg:col-start-2 lg:row-start-1 lg:items-start lg:text-start">
-          <p className="text-sm font-semibold text-[#b39bfa] sm:text-base">{LOGIN_HERO_EYEBROW}</p>
-          <h1 className="mt-2 max-w-md text-[clamp(1.75rem,4.4vw,2.75rem)] leading-[1.15] font-bold text-white">
+          <p className="text-sm font-semibold text-[#b39bfa] sm:text-base lg:text-xl lg:tracking-wide">
+            {LOGIN_HERO_EYEBROW}
+          </p>
+          <h1 className="mt-2 max-w-md text-[clamp(1.75rem,4.4vw,2.75rem)] leading-[1.15] font-bold text-white lg:mt-4 lg:max-w-xl lg:text-[clamp(3rem,3.6vw,4.75rem)] lg:leading-[1.08]">
             {LOGIN_HERO_HEADLINE}
           </h1>
-          <p className="mt-3 max-w-sm text-[15px] leading-relaxed text-white/60">{LOGIN_HERO_SUBTEXT}</p>
+          <p className="mt-3 max-w-sm text-[15px] leading-relaxed text-white/60 lg:mt-5 lg:max-w-lg lg:text-xl">
+            {LOGIN_HERO_SUBTEXT}
+          </p>
         </div>
 
         <div className="order-2 flex justify-center lg:order-none lg:col-start-1 lg:row-span-3 lg:row-start-1 lg:justify-start">
@@ -70,11 +74,11 @@ export function LoginHero({ initialClockTime, weekdayLabel, dayNumber, monthLabe
         </div>
 
         <div className="order-3 flex w-full flex-col items-center lg:order-none lg:col-start-2 lg:row-start-3 lg:items-start">
-          <div className="w-full max-w-sm">
+          <div className="w-full max-w-sm lg:max-w-md">
             {hasAuthError ? <LoginErrorNotice className="mb-4" /> : null}
             <GoogleSignInButton />
-            <p className="mt-4 flex items-center justify-center gap-1.5 text-xs text-white/50 lg:justify-start">
-              <Shield className="h-3.5 w-3.5" aria-hidden="true" strokeWidth={1.75} />
+            <p className="mt-4 flex items-center justify-center gap-1.5 text-xs text-white/50 lg:mt-5 lg:justify-start lg:text-sm">
+              <Shield className="h-3.5 w-3.5 lg:h-4 lg:w-4" aria-hidden="true" strokeWidth={1.75} />
               {LOGIN_AUTH_NOTE}
             </p>
           </div>

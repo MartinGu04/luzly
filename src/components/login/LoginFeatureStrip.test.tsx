@@ -19,6 +19,13 @@ describe("LoginFeatureStrip", () => {
   it("is hidden below the lg breakpoint (desktop-only, matching the supplied mobile reference)", () => {
     const { container } = render(<LoginFeatureStrip />);
     expect(container.firstElementChild).toHaveClass("hidden");
-    expect(container.firstElementChild).toHaveClass("lg:flex");
+    expect(container.firstElementChild).toHaveClass("lg:block");
+  });
+
+  it("renders as a single shared card, not loose floating items", () => {
+    const { container } = render(<LoginFeatureStrip />);
+    const card = container.querySelector(".ring-white\\/10");
+    expect(card).toBeInTheDocument();
+    expect(card?.children.length).toBe(LOGIN_FEATURE_HIGHLIGHTS.length);
   });
 });
