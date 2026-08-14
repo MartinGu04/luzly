@@ -46,7 +46,7 @@ export function LoginHero({ initialClockTime, weekdayLabel, dayNumber, monthLabe
           <h1 className="mt-2 max-w-md text-[clamp(1.75rem,4.4vw,2.75rem)] leading-[1.15] font-bold text-white lg:mt-4 lg:max-w-xl lg:text-[clamp(3rem,3.6vw,4.75rem)] lg:leading-[1.08]">
             {LOGIN_HERO_HEADLINE}
           </h1>
-          <p className="mt-3 max-w-sm text-[15px] leading-relaxed text-white/60 lg:mt-5 lg:max-w-lg lg:text-xl">
+          <p className="mt-3 max-w-sm text-base leading-relaxed text-white/75 lg:mt-5 lg:max-w-lg lg:text-xl lg:text-white/60">
             {LOGIN_HERO_SUBTEXT}
           </p>
         </div>
@@ -77,8 +77,8 @@ export function LoginHero({ initialClockTime, weekdayLabel, dayNumber, monthLabe
           <div className="w-full max-w-sm lg:max-w-md">
             {hasAuthError ? <LoginErrorNotice className="mb-4" /> : null}
             <GoogleSignInButton />
-            <p className="mt-4 flex items-center justify-center gap-1.5 text-xs text-white/50 lg:mt-5 lg:justify-start lg:text-sm">
-              <Shield className="h-3.5 w-3.5 lg:h-4 lg:w-4" aria-hidden="true" strokeWidth={1.75} />
+            <p className="mt-4 flex items-center justify-center gap-1.5 text-sm text-white/65 lg:mt-5 lg:justify-start lg:text-sm lg:text-white/50">
+              <Shield className="h-4 w-4" aria-hidden="true" strokeWidth={1.75} />
               {LOGIN_AUTH_NOTE}
             </p>
           </div>
