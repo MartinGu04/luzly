@@ -1,4 +1,5 @@
 import { dayOfWeek } from "./dutyBlocks";
+import type { LocalNow } from "./localNow";
 
 /**
  * A Gregorian calendar month, independent of any specific day within it.
@@ -47,6 +48,12 @@ export function parseMonthParam(raw: string | null | undefined): CalendarMonthKe
 /** "YYYY-MM", the inverse of `parseMonthParam`. */
 export function formatMonthParam({ year, month }: CalendarMonthKey): string {
   return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}`;
+}
+
+/** The Gregorian month a `LocalNow.date` ("YYYY-MM-DD") falls in -- the shared "default display month" / "today" navigation target every month-scoped screen (Schedule, Manager Overview's month range) derives the same way. */
+export function calendarMonthOfLocalNow(localNow: LocalNow): CalendarMonthKey {
+  const [year, month] = localNow.date.split("-").map(Number);
+  return { year, month };
 }
 
 /** `delta` months from `key`, correctly rolling the year over in either direction (Dec -> Jan, Jan -> Dec). */

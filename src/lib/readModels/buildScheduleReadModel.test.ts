@@ -1,0 +1,432 @@
+import { describe, expect, it } from "vitest";
+import type { Event } from "@/lib/domain/event";
+import type { LocalNow } from "@/lib/domain/localNow";
+import { buildShiftSchedule } from "@/lib/domain/shiftSchedule";
+import type { Person } from "@/lib/domain/types";
+import { buildManagerScheduleReadModel, buildSelfOnlyScheduleReadModel } from "./buildScheduleReadModel";
+import { buildPersonalScheduleReadModel } from "./buildPersonalScheduleReadModel";
+import type { PersonalScheduleReadModel } from "./types";
+
+// day 07:30-19:30, night 19:30-07:30(+1)
+const schedule = buildShiftSchedule("07:30");
+const now: LocalNow = { date: "2026-08-13", minuteOfDay: 600 };
+
+let cellCounter = 0;
+function nextCell(): string {
+  cellCounter += 1;
+  return `C${cellCounter}`;
+}
+
+function person(overrides: Partial<Person> = {}): Person {
+  return {
+    id: "p_x",
+    name: "שם",
+    email: null,
+    isManager: false,
+    isTechnician: false,
+    isSupervisor: false,
+    personnelType: null,
+    ...overrides,
+  };
+}
+
+const MANAGER = person({ id: "p_manager", name: "מרטין גוסין", isManager: true });
+const DANIEL = person({ id: "p_daniel", name: "דניאל כהן", isTechnician: true });
+const EITAN = person({ id: "p_eitan", name: "איתן דוגמה", isSupervisor: true });
+const NOA = person({ id: "p_noa", name: "נועה דוגמה", isTechnician: true });
+
+function event(overrides: Partial<Event> = {}): Event {
+  return {
+    personId: DANIEL.id,
+    personName: DANIEL.name,
+    date: "2026-08-13",
+    title: "טכנאי יום",
+    rawValue: "טכנאי יום",
+    category: "shift",
+    certainty: "confirmed",
+    role: "technician",
+    period: "day",
+    sourceSheet: "משמרות + תורנויות",
+    sourceCell: nextCell(),
+    slot: null,
+    shadow: false,
+    startTimeOverride: null,
+    endTimeOverride: null,
+    changeNote: null,
+    dutyFamily: null,
+    absenceKind: null,
+    ...overrides,
+  };
+}
+
+const AUGUST_DATES = Array.from({ length: 31 }, (_, i) => `2026-08-${String(i + 1).padStart(2, "0")}`);
+
+const PEOPLE: Person[] = [MANAGER, DANIEL, EITAN, NOA];
+
+describe("buildManagerScheduleReadModel — perspective resolution (PR #24 §9)", () => {
+  it("no requested person -> self", () => {
+    const model = buildManagerScheduleReadModel({
+      manager: MANAGER,
+      people: PEOPLE,
+      events: [],
+      shiftSchedule: schedule,
+      fetchedAt: "2026-08-13T08:00:00.000Z",
+      now,
+      monthDates: AUGUST_DATES,
+      requestedPersonId: null,
+    });
+    expect(model.perspective).toBe("self");
+    expect(model.selectedPersonId).toBeNull();
+    expect(model.personal?.person.name).toBe(MANAGER.name);
+    expect(model.everyone).toBeNull();
+  });
+
+  it('"all" sentinel -> everyone', () => {
+    const model = buildManagerScheduleReadModel({
+      manager: MANAGER,
+      people: PEOPLE,
+      events: [],
+      shiftSchedule: schedule,
+      fetchedAt: "2026-08-13T08:00:00.000Z",
+      now,
+      monthDates: AUGUST_DATES,
+      requestedPersonId: "all",
+    });
+    expect(model.perspective).toBe("all");
+    expect(model.personal).toBeNull();
+    expect(model.everyone).not.toBeNull();
+  });
+
+  it("a valid roster person id -> person perspective", () => {
+    const model = buildManagerScheduleReadModel({
+      manager: MANAGER,
+      people: PEOPLE,
+      events: [],
+      shiftSchedule: schedule,
+      fetchedAt: "2026-08-13T08:00:00.000Z",
+      now,
+      monthDates: AUGUST_DATES,
+      requestedPersonId: DANIEL.id,
+    });
+    expect(model.perspective).toBe("person");
+    expect(model.selectedPersonId).toBe(DANIEL.id);
+    expect(model.selectedPersonName).toBe(DANIEL.name);
+    expect(model.personal?.person.name).toBe(DANIEL.name);
+  });
+
+  it("an unknown/stale/malformed id falls back to self -- never to everyone", () => {
+    const model = buildManagerScheduleReadModel({
+      manager: MANAGER,
+      people: PEOPLE,
+      events: [],
+      shiftSchedule: schedule,
+      fetchedAt: "2026-08-13T08:00:00.000Z",
+      now,
+      monthDates: AUGUST_DATES,
+      requestedPersonId: "p_does_not_exist",
+    });
+    expect(model.perspective).toBe("self");
+    expect(model.everyone).toBeNull();
+  });
+
+  it("selecting the manager's own id normalizes to self (no self-referencing person mode)", () => {
+    const model = buildManagerScheduleReadModel({
+      manager: MANAGER,
+      people: PEOPLE,
+      events: [],
+      shiftSchedule: schedule,
+      fetchedAt: "2026-08-13T08:00:00.000Z",
+      now,
+      monthDates: AUGUST_DATES,
+      requestedPersonId: MANAGER.id,
+    });
+    expect(model.perspective).toBe("self");
+    expect(model.selectedPersonId).toBeNull();
+  });
+});
+
+describe("buildManagerScheduleReadModel — roster (PR #24 §6)", () => {
+  it("excludes the manager's own entry from the roster", () => {
+    const model = buildManagerScheduleReadModel({
+      manager: MANAGER,
+      people: PEOPLE,
+      events: [],
+      shiftSchedule: schedule,
+      fetchedAt: "2026-08-13T08:00:00.000Z",
+      now,
+      monthDates: AUGUST_DATES,
+      requestedPersonId: null,
+    });
+    expect(model.roster.map((p) => p.id)).not.toContain(MANAGER.id);
+    expect(model.roster).toHaveLength(3);
+  });
+
+  it("roster options never carry email or any field beyond id/name", () => {
+    const model = buildManagerScheduleReadModel({
+      manager: MANAGER,
+      people: PEOPLE,
+      events: [],
+      shiftSchedule: schedule,
+      fetchedAt: "2026-08-13T08:00:00.000Z",
+      now,
+      monthDates: AUGUST_DATES,
+      requestedPersonId: null,
+    });
+    for (const option of model.roster) {
+      expect(Object.keys(option).sort()).toEqual(["id", "name"]);
+    }
+  });
+
+  it("orders the roster by name, then id as a stable tiebreak for duplicate names", () => {
+    const dup1 = person({ id: "p_b", name: "דניאל כהן" });
+    const dup2 = person({ id: "p_a", name: "דניאל כהן" });
+    const model = buildManagerScheduleReadModel({
+      manager: MANAGER,
+      people: [MANAGER, dup1, dup2],
+      events: [],
+      shiftSchedule: schedule,
+      fetchedAt: "2026-08-13T08:00:00.000Z",
+      now,
+      monthDates: AUGUST_DATES,
+      requestedPersonId: null,
+    });
+    expect(model.roster.map((p) => p.id)).toEqual(["p_a", "p_b"]);
+  });
+});
+
+describe("buildManagerScheduleReadModel — self mode reuses buildPersonalScheduleReadModel outright (PR #24 §11)", () => {
+  it("self's `personal` is exactly what buildPersonalScheduleReadModel produces for the manager", () => {
+    const events = [event({ personId: MANAGER.id, personName: MANAGER.name })];
+    const model = buildManagerScheduleReadModel({
+      manager: MANAGER,
+      people: PEOPLE,
+      events,
+      shiftSchedule: schedule,
+      fetchedAt: "2026-08-13T08:00:00.000Z",
+      now,
+      monthDates: AUGUST_DATES,
+      requestedPersonId: null,
+    });
+    const expected: PersonalScheduleReadModel = buildPersonalScheduleReadModel({
+      person: MANAGER,
+      people: PEOPLE,
+      events,
+      shiftSchedule: schedule,
+      fetchedAt: "2026-08-13T08:00:00.000Z",
+      now,
+    });
+    expect(model.personal).toEqual(expected);
+  });
+});
+
+describe("buildManagerScheduleReadModel — person mode (PR #24 §10-12)", () => {
+  it("selected person's shiftCalendarEvents are their own real events", () => {
+    const events = [
+      event({ personId: DANIEL.id, personName: DANIEL.name, date: "2026-08-13" }),
+      event({ personId: EITAN.id, personName: EITAN.name, date: "2026-08-13", role: "supervisor" }),
+    ];
+    const model = buildManagerScheduleReadModel({
+      manager: MANAGER,
+      people: PEOPLE,
+      events,
+      shiftSchedule: schedule,
+      fetchedAt: "2026-08-13T08:00:00.000Z",
+      now,
+      monthDates: AUGUST_DATES,
+      requestedPersonId: DANIEL.id,
+    });
+    expect(model.personal?.shiftCalendarEvents).toHaveLength(1);
+    expect(model.personal?.shiftCalendarEvents[0].title).toBe("טכנאי יום");
+  });
+
+  it("a person with zero shift events this month still gets a personal model (page renders the empty-month note, not this builder)", () => {
+    const model = buildManagerScheduleReadModel({
+      manager: MANAGER,
+      people: PEOPLE,
+      events: [],
+      shiftSchedule: schedule,
+      fetchedAt: "2026-08-13T08:00:00.000Z",
+      now,
+      monthDates: AUGUST_DATES,
+      requestedPersonId: DANIEL.id,
+    });
+    expect(model.personal?.shiftCalendarEvents).toEqual([]);
+  });
+});
+
+describe("buildManagerScheduleReadModel — everyone mode (PR #24 §14-19)", () => {
+  it("day technicians/supervisors and night technicians/supervisors render as separate, correct groups", () => {
+    const events = [
+      event({ personId: DANIEL.id, personName: DANIEL.name, date: "2026-08-13", period: "day", role: "technician" }),
+      event({ personId: EITAN.id, personName: EITAN.name, date: "2026-08-13", period: "day", role: "supervisor" }),
+      event({ personId: NOA.id, personName: NOA.name, date: "2026-08-13", period: "night", role: "technician" }),
+      event({ personId: MANAGER.id, personName: MANAGER.name, date: "2026-08-13", period: "night", role: "supervisor" }),
+    ];
+    const model = buildManagerScheduleReadModel({
+      manager: MANAGER,
+      people: PEOPLE,
+      events,
+      shiftSchedule: schedule,
+      fetchedAt: "2026-08-13T08:00:00.000Z",
+      now,
+      monthDates: AUGUST_DATES,
+      requestedPersonId: "all",
+    });
+
+    const dayGroup = model.everyone?.staffing.find((g) => g.date === "2026-08-13" && g.period === "day");
+    const nightGroup = model.everyone?.staffing.find((g) => g.date === "2026-08-13" && g.period === "night");
+    expect(dayGroup?.technicians.map((p) => p.personName)).toEqual([DANIEL.name]);
+    expect(dayGroup?.supervisors.map((p) => p.personName)).toEqual([EITAN.name]);
+    expect(nightGroup?.technicians.map((p) => p.personName)).toEqual([NOA.name]);
+    expect(nightGroup?.supervisors.map((p) => p.personName)).toEqual([MANAGER.name]);
+  });
+
+  it("preserves multiple assignees for the same role instead of collapsing them", () => {
+    const events = [
+      event({ personId: DANIEL.id, personName: DANIEL.name, date: "2026-08-13", period: "day", role: "technician" }),
+      event({ personId: NOA.id, personName: NOA.name, date: "2026-08-13", period: "day", role: "technician" }),
+    ];
+    const model = buildManagerScheduleReadModel({
+      manager: MANAGER,
+      people: PEOPLE,
+      events,
+      shiftSchedule: schedule,
+      fetchedAt: "2026-08-13T08:00:00.000Z",
+      now,
+      monthDates: AUGUST_DATES,
+      requestedPersonId: "all",
+    });
+    const dayGroup = model.everyone?.staffing.find((g) => g.date === "2026-08-13" && g.period === "day");
+    expect(dayGroup?.technicians.map((p) => p.personName).sort()).toEqual([DANIEL.name, NOA.name].sort());
+  });
+
+  it("keeps shadow technicians/supervisors distinct from primary staffing", () => {
+    const events = [
+      event({ personId: DANIEL.id, personName: DANIEL.name, date: "2026-08-13", period: "day", role: "technician" }),
+      event({
+        personId: NOA.id,
+        personName: NOA.name,
+        date: "2026-08-13",
+        period: "day",
+        role: "technician",
+        shadow: true,
+      }),
+    ];
+    const model = buildManagerScheduleReadModel({
+      manager: MANAGER,
+      people: PEOPLE,
+      events,
+      shiftSchedule: schedule,
+      fetchedAt: "2026-08-13T08:00:00.000Z",
+      now,
+      monthDates: AUGUST_DATES,
+      requestedPersonId: "all",
+    });
+    const dayGroup = model.everyone?.staffing.find((g) => g.date === "2026-08-13" && g.period === "day");
+    expect(dayGroup?.technicians.map((p) => p.personName)).toEqual([DANIEL.name]);
+    expect(dayGroup?.shadowTechnicians.map((p) => p.personName)).toEqual([NOA.name]);
+  });
+
+  it("a role with zero non-shadow events uses roleCoverage 'missing', not a guessed empty list", () => {
+    const events = [
+      event({ personId: DANIEL.id, personName: DANIEL.name, date: "2026-08-13", period: "day", role: "technician" }),
+      // No supervisor at all this day/period.
+    ];
+    const model = buildManagerScheduleReadModel({
+      manager: MANAGER,
+      people: PEOPLE,
+      events,
+      shiftSchedule: schedule,
+      fetchedAt: "2026-08-13T08:00:00.000Z",
+      now,
+      monthDates: AUGUST_DATES,
+      requestedPersonId: "all",
+    });
+    const dayGroup = model.everyone?.staffing.find((g) => g.date === "2026-08-13" && g.period === "day");
+    expect(dayGroup?.roleCoverage.supervisor.status).toBe("missing");
+    expect(dayGroup?.coverageStatus).toBe("missing");
+  });
+
+  it("groups duties by date+person and scopes them to the given monthDates", () => {
+    const events = [
+      event({
+        personId: DANIEL.id,
+        personName: DANIEL.name,
+        date: "2026-08-13",
+        category: "duty",
+        dutyFamily: "guard",
+        slot: 1,
+        role: null,
+        period: "unspecified",
+      }),
+      event({
+        personId: NOA.id,
+        personName: NOA.name,
+        date: "2026-09-01", // outside monthDates
+        category: "duty",
+        dutyFamily: "guard",
+        slot: 2,
+        role: null,
+        period: "unspecified",
+      }),
+    ];
+    const model = buildManagerScheduleReadModel({
+      manager: MANAGER,
+      people: PEOPLE,
+      events,
+      shiftSchedule: schedule,
+      fetchedAt: "2026-08-13T08:00:00.000Z",
+      now,
+      monthDates: AUGUST_DATES,
+      requestedPersonId: "all",
+    });
+    expect(model.everyone?.duties).toHaveLength(1);
+    expect(model.everyone?.duties[0].personName).toBe(DANIEL.name);
+  });
+
+  it("groups absences by date+person and scopes them to the given monthDates", () => {
+    const events = [
+      event({
+        personId: EITAN.id,
+        personName: EITAN.name,
+        date: "2026-08-13",
+        category: "absence",
+        absenceKind: "vacation",
+        role: null,
+        period: "unspecified",
+      }),
+    ];
+    const model = buildManagerScheduleReadModel({
+      manager: MANAGER,
+      people: PEOPLE,
+      events,
+      shiftSchedule: schedule,
+      fetchedAt: "2026-08-13T08:00:00.000Z",
+      now,
+      monthDates: AUGUST_DATES,
+      requestedPersonId: "all",
+    });
+    expect(model.everyone?.absences).toHaveLength(1);
+    expect(model.everyone?.absences[0].personName).toBe(EITAN.name);
+    expect(model.everyone?.absences[0].absenceKind).toBe("vacation");
+  });
+});
+
+describe("buildSelfOnlyScheduleReadModel (normal user / fail-closed fallback)", () => {
+  it("wraps a PersonalScheduleReadModel with no manager scope at all", () => {
+    const personal = buildPersonalScheduleReadModel({
+      person: DANIEL,
+      people: PEOPLE,
+      events: [],
+      shiftSchedule: schedule,
+      fetchedAt: "2026-08-13T08:00:00.000Z",
+      now,
+    });
+    const model = buildSelfOnlyScheduleReadModel(personal);
+    expect(model.manager).toBeNull();
+    expect(model.roster).toEqual([]);
+    expect(model.perspective).toBe("self");
+    expect(model.personal).toBe(personal);
+    expect(model.everyone).toBeNull();
+  });
+});

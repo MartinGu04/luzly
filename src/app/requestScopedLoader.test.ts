@@ -39,9 +39,10 @@ describe("3. layout/page reuse the same request-scoped loader, never a second di
     }
   });
 
-  it("the schedule page only imports getRequestPersonalSchedule, not the raw loader -- same request-scoped load as the layout, no second Google request", () => {
-    expect(scheduleSource).toContain("getRequestPersonalSchedule");
-    for (const pattern of FORBIDDEN_DIRECT_CALLS) {
+  it("the schedule page only imports getRequestSchedule, not the raw loader -- getRequestSchedule itself reuses the SAME request-scoped getRequestPersonalSchedule() internally (PR #24), same no-second-Google-request guarantee as every other route here", () => {
+    expect(scheduleSource).toContain("getRequestSchedule");
+    expect(scheduleSource).not.toContain("getRequestPersonalSchedule");
+    for (const pattern of [...FORBIDDEN_DIRECT_CALLS, /\bloadScheduleReadModel\b/]) {
       expect(scheduleSource).not.toMatch(pattern);
     }
   });

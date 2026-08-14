@@ -81,8 +81,16 @@ export function getManagerWorkbookSheet(snapshot: RawWorkbookSnapshot, key: Shee
  * from `context.snapshot` via `getManagerWorkbookSheet` -- this helper
  * intentionally stops at the authorized raw snapshot + roster, since not
  * every manager feature needs the same downstream sheets.
+ *
+ * `sources` defaults to `MANAGER_WORKBOOK_SOURCES` (every existing caller's
+ * behavior, unchanged) but a narrower feature -- e.g. Schedule (PR #24),
+ * which never needs potentialH1/H2 -- can pass its own smaller list so it
+ * never fetches sheets it has no use for, while still going through the
+ * exact same fail-closed authorization sequence.
  */
-export async function loadManagerWorkbookContext(): Promise<ManagerWorkbookContextResult> {
+export async function loadManagerWorkbookContext(
+  sources: SheetSourceKey[] = MANAGER_WORKBOOK_SOURCES,
+): Promise<ManagerWorkbookContextResult> {
   const personalResult = await getRequestPersonalSchedule();
 
   if (personalResult.status === "unauthenticated") return { status: "unauthenticated" };
@@ -97,7 +105,7 @@ export async function loadManagerWorkbookContext(): Promise<ManagerWorkbookConte
     return { status: "forbidden" };
   }
 
-  const snapshot = await fetchRawWorkbookSnapshot(MANAGER_WORKBOOK_SOURCES);
+  const snapshot = await fetchRawWorkbookSnapshot(sources);
 
   // Defense in depth: re-verify identity + manager status against the FRESH snapshot, never trust the first check alone.
   const identity = await getAuthenticatedIdentity();
