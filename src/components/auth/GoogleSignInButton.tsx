@@ -1,12 +1,26 @@
 "use client";
 
 import { useState } from "react";
+import { Loader2 } from "lucide-react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { GoogleGlyph } from "./GoogleGlyph";
 
-export function GoogleSignInButton() {
+interface GoogleSignInButtonProps {
+  className?: string;
+}
+
+/**
+ * The one real authentication action in the app. `pending` both drives the
+ * "מתחבר..." feedback state and disables the button, so a double click (or
+ * the round trip to Google) can never fire `signInWithOAuth` twice. OAuth
+ * behavior itself (provider, redirect target, Supabase flow) is unchanged
+ * from before the Design Pass -- this only redresses the button.
+ */
+export function GoogleSignInButton({ className = "" }: GoogleSignInButtonProps) {
   const [pending, setPending] = useState(false);
 
   async function handleSignIn() {
+    if (pending) return;
     setPending(true);
     const supabase = createSupabaseBrowserClient();
     await supabase.auth.signInWithOAuth({
@@ -20,9 +34,20 @@ export function GoogleSignInButton() {
       type="button"
       onClick={handleSignIn}
       disabled={pending}
-      className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
+      aria-busy={pending}
+      className={`flex h-[52px] w-full items-center justify-center gap-2.5 rounded-xl bg-primary px-4 text-[15px] font-semibold text-primary-foreground transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-70 ${className}`}
     >
-      {pending ? "מעביר להתחברות..." : "התחברות עם Google"}
+      {pending ? (
+        <>
+          <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" strokeWidth={2} />
+          <span>מתחבר...</span>
+        </>
+      ) : (
+        <>
+          <GoogleGlyph className="h-5 w-5" />
+          <span>המשך עם Google</span>
+        </>
+      )}
     </button>
   );
 }

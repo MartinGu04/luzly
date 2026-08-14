@@ -64,6 +64,21 @@ describe("LiveClock", () => {
     expect(timeEl?.textContent).toMatch(/^\d{2}:\d{2}:\d{2}$/);
   });
 
+  it('with size="hero", splits HH:mm from :ss into a large primary token and a smaller secondary one, while keeping the full HH:mm:ss as the accessible dateTime value', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-12T20:21:37.000Z")); // 23:21:37 in Asia/Jerusalem (UTC+3, DST)
+
+    const { container } = render(<LiveClock initialTime="00:00:00" size="hero" />);
+    const timeEl = container.querySelector("time");
+
+    expect(timeEl?.getAttribute("dateTime")).toBe("23:21:37");
+    expect(timeEl?.textContent).toBe("23:21:37");
+
+    const [primary, secondary] = Array.from(timeEl?.children ?? []);
+    expect(primary?.textContent).toBe("23:21");
+    expect(secondary?.textContent).toBe(":37");
+  });
+
   it("never performs a network request -- it only reads the browser's own clock", () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     vi.useFakeTimers();

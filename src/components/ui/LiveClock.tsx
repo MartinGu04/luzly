@@ -24,8 +24,14 @@ interface LiveClockProps {
    * render nothing, so there is nothing for React to flag as a mismatch.
    */
   initialTime: string | null;
-  /** "md" (default) is the original prominent dashboard-hero size; "sm" is for a quieter chrome context like `ShellUtilityBar`. */
-  size?: "sm" | "md";
+  /**
+   * "md" (default) is the original prominent dashboard-hero size; "sm" is
+   * for a quieter chrome context like `ShellUtilityBar`; "hero" is the
+   * large split HH:mm/:ss treatment for the login page's visual identity
+   * side (Design Pass PR #22) -- seconds render as a smaller secondary
+   * token instead of matching the main digits' size/weight.
+   */
+  size?: "sm" | "md" | "hero";
   className?: string;
 }
 
@@ -58,8 +64,23 @@ export function LiveClock({ initialTime, size = "md", className = "" }: LiveCloc
     return null;
   }
 
+  if (size === "hero") {
+    const [hoursMinutes, seconds] = [time.slice(0, 5), time.slice(6, 8)];
+    return (
+      <time
+        dir="ltr"
+        dateTime={time}
+        className={`font-variant-numeric tabular-nums inline-flex items-baseline gap-1.5 ${className}`}
+      >
+        <span className="text-[clamp(2.25rem,6.5vw,5rem)] leading-none font-bold">{hoursMinutes}</span>
+        <span className="text-xl leading-none font-semibold opacity-60">:{seconds}</span>
+      </time>
+    );
+  }
+
   return (
     <time
+      dir="ltr"
       dateTime={time}
       className={`font-variant-numeric tabular-nums text-foreground ${SIZE_CLASSES[size]} ${className}`}
     >

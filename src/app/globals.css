@@ -303,12 +303,21 @@ body::after {
   100% { background-position: -200% 0; }
 }
 
+/* The login hero's "now" marker drifting a few pixels along the decorative
+   timeline -- deliberately tiny and slow, never a directional cue (RTL/LTR
+   agnostic, just a calm back-and-forth). */
+@keyframes login-now-drift {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(6px); }
+}
+
 .animate-pulse-dot { animation: pulse-dot 2.4s ease-in-out infinite; }
 .animate-pulse-ring { animation: pulse-ring 2.4s cubic-bezier(0.25, 0.6, 0.35, 1) infinite; }
 .animate-ambient-glow { animation: ambient-glow 7s ease-in-out infinite; }
 .animate-fade-up { animation: fade-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }
 .animate-breathe { animation: breathe 3.4s ease-in-out infinite; }
 .animate-issue-pulse { animation: issue-pulse 2.8s ease-in-out infinite; }
+.animate-login-now-drift { animation: login-now-drift 9s ease-in-out infinite; }
 
 .skeleton {
   background-image: linear-gradient(
@@ -328,6 +337,7 @@ body::after {
   .animate-fade-up,
   .animate-breathe,
   .animate-issue-pulse,
+  .animate-login-now-drift,
   .skeleton {
     animation: none !important;
   }
