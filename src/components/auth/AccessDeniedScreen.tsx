@@ -13,7 +13,7 @@ export function AccessDeniedScreen() {
   return (
     <div className="flex min-h-screen items-center justify-center px-4">
       <Panel variant="hero" className="w-full max-w-sm text-center">
-        <h1 className="text-lg font-bold text-foreground">אין לך הרשאה ל-{APP_NAME}</h1>
+        <h1 className="text-xl font-bold text-foreground">אין לך הרשאה ל-{APP_NAME}</h1>
         <p className="mt-2 text-sm text-muted">פנה/י למנהל המערכת אם לדעתך זו טעות.</p>
         <form action={signOutAction} className="mt-6">
           <button

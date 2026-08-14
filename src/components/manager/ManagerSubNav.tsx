@@ -38,7 +38,7 @@ export function ManagerSubNav({ active }: ManagerSubNavProps) {
             key={item.key}
             href={item.href}
             aria-current={isActive ? "page" : undefined}
-            className={`rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors duration-200 ${
+            className={`rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${
               isActive ? "bg-surface-1 text-primary shadow-sm" : "text-muted hover:text-foreground"
             }`}
           >
