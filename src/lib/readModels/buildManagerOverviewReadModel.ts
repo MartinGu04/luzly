@@ -12,19 +12,15 @@ import {
   type ManagerRequirementReconciliation,
 } from "@/lib/domain/potentialReconciliation";
 import { scopeManagerPotentialAllocation } from "@/lib/domain/potentialSourceOwnership";
-import { analyzeUnitShiftCoverage } from "@/lib/domain/shiftCoverage";
 import type { ShiftSchedule } from "@/lib/domain/shiftSchedule";
 import type { Person } from "@/lib/domain/types";
 import { buildPersonalScheduleReadModel } from "./buildPersonalScheduleReadModel";
+import { buildManagerAbsenceEntries, buildManagerDutyEntries, buildShiftStaffingOverview } from "./managerEventProjections";
 import type {
-  ManagerAbsenceEntry,
-  ManagerDutyEntry,
   ManagerIssue,
   ManagerOverviewReadModel,
   ManagerPersonSummary,
   ManagerPotentialRequirementView,
-  ManagerShiftGroupPerson,
-  ManagerShiftOverviewEntry,
 } from "./managerTypes";
 import type { PersonalIssueTargetSummary } from "./types";
 
@@ -89,17 +85,11 @@ export function buildManagerOverviewReadModel(
     .sort(compareManagerIssues)
     .map((issue) => toManagerIssue(issue, peopleById));
 
-  const coverageOverview = buildCoverageOverview(events, shiftSchedule, rangeDates);
+  const coverageOverview = buildShiftStaffingOverview(events, shiftSchedule, rangeDates);
 
-  const duties = events
-    .filter((event) => event.category === "duty" && event.dutyFamily !== null && rangeDates.has(event.date))
-    .map((event) => toManagerDutyEntry(event, peopleById))
-    .sort(compareDutyEntries);
+  const duties = buildManagerDutyEntries(events, peopleById, rangeDates);
 
-  const absences = events
-    .filter((event) => event.category === "absence" && event.absenceKind !== null && rangeDates.has(event.date))
-    .map((event) => toManagerAbsenceEntry(event, peopleById))
-    .sort(compareAbsenceEntries);
+  const absences = buildManagerAbsenceEntries(events, peopleById, rangeDates);
 
   // Manager Overview is intentionally scoped to this team's own Potential
   // responsibility (PR #16) -- filtered BEFORE reconciliation, so an
@@ -210,124 +200,6 @@ function toManagerIssue(issue: OperationalIssue, peopleById: ReadonlyMap<string,
     metadata: issue.metadata,
     targetEvent: issue.targetEvent ? toIssueTargetSummary(issue.targetEvent) : null,
   };
-}
-
-// ---------------------------------------------------------------------------
-// Unit-wide shift coverage overview
-// ---------------------------------------------------------------------------
-
-const PERIOD_ORDER: Record<string, number> = { day: 0, night: 1, morning: 2, unspecified: 3 };
-
-/** Deterministic ordering for the displayed people lists within a group -- personId first, then sourceSheet/sourceCell (never exposed on the output type). Coverage itself (`analyzeUnitShiftCoverage`) doesn't depend on this order at all. */
-function compareEventsStable(a: Event, b: Event): number {
-  if (a.personId !== b.personId) return a.personId < b.personId ? -1 : 1;
-  if (a.sourceSheet !== b.sourceSheet) return a.sourceSheet < b.sourceSheet ? -1 : 1;
-  return a.sourceCell < b.sourceCell ? -1 : a.sourceCell > b.sourceCell ? 1 : 0;
-}
-
-function toShiftGroupPerson(event: Event): ManagerShiftGroupPerson {
-  return {
-    personId: event.personId,
-    personName: event.personName,
-    certainty: event.certainty,
-    startTimeOverride: event.startTimeOverride,
-    endTimeOverride: event.endTimeOverride,
-  };
-}
-
-/**
- * Groups every shift Event within `rangeDates` by date+period, preserving
- * EVERY assigned person (never collapsed to one). `coverageStatus`/
- * `missingIntervals` reuse `analyzeUnitShiftCoverage` -- a PURE,
- * person-order-independent group coverage algorithm (see
- * `lib/domain/shiftCoverage.ts`) that evaluates the canonical shift
- * window against both roles' merged intervals. This deliberately does
- * NOT pick an arbitrary "target" person the way `analyzeShiftCounterparts`
- * does — the result is identical regardless of `personId`/`sourceCell`
- * ordering.
- */
-function buildCoverageOverview(
-  events: readonly Event[],
-  shiftSchedule: ShiftSchedule,
-  rangeDates: ReadonlySet<string>,
-): ManagerShiftOverviewEntry[] {
-  const shiftEvents = events.filter((event) => event.category === "shift" && rangeDates.has(event.date));
-
-  const groups = new Map<string, Event[]>();
-  for (const event of shiftEvents) {
-    const key = `${event.date}|${event.period}`;
-    const group = groups.get(key);
-    if (group) group.push(event);
-    else groups.set(key, [event]);
-  }
-
-  const entries: ManagerShiftOverviewEntry[] = [];
-
-  for (const [key, groupEvents] of groups) {
-    const [date, period] = key.split("|") as [string, Event["period"]];
-    const sortedGroup = [...groupEvents].sort(compareEventsStable);
-
-    const technicians = sortedGroup.filter((e) => e.role === "technician" && !e.shadow).map(toShiftGroupPerson);
-    const supervisors = sortedGroup.filter((e) => e.role === "supervisor" && !e.shadow).map(toShiftGroupPerson);
-    const shadowTechnicians = sortedGroup.filter((e) => e.role === "technician" && e.shadow).map(toShiftGroupPerson);
-    const shadowSupervisors = sortedGroup.filter((e) => e.role === "supervisor" && e.shadow).map(toShiftGroupPerson);
-
-    const analysis = analyzeUnitShiftCoverage(period, sortedGroup, shiftSchedule);
-
-    entries.push({
-      date,
-      period,
-      technicians,
-      supervisors,
-      shadowTechnicians,
-      shadowSupervisors,
-      coverageStatus: analysis.coverageStatus,
-      missingIntervals: analysis.missingIntervals,
-      roleCoverage: analysis.roleCoverage,
-    });
-  }
-
-  return entries.sort((a, b) => {
-    if (a.date !== b.date) return a.date < b.date ? -1 : 1;
-    return PERIOD_ORDER[a.period] - PERIOD_ORDER[b.period];
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Duties / absences
-// ---------------------------------------------------------------------------
-
-function toManagerDutyEntry(event: Event, peopleById: ReadonlyMap<string, Person>): ManagerDutyEntry {
-  return {
-    personId: event.personId,
-    personName: peopleById.get(event.personId)?.name ?? event.personName,
-    date: event.date,
-    dutyFamily: event.dutyFamily as NonNullable<Event["dutyFamily"]>,
-    slot: event.slot,
-    certainty: event.certainty,
-  };
-}
-
-function compareDutyEntries(a: ManagerDutyEntry, b: ManagerDutyEntry): number {
-  if (a.date !== b.date) return a.date < b.date ? -1 : 1;
-  if (a.personId !== b.personId) return a.personId < b.personId ? -1 : 1;
-  if (a.dutyFamily !== b.dutyFamily) return a.dutyFamily < b.dutyFamily ? -1 : 1;
-  return (a.slot ?? -1) - (b.slot ?? -1);
-}
-
-function toManagerAbsenceEntry(event: Event, peopleById: ReadonlyMap<string, Person>): ManagerAbsenceEntry {
-  return {
-    personId: event.personId,
-    personName: peopleById.get(event.personId)?.name ?? event.personName,
-    date: event.date,
-    absenceKind: event.absenceKind as NonNullable<Event["absenceKind"]>,
-    certainty: event.certainty,
-  };
-}
-
-function compareAbsenceEntries(a: ManagerAbsenceEntry, b: ManagerAbsenceEntry): number {
-  if (a.date !== b.date) return a.date < b.date ? -1 : 1;
-  return a.personId < b.personId ? -1 : a.personId > b.personId ? 1 : 0;
 }
 
 // ---------------------------------------------------------------------------
