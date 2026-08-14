@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 import { Panel } from "@/components/ui/Panel";
+import { APP_NAME } from "@/lib/config/productName";
 
 export interface ManagerFairnessPersonDetailView {
   sourceName: string;
@@ -86,7 +87,7 @@ export function ManagerFairnessPersonDetail({ view }: { view: ManagerFairnessPer
         ) : null}
 
         <p className="mt-4 text-xs text-muted-2">
-          הניקוד הנוכחי מגיע ישירות מ-Google Sheet ומהווה את מקור האמת; Luzly אינה מפרקת אותו לרכיבים ואינה מחשבת
+          הניקוד הנוכחי מגיע ישירות מ-Google Sheet ומהווה את מקור האמת; {APP_NAME} אינה מפרקת אותו לרכיבים ואינה מחשבת
           ניקוד חלופי.
         </p>
       </Panel>

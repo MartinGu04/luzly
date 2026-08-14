@@ -51,6 +51,7 @@ export function Avatar({ name, size = "md", className = "", avatarUrl = null }: 
         <img
           src={avatarUrl}
           alt=""
+          data-testid="avatar-photo"
           referrerPolicy="no-referrer"
           className="h-full w-full object-cover"
           onError={() => setImageFailed(true)}

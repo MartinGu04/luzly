@@ -24,7 +24,7 @@ const RELATIVE_AGE_TICK_MS = 30_000;
 /**
  * Restrained, reusable "how fresh is what I'm looking at" metadata row
  * (PR #17) -- supporting context, never a hero card. Google Sheets remains
- * the source of truth; Luzly only ever holds a read-only, timestamped
+ * the source of truth; מי-מה-מו only ever holds a read-only, timestamped
  * snapshot of it. The refresh control reruns the CURRENT route's existing
  * Server Component data loader via `router.refresh()` -- no new API
  * route, no direct browser Google call, no writeback, and no automatic

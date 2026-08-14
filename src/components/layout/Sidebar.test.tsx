@@ -2,6 +2,7 @@ import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { ThemeProvider } from "@/lib/theme/ThemeProvider";
+import { APP_NAME } from "@/lib/config/productName";
 import { Sidebar } from "./Sidebar";
 import { navItems } from "./nav-items";
 
@@ -106,6 +107,15 @@ describe("Sidebar", () => {
       expect(screen.queryByRole("link", { name: "סנכרון" })).toBeNull();
       expect(screen.queryByText("סנכרון")).toBeNull();
     });
+  });
+});
+
+describe("Sidebar — brand identity (PR #23)", () => {
+  it("shows the מי-מה-מו symbol next to the wordmark, and never the retired 'Luzly' name", () => {
+    const { container } = renderWithTheme(<Sidebar />);
+    expect(screen.getByText(APP_NAME)).toBeInTheDocument();
+    expect(container.querySelector('img[src*="symbol.png"]')).toBeInTheDocument();
+    expect(container.textContent).not.toMatch(/luzly/i);
   });
 });
 

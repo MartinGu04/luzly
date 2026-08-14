@@ -16,12 +16,12 @@ surface variants, `Badge`, `Avatar`, `Card`, `CoverageBadge`,
 
 ## Data freshness + manual refresh (PR #17)
 
-Luzly does not replace Google Sheets. Google Sheets stays the working
-surface and the source of truth; Luzly is a **read-only** visibility
+מי-מה-מו does not replace Google Sheets. Google Sheets stays the working
+surface and the source of truth; מי-מה-מו is a **read-only** visibility
 layer that fetches timestamped snapshots of it (`lib/google` — every
 sheet read is `spreadsheets.values.batchGet`, never a write). Every read
 model already carries its own `fetchedAt` (an ISO instant) recording
-**when Luzly fetched that snapshot** — never when someone last edited
+**when מי-מה-מו fetched that snapshot** — never when someone last edited
 the spreadsheet, and there is no separate "last modified in Sheets"
 timestamp anywhere in this codebase.
 

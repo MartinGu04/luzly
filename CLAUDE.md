@@ -1,14 +1,14 @@
 @AGENTS.md
 
-# Luzly — Engineering Rules
+# מי-מה-מו (mi-ma-mo) — Engineering Rules
 
-Luzly is a Hebrew RTL, read-only scheduling companion built on top of an
+מי-מה-מו is a Hebrew RTL, read-only scheduling companion built on top of an
 existing Google Sheets scheduling workbook.
 
 ## Permanent rules
 
 - Google Sheets is the source of truth.
-- Luzly is read-only.
+- מי-מה-מו is read-only.
 - Never write schedule changes back to Google Sheets.
 - The UI must never parse raw spreadsheet cells directly — it consumes
   typed output from `lib/parsers` / `lib/domain` only.
