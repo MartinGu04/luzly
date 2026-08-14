@@ -63,13 +63,10 @@ describe("Sidebar", () => {
     expect(screen.getByRole("link", { name: /מי איתי/ })).not.toHaveAttribute("aria-current");
   });
 
-  it("still renders every disabled future route as a non-interactive placeholder", () => {
+  it("no navItems entry is disabled anymore -- every rendered item is a real link (sidebar/mobile-nav refinement pass)", () => {
     renderWithTheme(<Sidebar />);
-    const disabled = navItems.filter((item) => !item.enabled);
-    expect(disabled.length).toBeGreaterThan(0);
-    for (const item of disabled) {
-      expect(screen.queryByRole("link", { name: item.label })).toBeNull();
-    }
+    expect(navItems.every((item) => item.enabled)).toBe(true);
+    expect(screen.queryByText("בקרוב")).toBeNull();
   });
 
   describe("manager-only navigation", () => {
@@ -102,11 +99,37 @@ describe("Sidebar", () => {
       expect(screen.getByRole("link", { name: /התנגשויות/ })).toHaveAttribute("href", "/conflicts");
     });
 
-    it("/reminders remains a disabled placeholder for a manager too, and the removed sync item never renders", () => {
+    it("neither the removed reminders item nor the removed sync item ever renders, for a manager either", () => {
       renderWithTheme(<Sidebar person={{ name: "דני מנהל", isManager: true }} />);
       expect(screen.queryByRole("link", { name: "תזכורות" })).toBeNull();
+      expect(screen.queryByText("תזכורות")).toBeNull();
       expect(screen.queryByRole("link", { name: "סנכרון" })).toBeNull();
       expect(screen.queryByText("סנכרון")).toBeNull();
     });
+  });
+});
+
+describe("Sidebar — width and layout", () => {
+  it("uses the widened 320px rail (sidebar/mobile-nav refinement pass)", () => {
+    const { container } = renderWithTheme(<Sidebar />);
+    const aside = container.querySelector("aside");
+    expect(aside?.className).toMatch(/\bw-\[320px\]/);
+  });
+});
+
+describe("Sidebar — theme control placement (sidebar/mobile-nav refinement pass)", () => {
+  it("renders no theme control at the top of the rail when no person is provided", () => {
+    renderWithTheme(<Sidebar />);
+    expect(screen.queryByRole("radiogroup", { name: "ערכת נושא" })).toBeNull();
+  });
+
+  it("renders exactly one theme control, in the bottom identity/footer area, when a person is provided", () => {
+    renderWithTheme(<Sidebar person={{ name: "דני בדיקה", isManager: false }} />);
+    const toggles = screen.getAllByRole("radiogroup", { name: "ערכת נושא" });
+    expect(toggles).toHaveLength(1);
+
+    // Confirm it lives inside the footer, alongside the sign-out button and version text -- not up near the logo/bell.
+    const footer = screen.getByRole("button", { name: "התנתקות" }).closest("div.border-t");
+    expect(footer?.contains(toggles[0])).toBe(true);
   });
 });

@@ -79,7 +79,7 @@ describe("BottomNav", () => {
     expect(screen.queryByText("בדיקות")).toBeNull();
   });
 
-  it("still disabled/manager-only routes (manager, reminders) are not part of the bottom nav at all", () => {
+  it("the manager-only route is not part of the bottom nav at all", () => {
     render(<BottomNav />);
     expect(screen.queryByText("מנהל")).toBeNull();
   });
