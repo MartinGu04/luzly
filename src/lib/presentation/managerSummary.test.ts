@@ -23,6 +23,10 @@ describe("managerSummaryLabel", () => {
           shadowSupervisors: [{ personId: "c", personName: "c", certainty: "confirmed" as const, startTimeOverride: null, endTimeOverride: null }],
           coverageStatus: "full" as const,
           missingIntervals: [],
+          roleCoverage: {
+            technician: { status: "full" as const, missingIntervals: [] },
+            supervisor: { status: "full" as const, missingIntervals: [] },
+          },
         },
       ],
     };
@@ -87,6 +91,10 @@ describe("managerSummaryLabel", () => {
           shadowSupervisors: [],
           coverageStatus: "missing" as const,
           missingIntervals: [],
+          roleCoverage: {
+            technician: { status: "full" as const, missingIntervals: [] },
+            supervisor: { status: "missing" as const, missingIntervals: [] },
+          },
         },
       ],
       duties: [{ personId: "a", personName: "a", date: "2026-08-13", dutyFamily: "guard" as const, slot: null, certainty: "confirmed" as const }],

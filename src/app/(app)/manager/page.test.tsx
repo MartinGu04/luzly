@@ -60,6 +60,10 @@ function shiftGroup(overrides: Partial<ManagerShiftOverviewEntry> = {}): Manager
     shadowSupervisors: [],
     coverageStatus: "full",
     missingIntervals: [],
+    roleCoverage: {
+      technician: { status: "full", missingIntervals: [] },
+      supervisor: { status: "full", missingIntervals: [] },
+    },
     ...overrides,
   };
 }
@@ -191,6 +195,21 @@ describe("ManagerPage — everyone view", () => {
     getRequestManagerOverview.mockResolvedValue(okResult(model()));
     await renderPage();
     expect(screen.getByText("אין כרגע דברים שדורשים התייחסות בטווח שנבחר")).toBeInTheDocument();
+  });
+
+  it("shows the אזור מנהל title (no מנהל chip) and the subnav with סקירה active", async () => {
+    getRequestManagerOverview.mockResolvedValue(okResult(model()));
+    await renderPage();
+    expect(screen.getByRole("heading", { name: "אזור מנהל", level: 1 })).toBeInTheDocument();
+    expect(screen.queryByText("מנהל")).toBeNull();
+    expect(screen.getByRole("link", { name: "סקירה" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "טבלת צדק" })).toHaveAttribute("href", "/manager/fairness");
+  });
+
+  it("shows the strong outlined הצג רק בעיות action when problems are not filtered", async () => {
+    getRequestManagerOverview.mockResolvedValue(okResult(model()));
+    await renderPage();
+    expect(screen.getByRole("link", { name: "הצג רק בעיות" })).toHaveAttribute("href", "/manager?problems=1");
   });
 
   it("shows several critical/review issues, grouped by severity", async () => {
@@ -337,7 +356,7 @@ describe("ManagerPage — everyone view", () => {
   it("the roster section links to each person by id", async () => {
     getRequestManagerOverview.mockResolvedValue(okResult(model()));
     await renderPage();
-    const link = screen.getAllByRole("link", { name: "מרטין בדיקה" })[0];
+    const link = screen.getAllByRole("link", { name: /מרטין בדיקה/ })[0];
     expect(link).toHaveAttribute("href", "/manager?person=p_martin");
   });
 });
@@ -403,6 +422,24 @@ describe("ManagerPage — selected person view", () => {
     await renderPage({ person: "p_martin" });
     expect(screen.getByText("היעדרויות בטווח")).toBeInTheDocument();
     expect(screen.queryByText("נועה דוגמה")).toBeNull();
+  });
+
+  it("never shows the problems-only toggle -- it has no meaning once already drilled into one person (Design Pass PR #21 §8)", async () => {
+    getRequestManagerOverview.mockResolvedValue(
+      okResult(model({ selectedPersonId: "p_martin", selectedPerson: personalModel() })),
+    );
+    await renderPage({ person: "p_martin" });
+    expect(screen.queryByRole("link", { name: "הצג רק בעיות" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "מציג רק בעיות" })).toBeNull();
+  });
+
+  it("still shows the shared אזור מנהל header and subnav on the selected-person view", async () => {
+    getRequestManagerOverview.mockResolvedValue(
+      okResult(model({ selectedPersonId: "p_martin", selectedPerson: personalModel() })),
+    );
+    await renderPage({ person: "p_martin" });
+    expect(screen.getByRole("heading", { name: "אזור מנהל", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "סקירה" })).toHaveAttribute("aria-current", "page");
   });
 
   it("selecting a person never renders a sign-out affordance or changes identity chrome", async () => {

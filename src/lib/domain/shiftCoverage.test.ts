@@ -510,3 +510,103 @@ describe("analyzeUnitShiftCoverage — unit-wide group coverage (PR #14 hardenin
     expect(result.coverageStatus).toBe("missing");
   });
 });
+
+describe("analyzeUnitShiftCoverage — per-role diagnostics (Design Pass PR #21 §11/§39)", () => {
+  it("both full: roleCoverage.technician/supervisor are both full with no missing intervals", () => {
+    const result = analyzeUnitShiftCoverage("day", [technicianDay(), supervisorDay()], schedule);
+    expect(result.roleCoverage.technician).toEqual({ status: "full", missingIntervals: [] });
+    expect(result.roleCoverage.supervisor).toEqual({ status: "full", missingIntervals: [] });
+  });
+
+  it("technician fully missing: roleCoverage.technician is missing (whole canonical window), supervisor stays full", () => {
+    const result = analyzeUnitShiftCoverage("day", [supervisorDay()], schedule);
+    expect(result.coverageStatus).toBe("missing"); // overall precedence
+    expect(result.roleCoverage.technician).toEqual({
+      status: "missing",
+      missingIntervals: [{ startMinute: 450, endMinute: 1170 }],
+    });
+    expect(result.roleCoverage.supervisor).toEqual({ status: "full", missingIntervals: [] });
+  });
+
+  it("supervisor fully missing: roleCoverage.supervisor is missing, technician stays full", () => {
+    const result = analyzeUnitShiftCoverage("day", [technicianDay()], schedule);
+    expect(result.roleCoverage.supervisor).toEqual({
+      status: "missing",
+      missingIntervals: [{ startMinute: 450, endMinute: 1170 }],
+    });
+    expect(result.roleCoverage.technician).toEqual({ status: "full", missingIntervals: [] });
+  });
+
+  it("technician partial: roleCoverage.technician is partial with its own gap, independent of the overall verdict", () => {
+    const tech = technicianDay({ endTimeOverride: "12:00" });
+    const sup = supervisorDay();
+    const result = analyzeUnitShiftCoverage("day", [tech, sup], schedule);
+    expect(result.coverageStatus).toBe("partial");
+    expect(result.roleCoverage.technician).toEqual({
+      status: "partial",
+      missingIntervals: [{ startMinute: 720, endMinute: 1170 }],
+    });
+    expect(result.roleCoverage.supervisor).toEqual({ status: "full", missingIntervals: [] });
+  });
+
+  it("supervisor partial: roleCoverage.supervisor is partial with its own gap", () => {
+    const tech = technicianDay();
+    const sup = supervisorDay({ endTimeOverride: "12:00" });
+    const result = analyzeUnitShiftCoverage("day", [tech, sup], schedule);
+    expect(result.roleCoverage.supervisor).toEqual({
+      status: "partial",
+      missingIntervals: [{ startMinute: 720, endMinute: 1170 }],
+    });
+    expect(result.roleCoverage.technician).toEqual({ status: "full", missingIntervals: [] });
+  });
+
+  it("ambiguous technician: roleCoverage.technician is not_evaluable with no fabricated missingIntervals, even though the overall status is also not_evaluable", () => {
+    const invalidTech = technicianDay({ startTimeOverride: "99:99" });
+    const sup = supervisorDay();
+    const result = analyzeUnitShiftCoverage("day", [invalidTech, sup], schedule);
+    expect(result.coverageStatus).toBe("not_evaluable");
+    expect(result.roleCoverage.technician).toEqual({ status: "not_evaluable", missingIntervals: [] });
+    expect(result.roleCoverage.supervisor).toEqual({ status: "full", missingIntervals: [] });
+  });
+
+  it("ambiguous supervisor: roleCoverage.supervisor is not_evaluable, technician stays full", () => {
+    const tech = technicianDay();
+    const invalidSup = supervisorDay({ startTimeOverride: "99:99" });
+    const result = analyzeUnitShiftCoverage("day", [tech, invalidSup], schedule);
+    expect(result.roleCoverage.supervisor).toEqual({ status: "not_evaluable", missingIntervals: [] });
+    expect(result.roleCoverage.technician).toEqual({ status: "full", missingIntervals: [] });
+  });
+
+  it("shadow person does not count as coverage: a shadow-only technician still reads as roleCoverage.technician missing", () => {
+    const shadowTech = technicianDay({ shadow: true });
+    const sup = supervisorDay();
+    const result = analyzeUnitShiftCoverage("day", [shadowTech, sup], schedule);
+    expect(result.roleCoverage.technician.status).toBe("missing");
+  });
+
+  it("a period with no canonical window: both roles are not_evaluable, never a fabricated gap", () => {
+    const result = analyzeUnitShiftCoverage("morning", [technicianDay({ period: "morning" })], schedule);
+    expect(result.roleCoverage.technician).toEqual({ status: "not_evaluable", missingIntervals: [] });
+    expect(result.roleCoverage.supervisor).toEqual({ status: "not_evaluable", missingIntervals: [] });
+  });
+
+  it("an empty group: both roles read as missing, whole canonical window", () => {
+    const result = analyzeUnitShiftCoverage("day", [], schedule);
+    expect(result.roleCoverage.technician).toEqual({
+      status: "missing",
+      missingIntervals: [{ startMinute: 450, endMinute: 1170 }],
+    });
+    expect(result.roleCoverage.supervisor).toEqual({
+      status: "missing",
+      missingIntervals: [{ startMinute: 450, endMinute: 1170 }],
+    });
+  });
+
+  it("existing overall coverageStatus/missingIntervals fixtures remain byte-identical with roleCoverage added", () => {
+    const tech = technicianDay({ endTimeOverride: "12:00" });
+    const sup = supervisorDay();
+    const result = analyzeUnitShiftCoverage("day", [tech, sup], schedule);
+    expect(result.coverageStatus).toBe("partial");
+    expect(result.missingIntervals).toEqual([{ startMinute: 720, endMinute: 1170 }]);
+  });
+});

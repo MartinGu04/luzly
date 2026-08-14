@@ -283,6 +283,7 @@ function buildCoverageOverview(
       shadowSupervisors,
       coverageStatus: analysis.coverageStatus,
       missingIntervals: analysis.missingIntervals,
+      roleCoverage: analysis.roleCoverage,
     });
   }
 

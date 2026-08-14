@@ -64,6 +64,17 @@ export interface ManagerShiftGroupPerson {
 }
 
 /**
+ * Presentation-safe per-role coverage diagnostic -- mirrors
+ * `RoleCoverageDiagnostic` from `lib/domain/shiftCoverage.ts` exactly (same
+ * `status`/`missingIntervals` shape), carried through unchanged. Never
+ * carries the underlying raw `Event[]` the domain layer computed it from.
+ */
+export interface ManagerRoleCoverageView {
+  status: CoverageStatus;
+  missingIntervals: MinuteInterval[];
+}
+
+/**
  * One date+period shift group across EVERYONE (unlike `PersonalShiftContext`,
  * which is anchored to one person's own shift). `technicians`/`supervisors`
  * preserve every assigned person -- never collapsed to one -- with
@@ -71,7 +82,11 @@ export interface ManagerShiftGroupPerson {
  * `missingIntervals` reuse the exact same `analyzeShiftCounterparts` domain
  * algorithm as everywhere else in the app (see
  * `buildManagerOverviewReadModel.ts` for the deterministic target-selection
- * note when several same-role people share a group).
+ * note when several same-role people share a group). `roleCoverage` is the
+ * SAME `analyzeUnitShiftCoverage()` call's per-role diagnostic (Design Pass
+ * PR #21 §11/§12) -- not a second coverage computation -- so the UI can say
+ * explicitly which role is missing/partial instead of inferring it from
+ * empty name lists.
  */
 export interface ManagerShiftOverviewEntry {
   date: string;
@@ -82,6 +97,10 @@ export interface ManagerShiftOverviewEntry {
   shadowSupervisors: ManagerShiftGroupPerson[];
   coverageStatus: CoverageStatus;
   missingIntervals: MinuteInterval[];
+  roleCoverage: {
+    technician: ManagerRoleCoverageView;
+    supervisor: ManagerRoleCoverageView;
+  };
 }
 
 /** One typed duty Event across everyone, within the selected range. */

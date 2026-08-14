@@ -146,21 +146,22 @@ describe("classifyPotentialSourceOwnership — ambiguous short first names never
   });
 });
 
-describe("classifyPotentialSourceOwnership — תקש\"ל אתרים unresolved team persons (PR #16 hardening §1-4)", () => {
-  it.each(["נדב", "יובל"])(
-    '"%s" is team_unresolved_person when absent from current personnel -- included in scope, no fabricated personId',
+describe('classifyPotentialSourceOwnership — נדב/יובל have NO special ownership anymore (Design Pass PR #21 §23-25)', () => {
+  const PERSONNEL_WITHOUT_NADAV_YUVAL = PERSONNEL; // neither is in the base fixture at all
+
+  it.each(["נדב", "יובל", "נדב - הוקפץ", "יובל - החלפה"])(
+    '"%s" with no current personnel record falls through to unknown -- excluded, never a fake ownership state',
     (label) => {
-      expect(classifyPotentialSourceOwnership(label, PERSONNEL)).toEqual({ kind: "team_unresolved_person" });
+      expect(classifyPotentialSourceOwnership(label, PERSONNEL_WITHOUT_NADAV_YUVAL)).toEqual({ kind: "unknown" });
     },
   );
 
-  it("סטיבן (a FORMER team member) stays unknown, never team_unresolved_person -- this list is current responsibility only", () => {
-    expect(classifyPotentialSourceOwnership("סטיבן", PERSONNEL.filter((p) => p.id !== STEVEN.id))).toEqual({
-      kind: "unknown",
-    });
+  it("סטיבן (a former team member) behaves identically to נדב/יובל -- no special-casing for anyone, all fall through to unknown", () => {
+    const withoutSteven = PERSONNEL.filter((p) => p.id !== STEVEN.id);
+    expect(classifyPotentialSourceOwnership("סטיבן", withoutSteven)).toEqual({ kind: "unknown" });
   });
 
-  it("if נדב is later added to כ\"א with a real personnel record, the exact/short-name checks resolve him as a real team_person instead", () => {
+  it("if נדב is later added to כ\"א with a real personnel record, the ordinary exact/short-name checks resolve him as team_person -- no special-casing required", () => {
     const NADAV = person({ id: "p_nadav", name: "נדב פרידמן" });
     const personnelWithNadav = [...PERSONNEL, NADAV];
     expect(classifyPotentialSourceOwnership("נדב", personnelWithNadav)).toEqual({
@@ -178,8 +179,13 @@ describe("classifyPotentialSourceOwnership — תקש\"ל אתרים unresolved 
     });
   });
 
-  it("external precedence is untouched by the new state -- known external tokens still classify as external, not team_unresolved_person", () => {
+  it("external precedence is unaffected by this cleanup -- known external tokens still classify as external", () => {
     expect(classifyPotentialSourceOwnership("איתן מרכז", PERSONNEL)).toEqual({ kind: "external" });
+  });
+
+  it("PotentialSourceOwnership no longer has a team_unresolved_person kind at the type level", () => {
+    const result = classifyPotentialSourceOwnership("נדב", PERSONNEL);
+    expect(result.kind).not.toBe("team_unresolved_person");
   });
 });
 
@@ -221,9 +227,9 @@ describe("isManagerOwnedPotentialAllocation", () => {
     expect(isManagerOwnedPotentialAllocation("משהו שלא קיים", PERSONNEL)).toBe(false);
   });
 
-  it("true for a known תקש\"ל אתרים unresolved person (נדב/יובל)", () => {
-    expect(isManagerOwnedPotentialAllocation("נדב", PERSONNEL)).toBe(true);
-    expect(isManagerOwnedPotentialAllocation("יובל", PERSONNEL)).toBe(true);
+  it("false for נדב/יובל with no current personnel record -- no special ownership anymore (Design Pass PR #21)", () => {
+    expect(isManagerOwnedPotentialAllocation("נדב", PERSONNEL)).toBe(false);
+    expect(isManagerOwnedPotentialAllocation("יובל", PERSONNEL)).toBe(false);
   });
 
   it("false for סטיבן, a former team member absent from current personnel", () => {
@@ -297,20 +303,23 @@ describe("scopeManagerPotentialAllocation — PR #16 hardening (short/annotated 
     expect(JSON.stringify(source)).toBe(before);
   });
 
-  it("team_unresolved_person (נדב/יובל): the allocation passes through INCLUDED, but resolvedSourcePersonId stays null -- no fabricated identity", () => {
+  it("נדב/יובל with no current personnel record: EXCLUDED (null) -- no special ownership anymore (Design Pass PR #21 §23/§24/§41)", () => {
     const nadav = allocation({ sourceAllocationLabel: "נדב", resolvedSourcePersonId: null });
     const yuval = allocation({ sourceAllocationLabel: "יובל", resolvedSourcePersonId: null });
 
-    const nadavResult = scopeManagerPotentialAllocation(nadav, PERSONNEL);
-    const yuvalResult = scopeManagerPotentialAllocation(yuval, PERSONNEL);
-
-    expect(nadavResult).toEqual(nadav);
-    expect(nadavResult?.resolvedSourcePersonId).toBeNull();
-    expect(yuvalResult).toEqual(yuval);
-    expect(yuvalResult?.resolvedSourcePersonId).toBeNull();
+    expect(scopeManagerPotentialAllocation(nadav, PERSONNEL)).toBeNull();
+    expect(scopeManagerPotentialAllocation(yuval, PERSONNEL)).toBeNull();
   });
 
-  it("סטיבן stays excluded (null) -- a former team member is never treated as team_unresolved_person", () => {
+  it("annotated נדב/יובל forms also exclude (null)", () => {
+    const nadav = allocation({ sourceAllocationLabel: "נדב - הוקפץ", resolvedSourcePersonId: null });
+    const yuval = allocation({ sourceAllocationLabel: "יובל - החלפה", resolvedSourcePersonId: null });
+
+    expect(scopeManagerPotentialAllocation(nadav, PERSONNEL)).toBeNull();
+    expect(scopeManagerPotentialAllocation(yuval, PERSONNEL)).toBeNull();
+  });
+
+  it("סטיבן stays excluded (null), exactly like נדב/יובל -- no special-casing for any of them", () => {
     const source = allocation({ sourceAllocationLabel: "סטיבן", resolvedSourcePersonId: null });
     const currentPersonnel = PERSONNEL.filter((p) => p.id !== STEVEN.id);
     expect(scopeManagerPotentialAllocation(source, currentPersonnel)).toBeNull();

@@ -16,24 +16,16 @@ import type { Person } from "./types";
  * `isManagerOwnedPotentialAllocation`), but it is also never asserted to
  * be "external" without evidence.
  *
- * `team_unresolved_person` is a distinct, HONEST third state (PR #16
- * hardening): a known תקש"ל אתרים (a sub-team within our overall
- * responsibility) source person -- currently נדב/יובל -- who is manager-
- * owned Potential scope but has NO current `כ"א` personnel record to
- * resolve to. This is real, expected domain structure, not stale data --
- * it must be INCLUDED in Manager Overview, but MUST NEVER be conflated
- * with `team_person`: no `personId` is fabricated, they are never added
- * to the roster, and `sourceConflict` can never be computed for them
- * (that requires a resolved app `Person` to check for a blocking
- * absence). If either name is later added to `כ"א`, the EXACT full-name
- * or unique short-name checks above resolve them as a real `team_person`
- * automatically -- `team_unresolved_person` is only ever a fallback for
- * a name that isn't there yet.
+ * A source like "נדב"/"יובל" (a תקש"ל אתרים sub-team person with no
+ * current `כ"א` record) intentionally resolves to `unknown` -- Luzly no
+ * longer claims that responsibility (Design Pass PR #21 §23/§24). If
+ * either name is later added to `כ"א`, the normal exact-full-name or
+ * unique-short-name checks below resolve them as a real `team_person`
+ * automatically, with no special-casing required.
  */
 export type PotentialSourceOwnership =
   | { kind: "team_alias" }
   | { kind: "team_person"; personId: string }
-  | { kind: "team_unresolved_person" }
   | { kind: "external" }
   | { kind: "unknown" };
 
@@ -70,21 +62,6 @@ const KNOWN_EXTERNAL_LEADING_TOKENS: ReadonlySet<string> = new Set([
   "אמלח",
   "מנהלה",
 ]);
-
-/**
- * Known תקש"ל אתרים source-person labels with no current `כ"א` record
- * (PR #16 hardening §1/§3) -- a small, explicit, intentional canonical
- * set, never fuzzy matching. Matched against the LEADING token, same
- * technique as `KNOWN_EXTERNAL_LEADING_TOKENS` and short-name person
- * resolution, so an annotated label ("נדב - ...") still resolves.
- *
- * `סטיבן` is deliberately NOT in this set: he was formerly on this team
- * but has since moved to another department, so a Potential cell
- * containing "סטיבן" with no personnel match now correctly falls through
- * to `unknown` (excluded) -- this list is CURRENT responsibility only,
- * never historical.
- */
-const KNOWN_TEAM_UNRESOLVED_PERSON_LEADING_TOKENS: ReadonlySet<string> = new Set(["נדב", "יובל"]);
 
 /** Every quote-like character (ASCII, Hebrew geresh/gershayim, smart quotes) treated as insignificant for alias/external-token comparison only. */
 const QUOTE_CHARACTERS_RE = /[׳״"'‘’“”]/g;
@@ -159,12 +136,10 @@ function resolveUniqueMatch(matches: readonly Person[] | undefined): Person | nu
  *    LEADING token is ever used to resolve a person -- trailing text
  *    (including another organization's name) never overrides it, and
  *    never gets parsed as natural language beyond that leading token.
- * 5. Known תקש"ל אתרים unresolved-person label (currently נדב/יובל) --
- *    checked AFTER current-personnel short-name resolution, so if either
- *    name is later added to `כ"א` it naturally resolves as a real
- *    `team_person` there instead, and this state is only ever a fallback
- *    for a name that isn't in personnel yet.
- * 6. `unknown` -- fails closed, never guessed.
+ * 5. `unknown` -- fails closed, never guessed. A name with no current
+ *    `כ"א` record (e.g. "נדב"/"יובל"/"סטיבן") lands here -- Luzly claims
+ *    no special responsibility for a source it can't resolve to a real
+ *    person (Design Pass PR #21).
  *
  * Pure, deterministic, no fuzzy matching anywhere.
  */
@@ -195,24 +170,16 @@ export function classifyPotentialSourceOwnership(
     return { kind: "team_person", personId: shortNameMatch.id };
   }
 
-  if (KNOWN_TEAM_UNRESOLVED_PERSON_LEADING_TOKENS.has(leadingToken(canonicalLabel))) {
-    return { kind: "team_unresolved_person" };
-  }
-
   return { kind: "unknown" };
 }
 
-/** True for `team_alias`/`team_person`/`team_unresolved_person` -- `external` and `unknown` are both excluded from Manager Overview's Potential scope (PR #16 §13, fail-closed). A simple boolean-only convenience for callers that don't need `scopeManagerPotentialAllocation`'s enrichment -- see that function's doc for why the two should never both run against the SAME allocation (that would classify it twice). */
+/** True for `team_alias`/`team_person` -- `external` and `unknown` are both excluded from Manager Overview's Potential scope (PR #16 §13, fail-closed). A simple boolean-only convenience for callers that don't need `scopeManagerPotentialAllocation`'s enrichment -- see that function's doc for why the two should never both run against the SAME allocation (that would classify it twice). */
 export function isManagerOwnedPotentialAllocation(
   sourceAllocationLabel: string,
   personnel: readonly Person[],
 ): boolean {
   const ownership = classifyPotentialSourceOwnership(sourceAllocationLabel, personnel);
-  return (
-    ownership.kind === "team_alias" ||
-    ownership.kind === "team_person" ||
-    ownership.kind === "team_unresolved_person"
-  );
+  return ownership.kind === "team_alias" || ownership.kind === "team_person";
 }
 
 /**
@@ -240,12 +207,6 @@ export function isManagerOwnedPotentialAllocation(
  *   the parser -- never overwriting an already-resolved id with a
  *   different one, since an exact full-name match is classified before
  *   short-name resolution and would already equal this same person).
- * - `team_unresolved_person`: the allocation, unchanged -- included in
- *   scope, but `resolvedSourcePersonId` stays `null`. There is no app
- *   `Person`/personId to enrich it with (PR #16 hardening §2/§6): we
- *   never invent one, so `sourceConflict` downstream correctly stays
- *   `null` too (it requires a resolved person to check for a blocking
- *   absence, which can't be proven here).
  * - `external`/`unknown`: `null`.
  *
  * Never mutates the input allocation.
@@ -256,9 +217,7 @@ export function scopeManagerPotentialAllocation(
 ): PotentialAllocation | null {
   const ownership = classifyPotentialSourceOwnership(allocation.sourceAllocationLabel, personnel);
 
-  if (ownership.kind === "team_alias" || ownership.kind === "team_unresolved_person") {
-    return allocation;
-  }
+  if (ownership.kind === "team_alias") return allocation;
   if (ownership.kind === "team_person") {
     return { ...allocation, resolvedSourcePersonId: ownership.personId };
   }

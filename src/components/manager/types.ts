@@ -1,3 +1,4 @@
+import type { AbsenceKind, DutyFamily } from "@/lib/domain/event";
 import type { IssueSeverity } from "@/lib/domain/operationalIssues";
 import type { ManagerRequirementStatus } from "@/lib/domain/potentialReconciliation";
 import type { CoverageStatus } from "@/lib/domain/shiftCoverage";
@@ -31,6 +32,18 @@ export interface ManagerPotentialRowView {
   sourceConflictNote: string | null;
 }
 
+/**
+ * Explicit per-role coverage diagnostic view -- `message` is null only when
+ * `status === "full"` (the group's own name list already shows who covers
+ * it); otherwise it's an already-formatted "חסר טכנאי" / "כיסוי אחמ״ש חלקי
+ * · 05:30–07:30" / "לא ניתן להעריך כיסוי טכנאי" string, never derived by
+ * the component from an empty name list.
+ */
+export interface ManagerRoleCoverageRowView {
+  status: CoverageStatus;
+  message: string | null;
+}
+
 /** Presentation-ready view of one `ManagerShiftOverviewEntry` date+period group. */
 export interface ManagerShiftGroupView {
   key: string;
@@ -43,22 +56,26 @@ export interface ManagerShiftGroupView {
   shadowSupervisorNames: string[];
   coverageStatus: CoverageStatus;
   missingIntervalLabels: string[];
+  technicianCoverage: ManagerRoleCoverageRowView;
+  supervisorCoverage: ManagerRoleCoverageRowView;
 }
 
-/** Presentation-ready view of one `ManagerDutyEntry`. */
+/** Presentation-ready view of one `ManagerDutyEntry`. `dutyFamily` is carried through (a typed domain enum, not raw sheet text) so the section can group by it -- same family, different slots, group together (Design Pass PR #21 §15). */
 export interface ManagerDutyRowView {
   key: string;
   personName: string;
   dateLabel: string;
   emoji: string | null;
   title: string;
+  dutyFamily: DutyFamily;
 }
 
-/** Presentation-ready view of one `ManagerAbsenceEntry`. */
+/** Presentation-ready view of one `ManagerAbsenceEntry`. `absenceKind` is carried through (a typed domain enum) so the section can group by it (Design Pass PR #21 §16). */
 export interface ManagerAbsenceRowView {
   key: string;
   personName: string;
   dateLabel: string;
   emoji: string | null;
   label: string;
+  absenceKind: AbsenceKind;
 }

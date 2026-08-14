@@ -150,8 +150,7 @@ no Google API calls and no spreadsheet-cell access.
   intentionally scoped to only תקש"ל / תקשאס responsibility.
   `classifyPotentialSourceOwnership(sourceAllocationLabel, personnel)` is
   the single centralized classifier (`team_alias` / `team_person` /
-  `team_unresolved_person` / `external` / `unknown`), checked in this
-  order:
+  `external` / `unknown`), checked in this order:
   1. Exact team-alias match, quote-insensitive canonical comparison
      (תקש"ל / תקש״ל / תקשל all canonicalize the same; likewise
      תקשאס-family). No fuzzy matching — only quote characters are
@@ -173,23 +172,19 @@ no Google API calls and no spreadsheet-cell access.
      person; no natural-language parsing beyond that. Two personnel
      sharing the same first name never resolve (fails closed, same
      convention as `lib/parsers/potential.ts`'s exact-name resolution).
-  5. A known תקש"ל אתרים (a sub-team within our overall responsibility)
-     unresolved-person label as the leading token — currently נדב/יובל, a
-     small explicit canonical set (never fuzzy matching). They appear in
-     Potential without a current `כ"א` record — real domain structure, not
-     stale data — so they resolve to `team_unresolved_person`, checked
-     AFTER current-personnel short-name resolution: if either name is
-     later added to `כ"א`, step 4 resolves them as a real `team_person`
-     there instead, and this state stops applying to that name
-     automatically. `סטיבן` is deliberately NOT in this set — he
-     previously belonged to the team but has since moved elsewhere, so
-     "סטיבן" with no personnel match correctly falls through to
-     `unknown` (current responsibility only, never historical).
-  6. Otherwise `unknown` — fails closed, excluded from Manager Overview,
-     never guessed either way.
+  5. Otherwise `unknown` — fails closed, excluded from Manager Overview,
+     never guessed either way. A source with no current `כ"א` record
+     (e.g. "נדב"/"יובל"/"סטיבן") lands here like any other unrecognized
+     source — Design Pass PR #21 removed the temporary special-cased
+     `team_unresolved_person` ownership state that used to carve out
+     נדב/יובל as a known-but-unresolved תקש"ל אתרים responsibility; Luzly
+     no longer claims that responsibility at all. If either name (or
+     anyone else) is later added to `כ"א`, steps 2/4 above resolve them as
+     an ordinary `team_person` automatically, with no special-casing
+     required.
   `isManagerOwnedPotentialAllocation` is `true` for `team_alias`/
-  `team_person`/`team_unresolved_person` -- a simple boolean convenience
-  for a caller that doesn't need enrichment (see below). `parsePotentialSheet`
+  `team_person` only -- a simple boolean convenience for a caller that
+  doesn't need enrichment (see below). `parsePotentialSheet`
   and `PotentialAllocation.resolvedSourcePersonId` (exact full-name only,
   used for `sourceConflict`) are both left exactly as they were — this
   classifier does its own independent person resolution rather than
@@ -199,14 +194,9 @@ no Google API calls and no spreadsheet-cell access.
   `buildManagerOverviewReadModel.ts` actually calls, once per allocation
   (hardening pass -- classifying the same allocation twice, once via
   `isManagerOwnedPotentialAllocation` and again separately, is exactly
-  what this consolidates away). It both scopes AND enriches:
-  `team_alias`/`team_unresolved_person` pass the allocation through
-  unchanged (a `team_unresolved_person`'s `resolvedSourcePersonId` stays
-  whatever it already was -- `null`, coming from the parser -- since there
-  is no app `Person` to enrich it with; NEVER a fabricated personId, and
-  `sourceConflict` downstream correctly stays `null` too, since that check
-  requires a resolved person to prove a blocking absence against);
-  `team_person` returns a COPY with `resolvedSourcePersonId` set to the
+  what this consolidates away). It both scopes AND enriches: `team_alias`
+  passes the allocation through unchanged; `team_person` returns a COPY
+  with `resolvedSourcePersonId` set to the
   classifier's resolved person id (closing a real gap -- a short/annotated
   person source like "מרטין" or "מארק - הוקפץ מא" would otherwise reach
   `reconcilePotentialAllocations` with `resolvedSourcePersonId: null` from

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ManagerFairnessChart } from "./ManagerFairnessChart";
 
 afterEach(() => {
@@ -58,6 +58,71 @@ describe("ManagerFairnessChart — populated", () => {
     const legendText = screen.getByLabelText("מקרא התרשים").textContent ?? "";
     expect(legendText).not.toContain("sourceSheet");
     expect(legendText).not.toContain("@");
+  });
+});
+
+describe("ManagerFairnessChart — hover/keyboard-focus tooltip (Design Pass PR #21 §33/§34)", () => {
+  const slices = [
+    { id: "p_a", name: "מרטין בדיקה", score: 6, percentage: 60 },
+    { id: "p_b", name: "איתן דוגמה", score: 4, percentage: 40 },
+  ];
+
+  function segmentFor(container: HTMLElement, index: number) {
+    // index 0 is the background ring, slice segments start at index 1.
+    return container.querySelectorAll("g circle")[index + 1] as SVGCircleElement;
+  }
+
+  it("each segment carries an aria-label with name/score/percentage -- keyboard focus alone exposes equivalent info", () => {
+    const { container } = render(<ManagerFairnessChart slices={slices} />);
+    const first = segmentFor(container, 0);
+    expect(first).toHaveAttribute("aria-label", "מרטין בדיקה · 6 · 60%");
+  });
+
+  it("hovering a segment shows its name/score/percentage in the visual readout", () => {
+    const { container } = render(<ManagerFairnessChart slices={slices} />);
+    fireEvent.mouseEnter(segmentFor(container, 0));
+    expect(screen.getByText("מרטין בדיקה · 6 · 60%")).toBeInTheDocument();
+  });
+
+  it("focusing a segment (keyboard) shows the same readout as hover", () => {
+    const { container } = render(<ManagerFairnessChart slices={slices} />);
+    fireEvent.focus(segmentFor(container, 1));
+    expect(screen.getByText("איתן דוגמה · 4 · 40%")).toBeInTheDocument();
+  });
+
+  it("mouse leaving the segment clears the readout -- never trapped open", () => {
+    const { container } = render(<ManagerFairnessChart slices={slices} />);
+    const segment = segmentFor(container, 0);
+    fireEvent.mouseEnter(segment);
+    expect(screen.getByText("מרטין בדיקה · 6 · 60%")).toBeInTheDocument();
+    fireEvent.mouseLeave(segment);
+    expect(screen.queryByText("מרטין בדיקה · 6 · 60%")).toBeNull();
+  });
+
+  it("blur (focus leaving) clears the readout -- never trapped open", () => {
+    const { container } = render(<ManagerFairnessChart slices={slices} />);
+    const segment = segmentFor(container, 1);
+    fireEvent.focus(segment);
+    expect(screen.getByText("איתן דוגמה · 4 · 40%")).toBeInTheDocument();
+    fireEvent.blur(segment);
+    expect(screen.queryByText("איתן דוגמה · 4 · 40%")).toBeNull();
+  });
+
+  it("Escape closes the readout while a segment is focused", () => {
+    const { container } = render(<ManagerFairnessChart slices={slices} />);
+    const segment = segmentFor(container, 0);
+    fireEvent.focus(segment);
+    expect(screen.getByText("מרטין בדיקה · 6 · 60%")).toBeInTheDocument();
+    fireEvent.keyDown(segment, { key: "Escape" });
+    expect(screen.queryByText("מרטין בדיקה · 6 · 60%")).toBeNull();
+  });
+
+  it("the legend stays visible regardless of hover/focus state -- never the only way to read the chart", () => {
+    const { container } = render(<ManagerFairnessChart slices={slices} />);
+    fireEvent.mouseEnter(segmentFor(container, 0));
+    expect(screen.getByLabelText("מקרא התרשים")).toBeInTheDocument();
+    expect(screen.getByText("מרטין בדיקה")).toBeInTheDocument();
+    expect(screen.getByText("איתן דוגמה")).toBeInTheDocument();
   });
 });
 

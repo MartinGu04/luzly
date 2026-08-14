@@ -1,10 +1,15 @@
+"use client";
+
+import { useState } from "react";
 import type { ManagerFairnessChartSlice } from "@/lib/readModels/managerFairnessTypes";
 
 /**
  * The ONLY shape this component ever receives -- safe chart segment data
  * (PR #15 §28), never the full `ManagerFairnessReadModel`, never raw sheet
- * cells. Server-rendered SVG, no chart library, no client JS: every slice
- * is plain arithmetic against the circle's own circumference.
+ * cells. A tiny Client Component only because the hover/keyboard-focus
+ * tooltip (Design Pass PR #21 §33/§34) needs local UI state -- every slice
+ * is still plain arithmetic against the circle's own circumference, no
+ * chart library.
  */
 interface ManagerFairnessChartProps {
   slices: readonly ManagerFairnessChartSlice[];
@@ -25,6 +30,10 @@ const MAX_NAMED_SLICES = 7;
 
 function trimmedNumber(value: number): string {
   return value.toFixed(1).replace(/\.0$/, "");
+}
+
+function sliceTooltipText(slice: Pick<PreparedSlice, "name" | "score" | "percentage">): string {
+  return `${slice.name} · ${trimmedNumber(slice.score)} · ${Math.round(slice.percentage)}%`;
 }
 
 interface PreparedSlice {
@@ -85,8 +94,18 @@ function computeSegmentGeometry(prepared: readonly PreparedSlice[]): SegmentGeom
  * informational (PR #15 §27), never a fairness recommendation. Always
  * paired with a visible legend so the chart makes sense without hover
  * (PR #15 §29) -- an exempt person is still shown here, raw score only.
+ *
+ * Each segment is focusable (`tabIndex=0`) and carries an `aria-label`
+ * with its name/score/percentage, so keyboard focus alone exposes the same
+ * information a mouse hover does (Design Pass PR #21 §33) -- the small
+ * visual readout below the chart mirrors that same text for sighted users,
+ * clears on `mouseleave`/`blur`/Escape (never left open once focus/hover
+ * moves elsewhere), and the legend list stays the primary, always-visible
+ * way to read the chart regardless of hover/focus.
  */
 export function ManagerFairnessChart({ slices }: ManagerFairnessChartProps) {
+  const [activeId, setActiveId] = useState<string | null>(null);
+
   if (slices.length === 0) {
     return (
       <div className="flex flex-col items-center gap-3 py-4 text-center">
@@ -107,6 +126,11 @@ export function ManagerFairnessChart({ slices }: ManagerFairnessChartProps) {
 
   const prepared = prepareSlices(slices);
   const geometry = computeSegmentGeometry(prepared);
+  const activeSlice = prepared.find((slice) => slice.id === activeId) ?? null;
+
+  function clearIfActive(id: string) {
+    setActiveId((current) => (current === id ? null : current));
+  }
 
   const lightVars = Object.fromEntries(
     SERIES_LIGHT.slice(0, MAX_NAMED_SLICES).map((hex, index) => [`--fairness-series-${index + 1}`, hex]),
@@ -129,41 +153,55 @@ export function ManagerFairnessChart({ slices }: ManagerFairnessChartProps) {
         }
       `}</style>
 
-      <svg
-        width={SIZE}
-        height={SIZE}
-        viewBox={`0 0 ${SIZE} ${SIZE}`}
-        role="img"
-        aria-label="חלוקת הניקוד הנוכחי בצוות"
-        className="shrink-0"
-      >
-        <g transform={`rotate(-90 ${CENTER} ${CENTER})`}>
-          <circle cx={CENTER} cy={CENTER} r={RADIUS} fill="none" stroke="var(--overlay-faint)" strokeWidth={STROKE_WIDTH} />
-          {geometry.map(({ slice, segmentLength, offset }) => {
-            const color =
-              slice.colorIndex === null ? "var(--muted-2)" : `var(--fairness-series-${slice.colorIndex + 1})`;
+      <div className="flex shrink-0 flex-col items-center gap-2">
+        <svg
+          width={SIZE}
+          height={SIZE}
+          viewBox={`0 0 ${SIZE} ${SIZE}`}
+          role="img"
+          aria-label="חלוקת הניקוד הנוכחי בצוות"
+        >
+          <g transform={`rotate(-90 ${CENTER} ${CENTER})`}>
+            <circle cx={CENTER} cy={CENTER} r={RADIUS} fill="none" stroke="var(--overlay-faint)" strokeWidth={STROKE_WIDTH} />
+            {geometry.map(({ slice, segmentLength, offset }) => {
+              const color =
+                slice.colorIndex === null ? "var(--muted-2)" : `var(--fairness-series-${slice.colorIndex + 1})`;
+              const isDimmed = activeId !== null && activeId !== slice.id;
 
-            return (
-              <circle
-                key={slice.id}
-                cx={CENTER}
-                cy={CENTER}
-                r={RADIUS}
-                fill="none"
-                stroke={color}
-                strokeWidth={STROKE_WIDTH}
-                strokeDasharray={`${segmentLength} ${CIRCUMFERENCE - segmentLength}`}
-                strokeDashoffset={offset}
-                strokeLinecap="round"
-              >
-                <title>
-                  {slice.name} · {trimmedNumber(slice.score)} · {Math.round(slice.percentage)}%
-                </title>
-              </circle>
-            );
-          })}
-        </g>
-      </svg>
+              return (
+                <circle
+                  key={slice.id}
+                  cx={CENTER}
+                  cy={CENTER}
+                  r={RADIUS}
+                  fill="none"
+                  stroke={color}
+                  strokeWidth={STROKE_WIDTH}
+                  strokeDasharray={`${segmentLength} ${CIRCUMFERENCE - segmentLength}`}
+                  strokeDashoffset={offset}
+                  strokeLinecap="round"
+                  tabIndex={0}
+                  role="button"
+                  aria-label={sliceTooltipText(slice)}
+                  onMouseEnter={() => setActiveId(slice.id)}
+                  onMouseLeave={() => clearIfActive(slice.id)}
+                  onFocus={() => setActiveId(slice.id)}
+                  onBlur={() => clearIfActive(slice.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") setActiveId(null);
+                  }}
+                  className="cursor-pointer outline-none"
+                  style={{ opacity: isDimmed ? 0.5 : 1, transition: "opacity 120ms" }}
+                />
+              );
+            })}
+          </g>
+        </svg>
+
+        <div className="min-h-[1.375rem] rounded-full bg-overlay-strong px-3 py-1 text-center text-xs font-medium text-foreground" aria-hidden="true">
+          {activeSlice ? sliceTooltipText(activeSlice) : " "}
+        </div>
+      </div>
 
       <ul className="w-full min-w-0 space-y-1.5" aria-label="מקרא התרשים">
         {prepared.map((slice) => (

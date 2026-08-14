@@ -140,10 +140,35 @@ function isInterval(interval: MinuteInterval | null): interval is MinuteInterval
 // person's identity/ordering, unlike `analyzeShiftCounterparts` above.
 // ---------------------------------------------------------------------------
 
+/**
+ * Per-role coverage diagnostic, derived from the SAME `RoleCoverageResult`
+ * the overall group verdict below is built from -- never a second,
+ * independent coverage algorithm, and never guessed from presentation
+ * data (e.g. "is the rendered name list empty?"). See
+ * `toRoleCoverageDiagnostic` for the exact status derivation rule.
+ */
+export interface RoleCoverageDiagnostic {
+  status: CoverageStatus;
+  /** Empty unless `status === "partial"` or `"missing"` -- a `"not_evaluable"` role never fabricates a gap it can't honestly prove. */
+  missingIntervals: MinuteInterval[];
+}
+
 export interface UnitShiftCoverageAnalysis {
   coverageStatus: CoverageStatus;
   /** Times within the canonical shift window where at least one required role (technician or supervisor) isn't covered. Empty unless status is "partial"/"missing". */
   missingIntervals: MinuteInterval[];
+  /**
+   * Independent per-role diagnostics -- lets a caller say "חסר טכנאי" vs.
+   * "חסר אחמ״ש" explicitly, rather than inferring the missing role from
+   * an empty rendered name list. Set in every branch (including the
+   * "provably missing"/"not_evaluable" overall-status shortcuts), so a
+   * role's own true status is never hidden behind the group's headline
+   * verdict.
+   */
+  roleCoverage: {
+    technician: RoleCoverageDiagnostic;
+    supervisor: RoleCoverageDiagnostic;
+  };
 }
 
 function canonicalWindowForPeriod(period: EventPeriod, schedule: ShiftSchedule): MinuteInterval | null {
@@ -200,6 +225,27 @@ function isProvablyZeroCoverage(role: RoleCoverageResult): boolean {
 }
 
 /**
+ * Role-level status, derived from the SAME `RoleCoverageResult` fields the
+ * overall group verdict uses -- never a re-derived/independent judgment:
+ * - `ambiguous` -> `"not_evaluable"` (an unresolved/invalid Event means
+ *   this role's true coverage genuinely can't be proven -- never
+ *   fabricate a gap or a false "full").
+ * - no gaps (`missing.length === 0`) -> `"full"`.
+ * - zero resolved coverage (`covered.length === 0`, and not ambiguous --
+ *   i.e. this role has no non-shadow Events at all) -> `"missing"`.
+ * - otherwise -> `"partial"`.
+ *
+ * A `"not_evaluable"` role never exposes `missingIntervals` -- exposing a
+ * gap there would imply more certainty than the domain actually has.
+ */
+function toRoleCoverageDiagnostic(role: RoleCoverageResult): RoleCoverageDiagnostic {
+  if (role.ambiguous) return { status: "not_evaluable", missingIntervals: [] };
+  if (role.missing.length === 0) return { status: "full", missingIntervals: [] };
+  if (role.covered.length === 0) return { status: "missing", missingIntervals: role.missing };
+  return { status: "partial", missingIntervals: role.missing };
+}
+
+/**
  * Unit-wide coverage for one date+period GROUP (every shift Event that
  * date/period, any person, any role) — independent of `personId`/
  * `sourceCell` ordering or which person happens to sort first, unlike
@@ -243,30 +289,41 @@ export function analyzeUnitShiftCoverage(
 ): UnitShiftCoverageAnalysis {
   const canonical = canonicalWindowForPeriod(period, schedule);
   if (!canonical) {
-    return { coverageStatus: "not_evaluable", missingIntervals: [] };
+    const notEvaluable: RoleCoverageDiagnostic = { status: "not_evaluable", missingIntervals: [] };
+    return {
+      coverageStatus: "not_evaluable",
+      missingIntervals: [],
+      roleCoverage: { technician: notEvaluable, supervisor: notEvaluable },
+    };
   }
 
   const technician = analyzeRoleCoverage("technician", groupEvents, schedule, canonical);
   const supervisor = analyzeRoleCoverage("supervisor", groupEvents, schedule, canonical);
+  const roleCoverage = {
+    technician: toRoleCoverageDiagnostic(technician),
+    supervisor: toRoleCoverageDiagnostic(supervisor),
+  };
 
   // A provably-absent required role makes the group definitely "missing",
   // regardless of whether the OTHER role is ambiguous (or even fully
   // covered) -- proven absence always takes precedence over uncertainty
   // elsewhere. The group's missingIntervals are the entire canonical
   // window in this case: a partial gap in the other (irrelevant) role
-  // would understate how incomplete the group actually is.
+  // would understate how incomplete the group actually is. Per-role
+  // diagnostics still reflect each role's OWN true status, independent of
+  // this overall shortcut.
   if (isProvablyZeroCoverage(technician) || isProvablyZeroCoverage(supervisor)) {
-    return { coverageStatus: "missing", missingIntervals: [canonical] };
+    return { coverageStatus: "missing", missingIntervals: [canonical], roleCoverage };
   }
 
   if (technician.ambiguous || supervisor.ambiguous) {
-    return { coverageStatus: "not_evaluable", missingIntervals: [] };
+    return { coverageStatus: "not_evaluable", missingIntervals: [], roleCoverage };
   }
 
   const missingIntervals = mergeIntervals([...technician.missing, ...supervisor.missing]);
   const coverageStatus: CoverageStatus = missingIntervals.length === 0 ? "full" : "partial";
 
-  return { coverageStatus, missingIntervals };
+  return { coverageStatus, missingIntervals, roleCoverage };
 }
 
 // ---------------------------------------------------------------------------
