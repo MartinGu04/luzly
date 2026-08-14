@@ -71,7 +71,7 @@ describe("Sidebar", () => {
 
   describe("manager-only navigation", () => {
     it("a non-manager sees no /manager link at all -- not even disabled", () => {
-      renderWithTheme(<Sidebar person={{ name: "דני עובד", isManager: false }} />);
+      renderWithTheme(<Sidebar person={{ name: "דני עובד", isManager: false, avatarUrl: null }} />);
       expect(screen.queryByRole("link", { name: /אזור מנהל/ })).toBeNull();
       expect(screen.queryByText("אזור מנהל")).toBeNull();
     });
@@ -82,25 +82,25 @@ describe("Sidebar", () => {
     });
 
     it("a manager sees /manager as a real enabled link", () => {
-      renderWithTheme(<Sidebar person={{ name: "דני מנהל", isManager: true }} />);
+      renderWithTheme(<Sidebar person={{ name: "דני מנהל", isManager: true, avatarUrl: null }} />);
       const link = screen.getByRole("link", { name: /אזור מנהל/ });
       expect(link).toHaveAttribute("href", "/manager");
     });
 
     it("marks /manager as the active route with aria-current for a manager", () => {
       usePathname.mockReturnValue("/manager");
-      renderWithTheme(<Sidebar person={{ name: "דני מנהל", isManager: true }} />);
+      renderWithTheme(<Sidebar person={{ name: "דני מנהל", isManager: true, avatarUrl: null }} />);
       expect(screen.getByRole("link", { name: /אזור מנהל/ })).toHaveAttribute("aria-current", "page");
     });
 
     it("existing enabled routes remain visible for a manager too", () => {
-      renderWithTheme(<Sidebar person={{ name: "דני מנהל", isManager: true }} />);
+      renderWithTheme(<Sidebar person={{ name: "דני מנהל", isManager: true, avatarUrl: null }} />);
       expect(screen.getByRole("link", { name: /תורנויות/ })).toHaveAttribute("href", "/duties");
       expect(screen.getByRole("link", { name: /התנגשויות/ })).toHaveAttribute("href", "/conflicts");
     });
 
     it("neither the removed reminders item nor the removed sync item ever renders, for a manager either", () => {
-      renderWithTheme(<Sidebar person={{ name: "דני מנהל", isManager: true }} />);
+      renderWithTheme(<Sidebar person={{ name: "דני מנהל", isManager: true, avatarUrl: null }} />);
       expect(screen.queryByRole("link", { name: "תזכורות" })).toBeNull();
       expect(screen.queryByText("תזכורות")).toBeNull();
       expect(screen.queryByRole("link", { name: "סנכרון" })).toBeNull();
@@ -118,18 +118,27 @@ describe("Sidebar — width and layout", () => {
 });
 
 describe("Sidebar — theme control placement (sidebar/mobile-nav refinement pass)", () => {
-  it("renders no theme control at the top of the rail when no person is provided", () => {
+  it("never renders the 3-option ThemeToggle anywhere, with or without a person", () => {
     renderWithTheme(<Sidebar />);
-    expect(screen.queryByRole("radiogroup", { name: "ערכת נושא" })).toBeNull();
+    expect(screen.queryByRole("radiogroup")).toBeNull();
+
+    renderWithTheme(<Sidebar person={{ name: "דני בדיקה", isManager: false, avatarUrl: null }} />);
+    expect(screen.queryByRole("radiogroup")).toBeNull();
   });
 
-  it("renders exactly one theme control, in the bottom identity/footer area, when a person is provided", () => {
-    renderWithTheme(<Sidebar person={{ name: "דני בדיקה", isManager: false }} />);
-    const toggles = screen.getAllByRole("radiogroup", { name: "ערכת נושא" });
-    expect(toggles).toHaveLength(1);
+  it("renders no theme control at all when no person is provided (it lives in the footer, which needs a person)", () => {
+    renderWithTheme(<Sidebar />);
+    expect(screen.queryByRole("button", { name: "מצב כהה" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "מצב בהיר" })).toBeNull();
+  });
+
+  it("renders exactly one single-action theme control, in the bottom identity/footer area, when a person is provided", () => {
+    renderWithTheme(<Sidebar person={{ name: "דני בדיקה", isManager: false, avatarUrl: null }} />);
+    // The global matchMedia stub (vitest.setup.ts) resolves to light, so the action offers to switch to dark.
+    const toggle = screen.getByRole("button", { name: "מצב כהה" });
 
     // Confirm it lives inside the footer, alongside the sign-out button and version text -- not up near the logo/bell.
     const footer = screen.getByRole("button", { name: "התנתקות" }).closest("div.border-t");
-    expect(footer?.contains(toggles[0])).toBe(true);
+    expect(footer?.contains(toggle)).toBe(true);
   });
 });

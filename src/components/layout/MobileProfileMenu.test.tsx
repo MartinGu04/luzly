@@ -40,7 +40,7 @@ beforeEach(() => {
 
 describe("MobileProfileMenu — trigger", () => {
   it("the Avatar is a real button with an accessible name and popup semantics, closed by default", () => {
-    renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} />);
+    renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} avatarUrl={null} />);
     const trigger = screen.getByRole("button", { name: "תפריט פרופיל של דני בדיקה" });
     expect(trigger).toHaveAttribute("aria-haspopup", "menu");
     expect(trigger).toHaveAttribute("aria-expanded", "false");
@@ -48,7 +48,7 @@ describe("MobileProfileMenu — trigger", () => {
   });
 
   it("opens the menu on click, and toggles aria-expanded", () => {
-    renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} />);
+    renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} avatarUrl={null} />);
     const trigger = screen.getByRole("button", { name: "תפריט פרופיל של דני בדיקה" });
 
     fireEvent.click(trigger);
@@ -63,13 +63,13 @@ describe("MobileProfileMenu — trigger", () => {
 
 describe("MobileProfileMenu — identity block", () => {
   it("shows the user's name inside the open menu", () => {
-    renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} />);
+    renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} avatarUrl={null} />);
     fireEvent.click(screen.getByRole("button", { name: /תפריט פרופיל/ }));
     expect(screen.getByText("דני בדיקה")).toBeInTheDocument();
   });
 
   it("never renders an email anywhere in the menu", () => {
-    renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} />);
+    renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} avatarUrl={null} />);
     fireEvent.click(screen.getByRole("button", { name: /תפריט פרופיל/ }));
     const menu = screen.getByRole("menu");
     expect(menu.textContent).not.toContain("@");
@@ -78,7 +78,7 @@ describe("MobileProfileMenu — identity block", () => {
 
 describe("MobileProfileMenu — manager access", () => {
   it('a manager sees "אזור מנהל", linking to /manager', () => {
-    renderWithTheme(<MobileProfileMenu name="נועה מנהלת" isManager={true} />);
+    renderWithTheme(<MobileProfileMenu name="נועה מנהלת" isManager={true} avatarUrl={null} />);
     fireEvent.click(screen.getByRole("button", { name: /תפריט פרופיל/ }));
     const link = screen.getByRole("menuitem", { name: "אזור מנהל" });
     expect(link).toHaveAttribute("href", "/manager");
@@ -86,7 +86,7 @@ describe("MobileProfileMenu — manager access", () => {
   });
 
   it("a non-manager never sees the manager entry", () => {
-    renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} />);
+    renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} avatarUrl={null} />);
     fireEvent.click(screen.getByRole("button", { name: /תפריט פרופיל/ }));
     expect(screen.queryByRole("menuitem", { name: "אזור מנהל" })).toBeNull();
     expect(screen.queryByText("מנהל/ת")).toBeNull();
@@ -96,7 +96,7 @@ describe("MobileProfileMenu — manager access", () => {
 describe("MobileProfileMenu — single-button theme toggle", () => {
   it('when the system currently resolves dark, offers "עבור למצב בהיר" and switches to explicit light on click', () => {
     mockMatchMedia(true);
-    renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} />);
+    renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} avatarUrl={null} />);
     fireEvent.click(screen.getByRole("button", { name: /תפריט פרופיל/ }));
 
     const toggle = screen.getByRole("menuitem", { name: "עבור למצב בהיר" });
@@ -107,7 +107,7 @@ describe("MobileProfileMenu — single-button theme toggle", () => {
 
   it('when the system currently resolves light, offers "עבור למצב כהה" and switches to explicit dark on click', () => {
     mockMatchMedia(false);
-    renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} />);
+    renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} avatarUrl={null} />);
     fireEvent.click(screen.getByRole("button", { name: /תפריט פרופיל/ }));
 
     const toggle = screen.getByRole("menuitem", { name: "עבור למצב כהה" });
@@ -118,20 +118,20 @@ describe("MobileProfileMenu — single-button theme toggle", () => {
 
   it("an explicit stored dark preference (not system) also offers the light-switch action", () => {
     localStorage.setItem(THEME_STORAGE_KEY, "dark");
-    renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} />);
+    renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} avatarUrl={null} />);
     fireEvent.click(screen.getByRole("button", { name: /תפריט פרופיל/ }));
     expect(screen.getByRole("menuitem", { name: "עבור למצב בהיר" })).toBeInTheDocument();
   });
 
   it("closes the menu after toggling theme", () => {
-    renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} />);
+    renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} avatarUrl={null} />);
     fireEvent.click(screen.getByRole("button", { name: /תפריט פרופיל/ }));
     fireEvent.click(screen.getByRole("menuitem", { name: "עבור למצב כהה" }));
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
   it("never renders the 3-option system/light/dark segmented control inside the menu", () => {
-    renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} />);
+    renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} avatarUrl={null} />);
     fireEvent.click(screen.getByRole("button", { name: /תפריט פרופיל/ }));
     expect(screen.queryByRole("radiogroup")).toBeNull();
     expect(screen.queryByText("מערכת")).toBeNull();
@@ -140,7 +140,7 @@ describe("MobileProfileMenu — single-button theme toggle", () => {
 
 describe("MobileProfileMenu — logout", () => {
   it("logout remains reachable inside the menu", () => {
-    renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} />);
+    renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} avatarUrl={null} />);
     fireEvent.click(screen.getByRole("button", { name: /תפריט פרופיל/ }));
     expect(screen.getByRole("menuitem", { name: "התנתקות" })).toBeInTheDocument();
   });
@@ -148,7 +148,7 @@ describe("MobileProfileMenu — logout", () => {
 
 describe("MobileProfileMenu — dismiss behavior", () => {
   it("Escape closes the menu and returns focus to the trigger", () => {
-    renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} />);
+    renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} avatarUrl={null} />);
     const trigger = screen.getByRole("button", { name: /תפריט פרופיל/ });
     fireEvent.click(trigger);
     expect(screen.getByRole("menu")).toBeInTheDocument();
@@ -162,7 +162,7 @@ describe("MobileProfileMenu — dismiss behavior", () => {
   it("a pointerdown outside the menu closes it", () => {
     renderWithTheme(
       <div>
-        <MobileProfileMenu name="דני בדיקה" isManager={false} />
+        <MobileProfileMenu name="דני בדיקה" isManager={false} avatarUrl={null} />
         <button type="button">outside</button>
       </div>,
     );
@@ -175,7 +175,7 @@ describe("MobileProfileMenu — dismiss behavior", () => {
   });
 
   it("a pointerdown inside the menu does not close it", () => {
-    renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} />);
+    renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} avatarUrl={null} />);
     fireEvent.click(screen.getByRole("button", { name: /תפריט פרופיל/ }));
     const menu = screen.getByRole("menu");
 

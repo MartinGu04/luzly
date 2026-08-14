@@ -5,6 +5,8 @@ import { MobileProfileMenu } from "./MobileProfileMenu";
 interface MobileIdentityBarProps {
   name: string;
   isManager: boolean;
+  /** Presentation-only Google account photo -- see `lib/auth/currentUser.ts`. `null` falls back to initials. */
+  avatarUrl: string | null;
 }
 
 /**
@@ -29,7 +31,7 @@ interface MobileIdentityBarProps {
  * shell (the same identity the request-scoped read model already
  * resolved) -- no email, no extra Google/auth fetch.
  */
-export function MobileIdentityBar({ name, isManager }: MobileIdentityBarProps) {
+export function MobileIdentityBar({ name, isManager, avatarUrl }: MobileIdentityBarProps) {
   return (
     <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-2.5 lg:hidden">
       <span className="text-sm font-bold tracking-wide text-foreground">{APP_NAME}</span>
@@ -45,7 +47,7 @@ export function MobileIdentityBar({ name, isManager }: MobileIdentityBarProps) {
         >
           <Bell className="h-[16px] w-[16px]" aria-hidden="true" strokeWidth={1.75} />
         </button>
-        <MobileProfileMenu name={name} isManager={isManager} />
+        <MobileProfileMenu name={name} isManager={isManager} avatarUrl={avatarUrl} />
       </div>
     </div>
   );

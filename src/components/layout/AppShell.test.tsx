@@ -22,7 +22,7 @@ function renderWithTheme(ui: ReactElement) {
 describe("AppShell — mobile identity/sign-out", () => {
   it("the desktop Sidebar's sign-out is immediately visible; the mobile one is reachable behind the profile menu", () => {
     renderWithTheme(
-      <AppShell person={{ name: "דני בדיקה", isManager: false }}>
+      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null }}>
         <div>DASHBOARD_CONTENT</div>
       </AppShell>,
     );
@@ -39,7 +39,7 @@ describe("AppShell — mobile identity/sign-out", () => {
 
   it("the safe person name is reachable via the mobile profile menu, not permanently in the header", () => {
     renderWithTheme(
-      <AppShell person={{ name: "דני בדיקה", isManager: false }}>
+      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null }}>
         <div>content</div>
       </AppShell>,
     );
@@ -49,7 +49,7 @@ describe("AppShell — mobile identity/sign-out", () => {
 
   it("shows the manager indication when isManager is true", () => {
     renderWithTheme(
-      <AppShell person={{ name: "נועה דוגמה", isManager: true }}>
+      <AppShell person={{ name: "נועה דוגמה", isManager: true, avatarUrl: null }}>
         <div>content</div>
       </AppShell>,
     );
@@ -58,7 +58,7 @@ describe("AppShell — mobile identity/sign-out", () => {
 
   it("never renders an email anywhere in the shell", () => {
     const { container } = renderWithTheme(
-      <AppShell person={{ name: "דני בדיקה", isManager: false }}>
+      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null }}>
         <div>content</div>
       </AppShell>,
     );
@@ -67,7 +67,7 @@ describe("AppShell — mobile identity/sign-out", () => {
 
   it("remains available around configuration_error content (any children), not just the real dashboard", () => {
     renderWithTheme(
-      <AppShell person={{ name: "דני בדיקה", isManager: false }}>
+      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null }}>
         <div>לא ניתן לחשב כרגע את שעות המשמרות</div>
       </AppShell>,
     );
@@ -82,7 +82,7 @@ describe("AppShell — mobile identity/sign-out", () => {
 
   it("keeps the bottom navigation -- no hamburger drawer reappears", () => {
     renderWithTheme(
-      <AppShell person={{ name: "דני בדיקה", isManager: false }}>
+      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null }}>
         <div>content</div>
       </AppShell>,
     );
@@ -94,7 +94,7 @@ describe("AppShell — mobile identity/sign-out", () => {
 describe("AppShell — sign-out looks destructive", () => {
   it("gives every sign-out affordance a red/critical treatment in both themes", () => {
     renderWithTheme(
-      <AppShell person={{ name: "דני בדיקה", isManager: false }}>
+      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null }}>
         <div>content</div>
       </AppShell>,
     );
@@ -124,7 +124,7 @@ describe("AppShell — shell utility bar / live clock (Design Pass PR #19)", () 
     vi.setSystemTime(new Date("2026-08-12T07:00:00.000Z")); // 10:00:00 in Asia/Jerusalem (UTC+3, DST)
 
     renderWithTheme(
-      <AppShell person={{ name: "דני בדיקה", isManager: false }} initialClockTime="00:00:00">
+      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null }} initialClockTime="00:00:00">
         <div>content</div>
       </AppShell>,
     );
@@ -136,7 +136,7 @@ describe("AppShell — shell utility bar / live clock (Design Pass PR #19)", () 
   it("never crashes with no server-derived clock time (configuration_error shell render)", () => {
     expect(() =>
       renderWithTheme(
-        <AppShell person={{ name: "דני בדיקה", isManager: false }} initialClockTime={null}>
+        <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null }} initialClockTime={null}>
           <div>content</div>
         </AppShell>,
       ),
@@ -146,7 +146,7 @@ describe("AppShell — shell utility bar / live clock (Design Pass PR #19)", () 
   it("omitting initialClockTime entirely behaves the same as null -- no crash", () => {
     expect(() =>
       renderWithTheme(
-        <AppShell person={{ name: "דני בדיקה", isManager: false }}>
+        <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null }}>
           <div>content</div>
         </AppShell>,
       ),
@@ -155,23 +155,61 @@ describe("AppShell — shell utility bar / live clock (Design Pass PR #19)", () 
 });
 
 describe("AppShell — theme control", () => {
-  it("renders the 3-option theme toggle only in the desktop sidebar, not the mobile header (Design Pass PR #22)", () => {
+  it("never renders the 3-option ThemeToggle anywhere in the shell -- neither desktop sidebar nor mobile header", () => {
     renderWithTheme(
-      <AppShell person={{ name: "דני בדיקה", isManager: false }}>
+      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null }}>
         <div>content</div>
       </AppShell>,
     );
-    expect(screen.getAllByRole("radiogroup", { name: "ערכת נושא" })).toHaveLength(1);
+    expect(screen.queryByRole("radiogroup")).toBeNull();
+
+    openMobileProfileMenu();
+    expect(screen.queryByRole("radiogroup")).toBeNull();
+  });
+
+  it("the desktop IdentityFooter offers a single binary light/dark action", () => {
+    renderWithTheme(
+      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null }}>
+        <div>content</div>
+      </AppShell>,
+    );
+    // vitest.setup.ts's baseline matchMedia stub resolves to light -> offers to switch to dark.
+    expect(screen.getByRole("button", { name: "מצב כהה" })).toBeInTheDocument();
   });
 
   it("the mobile profile menu offers a single binary light/dark action instead", () => {
     renderWithTheme(
-      <AppShell person={{ name: "דני בדיקה", isManager: false }}>
+      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null }}>
         <div>content</div>
       </AppShell>,
     );
     openMobileProfileMenu();
     const toggle = screen.getByRole("menuitem", { name: /עבור למצב/ });
     expect(toggle).toBeInTheDocument();
+  });
+});
+
+describe("AppShell — avatarUrl (presentation-only Google account photo)", () => {
+  it("passes the same avatarUrl to both the desktop IdentityFooter and the mobile profile menu's Avatar", () => {
+    const { container } = renderWithTheme(
+      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: "https://lh3.googleusercontent.com/a/photo.jpg" }}>
+        <div>content</div>
+      </AppShell>,
+    );
+    const images = container.querySelectorAll("img");
+    expect(images.length).toBeGreaterThanOrEqual(2); // desktop IdentityFooter + mobile header trigger
+    for (const img of images) {
+      expect(img).toHaveAttribute("src", "https://lh3.googleusercontent.com/a/photo.jpg");
+    }
+  });
+
+  it("falls back to initials everywhere when avatarUrl is null -- no broken-image icon", () => {
+    const { container } = renderWithTheme(
+      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null }}>
+        <div>content</div>
+      </AppShell>,
+    );
+    expect(container.querySelector("img")).toBeNull();
+    expect(screen.getAllByText("דב").length).toBeGreaterThan(0);
   });
 });

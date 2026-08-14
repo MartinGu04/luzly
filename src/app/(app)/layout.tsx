@@ -53,6 +53,10 @@ export default async function ProtectedLayout({ children }: { children: ReactNod
   }
 
   const person = result.status === "ok" ? result.model.person : result.person;
+  // `avatarUrl` is a sibling of `person`/`model` on both remaining statuses
+  // (see PersonalScheduleLoadResult) -- presentation-only, sourced from the
+  // Supabase auth identity, never כ"א/Person, never affecting who this is.
+  const avatarUrl = result.avatarUrl;
 
   // The app shell's ONE live clock (`ShellUtilityBar`) needs a server-
   // computed "HH:mm:ss" for its first paint, same as the old dashboard-only
@@ -67,7 +71,10 @@ export default async function ProtectedLayout({ children }: { children: ReactNod
     result.status === "ok" ? `${formatScheduleMinute(result.model.localNow.minuteOfDay)}:00` : null;
 
   return (
-    <AppShell person={{ name: person.name, isManager: person.isManager }} initialClockTime={initialClockTime}>
+    <AppShell
+      person={{ name: person.name, isManager: person.isManager, avatarUrl }}
+      initialClockTime={initialClockTime}
+    >
       {children}
     </AppShell>
   );

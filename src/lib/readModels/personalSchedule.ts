@@ -30,9 +30,16 @@ export type PersonalScheduleLoadResult =
    * polished "can't compute shift hours right now" state instead of the
    * real schedule. `message` is for server-side diagnostics only -- the UI
    * must never render it (never the raw exception text).
+   *
+   * `avatarUrl` (both here and on "ok" below) is carried as a sibling of
+   * `person`/`model`, deliberately never folded into `PersonalProfile`/
+   * `PersonalScheduleReadModel` themselves -- it comes from the Supabase
+   * auth identity, not כ"א/`Person`, and must stay presentation-only,
+   * never something the domain/personnel layer could read back and treat
+   * as identity data.
    */
-  | { status: "configuration_error"; message: string; person: PersonalProfile }
-  | { status: "ok"; model: PersonalScheduleReadModel };
+  | { status: "configuration_error"; message: string; person: PersonalProfile; avatarUrl: string | null }
+  | { status: "ok"; model: PersonalScheduleReadModel; avatarUrl: string | null };
 
 /**
  * Everything this read model needs from the workbook, and nothing more —
@@ -94,6 +101,7 @@ export async function loadPersonalScheduleReadModel(): Promise<PersonalScheduleL
         status: "configuration_error",
         message: error.message,
         person: toPersonalProfile(identityResult.person),
+        avatarUrl: identity.avatarUrl,
       };
     }
     throw error;
@@ -111,5 +119,5 @@ export async function loadPersonalScheduleReadModel(): Promise<PersonalScheduleL
     now: getJerusalemLocalNow(),
   });
 
-  return { status: "ok", model };
+  return { status: "ok", model, avatarUrl: identity.avatarUrl };
 }

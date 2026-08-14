@@ -84,6 +84,7 @@ beforeEach(() => {
     status: "authenticated",
     userId: "u1",
     email: "dani@example.invalid",
+    avatarUrl: null,
   });
   fetchRawWorkbookSnapshot.mockResolvedValue(managerSnapshot());
 });

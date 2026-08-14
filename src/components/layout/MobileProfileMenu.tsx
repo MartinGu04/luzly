@@ -10,6 +10,8 @@ import { useEffectiveTheme, useTheme } from "@/lib/theme/ThemeProvider";
 interface MobileProfileMenuProps {
   name: string;
   isManager: boolean;
+  /** Presentation-only Google account photo -- see `lib/auth/currentUser.ts`. `null` falls back to initials in `Avatar`. */
+  avatarUrl: string | null;
 }
 
 /**
@@ -25,7 +27,7 @@ interface MobileProfileMenuProps {
  * `signOutAction` form (works with no client JS); everything else here is
  * presentation-only, same as `ThemeToggle`/`IdentityFooter`.
  */
-export function MobileProfileMenu({ name, isManager }: MobileProfileMenuProps) {
+export function MobileProfileMenu({ name, isManager, avatarUrl }: MobileProfileMenuProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -75,7 +77,7 @@ export function MobileProfileMenu({ name, isManager }: MobileProfileMenuProps) {
         onClick={() => setOpen((prev) => !prev)}
         className="rounded-full transition-transform duration-150 hover:opacity-90 active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
       >
-        <Avatar name={name} size="sm" />
+        <Avatar name={name} size="sm" avatarUrl={avatarUrl} />
       </button>
 
       {open ? (
@@ -92,7 +94,7 @@ export function MobileProfileMenu({ name, isManager }: MobileProfileMenuProps) {
           className="absolute end-0 top-full z-50 mt-2 w-56 rounded-2xl bg-surface-1 p-1.5 shadow-[var(--shadow-hero)] ring-1 ring-border-strong"
         >
           <div className="flex items-center gap-2.5 px-2.5 py-2">
-            <Avatar name={name} size="sm" />
+            <Avatar name={name} size="sm" avatarUrl={avatarUrl} />
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold text-foreground">{name}</p>
               {isManager ? <p className="text-xs text-muted">מנהל/ת</p> : null}

@@ -44,6 +44,7 @@ describe("getAuthenticatedIdentity", () => {
       status: "authenticated",
       userId: "u1",
       email: "dani@example.invalid",
+      avatarUrl: null,
     });
   });
 
@@ -56,6 +57,7 @@ describe("getAuthenticatedIdentity", () => {
       status: "authenticated",
       userId: "u1",
       email: "dani@example.invalid",
+      avatarUrl: null,
     });
   });
 
@@ -74,5 +76,116 @@ describe("getAuthenticatedIdentity", () => {
     await getAuthenticatedIdentity();
     await getAuthenticatedIdentity();
     expect(createSupabaseServerClient).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("getAuthenticatedIdentity — avatarUrl (presentation-only, no extra Google call)", () => {
+  it("picks up a valid https avatar_url from user_metadata", async () => {
+    getUser.mockResolvedValue({
+      data: {
+        user: {
+          id: "u1",
+          email: "dani@example.invalid",
+          user_metadata: { avatar_url: "https://lh3.googleusercontent.com/a/photo.jpg" },
+        },
+      },
+      error: null,
+    });
+    const result = await getAuthenticatedIdentity();
+    expect(result).toMatchObject({ avatarUrl: "https://lh3.googleusercontent.com/a/photo.jpg" });
+  });
+
+  it("falls back to the raw Google OIDC 'picture' claim when avatar_url is absent", async () => {
+    getUser.mockResolvedValue({
+      data: {
+        user: {
+          id: "u1",
+          email: "dani@example.invalid",
+          user_metadata: { picture: "https://lh3.googleusercontent.com/a/other.jpg" },
+        },
+      },
+      error: null,
+    });
+    const result = await getAuthenticatedIdentity();
+    expect(result).toMatchObject({ avatarUrl: "https://lh3.googleusercontent.com/a/other.jpg" });
+  });
+
+  it("prefers avatar_url over picture when both are present", async () => {
+    getUser.mockResolvedValue({
+      data: {
+        user: {
+          id: "u1",
+          email: "dani@example.invalid",
+          user_metadata: {
+            avatar_url: "https://lh3.googleusercontent.com/a/preferred.jpg",
+            picture: "https://lh3.googleusercontent.com/a/other.jpg",
+          },
+        },
+      },
+      error: null,
+    });
+    const result = await getAuthenticatedIdentity();
+    expect(result).toMatchObject({ avatarUrl: "https://lh3.googleusercontent.com/a/preferred.jpg" });
+  });
+
+  it("is null when user_metadata has no avatar field at all", async () => {
+    getUser.mockResolvedValue({
+      data: { user: { id: "u1", email: "dani@example.invalid", user_metadata: { full_name: "דני בדיקה" } } },
+      error: null,
+    });
+    const result = await getAuthenticatedIdentity();
+    expect(result).toMatchObject({ avatarUrl: null });
+  });
+
+  it("is null when user_metadata is entirely absent", async () => {
+    getUser.mockResolvedValue({ data: { user: { id: "u1", email: "dani@example.invalid" } }, error: null });
+    const result = await getAuthenticatedIdentity();
+    expect(result).toMatchObject({ avatarUrl: null });
+  });
+
+  it("rejects a non-string avatar_url rather than trusting it as-is", async () => {
+    getUser.mockResolvedValue({
+      data: { user: { id: "u1", email: "dani@example.invalid", user_metadata: { avatar_url: 12345 } } },
+      error: null,
+    });
+    const result = await getAuthenticatedIdentity();
+    expect(result).toMatchObject({ avatarUrl: null });
+  });
+
+  it("rejects a non-https URL (e.g. javascript:/data: schemes, or plain http)", async () => {
+    for (const malicious of ["javascript:alert(1)", "data:text/html,evil", "http://example.invalid/a.jpg", "not a url"]) {
+      getUser.mockResolvedValue({
+        data: { user: { id: "u1", email: "dani@example.invalid", user_metadata: { avatar_url: malicious } } },
+        error: null,
+      });
+      const result = await getAuthenticatedIdentity();
+      expect(result).toMatchObject({ avatarUrl: null });
+    }
+  });
+
+  it("never exposes the raw user_metadata object itself in the returned identity", async () => {
+    getUser.mockResolvedValue({
+      data: {
+        user: {
+          id: "u1",
+          email: "dani@example.invalid",
+          user_metadata: { avatar_url: "https://lh3.googleusercontent.com/a/photo.jpg", full_name: "דני בדיקה" },
+        },
+      },
+      error: null,
+    });
+    const result = await getAuthenticatedIdentity();
+    expect(result).not.toHaveProperty("user_metadata");
+    expect(result).not.toHaveProperty("full_name");
+    expect(Object.keys(result).sort()).toEqual(["avatarUrl", "email", "status", "userId"]);
+  });
+
+  it("missing_email never carries an avatarUrl field either -- it's only meaningful once truly authenticated", async () => {
+    getUser.mockResolvedValue({
+      data: { user: { id: "u1", email: undefined, user_metadata: { avatar_url: "https://example.invalid/a.jpg" } } },
+      error: null,
+    });
+    const result = await getAuthenticatedIdentity();
+    expect(result).not.toHaveProperty("avatarUrl");
   });
 });

@@ -6,7 +6,13 @@ import { Sidebar } from "./Sidebar";
 
 interface AppShellProps {
   children: ReactNode;
-  person?: { name: string; isManager: boolean };
+  /**
+   * `avatarUrl` is presentation-only (the Google account's profile photo,
+   * already server-verified as part of the Supabase auth identity -- see
+   * `lib/auth/currentUser.ts`) -- it never affects identity matching or
+   * authorization, only which `Avatar` renders a photo vs. initials.
+   */
+  person?: { name: string; isManager: boolean; avatarUrl: string | null };
   /**
    * Same "HH:mm:ss" (or `null`) contract as `LiveClock.initialTime`, passed
    * straight through to `ShellUtilityBar` -- `null` whenever the caller has
@@ -46,7 +52,9 @@ export function AppShell({ children, person, initialClockTime = null }: AppShell
     <div className="flex min-h-screen bg-background text-foreground">
       <Sidebar person={person} />
       <div className="flex min-h-screen w-full flex-1 flex-col">
-        {person ? <MobileIdentityBar name={person.name} isManager={person.isManager} /> : null}
+        {person ? (
+          <MobileIdentityBar name={person.name} isManager={person.isManager} avatarUrl={person.avatarUrl} />
+        ) : null}
         <ShellUtilityBar initialClockTime={initialClockTime} />
         <main className="flex-1 px-4 pt-6 pb-28 sm:px-6 lg:px-10 lg:pt-10 lg:pb-10">
           <div className="mx-auto w-full max-w-[1440px]">{children}</div>

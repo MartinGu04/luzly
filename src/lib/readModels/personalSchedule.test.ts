@@ -74,6 +74,7 @@ describe("loadPersonalScheduleReadModel", () => {
       status: "authenticated",
       userId: "u1",
       email: "dani@example.invalid",
+      avatarUrl: null,
     });
     fetchRawWorkbookSnapshot.mockResolvedValue(validSnapshot());
 
@@ -88,6 +89,7 @@ describe("loadPersonalScheduleReadModel", () => {
       status: "authenticated",
       userId: "u1",
       email: "dani@example.invalid",
+      avatarUrl: null,
     });
     fetchRawWorkbookSnapshot.mockResolvedValue(validSnapshot());
 
@@ -103,6 +105,7 @@ describe("loadPersonalScheduleReadModel", () => {
       status: "authenticated",
       userId: "u1",
       email: "dani@example.invalid",
+      avatarUrl: null,
     });
     fetchRawWorkbookSnapshot.mockResolvedValue(validSnapshot());
 
@@ -120,6 +123,7 @@ describe("loadPersonalScheduleReadModel", () => {
       status: "authenticated",
       userId: "u1",
       email: "stranger@example.invalid",
+      avatarUrl: null,
     });
     fetchRawWorkbookSnapshot.mockResolvedValue(validSnapshot());
 
@@ -132,6 +136,7 @@ describe("loadPersonalScheduleReadModel", () => {
       status: "authenticated",
       userId: "u1",
       email: "shared@example.invalid",
+      avatarUrl: null,
     });
     fetchRawWorkbookSnapshot.mockResolvedValue({
       fetchedAt: "2026-08-12T08:00:00.000Z",
@@ -155,6 +160,7 @@ describe("loadPersonalScheduleReadModel", () => {
       status: "authenticated",
       userId: "u1",
       email: "stranger@example.invalid",
+      avatarUrl: null,
     });
     fetchRawWorkbookSnapshot.mockResolvedValue(validSnapshot());
 
@@ -167,6 +173,7 @@ describe("loadPersonalScheduleReadModel", () => {
       status: "authenticated",
       userId: "u1",
       email: "dani@example.invalid",
+      avatarUrl: null,
     });
     fetchRawWorkbookSnapshot.mockResolvedValue({
       fetchedAt: "2026-08-12T08:00:00.000Z",
@@ -182,10 +189,87 @@ describe("loadPersonalScheduleReadModel", () => {
       status: "authenticated",
       userId: "u1",
       email: "dani@example.invalid",
+      avatarUrl: null,
     });
     fetchRawWorkbookSnapshot.mockResolvedValue(validSnapshot());
 
     const result = await loadPersonalScheduleReadModel();
     expect(JSON.stringify(result)).not.toContain("dani@example.invalid");
+  });
+});
+
+describe("loadPersonalScheduleReadModel — avatarUrl (presentation-only, sourced only from the auth identity)", () => {
+  beforeEach(() => {
+    getAuthenticatedIdentity.mockReset();
+    fetchRawWorkbookSnapshot.mockReset();
+    getJerusalemLocalNow.mockReset();
+    getJerusalemLocalNow.mockReturnValue({ date: "2026-08-12", minuteOfDay: 600 });
+  });
+
+  it("carries the identity's avatarUrl straight through on an 'ok' result", async () => {
+    getAuthenticatedIdentity.mockResolvedValue({
+      status: "authenticated",
+      userId: "u1",
+      email: "dani@example.invalid",
+      avatarUrl: "https://lh3.googleusercontent.com/a/photo.jpg",
+    });
+    fetchRawWorkbookSnapshot.mockResolvedValue(validSnapshot());
+
+    const result = await loadPersonalScheduleReadModel();
+
+    expect(result.status).toBe("ok");
+    if (result.status === "ok") {
+      expect(result.avatarUrl).toBe("https://lh3.googleusercontent.com/a/photo.jpg");
+    }
+  });
+
+  it("is null on an 'ok' result when the identity had no avatarUrl -- never undefined, never a crash", async () => {
+    getAuthenticatedIdentity.mockResolvedValue({
+      status: "authenticated",
+      userId: "u1",
+      email: "dani@example.invalid",
+      avatarUrl: null,
+    });
+    fetchRawWorkbookSnapshot.mockResolvedValue(validSnapshot());
+
+    const result = await loadPersonalScheduleReadModel();
+
+    expect(result.status).toBe("ok");
+    if (result.status === "ok") {
+      expect(result.avatarUrl).toBeNull();
+    }
+  });
+
+  it("also carries through on a configuration_error result, alongside the resolved identity", async () => {
+    getAuthenticatedIdentity.mockResolvedValue({
+      status: "authenticated",
+      userId: "u1",
+      email: "dani@example.invalid",
+      avatarUrl: "https://lh3.googleusercontent.com/a/photo.jpg",
+    });
+    fetchRawWorkbookSnapshot.mockResolvedValue({
+      fetchedAt: "2026-08-12T08:00:00.000Z",
+      sheets: [scheduleSheet([]), settingsSheet([["הגדרה", "ערך"]]), personnelSheet(PERSONNEL_ROWS)],
+    });
+
+    const result = await loadPersonalScheduleReadModel();
+
+    expect(result.status).toBe("configuration_error");
+    if (result.status === "configuration_error") {
+      expect(result.avatarUrl).toBe("https://lh3.googleusercontent.com/a/photo.jpg");
+    }
+  });
+
+  it("avatarUrl never influences identity matching -- an unmapped email is still unmapped regardless of avatarUrl", async () => {
+    getAuthenticatedIdentity.mockResolvedValue({
+      status: "authenticated",
+      userId: "u1",
+      email: "stranger@example.invalid",
+      avatarUrl: "https://lh3.googleusercontent.com/a/photo.jpg",
+    });
+    fetchRawWorkbookSnapshot.mockResolvedValue(validSnapshot());
+
+    const result = await loadPersonalScheduleReadModel();
+    expect(result).toEqual({ status: "unmapped" });
   });
 });

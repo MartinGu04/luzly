@@ -8,7 +8,7 @@ import { visibleNavItems } from "./nav-items";
 import { IdentityFooter } from "./IdentityFooter";
 
 interface SidebarProps {
-  person?: { name: string; isManager: boolean };
+  person?: { name: string; isManager: boolean; avatarUrl: string | null };
 }
 
 /**
@@ -96,7 +96,9 @@ export function Sidebar({ person }: SidebarProps) {
         })}
       </nav>
 
-      {person ? <IdentityFooter name={person.name} isManager={person.isManager} /> : null}
+      {person ? (
+        <IdentityFooter name={person.name} isManager={person.isManager} avatarUrl={person.avatarUrl} />
+      ) : null}
     </aside>
   );
 }
