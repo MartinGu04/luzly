@@ -20,21 +20,37 @@ function zeroIndexedDayOfYear({ year, month, day }: CalendarDate): number {
 /**
  * Sunday-first week-of-year number, the SAME convention `buildMonthGrid`
  * already uses for its rows (`calendarMonth.ts`) -- this is the ONLY week-
- * numbering convention used anywhere in Luzly. Matches the classic
- * strftime `%U` specifier: week 1 begins on the year's first Sunday, and
- * any days before that (only possible when January 1st itself isn't a
- * Sunday) fall in "week 0".
+ * numbering convention used anywhere in Luzly.
  *
- * Deliberately NOT the Monday-first ISO-8601 week number: an ISO week
- * starts mid-row relative to a Sunday-first grid and ends mid-row the
- * following week, so a single Sunday-Saturday calendar row could
- * straddle two different ISO week numbers. This formula never can --
+ * Luzly's own convention (deliberately NOT strftime `%U`, which allows a
+ * user-visible "week 0" -- unacceptable UX here): the partial week
+ * containing January 1st is always WEEK 1, however many days it actually
+ * spans (1-7, depending on January 1st's weekday) -- when January 1st
+ * itself is a Sunday, that first full Sunday-Saturday week (Jan 1-7) IS
+ * week 1. Every Sunday after that first week increments the week number
+ * by exactly one. No date ever produces week 0.
+ *
+ * Deliberately NOT the Monday-first ISO-8601 week number either: an ISO
+ * week starts mid-row relative to a Sunday-first grid and ends mid-row
+ * the following week, so a single Sunday-Saturday calendar row could
+ * straddle two different ISO week numbers. This convention never can --
  * every date within the same Sunday-Saturday span produces the identical
- * result, because `dayOfYear - weekday` is invariant across any 7-day
- * Sunday-Saturday span (see `weekOfYear.test.ts` for the proof/coverage).
+ * result (see `weekOfYear.test.ts`): the day-of-year offset of the
+ * Sunday that starts week 2 is fixed for a given year
+ * (`7 - <January 1st's weekday>`), so whether a date falls before or
+ * after that fixed offset -- and, once after it, which 7-day block it
+ * falls in -- never changes within one Sunday-Saturday span.
  */
 export function weekOfYear(date: CalendarDate): number {
   const yday = zeroIndexedDayOfYear(date);
-  const wday = dayOfWeek(date);
-  return Math.floor((yday - wday + 7) / 7);
+  const weekday1 = dayOfWeek({ year: date.year, month: 1, day: 1 });
+
+  // The day-of-year offset (0-indexed) of the Sunday that starts week 2.
+  // When January 1st is itself a Sunday (weekday1 === 0), this is 7 --
+  // the SECOND Sunday of the year -- since the first Sunday-Saturday
+  // week (containing January 1st) is entirely week 1.
+  const week2Start = 7 - weekday1;
+
+  if (yday < week2Start) return 1;
+  return 2 + Math.floor((yday - week2Start) / 7);
 }
