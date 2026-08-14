@@ -13,4 +13,9 @@ describe("EmptyTeamState", () => {
     expect(screen.getByText("כשיהיה שיבוץ קרוב, האנשים שאיתך יופיעו כאן.")).toBeInTheDocument();
     expect(screen.getByText("😌")).toBeInTheDocument();
   });
+
+  it("links to /schedule as a useful next step (Design Pass PR #20)", () => {
+    render(<EmptyTeamState />);
+    expect(screen.getByRole("link", { name: /עבור ללוח המשמרות/ })).toHaveAttribute("href", "/schedule");
+  });
 });

@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
+import { parseCalendarDate } from "@/lib/domain/dutyBlocks";
+import { weekOfYear } from "@/lib/domain/weekOfYear";
 import type { PersonalEventView } from "@/lib/readModels/types";
 import { CalendarGrid } from "./CalendarGrid";
 import type { DayMeta } from "./types";
@@ -293,5 +295,139 @@ describe("CalendarGrid", () => {
       />,
     );
     expect(screen.getByRole("button", { name: /12 באוגוסט/ })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  describe("no longer relies on square desktop cells (Design Pass PR #20)", () => {
+    it("cells use a fixed, non-square height class, not aspect-square", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          eventsByDate={{}}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+      expect(cell.className).not.toMatch(/aspect-square/);
+      expect(cell.className).toMatch(/h-\[/);
+    });
+  });
+
+  describe("in-cell event labels (Design Pass PR #20)", () => {
+    it("shows the event's own (already-safe) title as a compact label inside its day", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          eventsByDate={{ "2026-08-12": [shiftEvent({ date: "2026-08-12", title: "טכנאי יום" })] }}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+      expect(cell.textContent).toContain("טכנאי יום");
+    });
+
+    it("shows at most 2 event labels, then a '+N' overflow indicator for the rest", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          eventsByDate={{
+            "2026-08-12": [
+              shiftEvent({ date: "2026-08-12", title: "אירוע ראשון", period: "day" }),
+              shiftEvent({ date: "2026-08-12", title: "אירוע שני", period: "night" }),
+              shiftEvent({ date: "2026-08-12", title: "אירוע שלישי", period: "morning" }),
+            ],
+          }}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+      expect(cell.textContent).toContain("אירוע ראשון");
+      expect(cell.textContent).toContain("אירוע שני");
+      expect(cell.textContent).not.toContain("אירוע שלישי");
+      expect(cell.textContent).toContain("+1");
+    });
+
+    it("shows no overflow indicator when there are exactly 2 events", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          eventsByDate={{
+            "2026-08-12": [
+              shiftEvent({ date: "2026-08-12", title: "אירוע ראשון", period: "day" }),
+              shiftEvent({ date: "2026-08-12", title: "אירוע שני", period: "night" }),
+            ],
+          }}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+      expect(cell.textContent).not.toMatch(/\+\d/);
+    });
+
+    it("a day with no events shows no label", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          eventsByDate={{}}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const cell = screen.getByRole("button", { name: /14 באוגוסט/ });
+      expect(cell.textContent?.trim()).toBe("14");
+    });
+  });
+
+  describe("week numbers (Design Pass PR #20, Sunday-first convention)", () => {
+    it("shows the Sunday-first week-of-year number beside the row, matching the weekOfYear helper", () => {
+      const { container } = render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          eventsByDate={{}}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const expectedWeek = weekOfYear(parseCalendarDate("2026-08-09")!);
+      expect(container.querySelector(`[aria-label="שבוע ${expectedWeek}"]`)).not.toBeNull();
+    });
+
+    it("a week straddling a month boundary still gets exactly one week number for the whole row", () => {
+      // 2026-08-30 (Sun) .. 2026-09-05 (Sat) -- but buildMonthGrid only ever
+      // supplies real dates from ONE month at a time, nulling the rest, so
+      // this row (as August's grid would render it) has August dates only.
+      const grid = ["2026-08-30", "2026-08-31", null, null, null, null, null];
+      const days: Record<string, DayMeta> = {
+        "2026-08-30": dayMeta("2026-08-30"),
+        "2026-08-31": dayMeta("2026-08-31"),
+      };
+      const { container } = render(
+        <CalendarGrid
+          grid={grid}
+          days={days}
+          eventsByDate={{}}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const expectedWeek = weekOfYear(parseCalendarDate("2026-08-30")!);
+      expect(container.querySelectorAll(`[aria-label="שבוע ${expectedWeek}"]`).length).toBe(1);
+    });
   });
 });

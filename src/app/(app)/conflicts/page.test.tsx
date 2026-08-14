@@ -232,6 +232,48 @@ describe("ConflictsPage — summary strip presence", () => {
   });
 });
 
+describe("ConflictsPage — critical visual treatment (Design Pass PR #20)", () => {
+  it("critical present: the critical group gets the pulse marker", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(
+      okResult(
+        model({
+          issues: [issue({ severity: "critical" }), issue({ severity: "review", reason: "invalid_shift_time" })],
+        }),
+      ),
+    );
+    const { container } = render(await ConflictsPage());
+    expect(container.querySelector(".animate-pulse-dot")).not.toBeNull();
+  });
+
+  it("the summary strip is critical-styled when any issue is critical", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(
+      okResult(
+        model({
+          issues: [issue({ severity: "critical" }), issue({ severity: "review", reason: "invalid_shift_time" })],
+        }),
+      ),
+    );
+    render(await ConflictsPage());
+    expect(screen.getByText("1 דחוף · 1 לבדיקה").className).toMatch(/text-critical/);
+  });
+
+  it("no critical: neither the summary nor any group shows the critical pulse marker", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(
+      okResult(
+        model({
+          issues: [
+            issue({ severity: "review", reason: "invalid_shift_time" }),
+            issue({ severity: "info", reason: "role_capability_mismatch" }),
+          ],
+        }),
+      ),
+    );
+    const { container } = render(await ConflictsPage());
+    expect(container.querySelector(".animate-pulse-dot")).toBeNull();
+    expect(screen.getByText("1 לבדיקה · 1 לתשומת לב").className).not.toMatch(/text-critical/);
+  });
+});
+
 describe("ConflictsPage — ordering", () => {
   it("preserves the read model's deterministic chronological order within a severity group", async () => {
     getRequestPersonalSchedule.mockResolvedValue(

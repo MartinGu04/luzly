@@ -231,6 +231,79 @@ describe("DutiesPage — no duplicate empty state", () => {
   });
 });
 
+describe("DutiesPage — quiet-state recent-history preview (Design Pass PR #20)", () => {
+  it("shows a bounded 'היסטוריה אחרונה' preview, using the EXISTING historyBlocks data, when there is no focus and nothing upcoming", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(
+      okResult(
+        model({
+          dutyBlocks: [
+            dutyBlock({ startDate: "2026-08-01", endDate: "2026-08-02", dates: ["2026-08-01", "2026-08-02"] }),
+          ],
+        }),
+      ),
+    );
+    const element = await DutiesPage({ searchParams: searchParams() });
+    render(element);
+
+    expect(screen.getByText("אין לך תורנויות קרובות")).toBeInTheDocument();
+    expect(screen.getByText("היסטוריה אחרונה")).toBeInTheDocument();
+    expect(screen.getByText("שמירה 2")).toBeInTheDocument();
+  });
+
+  it("the preview is bounded to a small slice (5), never the full/differently-limited history tab list", async () => {
+    const manyCompletedBlocks = Array.from({ length: 6 }, (_, i) =>
+      dutyBlock({
+        dutyFamily: "reserve",
+        slot: i + 1,
+        startDate: `2026-07-${String(i + 1).padStart(2, "0")}`,
+        endDate: `2026-07-${String(i + 1).padStart(2, "0")}`,
+        dates: [`2026-07-${String(i + 1).padStart(2, "0")}`],
+      }),
+    );
+
+    getRequestPersonalSchedule.mockResolvedValue(okResult(model({ dutyBlocks: manyCompletedBlocks })));
+
+    const upcomingElement = await DutiesPage({ searchParams: searchParams() });
+    const { unmount } = render(upcomingElement);
+    // Newest-first (per historyBlocks): slot 6 (2026-07-06) is among the most
+    // recent 5, slot 1 (2026-07-01, the oldest) is bumped out of the preview.
+    expect(screen.getByText("עתודה 6")).toBeInTheDocument();
+    expect(screen.queryByText("עתודה 1")).toBeNull();
+    unmount();
+
+    const historyElement = await DutiesPage({ searchParams: searchParams("history") });
+    render(historyElement);
+    // The full history tab is unaffected -- every block still appears.
+    expect(screen.getByText("עתודה 6")).toBeInTheDocument();
+    expect(screen.getByText("עתודה 1")).toBeInTheDocument();
+  });
+
+  it("never introduces a new duty-derivation rule -- the preview is just historyBlocks() with a smaller limit, same active/upcoming semantics", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(
+      okResult(
+        model({
+          dutyBlocks: [dutyBlock({ dates: ["2026-08-12", "2026-08-13", "2026-08-14"] })], // active today
+        }),
+      ),
+    );
+    const element = await DutiesPage({ searchParams: searchParams() });
+    render(element);
+
+    // A focus duty exists, so the quiet-state preview must NOT appear --
+    // the existing "nothing else upcoming" panel is shown instead (already
+    // covered above), never a history preview alongside an active focus.
+    expect(screen.getByText("בתורנות עכשיו")).toBeInTheDocument();
+    expect(screen.queryByText("היסטוריה אחרונה")).toBeNull();
+  });
+
+  it("?view=history semantics are unaffected by the preview -- still reachable via the toggle link", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(okResult(model({ dutyBlocks: [] })));
+    const element = await DutiesPage({ searchParams: searchParams() });
+    render(element);
+    expect(screen.getByRole("link", { name: "היסטוריה" })).toHaveAttribute("href", "/duties?view=history");
+  });
+});
+
 describe("DutiesPage — upcoming/history lists", () => {
   it("the remaining upcoming list excludes the focus block, never repeating it", async () => {
     getRequestPersonalSchedule.mockResolvedValue(

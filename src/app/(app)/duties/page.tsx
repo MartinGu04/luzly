@@ -93,6 +93,19 @@ export default async function DutiesPage({ searchParams }: DutiesPageProps) {
   const suppressRedundantUpcomingEmptyState =
     view === "upcoming" && focus.status === "none" && upcomingList.length === 0;
 
+  /**
+   * A genuinely quiet period (no focus, no upcoming) would otherwise leave
+   * the rest of the page nearly empty. Rather than a second "nothing
+   * upcoming" message, show a small bounded preview of the SAME
+   * `historyBlocks` data the history tab already computes (just a smaller
+   * limit here) -- never a new duty-derivation rule, and never the full
+   * history tab's own unbounded/differently-limited list. Only the
+   * "upcoming" view ever shows this (same condition as the suppressed
+   * empty state above); the history tab already renders its own full list
+   * unconditionally, regardless of this preview.
+   */
+  const historyPreview = suppressRedundantUpcomingEmptyState ? historyBlocks(model.dutyBlocks, todayDate, 5) : [];
+
   return (
     <div className="flex flex-col gap-6">
       <DutiesHeader />
@@ -109,7 +122,13 @@ export default async function DutiesPage({ searchParams }: DutiesPageProps) {
         <DutyViewToggle view={view} />
       </div>
 
-      {suppressRedundantUpcomingEmptyState ? null : (
+      {suppressRedundantUpcomingEmptyState ? (
+        <DutyBlockList
+          blocks={historyPreview.map((block) => buildDutyBlockView(block, model.dutyActions, model.localNow))}
+          title="היסטוריה אחרונה"
+          emptyMessage="אין עדיין היסטוריית תורנויות."
+        />
+      ) : (
         <DutyBlockList
           blocks={listBlocks.map((block) => buildDutyBlockView(block, model.dutyActions, model.localNow))}
           title={view === "history" ? "היסטוריה אחרונה" : undefined}

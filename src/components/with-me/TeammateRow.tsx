@@ -1,6 +1,6 @@
-import { UserRound } from "lucide-react";
 import type { PersonalCounterpart } from "@/lib/readModels/types";
 import { roleLabel } from "@/lib/presentation/labels";
+import { Avatar } from "@/components/ui/Avatar";
 import { Badge } from "@/components/ui/Badge";
 
 interface TeammateRowProps {
@@ -10,7 +10,9 @@ interface TeammateRowProps {
 
 /**
  * One teammate row: name, role, and only the badges that are structurally
- * true (shadow/handover, tentative). Deliberately never shows
+ * true (shadow/handover, tentative). Reuses the shared `Avatar` (initials
+ * from `personName`, no image/upload) so a colleague reads as a person,
+ * not a bare line of text. Deliberately never shows
  * `startTimeOverride`/`endTimeOverride` -- this screen has no full
  * `ShiftSchedule` to safely resolve them into real hours, and a guessed
  * "partial shift" from a single override would be worse than showing
@@ -21,9 +23,7 @@ export function TeammateRow({ counterpart, shadow = false }: TeammateRowProps) {
 
   return (
     <li className="flex items-center gap-3 rounded-xl bg-overlay-faint px-3 py-2.5 ring-1 ring-border">
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-overlay-soft text-muted">
-        <UserRound className="h-4 w-4" aria-hidden="true" strokeWidth={1.75} />
-      </span>
+      <Avatar name={counterpart.personName} size="sm" />
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium text-foreground">{counterpart.personName}</p>
         {role ? <p className="truncate text-xs text-muted">{role}</p> : null}
