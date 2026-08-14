@@ -361,6 +361,205 @@ describe("ManagerPage — everyone view", () => {
   });
 });
 
+describe("ManagerPage — attention section agrees with coverage section on which role is missing", () => {
+  it("technician missing: attention says 'חסר טכנאי למשמרת', matching the coverage section's 'חסר טכנאי'", async () => {
+    getRequestManagerOverview.mockResolvedValue(
+      okResult(
+        model({
+          issues: [
+            issue({
+              reason: "shift_coverage_missing",
+              personName: "טוביה פרי",
+              targetEvent: { date: "2026-08-13", category: "shift", title: "יום", role: "technician", period: "day" },
+            }),
+          ],
+          coverageOverview: [
+            shiftGroup({
+              coverageStatus: "missing",
+              technicians: [],
+              roleCoverage: {
+                technician: { status: "missing", missingIntervals: [] },
+                supervisor: { status: "full", missingIntervals: [] },
+              },
+            }),
+          ],
+        }),
+      ),
+    );
+    await renderPage();
+    expect(screen.getAllByText("טוביה פרי", { exact: false }).length).toBeGreaterThan(0);
+    expect(screen.getByText(/חסר טכנאי למשמרת/)).toBeInTheDocument();
+    expect(screen.queryByText(/חסר כיסוי למשמרת/)).toBeNull();
+    // Same wording as the lower coverage section's own explicit role message -- the two sections now agree.
+    expect(screen.getAllByText(/חסר טכנאי/).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('supervisor missing: attention says \'חסר אחמ"ש למשמרת\'', async () => {
+    getRequestManagerOverview.mockResolvedValue(
+      okResult(
+        model({
+          issues: [
+            issue({
+              reason: "shift_coverage_missing",
+              personName: "דנה כהן",
+              targetEvent: { date: "2026-08-13", category: "shift", title: "יום", role: "supervisor", period: "day" },
+            }),
+          ],
+          coverageOverview: [
+            shiftGroup({
+              coverageStatus: "missing",
+              supervisors: [],
+              roleCoverage: {
+                technician: { status: "full", missingIntervals: [] },
+                supervisor: { status: "missing", missingIntervals: [] },
+              },
+            }),
+          ],
+        }),
+      ),
+    );
+    await renderPage();
+    expect(screen.getAllByText("דנה כהן", { exact: false }).length).toBeGreaterThan(0);
+    expect(screen.getByText(/חסר אחמ"ש למשמרת/)).toBeInTheDocument();
+  });
+
+  it('both roles provably missing: attention says \'חסרים טכנאי ואחמ"ש למשמרת\', honestly representing the whole gap', async () => {
+    getRequestManagerOverview.mockResolvedValue(
+      okResult(
+        model({
+          issues: [
+            issue({
+              reason: "shift_coverage_missing",
+              personName: "רון קבוע",
+              targetEvent: { date: "2026-08-13", category: "shift", title: "יום", role: "technician", period: "day" },
+            }),
+          ],
+          coverageOverview: [
+            shiftGroup({
+              coverageStatus: "missing",
+              technicians: [],
+              supervisors: [],
+              roleCoverage: {
+                technician: { status: "missing", missingIntervals: [] },
+                supervisor: { status: "missing", missingIntervals: [] },
+              },
+            }),
+          ],
+        }),
+      ),
+    );
+    await renderPage();
+    expect(screen.getByText(/חסרים טכנאי ואחמ"ש למשמרת/)).toBeInTheDocument();
+  });
+
+  it("not_evaluable roleCoverage never invents a specific missing role -- keeps the truthful generic wording", async () => {
+    getRequestManagerOverview.mockResolvedValue(
+      okResult(
+        model({
+          issues: [
+            issue({
+              reason: "shift_coverage_missing",
+              personName: "מרטין בדיקה",
+              targetEvent: { date: "2026-08-13", category: "shift", title: "יום", role: "technician", period: "day" },
+            }),
+          ],
+          coverageOverview: [
+            shiftGroup({
+              coverageStatus: "not_evaluable",
+              roleCoverage: {
+                technician: { status: "not_evaluable", missingIntervals: [] },
+                supervisor: { status: "not_evaluable", missingIntervals: [] },
+              },
+            }),
+          ],
+        }),
+      ),
+    );
+    await renderPage();
+    expect(screen.getByText(/חסר כיסוי למשמרת/)).toBeInTheDocument();
+    expect(screen.queryByText(/חסר טכנאי/)).toBeNull();
+    expect(screen.queryByText(/חסר אחמ"ש/)).toBeNull();
+  });
+
+  it("a partial technician gap: attention says 'כיסוי טכנאי חלקי במשמרת', the existing interval callout still shows separately", async () => {
+    getRequestManagerOverview.mockResolvedValue(
+      okResult(
+        model({
+          issues: [
+            issue({
+              reason: "shift_coverage_partial",
+              personName: "גיל טכנאי",
+              missingIntervals: [{ startMinute: 330, endMinute: 450 }],
+              targetEvent: { date: "2026-08-13", category: "shift", title: "יום", role: "technician", period: "day" },
+            }),
+          ],
+          coverageOverview: [
+            shiftGroup({
+              coverageStatus: "partial",
+              roleCoverage: {
+                technician: { status: "partial", missingIntervals: [{ startMinute: 330, endMinute: 450 }] },
+                supervisor: { status: "full", missingIntervals: [] },
+              },
+            }),
+          ],
+        }),
+      ),
+    );
+    await renderPage();
+    expect(screen.getByText(/כיסוי טכנאי חלקי במשמרת/)).toBeInTheDocument();
+    expect(screen.getAllByText(/05:30–07:30/).length).toBeGreaterThan(0);
+  });
+
+  it("existing issue severity is unchanged by the reworded reason label", async () => {
+    getRequestManagerOverview.mockResolvedValue(
+      okResult(
+        model({
+          issues: [
+            issue({
+              reason: "shift_coverage_missing",
+              severity: "critical",
+              personName: "טוביה פרי",
+              targetEvent: { date: "2026-08-13", category: "shift", title: "יום", role: "technician", period: "day" },
+            }),
+          ],
+          coverageOverview: [
+            shiftGroup({
+              coverageStatus: "missing",
+              roleCoverage: {
+                technician: { status: "missing", missingIntervals: [] },
+                supervisor: { status: "full", missingIntervals: [] },
+              },
+            }),
+          ],
+        }),
+      ),
+    );
+    await renderPage();
+    expect(screen.getByText("דחוף")).toBeInTheDocument();
+  });
+
+  it("an issue reason unrelated to coverage is never rewritten by the roleCoverage lookup", async () => {
+    getRequestManagerOverview.mockResolvedValue(
+      okResult(
+        model({
+          issues: [issue({ reason: "invalid_shift_time", personName: "מרטין בדיקה", targetEvent: null })],
+          coverageOverview: [
+            shiftGroup({
+              coverageStatus: "missing",
+              roleCoverage: {
+                technician: { status: "missing", missingIntervals: [] },
+                supervisor: { status: "full", missingIntervals: [] },
+              },
+            }),
+          ],
+        }),
+      ),
+    );
+    await renderPage();
+    expect(screen.getByText(/שעות המשמרת דורשות בדיקה/)).toBeInTheDocument();
+  });
+});
+
 describe("ManagerPage — problems-only filter", () => {
   it("hides coverage/potential/duties/roster sections when problemsOnly is set", async () => {
     getRequestManagerOverview.mockResolvedValue(

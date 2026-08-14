@@ -40,6 +40,7 @@ import {
   roleLabel,
 } from "@/lib/presentation/labels";
 import type { ManagerHrefParams } from "@/lib/presentation/managerUrl";
+import { managerIssueCoverageReasonLabel } from "@/lib/presentation/managerIssueCoverage";
 import { managerSummaryLabel } from "@/lib/presentation/managerSummary";
 import { roleCoverageMessage } from "@/lib/presentation/roleCoverage";
 import { formatMissingIntervals } from "@/lib/presentation/scheduleTime";
@@ -70,12 +71,42 @@ interface ManagerPageProps {
 // View builders (page-local, same convention as /duties, /with-me, /conflicts)
 // ---------------------------------------------------------------------------
 
-function buildManagerIssueRowView(issue: ManagerIssue, todayDate: string, index: number): ManagerIssueRowView {
+const COVERAGE_ISSUE_REASONS = new Set<ManagerIssue["reason"]>(["shift_coverage_missing", "shift_coverage_partial"]);
+
+/**
+ * Looks up the SAME `roleCoverage` diagnostic `ManagerCoverageSection`
+ * already renders for this shift (matched by date+period, the only keys
+ * `ManagerShiftOverviewEntry` groups by) and uses it to say explicitly
+ * which role is missing/partial for a coverage-reason issue -- instead of
+ * the generic "חסר כיסוי למשמרת" the two sections used to disagree on. Any
+ * other issue reason, or a coverage-reason issue whose shift isn't found
+ * in `coverageOverview`, falls back to the existing generic label
+ * unchanged.
+ */
+function managerIssueReasonLabelFor(
+  issue: ManagerIssue,
+  coverageByDatePeriod: ReadonlyMap<string, ManagerShiftOverviewEntry>,
+): string {
+  const fallback = managerIssueReasonLabel(issue.reason);
+  if (!COVERAGE_ISSUE_REASONS.has(issue.reason) || !issue.targetEvent) return fallback;
+
+  const group = coverageByDatePeriod.get(`${issue.date}|${issue.targetEvent.period}`);
+  if (!group) return fallback;
+
+  return managerIssueCoverageReasonLabel(group.roleCoverage, fallback);
+}
+
+function buildManagerIssueRowView(
+  issue: ManagerIssue,
+  todayDate: string,
+  index: number,
+  coverageByDatePeriod: ReadonlyMap<string, ManagerShiftOverviewEntry>,
+): ManagerIssueRowView {
   return {
     key: `${issue.personId}-${issue.reason}-${issue.date}-${index}`,
     personName: issue.personName,
     severity: issue.severity,
-    reasonLabel: managerIssueReasonLabel(issue.reason),
+    reasonLabel: managerIssueReasonLabelFor(issue, coverageByDatePeriod),
     dateLabel: issueDateLabel(issue.date, todayDate),
     targetEmoji: issue.targetEvent ? issueTargetEmoji(issue.targetEvent) : null,
     targetTitle: issue.targetEvent ? issueTargetTitle(issue.targetEvent) : null,
@@ -280,7 +311,12 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
 
   const summary = managerSummaryLabel(model);
 
-  const issueViews = model.issues.map((issue, index) => buildManagerIssueRowView(issue, todayDate, index));
+  const coverageByDatePeriod = new Map(
+    model.coverageOverview.map((group) => [`${group.date}|${group.period}`, group]),
+  );
+  const issueViews = model.issues.map((issue, index) =>
+    buildManagerIssueRowView(issue, todayDate, index, coverageByDatePeriod),
+  );
   const criticalIssueViews = issueViews.filter((view) => view.severity === "critical");
   const reviewIssueViews = issueViews.filter((view) => view.severity === "review");
 
