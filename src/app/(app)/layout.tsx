@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { AppShell } from "@/components/layout/AppShell";
 import { AccessDeniedScreen } from "@/components/auth/AccessDeniedScreen";
 import { getRequestPersonalSchedule } from "@/lib/readModels/getRequestPersonalSchedule";
+import { formatScheduleMinute } from "@/lib/presentation/scheduleTime";
 
 /**
  * Every route here resolves a specific authenticated user's identity, so
@@ -53,7 +54,21 @@ export default async function ProtectedLayout({ children }: { children: ReactNod
 
   const person = result.status === "ok" ? result.model.person : result.person;
 
+  // The app shell's ONE live clock (`ShellUtilityBar`) needs a server-
+  // computed "HH:mm:ss" for its first paint, same as the old dashboard-only
+  // clock used to. Only the "ok" status ever computed a `localNow` (a
+  // `configuration_error` returns before that point) -- reusing
+  // `result.model.localNow` here costs no extra Google fetch or personal-
+  // loader call, it's the SAME already-resolved `result` from the one
+  // `getRequestPersonalSchedule()` call above. `configuration_error` passes
+  // `null` and `AppShell`/`LiveClock` handle that gracefully (no clock
+  // until the client's own first tick, never a `Date.now()` guess here).
+  const initialClockTime =
+    result.status === "ok" ? `${formatScheduleMinute(result.model.localNow.minuteOfDay)}:00` : null;
+
   return (
-    <AppShell person={{ name: person.name, isManager: person.isManager }}>{children}</AppShell>
+    <AppShell person={{ name: person.name, isManager: person.isManager }} initialClockTime={initialClockTime}>
+      {children}
+    </AppShell>
   );
 }

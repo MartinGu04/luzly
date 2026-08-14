@@ -11,6 +11,13 @@ const OPTIONS: ReadonlyArray<{ value: ThemePreference; label: string; icon: Luci
 
 interface ThemeToggleProps {
   className?: string;
+  /**
+   * "default" reads against a light content surface (main content area,
+   * `MobileIdentityBar`). "sidebar" reads against the always-dark-navy
+   * `Sidebar` surface (Design Pass PR #19) -- same control, an inverted
+   * track/active treatment so it never looks washed out on navy.
+   */
+  variant?: "default" | "sidebar";
 }
 
 /**
@@ -21,14 +28,17 @@ interface ThemeToggleProps {
  * `ThemeProvider` uses `useSyncExternalStore`, so this is never a wrong
  * guess, just the honest "not yet known" default).
  */
-export function ThemeToggle({ className = "" }: ThemeToggleProps) {
+export function ThemeToggle({ className = "", variant = "default" }: ThemeToggleProps) {
   const { theme, setTheme } = useTheme();
+  const isSidebar = variant === "sidebar";
 
   return (
     <div
       role="radiogroup"
       aria-label="ערכת נושא"
-      className={`inline-flex items-center gap-0.5 rounded-full bg-overlay-soft p-0.5 ${className}`}
+      className={`inline-flex items-center gap-0.5 rounded-full p-0.5 ${
+        isSidebar ? "bg-sidebar-hover" : "bg-overlay-soft"
+      } ${className}`}
     >
       {OPTIONS.map((option) => {
         const Icon = option.icon;
@@ -43,9 +53,13 @@ export function ThemeToggle({ className = "" }: ThemeToggleProps) {
             aria-label={option.label}
             onClick={() => setTheme(option.value)}
             className={`flex h-7 w-7 items-center justify-center rounded-full transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${
-              isActive
-                ? "bg-surface-1 text-primary shadow-sm"
-                : "text-muted hover:text-foreground"
+              isSidebar
+                ? isActive
+                  ? "bg-sidebar-active text-sidebar-foreground shadow-sm"
+                  : "text-sidebar-muted hover:text-sidebar-foreground"
+                : isActive
+                  ? "bg-surface-1 text-primary shadow-sm"
+                  : "text-muted hover:text-foreground"
             }`}
           >
             <Icon className="h-[15px] w-[15px]" aria-hidden="true" strokeWidth={1.75} />

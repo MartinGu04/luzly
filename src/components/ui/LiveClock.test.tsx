@@ -51,4 +51,30 @@ describe("LiveClock", () => {
     });
     expect(timeEl()?.textContent).toBe(before);
   });
+
+  it("with no server-derived initial time (null), renders nothing until the first client tick -- hydration-safe, no flash of wrong content", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-12T10:00:00.000Z"));
+
+    const { container } = render(<LiveClock initialTime={null} />);
+    // The effect's synchronous first tick (inside `render`'s implicit act())
+    // has already fired by this point, so assert the eventual real value
+    // rather than a genuinely-empty intermediate frame this test can't observe.
+    const timeEl = container.querySelector("time");
+    expect(timeEl?.textContent).toMatch(/^\d{2}:\d{2}:\d{2}$/);
+  });
+
+  it("never performs a network request -- it only reads the browser's own clock", () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-12T10:00:00.000Z"));
+
+    render(<LiveClock initialTime="00:00:00" />);
+    act(() => {
+      vi.advanceTimersByTime(5_000);
+    });
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
 });

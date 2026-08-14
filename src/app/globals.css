@@ -10,21 +10,27 @@
 /* the root layout (never by React state, so there is nothing for React  */
 /* to hydrate differently) -- "system" means no attribute is set at all, */
 /* letting the media query below decide.                                 */
+/*                                                                         */
+/* The sidebar is a deep navy surface in BOTH themes (Design Pass         */
+/* PR #19) -- only its exact tone shifts between light/dark. That is why  */
+/* the sidebar-interaction tokens further down (`--sidebar-hover-bg`,     */
+/* `--sidebar-active-bg`, ...) are defined once, using `color-mix()`      */
+/* formulas against `--primary`/white rather than per-theme literals.     */
 /* ---------------------------------------------------------------------- */
 :root {
   color-scheme: light;
 
-  --background: #f6f5f2;
+  --background: #f4f6fa;
   --background-glow-a: #e4d9fb;
   --background-glow-b: #d3eef7;
 
   --foreground: #1c1f27;
-  --muted: #667085;
-  --muted-2: #98a1b3;
+  --muted: #5b6577;
+  --muted-2: #838da0;
 
   --surface-1: #ffffff;
-  --surface-2: #fdfcfb;
-  --surface-3: #f3f1fb;
+  --surface-2: #fdfeff;
+  --surface-3: #eef1fa;
 
   --border: rgba(15, 23, 42, 0.08);
   --border-strong: rgba(15, 23, 42, 0.14);
@@ -38,10 +44,10 @@
   --card: var(--surface-1);
   --card-foreground: var(--foreground);
 
-  --sidebar: #fbfaf7;
-  --sidebar-foreground: #1c1f27;
-  --sidebar-muted: #6b7280;
-  --sidebar-border: rgba(15, 23, 42, 0.08);
+  --sidebar: #101a34;
+  --sidebar-foreground: #f3f5fc;
+  --sidebar-muted: #97a2c2;
+  --sidebar-border: rgba(255, 255, 255, 0.08);
 
   --primary: #7c3aed;
   --primary-strong: #6d28d9;
@@ -69,7 +75,7 @@
 
     --foreground: #eef0f6;
     --muted: #8b93a8;
-    --muted-2: #5c6478;
+    --muted-2: #6b7590;
 
     --surface-1: #12151f;
     --surface-2: #171c29;
@@ -84,10 +90,10 @@
 
     --grid-line: rgba(255, 255, 255, 0.025);
 
-    --sidebar: #0b0d15;
+    --sidebar: #10162a;
     --sidebar-foreground: #e7e9f2;
-    --sidebar-muted: #7a839a;
-    --sidebar-border: rgba(255, 255, 255, 0.07);
+    --sidebar-muted: #8b93ac;
+    --sidebar-border: rgba(255, 255, 255, 0.08);
 
     --primary: #8b7bf5;
     --primary-strong: #7461e8;
@@ -115,7 +121,7 @@
 
   --foreground: #eef0f6;
   --muted: #8b93a8;
-  --muted-2: #5c6478;
+  --muted-2: #6b7590;
 
   --surface-1: #12151f;
   --surface-2: #171c29;
@@ -130,10 +136,10 @@
 
   --grid-line: rgba(255, 255, 255, 0.025);
 
-  --sidebar: #0b0d15;
+  --sidebar: #10162a;
   --sidebar-foreground: #e7e9f2;
-  --sidebar-muted: #7a839a;
-  --sidebar-border: rgba(255, 255, 255, 0.07);
+  --sidebar-muted: #8b93ac;
+  --sidebar-border: rgba(255, 255, 255, 0.08);
 
   --primary: #8b7bf5;
   --primary-strong: #7461e8;
@@ -151,6 +157,21 @@
   --shadow-hero: 0 1px 0 0 rgba(255, 255, 255, 0.05) inset, 0 24px 60px -28px rgba(0, 0, 0, 0.65);
 }
 
+/* ---------------------------------------------------------------------- */
+/* Derived tokens -- formulas over the palette above rather than literal  */
+/* colors, so they never need a separate light/dark definition: whichever */
+/* `--primary`/`--critical`/etc. is active at a given element is what     */
+/* `color-mix()` resolves against at that element, automatically.         */
+/* ---------------------------------------------------------------------- */
+:root {
+  --sidebar-hover-bg: color-mix(in srgb, white 7%, transparent);
+  --sidebar-active-bg: color-mix(in srgb, var(--primary) 20%, transparent);
+  --sidebar-active-ring: color-mix(in srgb, var(--primary) 55%, transparent);
+
+  --surface-critical: color-mix(in srgb, var(--critical) 8%, var(--surface-1));
+  --surface-critical-border: color-mix(in srgb, var(--critical) 30%, transparent);
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -160,6 +181,8 @@
   --color-surface-1: var(--surface-1);
   --color-surface-2: var(--surface-2);
   --color-surface-3: var(--surface-3);
+  --color-surface-critical: var(--surface-critical);
+  --color-surface-critical-border: var(--surface-critical-border);
 
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
@@ -175,6 +198,9 @@
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-muted: var(--sidebar-muted);
   --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-hover: var(--sidebar-hover-bg);
+  --color-sidebar-active: var(--sidebar-active-bg);
+  --color-sidebar-active-ring: var(--sidebar-active-ring);
 
   --color-primary: var(--primary);
   --color-primary-strong: var(--primary-strong);
