@@ -63,6 +63,19 @@
   --critical-foreground: #ffffff;
 
   --shadow-hero: 0 1px 0 0 rgba(255, 255, 255, 0.7) inset, 0 20px 45px -24px rgba(15, 23, 42, 0.18);
+
+  /* Login auth-card glass treatment (Design Pass PR #22 hardening) --
+     login-only, deliberately separate from --shadow-hero/--surface-*.
+     Literal per-theme values (not a --surface-2 color-mix) because
+     --surface-2/--surface-3 read as nearly identical tones in dark mode --
+     a formula over them left the card visually fused with its own
+     background instead of floating above it. */
+  --login-glass-bg: rgba(246, 245, 253, 0.82);
+  --login-glass-border: rgba(124, 58, 237, 0.24);
+  --shadow-login-glass:
+    0 1px 0 0 rgba(255, 255, 255, 0.75) inset,
+    0 30px 60px -28px rgba(30, 27, 75, 0.22),
+    0 10px 22px -14px rgba(124, 58, 237, 0.18);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -109,6 +122,13 @@
     --critical-foreground: #2b0a0a;
 
     --shadow-hero: 0 1px 0 0 rgba(255, 255, 255, 0.05) inset, 0 24px 60px -28px rgba(0, 0, 0, 0.65);
+
+    --login-glass-bg: rgba(46, 53, 87, 0.68);
+    --login-glass-border: rgba(139, 123, 245, 0.26);
+    --shadow-login-glass:
+      0 1px 0 0 rgba(255, 255, 255, 0.14) inset,
+      0 32px 64px -26px rgba(0, 0, 0, 0.55),
+      0 12px 28px -14px rgba(139, 123, 245, 0.28);
   }
 }
 
@@ -155,6 +175,13 @@
   --critical-foreground: #2b0a0a;
 
   --shadow-hero: 0 1px 0 0 rgba(255, 255, 255, 0.05) inset, 0 24px 60px -28px rgba(0, 0, 0, 0.65);
+
+  --login-glass-bg: rgba(46, 53, 87, 0.68);
+  --login-glass-border: rgba(139, 123, 245, 0.26);
+  --shadow-login-glass:
+    0 1px 0 0 rgba(255, 255, 255, 0.14) inset,
+    0 32px 64px -26px rgba(0, 0, 0, 0.55),
+    0 12px 28px -14px rgba(139, 123, 245, 0.28);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -170,6 +197,17 @@
 
   --surface-critical: color-mix(in srgb, var(--critical) 8%, var(--surface-1));
   --surface-critical-border: color-mix(in srgb, var(--critical) 30%, transparent);
+
+  /* Login auth-card ambient glow (Design Pass PR #22 hardening) -- the
+     card's own background/border are per-theme literals above (see
+     --login-glass-bg), but the soft glow behind the card works fine as one
+     relative formula in both themes since it's just --primary at low
+     opacity, and --primary is already violet/indigo in both themes. */
+  --login-glass-ambient: color-mix(in srgb, var(--primary) 24%, transparent);
+
+  --shadow-login-cta: 0 10px 24px -10px color-mix(in srgb, var(--primary) 55%, transparent);
+  --shadow-login-cta-hover: 0 16px 34px -12px color-mix(in srgb, var(--primary) 62%, transparent);
+  --shadow-login-cta-active: 0 6px 14px -8px color-mix(in srgb, var(--primary) 55%, transparent);
 }
 
 @theme inline {

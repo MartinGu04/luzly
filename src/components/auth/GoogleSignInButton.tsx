@@ -35,7 +35,7 @@ export function GoogleSignInButton({ className = "" }: GoogleSignInButtonProps) 
       onClick={handleSignIn}
       disabled={pending}
       aria-busy={pending}
-      className={`flex h-[52px] w-full items-center justify-center gap-2.5 rounded-xl bg-primary px-4 text-[15px] font-semibold text-primary-foreground transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-70 ${className}`}
+      className={`flex h-[52px] w-full items-center justify-center gap-2.5 rounded-xl bg-primary px-4 text-[15px] font-semibold text-primary-foreground shadow-[var(--shadow-login-cta)] transition-all duration-200 hover:bg-primary-strong hover:shadow-[var(--shadow-login-cta-hover)] active:scale-[0.985] active:shadow-[var(--shadow-login-cta-active)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-70 disabled:shadow-[var(--shadow-login-cta)] disabled:hover:bg-primary disabled:active:scale-100 ${className}`}
     >
       {pending ? (
         <>
