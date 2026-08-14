@@ -3,7 +3,7 @@
 import { Bell } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { APP_NAME } from "@/lib/config/productName";
+import { BrandMark } from "@/components/brand/BrandMark";
 import { visibleNavItems } from "./nav-items";
 import { IdentityFooter } from "./IdentityFooter";
 
@@ -33,8 +33,8 @@ export function Sidebar({ person }: SidebarProps) {
 
   return (
     <aside className="sticky top-0 hidden h-dvh w-[320px] shrink-0 flex-col border-e border-sidebar-border bg-sidebar text-sidebar-foreground lg:flex">
-      <div className="flex items-center justify-between gap-2 px-6 pt-7 pb-5">
-        <span className="text-xl font-bold tracking-tight text-sidebar-foreground">{APP_NAME}</span>
+      <div className="flex items-center justify-between gap-3 px-6 pt-8 pb-6">
+        <BrandMark size="md" className="text-sidebar-foreground" />
         <button
           type="button"
           disabled

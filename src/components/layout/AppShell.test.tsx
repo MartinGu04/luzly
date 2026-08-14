@@ -196,7 +196,11 @@ describe("AppShell — avatarUrl (presentation-only Google account photo)", () =
         <div>content</div>
       </AppShell>,
     );
-    const images = container.querySelectorAll("img");
+    // Scoped to `data-testid="avatar-photo"` -- the shell also renders the
+    // product's own BrandMark <img> (Sidebar + mobile header), which is a
+    // brand asset, not a user avatar, and must never be confused with one
+    // (see `lib/config/brandAssets.ts`).
+    const images = container.querySelectorAll('[data-testid="avatar-photo"]');
     expect(images.length).toBeGreaterThanOrEqual(2); // desktop IdentityFooter + mobile header trigger
     for (const img of images) {
       expect(img).toHaveAttribute("src", "https://lh3.googleusercontent.com/a/photo.jpg");
@@ -209,7 +213,7 @@ describe("AppShell — avatarUrl (presentation-only Google account photo)", () =
         <div>content</div>
       </AppShell>,
     );
-    expect(container.querySelector("img")).toBeNull();
+    expect(container.querySelector('[data-testid="avatar-photo"]')).toBeNull();
     expect(screen.getAllByText("דב").length).toBeGreaterThan(0);
   });
 });

@@ -78,7 +78,7 @@ describe("(app) layout — server-side auth gating", () => {
     renderWithTheme(element);
 
     expect(screen.queryByText("SECRET_DASHBOARD_CONTENT")).toBeNull();
-    expect(screen.getByText("אין לך הרשאה ל-Luzly")).toBeInTheDocument();
+    expect(screen.getByText("אין לך הרשאה ל-מי-מה-מו")).toBeInTheDocument();
   });
 
   it("does not reveal personnel names/emails/workbook details on the unmapped-denial screen", async () => {
@@ -126,7 +126,7 @@ describe("(app) layout — server-side auth gating", () => {
     renderWithTheme(element);
 
     expect(screen.queryByText("SECRET_DASHBOARD_CONTENT")).toBeNull();
-    expect(screen.getByText("אין לך הרשאה ל-Luzly")).toBeInTheDocument();
+    expect(screen.getByText("אין לך הרשאה ל-מי-מה-מו")).toBeInTheDocument();
   });
 
   it("an ambiguous-identity user is denied the same way, never redirected, never reaching AppShell", async () => {
@@ -137,7 +137,7 @@ describe("(app) layout — server-side auth gating", () => {
 
     expect(redirect).not.toHaveBeenCalled();
     expect(screen.queryByText("SECRET_DASHBOARD_CONTENT")).toBeNull();
-    expect(screen.getByText("אין לך הרשאה ל-Luzly")).toBeInTheDocument();
+    expect(screen.getByText("אין לך הרשאה ל-מי-מה-מו")).toBeInTheDocument();
   });
 
   it("the denial screen text is identical for unmapped, missing_email, and ambiguous_identity", async () => {
@@ -252,7 +252,10 @@ describe("(app) layout — avatarUrl (presentation-only Google account photo)", 
     const element = await ProtectedLayout({ children: <div>x</div> });
     const { container } = renderWithTheme(element);
 
-    const images = container.querySelectorAll("img");
+    // Scoped to `data-testid="avatar-photo"` -- the shell also renders the
+    // product's own BrandMark <img> (Sidebar + mobile header), which is a
+    // brand asset, not a user avatar, and must never be confused with one.
+    const images = container.querySelectorAll('[data-testid="avatar-photo"]');
     expect(images.length).toBeGreaterThanOrEqual(2);
     for (const img of images) {
       expect(img).toHaveAttribute("src", "https://lh3.googleusercontent.com/a/photo.jpg");

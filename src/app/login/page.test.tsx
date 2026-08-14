@@ -96,3 +96,42 @@ describe("LoginPage", () => {
     expect(screen.queryByText("v0.1.0")).toBeNull();
   });
 });
+
+describe("LoginPage — brand identity (PR #23)", () => {
+  it("renders the full מי-מה-מו wordmark logo in the hero", async () => {
+    const element = await LoginPage({ searchParams: searchParams() });
+    const { container } = renderWithTheme(element);
+
+    const logo = container.querySelector('img[src*="logo-wordmark.png"]');
+    expect(logo).toBeInTheDocument();
+    expect(logo).toHaveAttribute("alt", "מי-מה-מו");
+  });
+
+  it('renders the final hero headline exactly once -- not duplicated by the wordmark image and the H1 both showing "כל מה שקורה. במקום אחד."', async () => {
+    const element = await LoginPage({ searchParams: searchParams() });
+    renderWithTheme(element);
+
+    expect(screen.getAllByText(LOGIN_HERO_HEADLINE).length).toBe(1);
+  });
+
+  it("renders BOTH real organizational logos -- תקש\"ל and תקשורת אסטרטגית -- with proper alt text, never a placeholder", async () => {
+    const element = await LoginPage({ searchParams: searchParams() });
+    const { container } = renderWithTheme(element);
+
+    const takshal = container.querySelector('img[src*="org-logo-takshal"]');
+    const strategicComm = container.querySelector('img[src*="org-logo-strategic-communication"]');
+    expect(takshal).toBeInTheDocument();
+    expect(strategicComm).toBeInTheDocument();
+    expect(takshal).toHaveAttribute("alt", 'תקש"ל');
+    expect(strategicComm).toHaveAttribute("alt", "תקשורת אסטרטגית");
+    expect(screen.queryByText(/LOGO 1|LOGO 2/i)).toBeNull();
+  });
+
+  it("never renders the retired 'Luzly' name anywhere on the page", async () => {
+    const element = await LoginPage({ searchParams: searchParams() });
+    const { container } = renderWithTheme(element);
+
+    expect(container.textContent).not.toMatch(/luzly/i);
+    expect(container.innerHTML).not.toMatch(/luzly/i);
+  });
+});
