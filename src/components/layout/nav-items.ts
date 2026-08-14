@@ -1,13 +1,4 @@
-import {
-  AlertTriangle,
-  Bell,
-  CalendarDays,
-  LayoutDashboard,
-  ShieldCheck,
-  UserCog,
-  Users,
-  type LucideIcon,
-} from "lucide-react";
+import { AlertTriangle, CalendarDays, LayoutDashboard, ShieldCheck, UserCog, Users, type LucideIcon } from "lucide-react";
 
 export interface NavItem {
   label: string;
@@ -32,17 +23,18 @@ export interface NavItem {
 }
 
 // "dashboard", "schedule", "duties", "with-me", "conflicts", and "manager"
-// (manager-only) are real, working routes today. Everything else previews
-// modules that will be built once further Google Sheets features exist, so
-// they are rendered as disabled placeholders rather than dead links.
+// (manager-only) are all real, working routes -- every current item is a
+// live link, none are disabled "coming soon" placeholders. "תזכורות" was
+// removed from here (Design Pass, sidebar/mobile-nav refinement pass): that
+// area now belongs to the notification bell flow instead of a permanent nav
+// slot, and there was never a real /reminders route behind it.
 export const navItems: NavItem[] = [
   { label: "לוח בקרה", shortLabel: "היום שלי", href: "/", enabled: true, icon: LayoutDashboard, inBottomNav: true },
   { label: "לוח משמרות", shortLabel: "משמרות", href: "/schedule", enabled: true, icon: CalendarDays, inBottomNav: true },
   { label: "תורנויות", shortLabel: "תורנויות", href: "/duties", enabled: true, icon: ShieldCheck, inBottomNav: true },
   { label: "מי איתי", shortLabel: "מי איתי", href: "/with-me", enabled: true, icon: Users, inBottomNav: true },
-  { label: "התנגשויות", shortLabel: "בדיקות", href: "/conflicts", enabled: true, icon: AlertTriangle, inBottomNav: true },
+  { label: "התנגשויות", shortLabel: "התנגשויות", href: "/conflicts", enabled: true, icon: AlertTriangle, inBottomNav: true },
   { label: "אזור מנהל", shortLabel: "מנהל", href: "/manager", enabled: true, icon: UserCog, inBottomNav: false, managerOnly: true },
-  { label: "תזכורות", shortLabel: "תזכורות", href: "/reminders", enabled: false, icon: Bell, inBottomNav: false },
 ];
 
 /** The nav items a given viewer may see at all -- `managerOnly` items are omitted entirely (never shown disabled) for a non-manager. */

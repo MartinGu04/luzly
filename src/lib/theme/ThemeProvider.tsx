@@ -95,3 +95,54 @@ export function useTheme(): ThemeContextValue {
   }
   return context;
 }
+
+export type EffectiveTheme = "light" | "dark";
+
+const darkMediaQuery = "(prefers-color-scheme: dark)";
+
+/** "system" resolved against the current OS preference; an explicit choice passes straight through. */
+function resolveEffectiveTheme(stored: ThemePreference): EffectiveTheme {
+  if (stored === "light" || stored === "dark") return stored;
+  return window.matchMedia(darkMediaQuery).matches ? "dark" : "light";
+}
+
+function getEffectiveThemeSnapshot(): EffectiveTheme {
+  return resolveEffectiveTheme(readStoredTheme());
+}
+
+/**
+ * Same "always render the server snapshot for the first client pass"
+ * contract as `getServerSnapshot()` above -- the server (and React's
+ * hydration pass) can never know the real OS preference, so this is an
+ * arbitrary stable placeholder, not a guess worth getting right. The
+ * `useSyncExternalStore` resync to the real value happens synchronously
+ * enough after hydration to be imperceptible (same mechanism `theme`
+ * itself already relies on), and every current caller only reads this
+ * inside a closed-by-default menu, so the placeholder is never actually
+ * seen in practice.
+ */
+function getEffectiveThemeServerSnapshot(): EffectiveTheme {
+  return "light";
+}
+
+function subscribeEffectiveTheme(listener: () => void): () => void {
+  const unsubscribeStored = subscribe(listener);
+  const media = window.matchMedia(darkMediaQuery);
+  // Keeps "system" correct if the OS theme flips while the tab is open,
+  // not just when `setTheme` is called explicitly.
+  media.addEventListener("change", listener);
+  return () => {
+    unsubscribeStored();
+    media.removeEventListener("change", listener);
+  };
+}
+
+/**
+ * The RESOLVED light/dark appearance -- unlike `useTheme().theme` (the
+ * stored preference, which may be "system"), this is always exactly
+ * "light" or "dark", safe to use for a binary toggle's icon/label
+ * without ever showing "system" as a third state.
+ */
+export function useEffectiveTheme(): EffectiveTheme {
+  return useSyncExternalStore(subscribeEffectiveTheme, getEffectiveThemeSnapshot, getEffectiveThemeServerSnapshot);
+}

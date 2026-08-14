@@ -21,6 +21,7 @@ describe("globals.css motion system", () => {
       "animate-fade-up",
       "animate-breathe",
       "animate-issue-pulse",
+      "animate-login-now-drift",
     ]) {
       expect(reducedBlock).toContain(`.${className}`);
     }
@@ -34,6 +35,7 @@ describe("globals.css motion system", () => {
       "fade-up",
       "breathe",
       "issue-pulse",
+      "login-now-drift",
     ]) {
       expect(css).toContain(`@keyframes ${keyframeName}`);
     }

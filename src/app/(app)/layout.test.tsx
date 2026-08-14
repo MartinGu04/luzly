@@ -31,9 +31,10 @@ function profile(overrides: Partial<PersonalProfile> = {}): PersonalProfile {
   };
 }
 
-function okResult(person: PersonalProfile) {
+function okResult(person: PersonalProfile, avatarUrl: string | null = null) {
   return {
     status: "ok" as const,
+    avatarUrl,
     model: {
       person,
       fetchedAt: "2026-08-12T08:00:00.000Z",
@@ -209,5 +210,62 @@ describe("(app) layout — server-side auth gating", () => {
 
     expect(container.textContent).not.toContain("תחילת משמרת יום");
     expect(container.textContent).not.toContain("Missing shift start time");
+  });
+});
+
+describe("(app) layout — avatarUrl (presentation-only Google account photo)", () => {
+  it("passes the read model's avatarUrl straight through to AppShell's person prop for an 'ok' result", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(okResult(profile(), "https://lh3.googleusercontent.com/a/photo.jpg"));
+
+    const element = await ProtectedLayout({ children: <div>x</div> });
+
+    expect(element.type).toBe(AppShell);
+    expect(element.props.person.avatarUrl).toBe("https://lh3.googleusercontent.com/a/photo.jpg");
+  });
+
+  it("passes null through (not undefined/crash) when the read model has no avatarUrl", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(okResult(profile(), null));
+
+    const element = await ProtectedLayout({ children: <div>x</div> });
+
+    expect(element.type).toBe(AppShell);
+    expect(element.props.person.avatarUrl).toBeNull();
+  });
+
+  it("also flows through for a configuration_error result, alongside the resolved identity", async () => {
+    getRequestPersonalSchedule.mockResolvedValue({
+      status: "configuration_error",
+      message: "Missing shift start time configuration.",
+      person: profile({ name: "נועה דוגמה" }),
+      avatarUrl: "https://lh3.googleusercontent.com/a/noa.jpg",
+    });
+
+    const element = await ProtectedLayout({ children: <div>x</div> });
+
+    expect(element.type).toBe(AppShell);
+    expect(element.props.person.avatarUrl).toBe("https://lh3.googleusercontent.com/a/noa.jpg");
+  });
+
+  it("renders an actual <img> for a real avatarUrl and reaches both the desktop and mobile Avatar instances", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(okResult(profile(), "https://lh3.googleusercontent.com/a/photo.jpg"));
+
+    const element = await ProtectedLayout({ children: <div>x</div> });
+    const { container } = renderWithTheme(element);
+
+    const images = container.querySelectorAll("img");
+    expect(images.length).toBeGreaterThanOrEqual(2);
+    for (const img of images) {
+      expect(img).toHaveAttribute("src", "https://lh3.googleusercontent.com/a/photo.jpg");
+    }
+  });
+
+  it("never renders an email or any raw user_metadata-shaped content anywhere in the shell", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(okResult(profile(), "https://lh3.googleusercontent.com/a/photo.jpg"));
+
+    const element = await ProtectedLayout({ children: <div>x</div> });
+    const { container } = renderWithTheme(element);
+
+    expect(container.textContent).not.toContain("@");
+    expect(container.innerHTML).not.toContain("user_metadata");
   });
 });

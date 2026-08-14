@@ -60,7 +60,7 @@ export function ManagerRangeSelector({ current, currentMonth }: ManagerRangeSele
               month: formatMonthParam(shiftCalendarMonth(currentMonth, -1)),
             })}
             aria-label="חודש קודם"
-            className="flex h-8 w-8 items-center justify-center rounded-full text-muted transition-colors duration-200 hover:bg-overlay-soft hover:text-foreground"
+            className="flex h-8 w-8 items-center justify-center rounded-full text-muted transition-colors duration-200 hover:bg-overlay-soft hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
           >
             ‹
           </Link>
@@ -71,7 +71,7 @@ export function ManagerRangeSelector({ current, currentMonth }: ManagerRangeSele
               month: formatMonthParam(shiftCalendarMonth(currentMonth, 1)),
             })}
             aria-label="חודש הבא"
-            className="flex h-8 w-8 items-center justify-center rounded-full text-muted transition-colors duration-200 hover:bg-overlay-soft hover:text-foreground"
+            className="flex h-8 w-8 items-center justify-center rounded-full text-muted transition-colors duration-200 hover:bg-overlay-soft hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
           >
             ›
           </Link>

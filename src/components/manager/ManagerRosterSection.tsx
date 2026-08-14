@@ -78,7 +78,7 @@ export function ManagerRosterSection({ roster, current }: ManagerRosterSectionPr
       <div className="mt-3 flex flex-col gap-5">
         {groups.map((group) => (
           <div key={group.group}>
-            <h4 className="text-[15px] font-semibold text-muted-2">
+            <h4 className="text-[15px] font-semibold text-foreground">
               {group.label} <span className="font-normal text-muted-2">· {groupCount(group)}</span>
             </h4>
 

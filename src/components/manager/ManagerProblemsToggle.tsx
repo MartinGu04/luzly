@@ -27,7 +27,7 @@ export function ManagerProblemsToggle({ current }: ManagerProblemsToggleProps) {
       >
         <TriangleAlert className="h-4 w-4 shrink-0" aria-hidden="true" strokeWidth={2} />
         <span>מציג רק בעיות</span>
-        <span className="mr-0.5 inline-flex items-center gap-1 border-r border-critical-foreground/30 pr-2 text-xs font-medium">
+        <span className="ms-0.5 inline-flex items-center gap-1 border-s border-critical-foreground/30 ps-2 text-xs font-medium">
           <X className="h-3.5 w-3.5" aria-hidden="true" strokeWidth={2} />
           כל המידע
         </span>

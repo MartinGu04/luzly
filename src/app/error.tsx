@@ -1,6 +1,7 @@
 "use client";
 
 import { RefreshCcw } from "lucide-react";
+import { Panel } from "@/components/ui/Panel";
 
 /**
  * The generic route-level error boundary. Catches anything thrown while
@@ -15,8 +16,8 @@ import { RefreshCcw } from "lucide-react";
 export default function GlobalError({ reset }: { error: Error & { digest?: string }; reset: () => void }) {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4 text-foreground">
-      <div className="w-full max-w-sm rounded-3xl bg-surface-2 p-7 text-center ring-1 ring-border-strong">
-        <h1 className="text-lg font-bold text-foreground">לא הצלחנו לטעון את הסידור כרגע</h1>
+      <Panel variant="hero" className="w-full max-w-sm text-center">
+        <h1 className="text-xl font-bold text-foreground">לא הצלחנו לטעון את הסידור כרגע</h1>
         <p className="mt-2 text-sm text-muted">אפשר לנסות שוב בעוד רגע.</p>
         <button
           type="button"
@@ -26,7 +27,7 @@ export default function GlobalError({ reset }: { error: Error & { digest?: strin
           <RefreshCcw className="h-4 w-4" aria-hidden="true" strokeWidth={1.75} />
           נסה שוב
         </button>
-      </div>
+      </Panel>
     </div>
   );
 }

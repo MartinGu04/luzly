@@ -45,13 +45,6 @@ describe("navItems — obsolete sync placeholder removed (PR #18)", () => {
     expect(navItems.some((item) => item.href === "/sync")).toBe(false);
   });
 
-  it('"תזכורות" remains as the existing disabled future placeholder', () => {
-    const reminders = navItems.find((item) => item.href === "/reminders");
-    expect(reminders).toBeDefined();
-    expect(reminders?.label).toBe("תזכורות");
-    expect(reminders?.enabled).toBe(false);
-  });
-
   it("every other enabled route is unchanged", () => {
     const enabledHrefs = navItems.filter((item) => item.enabled).map((item) => item.href);
     expect(enabledHrefs).toEqual(["/", "/schedule", "/duties", "/with-me", "/conflicts", "/manager"]);
@@ -62,6 +55,20 @@ describe("navItems — obsolete sync placeholder removed (PR #18)", () => {
     expect(manager?.managerOnly).toBe(true);
     expect(visibleNavItems(false).some((item) => item.href === "/manager")).toBe(false);
     expect(visibleNavItems(true).some((item) => item.href === "/manager")).toBe(true);
+  });
+});
+
+describe("navItems — \"תזכורות\" removed (sidebar/mobile-nav refinement pass)", () => {
+  it('"תזכורות" is not in navItems anymore -- that area now belongs to the notification bell flow', () => {
+    expect(navItems.some((item) => item.label === "תזכורות" || item.shortLabel === "תזכורות")).toBe(false);
+  });
+
+  it('"/reminders" is not in navItems anymore', () => {
+    expect(navItems.some((item) => item.href === "/reminders")).toBe(false);
+  });
+
+  it("no navItems entry is disabled -- every current item is a real, live link", () => {
+    expect(navItems.every((item) => item.enabled)).toBe(true);
   });
 });
 

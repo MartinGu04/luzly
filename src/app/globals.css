@@ -63,6 +63,19 @@
   --critical-foreground: #ffffff;
 
   --shadow-hero: 0 1px 0 0 rgba(255, 255, 255, 0.7) inset, 0 20px 45px -24px rgba(15, 23, 42, 0.18);
+
+  /* Login auth-card glass treatment (Design Pass PR #22 hardening) --
+     login-only, deliberately separate from --shadow-hero/--surface-*.
+     Literal per-theme values (not a --surface-2 color-mix) because
+     --surface-2/--surface-3 read as nearly identical tones in dark mode --
+     a formula over them left the card visually fused with its own
+     background instead of floating above it. */
+  --login-glass-bg: rgba(246, 245, 253, 0.82);
+  --login-glass-border: rgba(124, 58, 237, 0.24);
+  --shadow-login-glass:
+    0 1px 0 0 rgba(255, 255, 255, 0.75) inset,
+    0 30px 60px -28px rgba(30, 27, 75, 0.22),
+    0 10px 22px -14px rgba(124, 58, 237, 0.18);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -109,6 +122,13 @@
     --critical-foreground: #2b0a0a;
 
     --shadow-hero: 0 1px 0 0 rgba(255, 255, 255, 0.05) inset, 0 24px 60px -28px rgba(0, 0, 0, 0.65);
+
+    --login-glass-bg: rgba(46, 53, 87, 0.68);
+    --login-glass-border: rgba(139, 123, 245, 0.26);
+    --shadow-login-glass:
+      0 1px 0 0 rgba(255, 255, 255, 0.14) inset,
+      0 32px 64px -26px rgba(0, 0, 0, 0.55),
+      0 12px 28px -14px rgba(139, 123, 245, 0.28);
   }
 }
 
@@ -155,6 +175,47 @@
   --critical-foreground: #2b0a0a;
 
   --shadow-hero: 0 1px 0 0 rgba(255, 255, 255, 0.05) inset, 0 24px 60px -28px rgba(0, 0, 0, 0.65);
+
+  --login-glass-bg: rgba(46, 53, 87, 0.68);
+  --login-glass-border: rgba(139, 123, 245, 0.26);
+  --shadow-login-glass:
+    0 1px 0 0 rgba(255, 255, 255, 0.14) inset,
+    0 32px 64px -26px rgba(0, 0, 0, 0.55),
+    0 12px 28px -14px rgba(139, 123, 245, 0.28);
+}
+
+/* ---------------------------------------------------------------------- */
+/* Login mobile canvas -- fixed, theme-independent tokens (Design Pass    */
+/* PR #22 "immersive composition" pass). Below `lg`, the login route is   */
+/* intentionally ONE continuous dark branded canvas in BOTH app themes    */
+/* (see LoginAuthPanel/LoginVisualPanel) -- unlike every token above,     */
+/* these never change with data-theme/prefers-color-scheme. They are the */
+/* mobile-only glass-card/text treatment; `lg:` classes revert to the     */
+/* normal theme-responsive tokens for the approved desktop split.         */
+/* ---------------------------------------------------------------------- */
+:root {
+  --login-glass-bg-fixed: rgba(46, 53, 87, 0.68);
+  --login-glass-border-fixed: rgba(139, 123, 245, 0.26);
+  --shadow-login-glass-fixed:
+    0 1px 0 0 rgba(255, 255, 255, 0.14) inset,
+    0 32px 64px -26px rgba(0, 0, 0, 0.55),
+    0 12px 28px -14px rgba(139, 123, 245, 0.28);
+
+  --login-fg-fixed: #eef0f6;
+  --login-muted-fixed: #8b93a8;
+  --login-muted-2-fixed: #6b7590;
+
+  /* The mobile-only light/milky Google CTA (Design Pass PR #22
+     "immersive composition" pass, §6) -- deliberately the inverse of the
+     desktop violet CTA, for contrast against the always-dark mobile
+     canvas. Text is a fixed dark neutral (never --foreground, which would
+     flip to light text in dark app theme and vanish on this light button). */
+  --login-cta-fixed-bg: rgba(255, 255, 255, 0.96);
+  --login-cta-fixed-bg-hover: rgba(255, 255, 255, 1);
+  --login-cta-fixed-text: #23283a;
+  --shadow-login-cta-fixed: 0 12px 28px -10px rgba(139, 123, 245, 0.45);
+  --shadow-login-cta-fixed-hover: 0 18px 38px -12px rgba(139, 123, 245, 0.55);
+  --shadow-login-cta-fixed-active: 0 6px 16px -8px rgba(139, 123, 245, 0.42);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -170,6 +231,17 @@
 
   --surface-critical: color-mix(in srgb, var(--critical) 8%, var(--surface-1));
   --surface-critical-border: color-mix(in srgb, var(--critical) 30%, transparent);
+
+  /* Login auth-card ambient glow (Design Pass PR #22 hardening) -- the
+     card's own background/border are per-theme literals above (see
+     --login-glass-bg), but the soft glow behind the card works fine as one
+     relative formula in both themes since it's just --primary at low
+     opacity, and --primary is already violet/indigo in both themes. */
+  --login-glass-ambient: color-mix(in srgb, var(--primary) 24%, transparent);
+
+  --shadow-login-cta: 0 10px 24px -10px color-mix(in srgb, var(--primary) 55%, transparent);
+  --shadow-login-cta-hover: 0 16px 34px -12px color-mix(in srgb, var(--primary) 62%, transparent);
+  --shadow-login-cta-active: 0 6px 14px -8px color-mix(in srgb, var(--primary) 55%, transparent);
 }
 
 @theme inline {
@@ -303,12 +375,21 @@ body::after {
   100% { background-position: -200% 0; }
 }
 
+/* The login hero's "now" marker drifting a few pixels along the decorative
+   timeline -- deliberately tiny and slow, never a directional cue (RTL/LTR
+   agnostic, just a calm back-and-forth). */
+@keyframes login-now-drift {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(6px); }
+}
+
 .animate-pulse-dot { animation: pulse-dot 2.4s ease-in-out infinite; }
 .animate-pulse-ring { animation: pulse-ring 2.4s cubic-bezier(0.25, 0.6, 0.35, 1) infinite; }
 .animate-ambient-glow { animation: ambient-glow 7s ease-in-out infinite; }
 .animate-fade-up { animation: fade-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }
 .animate-breathe { animation: breathe 3.4s ease-in-out infinite; }
 .animate-issue-pulse { animation: issue-pulse 2.8s ease-in-out infinite; }
+.animate-login-now-drift { animation: login-now-drift 9s ease-in-out infinite; }
 
 .skeleton {
   background-image: linear-gradient(
@@ -328,6 +409,7 @@ body::after {
   .animate-fade-up,
   .animate-breathe,
   .animate-issue-pulse,
+  .animate-login-now-drift,
   .skeleton {
     animation: none !important;
   }
