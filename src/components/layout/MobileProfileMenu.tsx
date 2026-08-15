@@ -6,6 +6,8 @@ import Link from "next/link";
 import { Loader2, LogOut, Moon, Sun, UserCog } from "lucide-react";
 import { signOutAction } from "@/lib/auth/actions";
 import { Avatar } from "@/components/ui/Avatar";
+import { PushEndpointHiddenField } from "@/components/pwa/PushEndpointHiddenField";
+import { unsubscribeCurrentPushSubscription } from "@/lib/push/browserSubscription";
 import { useEffectiveTheme, useTheme } from "@/lib/theme/ThemeProvider";
 
 interface MobileProfileMenuProps {
@@ -26,6 +28,9 @@ function SignOutMenuItem() {
   return (
     <button
       type="submit"
+      onClick={() => {
+        unsubscribeCurrentPushSubscription();
+      }}
       role="menuitem"
       disabled={pending}
       aria-busy={pending}
@@ -158,6 +163,7 @@ export function MobileProfileMenu({ name, isManager, avatarUrl }: MobileProfileM
           <div className="my-1 h-px bg-border" />
 
           <form action={signOutAction}>
+            <PushEndpointHiddenField />
             <SignOutMenuItem />
           </form>
         </div>
