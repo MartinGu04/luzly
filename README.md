@@ -23,16 +23,29 @@ npm run typecheck    # tsc --noEmit
 npm test             # vitest
 ```
 
+## Environment setup
+
+Copy `.env.example` to `.env.local` and fill in real values -- see that
+file's own comments for what each variable is and its Supabase Auth /
+Web Push (VAPID) sections for the two auth-adjacent groups. Never commit
+`.env.local` or any file containing a real key.
+
+Web Push requires a one-time database migration too -- see
+`supabase/README.md`.
+
 ## Project layout
 
 ```
-src/app/          Next.js routes
-src/components/   UI (layout shell, generic building blocks)
-src/lib/google/   Google Sheets API access (not implemented)
-src/lib/parsers/  raw sheet data -> typed domain objects (not implemented)
-src/lib/domain/   scheduling business rules (not implemented)
-src/lib/sync/     sync/update status, caching (not implemented)
-src/lib/auth/     authentication & permissions (not implemented)
+src/app/              Next.js routes
+src/components/       UI (layout shell, generic building blocks, pwa/ notification UI)
+src/lib/google/       Google Sheets API access (read-only)
+src/lib/parsers/      raw sheet data -> typed domain objects
+src/lib/domain/       scheduling business rules
+src/lib/sync/         workbook-snapshot caching/freshness
+src/lib/auth/         authentication & permissions
+src/lib/push/         Web Push mechanics (VAPID, payload contract, send/classify)
+src/lib/notifications/ push subscription persistence (Supabase) + Server Actions
+supabase/migrations/  SQL migrations (currently: push_subscriptions)
 ```
 
 See `CLAUDE.md` for the permanent engineering rules.

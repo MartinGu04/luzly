@@ -1,5 +1,6 @@
 import { signOutAction } from "@/lib/auth/actions";
 import { Avatar } from "@/components/ui/Avatar";
+import { PushEndpointHiddenField } from "@/components/pwa/PushEndpointHiddenField";
 import { APP_VERSION } from "@/lib/config/appVersion";
 import { IdentityFooterSignOutButton } from "./IdentityFooterSignOutButton";
 import { IdentityFooterThemeAction } from "./IdentityFooterThemeAction";
@@ -31,6 +32,7 @@ export function IdentityFooter({ name, isManager, avatarUrl }: IdentityFooterPro
           {isManager ? <p className="text-xs text-sidebar-muted">מנהל/ת</p> : null}
         </div>
         <form action={signOutAction}>
+          <PushEndpointHiddenField />
           <IdentityFooterSignOutButton />
         </form>
       </div>

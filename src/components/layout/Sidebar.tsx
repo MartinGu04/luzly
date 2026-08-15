@@ -1,9 +1,9 @@
 "use client";
 
-import { Bell } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { BrandMark } from "@/components/brand/BrandMark";
+import { NotificationBell } from "@/components/pwa/NotificationBell";
 import { visibleNavItems } from "./nav-items";
 import { IdentityFooter } from "./IdentityFooter";
 
@@ -35,16 +35,7 @@ export function Sidebar({ person }: SidebarProps) {
     <aside className="sticky top-0 hidden h-dvh w-[320px] shrink-0 flex-col border-e border-sidebar-border bg-sidebar text-sidebar-foreground lg:flex">
       <div className="flex items-center justify-between gap-3 px-6 pt-8 pb-6">
         <BrandMark size="md" className="text-sidebar-foreground" />
-        <button
-          type="button"
-          disabled
-          aria-disabled="true"
-          aria-label="התראות (בקרוב)"
-          title="התראות -- בקרוב"
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sidebar-muted opacity-60 disabled:cursor-not-allowed"
-        >
-          <Bell className="h-[16px] w-[16px]" aria-hidden="true" strokeWidth={1.75} />
-        </button>
+        <NotificationBell variant="sidebar" />
       </div>
 
       <nav className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto px-4 py-2" aria-label="ניווט ראשי">

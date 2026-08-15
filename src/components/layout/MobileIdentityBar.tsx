@@ -1,5 +1,5 @@
-import { Bell } from "lucide-react";
 import { BrandMark } from "@/components/brand/BrandMark";
+import { NotificationBell } from "@/components/pwa/NotificationBell";
 import { MobileProfileMenu } from "./MobileProfileMenu";
 
 interface MobileIdentityBarProps {
@@ -23,9 +23,9 @@ interface MobileIdentityBarProps {
  * `IdentityFooter` is hidden and `BottomNav` has no identity slot) and
  * still the mobile entry point to `/manager` (the five-item `BottomNav`
  * deliberately never grows a sixth entry for it) -- both now reached via
- * the profile menu instead of being permanently visible. The Bell is the
- * same "future affordance, no fake data" convention as the desktop
- * `Sidebar`'s own bell: disabled, no unread count, no new route/fetch.
+ * the profile menu instead of being permanently visible. The Bell is now
+ * the real `NotificationBell` (PR #29) -- same spot the PR #28 "בקרוב"
+ * placeholder reserved for it.
  *
  * Uses only the already-safe name/isManager passed down from the app
  * shell (the same identity the request-scoped read model already
@@ -37,16 +37,7 @@ export function MobileIdentityBar({ name, isManager, avatarUrl }: MobileIdentity
       <BrandMark size="sm" className="text-foreground" />
 
       <div className="flex shrink-0 items-center gap-1.5">
-        <button
-          type="button"
-          disabled
-          aria-disabled="true"
-          aria-label="התראות (בקרוב)"
-          title="התראות -- בקרוב"
-          className="flex h-9 w-9 items-center justify-center rounded-lg text-muted opacity-60 disabled:cursor-not-allowed"
-        >
-          <Bell className="h-[16px] w-[16px]" aria-hidden="true" strokeWidth={1.75} />
-        </button>
+        <NotificationBell variant="mobile" />
         <MobileProfileMenu name={name} isManager={isManager} avatarUrl={avatarUrl} />
       </div>
     </div>
