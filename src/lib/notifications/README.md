@@ -45,3 +45,12 @@ renegotiate with the push service.
 Do not add this schema prematurely -- it doesn't simplify anything this
 PR needs, and the actual shape should be driven by the real categories
 the notification-rules PR ends up sending.
+
+## PR #30 -- the automatic notification engine
+
+`engine/` (server-only throughout) is the scheduled worker that turns
+Google Sheet operational data into automatic push notifications, sitting
+on top of this directory's PR #29 delivery primitives. See
+`engine/README.md` for the module layout, and
+`src/app/internal/notifications/tick/route.ts` for the secured entry
+point Supabase Cron calls every 5 minutes in production.

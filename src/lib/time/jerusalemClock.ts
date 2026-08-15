@@ -41,3 +41,53 @@ export function getJerusalemLocalNow(instant: Date = new Date()): LocalNow {
 
   return { date, minuteOfDay };
 }
+
+const offsetFormatter = new Intl.DateTimeFormat("en-US", {
+  timeZone: JERUSALEM_TIME_ZONE,
+  hourCycle: "h23",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+});
+
+/** Asia/Jerusalem's UTC offset (minutes, positive = ahead of UTC) in effect at `instant` -- DST-aware via the platform tz database, never a hard-coded +2/+3. */
+function jerusalemUtcOffsetMinutesAt(instant: Date): number {
+  const parts = offsetFormatter.formatToParts(instant);
+  const get = (type: Intl.DateTimeFormatPartTypes): number =>
+    Number(parts.find((candidate) => candidate.type === type)?.value ?? "0");
+
+  const asIfUtc = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute"), get("second"));
+  return Math.round((asIfUtc - instant.getTime()) / 60_000);
+}
+
+/**
+ * The reverse of `getJerusalemLocalNow`: given an Asia/Jerusalem civil
+ * date + clock time, returns the real UTC instant it refers to. Used
+ * exclusively for SCHEDULING future notification jobs at an explicit
+ * local time (PR #30 spec section 29: "never use the deployment
+ * server's implicit timezone for business decisions") -- never for
+ * interpreting `Event`/schedule data, which stays on the pure
+ * string/number `LocalNow`/`CalendarDate` arithmetic used everywhere
+ * else in `domain`.
+ *
+ * DST-safe via one correction pass: the offset is first estimated by
+ * treating the target wall-clock time as if it were already UTC, then
+ * re-derived from that corrected instant -- the only case this doesn't
+ * perfectly resolve is a wall-clock time that falls exactly inside a
+ * DST transition's skipped/repeated hour, an edge case far outside this
+ * app's actual reminder schedule (20:00/18:00/09:00, never near
+ * midnight).
+ */
+export function jerusalemLocalTimeToInstant(dateStr: string, hour: number, minute: number): Date {
+  const [year, month, day] = dateStr.split("-").map(Number);
+  const naiveUtcMs = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
+
+  const firstOffset = jerusalemUtcOffsetMinutesAt(new Date(naiveUtcMs));
+  const correctedMs = naiveUtcMs - firstOffset * 60_000;
+
+  const secondOffset = jerusalemUtcOffsetMinutesAt(new Date(correctedMs));
+  return new Date(naiveUtcMs - secondOffset * 60_000);
+}

@@ -62,14 +62,26 @@ describe("readSupabasePublicConfig", () => {
   });
 });
 
-describe("no service-role/secret key anywhere in the Supabase client layer", () => {
-  it("13. src/lib/supabase source never references a service-role or secret key", async () => {
+describe("no service-role/secret key anywhere in the Supabase client layer (except one documented PR #30 exception)", () => {
+  /**
+   * PR #29 established a zero-service-role convention across this whole
+   * directory. PR #30's notification worker is the one deliberate,
+   * documented exception: a Cron-triggered request has no logged-in
+   * user/session, so no RLS-scoped client can resolve recipients or
+   * write internal engine state -- see `serviceRoleClient.ts`'s own
+   * docstring and the migration comment it references. Every OTHER file
+   * in this directory must still hold to the original zero-service-role
+   * invariant exactly as before.
+   */
+  const SERVICE_ROLE_EXCEPTION_FILE = "serviceRoleClient.ts";
+
+  it("13. every src/lib/supabase file except the one documented service-role client never references a service-role or secret key", async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
     const dir = path.resolve(__dirname);
     const files = fs
       .readdirSync(dir)
-      .filter((name) => name.endsWith(".ts") && !name.endsWith(".test.ts"));
+      .filter((name) => name.endsWith(".ts") && !name.endsWith(".test.ts") && name !== SERVICE_ROLE_EXCEPTION_FILE);
 
     for (const file of files) {
       const content = fs.readFileSync(path.join(dir, file), "utf8");
@@ -78,5 +90,16 @@ describe("no service-role/secret key anywhere in the Supabase client layer", () 
       expect(content).not.toMatch(/service[_-]?role[_-]?key/i);
       expect(content).not.toMatch(/SUPABASE_SECRET/i);
     }
+  });
+
+  it("the one exception file is exactly serviceRoleClient.ts, is server-only, and is never a default export reused as a singleton", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const filePath = path.join(path.resolve(__dirname), SERVICE_ROLE_EXCEPTION_FILE);
+    expect(fs.existsSync(filePath)).toBe(true);
+
+    const content = fs.readFileSync(filePath, "utf8");
+    expect(content).toMatch(/^import "server-only";/);
+    expect(content).toMatch(/SUPABASE_SERVICE_ROLE_KEY/);
   });
 });
