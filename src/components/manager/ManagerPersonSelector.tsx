@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown, Loader2 } from "lucide-react";
 
 /** The only shape this client component ever receives -- never the full manager read model, never raw personnel rows. */
 export interface ManagerPersonOption {
@@ -51,6 +51,7 @@ export function ManagerPersonSelector({ people, selectedId }: ManagerPersonSelec
   const searchParams = useSearchParams();
   const [open, setOpen] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
+  const [isPending, startTransition] = useTransition();
 
   const containerRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -70,7 +71,9 @@ export function ManagerPersonSelector({ people, selectedId }: ManagerPersonSelec
     else params.set("person", value);
 
     const query = params.toString();
-    router.push(query ? `/manager?${query}` : "/manager");
+    startTransition(() => {
+      router.push(query ? `/manager?${query}` : "/manager");
+    });
   }
 
   function openMenu() {
@@ -176,12 +179,18 @@ export function ManagerPersonSelector({ people, selectedId }: ManagerPersonSelec
         aria-expanded={open}
         aria-controls={LISTBOX_ID}
         aria-label={`בחירת איש/אשת צוות: ${selectedOption.label}`}
+        aria-busy={isPending}
+        disabled={isPending}
         onClick={() => (open ? closeMenu(false) : openMenu())}
         onKeyDown={handleButtonKeyDown}
-        className="flex items-center gap-1.5 rounded-full bg-overlay-soft px-3.5 py-1.5 text-sm font-medium text-foreground ring-1 ring-border transition-colors duration-200 hover:bg-overlay-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        className="flex items-center gap-1.5 rounded-full bg-overlay-soft px-3.5 py-1.5 text-sm font-medium text-foreground ring-1 ring-border transition-colors duration-200 hover:bg-overlay-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-70"
       >
         <span className="max-w-[9rem] truncate">{selectedOption.label}</span>
-        <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-muted transition-transform duration-200 ${open ? "rotate-180" : ""}`} aria-hidden="true" strokeWidth={2} />
+        {isPending ? (
+          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted" aria-hidden="true" strokeWidth={2} />
+        ) : (
+          <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-muted transition-transform duration-200 ${open ? "rotate-180" : ""}`} aria-hidden="true" strokeWidth={2} />
+        )}
       </button>
 
       {open ? (

@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown, Loader2 } from "lucide-react";
 import type { ScheduleRosterOption } from "@/lib/readModels/scheduleTypes";
 
 export interface ScheduleManagerSelectorProps {
@@ -52,6 +52,7 @@ export function ScheduleManagerSelector({
   const searchParams = useSearchParams();
   const [open, setOpen] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
+  const [isPending, startTransition] = useTransition();
 
   const containerRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -74,7 +75,9 @@ export function ScheduleManagerSelector({
     else params.set("person", value);
 
     const query = params.toString();
-    router.push(query ? `/schedule?${query}` : "/schedule");
+    startTransition(() => {
+      router.push(query ? `/schedule?${query}` : "/schedule");
+    });
   }
 
   function openMenu() {
@@ -169,12 +172,18 @@ export function ScheduleManagerSelector({
           aria-expanded={open}
           aria-controls={LISTBOX_ID}
           aria-label={`מציג לוח עבור: ${selectedOption.label}`}
+          aria-busy={isPending}
+          disabled={isPending}
           onClick={() => (open ? closeMenu(false) : openMenu())}
           onKeyDown={handleButtonKeyDown}
-          className="flex items-center gap-1.5 rounded-full bg-overlay-soft px-3.5 py-1.5 text-sm font-medium text-foreground ring-1 ring-border transition-colors duration-200 hover:bg-overlay-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+          className="flex items-center gap-1.5 rounded-full bg-overlay-soft px-3.5 py-1.5 text-sm font-medium text-foreground ring-1 ring-border transition-colors duration-200 hover:bg-overlay-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-70"
         >
           <span className="max-w-[12rem] truncate">{selectedOption.label}</span>
-          <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-muted transition-transform duration-200 ${open ? "rotate-180" : ""}`} aria-hidden="true" strokeWidth={2} />
+          {isPending ? (
+            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted" aria-hidden="true" strokeWidth={2} />
+          ) : (
+            <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-muted transition-transform duration-200 ${open ? "rotate-180" : ""}`} aria-hidden="true" strokeWidth={2} />
+          )}
         </button>
 
         {open ? (
