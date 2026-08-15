@@ -12,8 +12,11 @@ interface CounterpartPanelProps {
 /**
  * "מי איתי?" -- contextual to one shift, never a standalone list of every
  * coworker's schedule. Renders only what the read model already scoped:
- * primary/shadow counterparts for this specific shift, plus its structural
- * coverage status. No colleague email/manager/capability data exists on
+ * the shift ROSTER (everyone else actually assigned to this shift, any
+ * role -- a same-role colleague, e.g. a second supervisor, shows up here
+ * too) plus the separate, independent structural coverage status (see
+ * `PersonalShiftContext` -- roster membership is never itself a coverage
+ * signal). No colleague email/manager/capability data exists on
  * `PersonalCounterpart` to begin with.
  */
 export function CounterpartPanel({ context, compact = false }: CounterpartPanelProps) {

@@ -323,6 +323,27 @@ describe("detectShiftTimingIssues — rules 2 & 3", () => {
     detectShiftTimingIssues([invalidShift], schedule);
     expect(invalidShift.rawValue).toBe("אחמ\"ש יום מ-99:99");
   });
+
+  it("2 supervisors + 0 technicians => valid, no missing-technician issue for either supervisor", () => {
+    const martin = supervisorShift({ personId: "p_martin" });
+    const ilay = supervisorShift({ personId: "p_ilay" });
+    expect(detectShiftTimingIssues([martin, ilay], schedule)).toEqual([]);
+  });
+
+  it("1 supervisor + 0 technicians retains the existing missing-coverage behavior", () => {
+    const martin = supervisorShift({ personId: "p_martin" });
+    const issues = detectShiftTimingIssues([martin], schedule);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toMatchObject({ reason: "shift_coverage_missing", targetEvent: martin });
+  });
+
+  it("the multi-supervisor waiver is never symmetric: 2 technicians + 0 supervisors still raises an issue for each", () => {
+    const techA = technicianShift({ personId: "p_a" });
+    const techB = technicianShift({ personId: "p_b" });
+    const issues = detectShiftTimingIssues([techA, techB], schedule);
+    expect(issues).toHaveLength(2);
+    expect(issues.every((issue) => issue.reason === "shift_coverage_missing")).toBe(true);
+  });
 });
 
 describe("detectCapabilityMismatchIssues — rule 4", () => {

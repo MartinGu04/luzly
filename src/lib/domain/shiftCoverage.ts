@@ -8,6 +8,33 @@ import {
 
 export type CoverageStatus = "full" | "partial" | "missing" | "not_evaluable";
 
+/** A shift is adequately supervisor-staffed on its own once this many distinct supervisors cover it -- see `hasMultiSupervisorStaffing`. */
+const MULTI_SUPERVISOR_WAIVER_MIN_COUNT = 2;
+
+/**
+ * Product rule: two (or more) supervisors on the same shift are, by
+ * themselves, sufficient staffing even with zero technicians -- a
+ * technician-missing verdict is waived wherever this is true (see
+ * `analyzeShiftCounterparts` and `analyzeUnitShiftCoverage`). Deliberately
+ * NOT symmetric: no rule waives a missing SUPERVISOR just because there are
+ * 2+ technicians -- that has never been defined as valid, so it stays
+ * exactly as invalid as before.
+ *
+ * Counts DISTINCT people (by `personId`) among `events` with
+ * `role === "supervisor"` and `shadow === false` -- a shadow/handover
+ * supervisor is never counted toward this, matching every other coverage
+ * computation in this domain. This is a staffing/headcount question (who is
+ * actually assigned), not a re-run of the interval math above.
+ */
+export function hasMultiSupervisorStaffing(events: readonly Event[]): boolean {
+  const supervisorPeople = new Set(
+    events
+      .filter((event) => event.category === "shift" && event.role === "supervisor" && !event.shadow)
+      .map((event) => event.personId),
+  );
+  return supervisorPeople.size >= MULTI_SUPERVISOR_WAIVER_MIN_COUNT;
+}
+
 /**
  * "מי איתי?" — who else is on this shift, and does the opposite role fully
  * cover it. Structural coverage only: certainty (confirmed/tentative) is
@@ -28,7 +55,13 @@ export interface ShiftCounterpartAnalysis {
   targetInterval: MinuteInterval | null;
   /** Merged, clipped-to-target intervals actually covered by primary counterparts. */
   coveredIntervals: MinuteInterval[];
-  /** Gaps within the target interval not covered by any primary counterpart. */
+  /**
+   * Gaps within the target interval not covered by any primary counterpart
+   * -- always empty once the multi-supervisor staffing waiver applies (see
+   * `hasMultiSupervisorStaffing`), even though `primaryCounterparts` itself
+   * still honestly reports zero counterparts; only the VERDICT is waived,
+   * never the underlying structural fact.
+   */
   missingIntervals: MinuteInterval[];
   coverageStatus: CoverageStatus;
 }
@@ -103,8 +136,24 @@ export function analyzeShiftCounterparts(
 
   const coveredIntervals = mergeIntervals(clippedPrimaryIntervals);
   const missingIntervals = computeMissingIntervals(targetInterval, coveredIntervals);
-  const coverageStatus: CoverageStatus =
+  let coverageStatus: CoverageStatus =
     missingIntervals.length === 0 ? "full" : coveredIntervals.length === 0 ? "missing" : "partial";
+  let effectiveMissingIntervals = missingIntervals;
+
+  // The multi-supervisor staffing waiver (see `hasMultiSupervisorStaffing`)
+  // only ever applies from a SUPERVISOR target's own perspective (its
+  // counterpart role is technician) against a fully-missing technician
+  // counterpart -- never a partial gap, and never the reverse direction.
+  if (
+    coverageStatus === "missing" &&
+    target.role === "supervisor" &&
+    hasMultiSupervisorStaffing(
+      events.filter((event) => event.date === target.date && event.period === target.period),
+    )
+  ) {
+    coverageStatus = "full";
+    effectiveMissingIntervals = [];
+  }
 
   return {
     target,
@@ -114,8 +163,57 @@ export function analyzeShiftCounterparts(
     targetIntervalResolution,
     targetInterval,
     coveredIntervals,
-    missingIntervals,
+    missingIntervals: effectiveMissingIntervals,
     coverageStatus,
+  };
+}
+
+/**
+ * "who else is actually on this shift with me?" -- roster/companionship
+ * context, deliberately SEPARATE from the coverage-validity question
+ * `analyzeShiftCounterparts` answers. Every OTHER person's shift Event
+ * sharing the same `date`+`period` as `target`, ANY role (same-role
+ * coworkers included -- e.g. two supervisors on the same shift), always
+ * excluding every one of the target's OWN Events (by `personId`, so a
+ * split-shift target with two of its own Events never lists itself).
+ * `role` is preserved on every returned Event so the UI can label who's
+ * טכנאי vs. אחמ״ש.
+ *
+ * This is never itself a coverage/adequacy signal -- who's on the roster
+ * says nothing about whether staffing is acceptable (see
+ * `analyzeShiftCounterparts.coverageStatus` /
+ * `analyzeUnitShiftCoverage.coverageStatus` for that separate question,
+ * including the multi-supervisor staffing waiver). A person appearing
+ * more than once (e.g. a genuine split-shift colleague with two Events)
+ * is never deduplicated away here -- each distinct Event is a real
+ * structural fact; the read-model projection layer decides how to present
+ * that as one row per person.
+ */
+export interface ShiftRosterAnalysis {
+  target: Event;
+  /** Every other person's same-date/same-period shift Event, any role, shadow === false. */
+  primaryRoster: Event[];
+  /** Same, but shadow === true -- never counted as primary coverage, still shown separately. */
+  shadowRoster: Event[];
+}
+
+export function buildShiftRoster(target: Event, events: readonly Event[]): ShiftRosterAnalysis {
+  if (target.category !== "shift") {
+    return { target, primaryRoster: [], shadowRoster: [] };
+  }
+
+  const candidates = events.filter(
+    (event) =>
+      event.category === "shift" &&
+      event.date === target.date &&
+      event.period === target.period &&
+      event.personId !== target.personId,
+  );
+
+  return {
+    target,
+    primaryRoster: candidates.filter((event) => !event.shadow),
+    shadowRoster: candidates.filter((event) => event.shadow),
   };
 }
 
@@ -261,26 +359,36 @@ function toRoleCoverageDiagnostic(role: RoleCoverageResult): RoleCoverageDiagnos
  * interval and merges them.
  *
  * PRECEDENCE (checked in this order):
- * 1. If EITHER role is provably zero coverage (`isProvablyZeroCoverage`
- *    — no non-shadow Events for that role at all, i.e. genuinely absent,
- *    not merely unresolved), the group is definitely `"missing"` — even
- *    if the OTHER role is ambiguous, partially covered, or even fully
- *    covered. `missingIntervals` is the ENTIRE canonical window in this
- *    case (a narrower gap in the other, structurally irrelevant role
- *    would understate how incomplete the group actually is). Proven
- *    absence always beats uncertainty or partial coverage elsewhere.
- * 2. Otherwise, if either role is `ambiguous` (it has an Event, but at
+ * 1. The multi-supervisor staffing waiver (`hasMultiSupervisorStaffing`):
+ *    if technician coverage is provably zero BUT supervisor coverage is
+ *    clean (fully resolved, no gap, not ambiguous) AND 2+ distinct
+ *    supervisors are staffing the shift, the group is treated as if
+ *    technician coverage were `"full"` -- this is a deliberate product
+ *    rule (two supervisors alone are sufficient staffing), never a second
+ *    coverage algorithm. Never the reverse direction (a missing supervisor
+ *    is never waived by extra technicians).
+ * 2. Otherwise, if EITHER role is provably zero coverage
+ *    (`isProvablyZeroCoverage` — no non-shadow Events for that role at
+ *    all, i.e. genuinely absent, not merely unresolved), the group is
+ *    definitely `"missing"` — even if the OTHER role is ambiguous,
+ *    partially covered, or even fully covered. `missingIntervals` is the
+ *    ENTIRE canonical window in this case (a narrower gap in the other,
+ *    structurally irrelevant role would understate how incomplete the
+ *    group actually is). Proven absence always beats uncertainty or
+ *    partial coverage elsewhere.
+ * 3. Otherwise, if either role is `ambiguous` (it has an Event, but at
  *    least one is unresolved/invalid AND resolved coverage alone doesn't
  *    already prove that role's window is fully covered), the group is
  *    `"not_evaluable"` — an unresolved/invalid Event never fabricates a
  *    "missing" gap where the truth is genuinely unknown. An extra
  *    unresolved duplicate Event never invalidates an already-provably-full
  *    result for that role, though (see `analyzeRoleCoverage`).
- * 3. Otherwise both roles are cleanly resolved (possibly with gaps): the
+ * 4. Otherwise both roles are cleanly resolved (possibly with gaps): the
  *    group is `"full"` only when BOTH roles structurally cover the entire
  *    canonical window; otherwise `"partial"`, with `missingIntervals`
  *    being the merged union of both roles' own gaps (a time is "missing"
- *    for the group if EITHER required role isn't covered there).
+ *    for the group if EITHER required role isn't covered there) -- the
+ *    waived technician gap (step 1) never contributes to this union.
  */
 export function analyzeUnitShiftCoverage(
   period: EventPeriod,
@@ -299,8 +407,17 @@ export function analyzeUnitShiftCoverage(
 
   const technician = analyzeRoleCoverage("technician", groupEvents, schedule, canonical);
   const supervisor = analyzeRoleCoverage("supervisor", groupEvents, schedule, canonical);
+
+  const technicianWaived =
+    isProvablyZeroCoverage(technician) &&
+    !supervisor.ambiguous &&
+    supervisor.missing.length === 0 &&
+    hasMultiSupervisorStaffing(groupEvents);
+
   const roleCoverage = {
-    technician: toRoleCoverageDiagnostic(technician),
+    technician: technicianWaived
+      ? ({ status: "full", missingIntervals: [] } satisfies RoleCoverageDiagnostic)
+      : toRoleCoverageDiagnostic(technician),
     supervisor: toRoleCoverageDiagnostic(supervisor),
   };
 
@@ -311,8 +428,8 @@ export function analyzeUnitShiftCoverage(
   // window in this case: a partial gap in the other (irrelevant) role
   // would understate how incomplete the group actually is. Per-role
   // diagnostics still reflect each role's OWN true status, independent of
-  // this overall shortcut.
-  if (isProvablyZeroCoverage(technician) || isProvablyZeroCoverage(supervisor)) {
+  // this overall shortcut. Skipped entirely once the waiver above applies.
+  if (!technicianWaived && (isProvablyZeroCoverage(technician) || isProvablyZeroCoverage(supervisor))) {
     return { coverageStatus: "missing", missingIntervals: [canonical], roleCoverage };
   }
 
@@ -320,7 +437,10 @@ export function analyzeUnitShiftCoverage(
     return { coverageStatus: "not_evaluable", missingIntervals: [], roleCoverage };
   }
 
-  const missingIntervals = mergeIntervals([...technician.missing, ...supervisor.missing]);
+  const missingIntervals = mergeIntervals([
+    ...(technicianWaived ? [] : technician.missing),
+    ...supervisor.missing,
+  ]);
   const coverageStatus: CoverageStatus = missingIntervals.length === 0 ? "full" : "partial";
 
   return { coverageStatus, missingIntervals, roleCoverage };

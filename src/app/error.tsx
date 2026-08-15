@@ -15,7 +15,7 @@ import { Panel } from "@/components/ui/Panel";
  */
 export default function GlobalError({ reset }: { error: Error & { digest?: string }; reset: () => void }) {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4 text-foreground">
+    <div className="flex min-h-dvh items-center justify-center bg-background px-4 text-foreground">
       <Panel variant="hero" className="w-full max-w-sm text-center">
         <h1 className="text-xl font-bold text-foreground">לא הצלחנו לטעון את הסידור כרגע</h1>
         <p className="mt-2 text-sm text-muted">אפשר לנסות שוב בעוד רגע.</p>

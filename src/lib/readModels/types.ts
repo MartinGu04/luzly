@@ -80,7 +80,10 @@ export interface PersonalNextAssignmentGroup {
 /**
  * Minimal colleague projection for "who is with me?" — deliberately
  * excludes email, manager flag, technician/supervisor capability flags,
- * personnelType, unrelated Events, and sourceSheet/sourceCell.
+ * personnelType, unrelated Events, and sourceSheet/sourceCell. `role` is
+ * ANY role, not necessarily the opposite of the viewer's own -- a same-role
+ * colleague (e.g. a second supervisor on the same shift) is a legitimate
+ * roster entry here, not filtered out (see `PersonalShiftContext`).
  */
 export interface PersonalCounterpart {
   personId: string;
@@ -93,7 +96,18 @@ export interface PersonalCounterpart {
   endTimeOverride: string | null;
 }
 
-/** Counterpart context for one of the authenticated person's own shifts. */
+/**
+ * Roster + coverage context for one of the authenticated person's own
+ * shifts -- two deliberately separate questions living side by side:
+ * `primaryCounterparts`/`shadowCounterparts` answer "who else is actually
+ * on this shift with me?" (`buildShiftRoster` — ANY role, same-role
+ * colleagues included, never itself a coverage signal), while
+ * `coverageStatus`/`missingIntervals` answer "is staffing adequate?"
+ * (`analyzeShiftCounterparts` — specifically the OPPOSITE role, including
+ * the multi-supervisor staffing waiver). Never infer one from the other:
+ * a shift can legitimately show a same-role-only roster (e.g. two
+ * supervisors, no technician) alongside a `"full"` `coverageStatus`.
+ */
 export interface PersonalShiftContext {
   date: string;
   period: EventPeriod;
