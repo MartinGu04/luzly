@@ -4,14 +4,11 @@ import type { ScheduleParams } from "./schedule";
 
 const getRequestPersonalSchedule = vi.fn();
 const getAuthenticatedIdentity = vi.fn();
-const fetchRawWorkbookSnapshot = vi.fn();
+const getWorkbookSnapshot = vi.fn();
 
 vi.mock("./getRequestPersonalSchedule", () => ({ getRequestPersonalSchedule }));
 vi.mock("@/lib/auth/currentUser", () => ({ getAuthenticatedIdentity }));
-vi.mock("@/lib/google", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/google")>("@/lib/google");
-  return { ...actual, fetchRawWorkbookSnapshot };
-});
+vi.mock("@/lib/sync", () => ({ getWorkbookSnapshot }));
 
 const { loadScheduleReadModel } = await import("./schedule");
 
@@ -80,14 +77,14 @@ const DEFAULT_PARAMS: ScheduleParams = { rawMonth: null, personId: null };
 beforeEach(() => {
   getRequestPersonalSchedule.mockReset();
   getAuthenticatedIdentity.mockReset();
-  fetchRawWorkbookSnapshot.mockReset();
+  getWorkbookSnapshot.mockReset();
   getAuthenticatedIdentity.mockResolvedValue({
     status: "authenticated",
     userId: "u1",
     email: "martin@example.invalid",
     avatarUrl: null,
   });
-  fetchRawWorkbookSnapshot.mockResolvedValue(managerSnapshot());
+  getWorkbookSnapshot.mockResolvedValue(managerSnapshot());
 });
 
 describe("loadScheduleReadModel — auth pass-through states", () => {
@@ -95,7 +92,7 @@ describe("loadScheduleReadModel — auth pass-through states", () => {
     getRequestPersonalSchedule.mockResolvedValue({ status: "unauthenticated" });
     const result = await loadScheduleReadModel(DEFAULT_PARAMS);
     expect(result).toEqual({ status: "unauthenticated" });
-    expect(fetchRawWorkbookSnapshot).not.toHaveBeenCalled();
+    expect(getWorkbookSnapshot).not.toHaveBeenCalled();
   });
 
   it("missing_email: no manager fetch", async () => {
@@ -124,7 +121,7 @@ describe("loadScheduleReadModel — auth pass-through states", () => {
     });
     const result = await loadScheduleReadModel(DEFAULT_PARAMS);
     expect(result).toEqual({ status: "configuration_error", message: "Missing shift start time configuration." });
-    expect(fetchRawWorkbookSnapshot).not.toHaveBeenCalled();
+    expect(getWorkbookSnapshot).not.toHaveBeenCalled();
   });
 });
 
@@ -132,7 +129,7 @@ describe("loadScheduleReadModel — normal (non-manager) user (PR #24 §3)", () 
   it("never fetches manager-wide data, always returns self, ignores any requested person", async () => {
     getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(false));
     const result = await loadScheduleReadModel({ rawMonth: null, personId: "all" });
-    expect(fetchRawWorkbookSnapshot).not.toHaveBeenCalled();
+    expect(getWorkbookSnapshot).not.toHaveBeenCalled();
     expect(result.status).toBe("ok");
     if (result.status === "ok") {
       expect(result.model.manager).toBeNull();
@@ -144,7 +141,7 @@ describe("loadScheduleReadModel — normal (non-manager) user (PR #24 §3)", () 
   it("still returns self even when a specific colleague id is requested", async () => {
     getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(false));
     const result = await loadScheduleReadModel({ rawMonth: null, personId: "p_someone_else" });
-    expect(fetchRawWorkbookSnapshot).not.toHaveBeenCalled();
+    expect(getWorkbookSnapshot).not.toHaveBeenCalled();
     expect(result.status).toBe("ok");
     if (result.status === "ok") {
       expect(result.model.perspective).toBe("self");
@@ -157,8 +154,8 @@ describe("loadScheduleReadModel — manager authorization / fetch scope (PR #24 
   it("manager: fetches exactly personnel+schedule+settings -- never potentialH1/H2", async () => {
     getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(true));
     await loadScheduleReadModel(DEFAULT_PARAMS);
-    expect(fetchRawWorkbookSnapshot).toHaveBeenCalledTimes(1);
-    expect(fetchRawWorkbookSnapshot).toHaveBeenCalledWith(["personnel", "schedule", "settings"]);
+    expect(getWorkbookSnapshot).toHaveBeenCalledTimes(1);
+    expect(getWorkbookSnapshot).toHaveBeenCalledWith(["personnel", "schedule", "settings"]);
   });
 
   it("a normal user only ever calls getRequestPersonalSchedule once", async () => {
@@ -176,12 +173,12 @@ describe("loadScheduleReadModel — manager authorization / fetch scope (PR #24 
   it("a non-manager never triggers the manager-wide fetch either, even via this loader's manager branch check", async () => {
     getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(false));
     await loadScheduleReadModel(DEFAULT_PARAMS);
-    expect(fetchRawWorkbookSnapshot).not.toHaveBeenCalled();
+    expect(getWorkbookSnapshot).not.toHaveBeenCalled();
   });
 
   it("fresh manager snapshot no longer marks the person as manager -> fails closed to the self-only experience, not an error page", async () => {
     getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(true));
-    fetchRawWorkbookSnapshot.mockResolvedValue(
+    getWorkbookSnapshot.mockResolvedValue(
       managerSnapshot({
         personnel: [
           ["שם", "מייל", "מנהל"],
@@ -199,7 +196,7 @@ describe("loadScheduleReadModel — manager authorization / fetch scope (PR #24 
 
   it("an invalid/missing shift configuration in the manager fetch fails closed as configuration_error", async () => {
     getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(true));
-    fetchRawWorkbookSnapshot.mockResolvedValue({
+    getWorkbookSnapshot.mockResolvedValue({
       fetchedAt: "2026-08-13T08:00:00.000Z",
       sheets: [personnelSheet(MANAGER_PERSONNEL_ROWS), scheduleSheet([]), settingsSheet([["הגדרה", "ערך"]])],
     });

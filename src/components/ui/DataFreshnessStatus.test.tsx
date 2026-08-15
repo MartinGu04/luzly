@@ -5,9 +5,14 @@ const refresh = vi.fn();
 const push = vi.fn();
 const replace = vi.fn();
 const useRouter = vi.fn(() => ({ refresh, push, replace }));
+const refreshWorkbookSnapshotAction = vi.fn(() => Promise.resolve());
 
 vi.mock("next/navigation", () => ({
   useRouter: () => useRouter(),
+}));
+
+vi.mock("@/lib/sync/actions", () => ({
+  refreshWorkbookSnapshotAction: () => refreshWorkbookSnapshotAction(),
 }));
 
 const { DataFreshnessStatus } = await import("./DataFreshnessStatus");
@@ -21,6 +26,8 @@ beforeEach(() => {
   refresh.mockReset();
   push.mockReset();
   replace.mockReset();
+  refreshWorkbookSnapshotAction.mockReset();
+  refreshWorkbookSnapshotAction.mockResolvedValue(undefined);
 });
 
 describe("DataFreshnessStatus — hydration-safe initial render", () => {
@@ -57,25 +64,56 @@ describe("DataFreshnessStatus — refresh control", () => {
     expect(screen.getByRole("button", { name: "רענון נתונים" })).toBeInTheDocument();
   });
 
-  it("clicking refresh calls router.refresh(), never push/replace (no navigation, no URL change)", () => {
+  it("clicking refresh invalidates the workbook-snapshot cache BEFORE calling router.refresh(), never push/replace", async () => {
     render(<DataFreshnessStatus fetchedAt={new Date().toISOString()} />);
-    fireEvent.click(screen.getByRole("button", { name: "רענון נתונים" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "רענון נתונים" }));
+    });
+    expect(refreshWorkbookSnapshotAction).toHaveBeenCalledTimes(1);
     expect(refresh).toHaveBeenCalledTimes(1);
+    expect(refreshWorkbookSnapshotAction.mock.invocationCallOrder[0]).toBeLessThan(
+      refresh.mock.invocationCallOrder[0],
+    );
     expect(push).not.toHaveBeenCalled();
     expect(replace).not.toHaveBeenCalled();
   });
 
-  it("never performs a direct fetch/XHR call itself", () => {
+  it("never performs a direct fetch/XHR call itself", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     render(<DataFreshnessStatus fetchedAt={new Date().toISOString()} />);
-    fireEvent.click(screen.getByRole("button", { name: "רענון נתונים" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "רענון נתונים" }));
+    });
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
   });
 
-  it("does not show a fake success message immediately after clicking (no new fetchedAt has arrived yet)", () => {
+  it("shows the pending 'מרענן…' state while the cache-invalidation action is still in flight", async () => {
+    let resolveAction: () => void = () => {};
+    refreshWorkbookSnapshotAction.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        resolveAction = resolve;
+      }),
+    );
     render(<DataFreshnessStatus fetchedAt={new Date().toISOString()} />);
     fireEvent.click(screen.getByRole("button", { name: "רענון נתונים" }));
+
+    const pendingButton = await screen.findByRole("button", { name: "רענון נתונים" });
+    expect(pendingButton).toBeDisabled();
+    expect(screen.getByText("מרענן…")).toBeInTheDocument();
+    expect(refresh).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveAction();
+    });
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not show a fake success message immediately after clicking (no new fetchedAt has arrived yet)", async () => {
+    render(<DataFreshnessStatus fetchedAt={new Date().toISOString()} />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "רענון נתונים" }));
+    });
     expect(screen.queryByText(/הרענון הצליח/)).toBeNull();
   });
 

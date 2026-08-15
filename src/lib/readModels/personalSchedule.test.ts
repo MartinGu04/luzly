@@ -2,14 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RawSheet } from "@/lib/google";
 
 const getAuthenticatedIdentity = vi.fn();
-const fetchRawWorkbookSnapshot = vi.fn();
+const getWorkbookSnapshot = vi.fn();
 const getJerusalemLocalNow = vi.fn();
 
 vi.mock("@/lib/auth/currentUser", () => ({ getAuthenticatedIdentity }));
-vi.mock("@/lib/google", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/google")>("@/lib/google");
-  return { ...actual, fetchRawWorkbookSnapshot };
-});
+vi.mock("@/lib/sync", () => ({ getWorkbookSnapshot }));
 vi.mock("@/lib/time/jerusalemClock", () => ({ getJerusalemLocalNow }));
 
 const { loadPersonalScheduleReadModel } = await import("./personalSchedule");
@@ -50,7 +47,7 @@ function validSnapshot() {
 describe("loadPersonalScheduleReadModel", () => {
   beforeEach(() => {
     getAuthenticatedIdentity.mockReset();
-    fetchRawWorkbookSnapshot.mockReset();
+    getWorkbookSnapshot.mockReset();
     getJerusalemLocalNow.mockReset();
     getJerusalemLocalNow.mockReturnValue({ date: "2026-08-12", minuteOfDay: 600 });
   });
@@ -59,14 +56,14 @@ describe("loadPersonalScheduleReadModel", () => {
     getAuthenticatedIdentity.mockResolvedValue({ status: "unauthenticated" });
     const result = await loadPersonalScheduleReadModel();
     expect(result).toEqual({ status: "unauthenticated" });
-    expect(fetchRawWorkbookSnapshot).not.toHaveBeenCalled();
+    expect(getWorkbookSnapshot).not.toHaveBeenCalled();
   });
 
   it("9. returns missing_email without fetching anything", async () => {
     getAuthenticatedIdentity.mockResolvedValue({ status: "missing_email", userId: "u1" });
     const result = await loadPersonalScheduleReadModel();
     expect(result).toEqual({ status: "missing_email" });
-    expect(fetchRawWorkbookSnapshot).not.toHaveBeenCalled();
+    expect(getWorkbookSnapshot).not.toHaveBeenCalled();
   });
 
   it("1 & 2. requests only personnel + schedule + settings, in a single batch call", async () => {
@@ -76,12 +73,12 @@ describe("loadPersonalScheduleReadModel", () => {
       email: "dani@example.invalid",
       avatarUrl: null,
     });
-    fetchRawWorkbookSnapshot.mockResolvedValue(validSnapshot());
+    getWorkbookSnapshot.mockResolvedValue(validSnapshot());
 
     await loadPersonalScheduleReadModel();
 
-    expect(fetchRawWorkbookSnapshot).toHaveBeenCalledTimes(1);
-    expect(fetchRawWorkbookSnapshot).toHaveBeenCalledWith(["personnel", "schedule", "settings"]);
+    expect(getWorkbookSnapshot).toHaveBeenCalledTimes(1);
+    expect(getWorkbookSnapshot).toHaveBeenCalledWith(["personnel", "schedule", "settings"]);
   });
 
   it("3. never requests the potential sheets", async () => {
@@ -91,11 +88,11 @@ describe("loadPersonalScheduleReadModel", () => {
       email: "dani@example.invalid",
       avatarUrl: null,
     });
-    fetchRawWorkbookSnapshot.mockResolvedValue(validSnapshot());
+    getWorkbookSnapshot.mockResolvedValue(validSnapshot());
 
     await loadPersonalScheduleReadModel();
 
-    const requestedKeys = fetchRawWorkbookSnapshot.mock.calls[0][0];
+    const requestedKeys = getWorkbookSnapshot.mock.calls[0][0];
     expect(requestedKeys).not.toContain("potentialH1");
     expect(requestedKeys).not.toContain("potentialH2");
   });
@@ -107,7 +104,7 @@ describe("loadPersonalScheduleReadModel", () => {
       email: "dani@example.invalid",
       avatarUrl: null,
     });
-    fetchRawWorkbookSnapshot.mockResolvedValue(validSnapshot());
+    getWorkbookSnapshot.mockResolvedValue(validSnapshot());
 
     const result = await loadPersonalScheduleReadModel();
 
@@ -125,7 +122,7 @@ describe("loadPersonalScheduleReadModel", () => {
       email: "stranger@example.invalid",
       avatarUrl: null,
     });
-    fetchRawWorkbookSnapshot.mockResolvedValue(validSnapshot());
+    getWorkbookSnapshot.mockResolvedValue(validSnapshot());
 
     const result = await loadPersonalScheduleReadModel();
     expect(result).toEqual({ status: "unmapped" });
@@ -138,7 +135,7 @@ describe("loadPersonalScheduleReadModel", () => {
       email: "shared@example.invalid",
       avatarUrl: null,
     });
-    fetchRawWorkbookSnapshot.mockResolvedValue({
+    getWorkbookSnapshot.mockResolvedValue({
       fetchedAt: "2026-08-12T08:00:00.000Z",
       sheets: [
         scheduleSheet([]),
@@ -162,7 +159,7 @@ describe("loadPersonalScheduleReadModel", () => {
       email: "stranger@example.invalid",
       avatarUrl: null,
     });
-    fetchRawWorkbookSnapshot.mockResolvedValue(validSnapshot());
+    getWorkbookSnapshot.mockResolvedValue(validSnapshot());
 
     const result = await loadPersonalScheduleReadModel();
     expect(result).not.toHaveProperty("model");
@@ -175,7 +172,7 @@ describe("loadPersonalScheduleReadModel", () => {
       email: "dani@example.invalid",
       avatarUrl: null,
     });
-    fetchRawWorkbookSnapshot.mockResolvedValue({
+    getWorkbookSnapshot.mockResolvedValue({
       fetchedAt: "2026-08-12T08:00:00.000Z",
       sheets: [scheduleSheet([]), settingsSheet([["הגדרה", "ערך"]]), personnelSheet(PERSONNEL_ROWS)],
     });
@@ -191,7 +188,7 @@ describe("loadPersonalScheduleReadModel", () => {
       email: "dani@example.invalid",
       avatarUrl: null,
     });
-    fetchRawWorkbookSnapshot.mockResolvedValue(validSnapshot());
+    getWorkbookSnapshot.mockResolvedValue(validSnapshot());
 
     const result = await loadPersonalScheduleReadModel();
     expect(JSON.stringify(result)).not.toContain("dani@example.invalid");
@@ -201,7 +198,7 @@ describe("loadPersonalScheduleReadModel", () => {
 describe("loadPersonalScheduleReadModel — avatarUrl (presentation-only, sourced only from the auth identity)", () => {
   beforeEach(() => {
     getAuthenticatedIdentity.mockReset();
-    fetchRawWorkbookSnapshot.mockReset();
+    getWorkbookSnapshot.mockReset();
     getJerusalemLocalNow.mockReset();
     getJerusalemLocalNow.mockReturnValue({ date: "2026-08-12", minuteOfDay: 600 });
   });
@@ -213,7 +210,7 @@ describe("loadPersonalScheduleReadModel — avatarUrl (presentation-only, source
       email: "dani@example.invalid",
       avatarUrl: "https://lh3.googleusercontent.com/a/photo.jpg",
     });
-    fetchRawWorkbookSnapshot.mockResolvedValue(validSnapshot());
+    getWorkbookSnapshot.mockResolvedValue(validSnapshot());
 
     const result = await loadPersonalScheduleReadModel();
 
@@ -230,7 +227,7 @@ describe("loadPersonalScheduleReadModel — avatarUrl (presentation-only, source
       email: "dani@example.invalid",
       avatarUrl: null,
     });
-    fetchRawWorkbookSnapshot.mockResolvedValue(validSnapshot());
+    getWorkbookSnapshot.mockResolvedValue(validSnapshot());
 
     const result = await loadPersonalScheduleReadModel();
 
@@ -247,7 +244,7 @@ describe("loadPersonalScheduleReadModel — avatarUrl (presentation-only, source
       email: "dani@example.invalid",
       avatarUrl: "https://lh3.googleusercontent.com/a/photo.jpg",
     });
-    fetchRawWorkbookSnapshot.mockResolvedValue({
+    getWorkbookSnapshot.mockResolvedValue({
       fetchedAt: "2026-08-12T08:00:00.000Z",
       sheets: [scheduleSheet([]), settingsSheet([["הגדרה", "ערך"]]), personnelSheet(PERSONNEL_ROWS)],
     });
@@ -267,7 +264,7 @@ describe("loadPersonalScheduleReadModel — avatarUrl (presentation-only, source
       email: "stranger@example.invalid",
       avatarUrl: "https://lh3.googleusercontent.com/a/photo.jpg",
     });
-    fetchRawWorkbookSnapshot.mockResolvedValue(validSnapshot());
+    getWorkbookSnapshot.mockResolvedValue(validSnapshot());
 
     const result = await loadPersonalScheduleReadModel();
     expect(result).toEqual({ status: "unmapped" });

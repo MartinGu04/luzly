@@ -3,14 +3,11 @@ import type { RawSheet } from "@/lib/google";
 
 const getRequestPersonalSchedule = vi.fn();
 const getAuthenticatedIdentity = vi.fn();
-const fetchRawWorkbookSnapshot = vi.fn();
+const getWorkbookSnapshot = vi.fn();
 
 vi.mock("./getRequestPersonalSchedule", () => ({ getRequestPersonalSchedule }));
 vi.mock("@/lib/auth/currentUser", () => ({ getAuthenticatedIdentity }));
-vi.mock("@/lib/google", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/google")>("@/lib/google");
-  return { ...actual, fetchRawWorkbookSnapshot };
-});
+vi.mock("@/lib/sync", () => ({ getWorkbookSnapshot }));
 
 const { loadManagerWorkbookContext, getManagerWorkbookSheet, MANAGER_WORKBOOK_SOURCES } = await import(
   "./managerWorkbookContext"
@@ -79,14 +76,14 @@ function okPersonalResult(isManager: boolean) {
 beforeEach(() => {
   getRequestPersonalSchedule.mockReset();
   getAuthenticatedIdentity.mockReset();
-  fetchRawWorkbookSnapshot.mockReset();
+  getWorkbookSnapshot.mockReset();
   getAuthenticatedIdentity.mockResolvedValue({
     status: "authenticated",
     userId: "u1",
     email: "dani@example.invalid",
     avatarUrl: null,
   });
-  fetchRawWorkbookSnapshot.mockResolvedValue(managerSnapshot());
+  getWorkbookSnapshot.mockResolvedValue(managerSnapshot());
 });
 
 describe("loadManagerWorkbookContext — auth pass-through states", () => {
@@ -99,7 +96,7 @@ describe("loadManagerWorkbookContext — auth pass-through states", () => {
     getRequestPersonalSchedule.mockResolvedValue(personalResult);
     const result = await loadManagerWorkbookContext();
     expect(result).toEqual(personalResult);
-    expect(fetchRawWorkbookSnapshot).not.toHaveBeenCalled();
+    expect(getWorkbookSnapshot).not.toHaveBeenCalled();
   });
 
   it("configuration_error: passes the message through, no manager fetch", async () => {
@@ -110,7 +107,7 @@ describe("loadManagerWorkbookContext — auth pass-through states", () => {
     });
     const result = await loadManagerWorkbookContext();
     expect(result).toEqual({ status: "configuration_error", message: "Missing shift start time configuration." });
-    expect(fetchRawWorkbookSnapshot).not.toHaveBeenCalled();
+    expect(getWorkbookSnapshot).not.toHaveBeenCalled();
   });
 });
 
@@ -119,20 +116,20 @@ describe("loadManagerWorkbookContext — manager authorization", () => {
     getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(false));
     const result = await loadManagerWorkbookContext();
     expect(result).toEqual({ status: "forbidden" });
-    expect(fetchRawWorkbookSnapshot).not.toHaveBeenCalled();
+    expect(getWorkbookSnapshot).not.toHaveBeenCalled();
   });
 
   it("manager: fetches exactly the 5 shared manager sources, exactly once", async () => {
     getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(true));
     await loadManagerWorkbookContext();
-    expect(fetchRawWorkbookSnapshot).toHaveBeenCalledTimes(1);
-    expect(fetchRawWorkbookSnapshot).toHaveBeenCalledWith(MANAGER_WORKBOOK_SOURCES);
+    expect(getWorkbookSnapshot).toHaveBeenCalledTimes(1);
+    expect(getWorkbookSnapshot).toHaveBeenCalledWith(MANAGER_WORKBOOK_SOURCES);
     expect(MANAGER_WORKBOOK_SOURCES).toEqual(["personnel", "schedule", "settings", "potentialH1", "potentialH2"]);
   });
 
   it("fresh manager snapshot no longer marks the person as manager -> fails closed, data discarded", async () => {
     getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(true));
-    fetchRawWorkbookSnapshot.mockResolvedValue(
+    getWorkbookSnapshot.mockResolvedValue(
       managerSnapshot({ personnel: [["שם", "מייל", "מנהל"], ["דני מנהל", "dani@example.invalid", false]] }),
     );
     const result = await loadManagerWorkbookContext();
@@ -142,7 +139,7 @@ describe("loadManagerWorkbookContext — manager authorization", () => {
 
   it("fresh snapshot where the person is no longer mapped at all also fails closed", async () => {
     getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(true));
-    fetchRawWorkbookSnapshot.mockResolvedValue(
+    getWorkbookSnapshot.mockResolvedValue(
       managerSnapshot({ personnel: [["שם", "מייל", "מנהל"], ["מישהו אחר", "other@example.invalid", true]] }),
     );
     const result = await loadManagerWorkbookContext();

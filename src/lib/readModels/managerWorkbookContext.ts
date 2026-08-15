@@ -1,15 +1,10 @@
 import "server-only";
 import { getAuthenticatedIdentity } from "@/lib/auth/currentUser";
 import { resolveIdentityAgainstPeople } from "@/lib/auth/resolveCurrentPerson";
-import {
-  fetchRawWorkbookSnapshot,
-  SHEET_SOURCES,
-  type RawSheet,
-  type RawWorkbookSnapshot,
-  type SheetSourceKey,
-} from "@/lib/google";
+import { SHEET_SOURCES, type RawSheet, type RawWorkbookSnapshot, type SheetSourceKey } from "@/lib/google";
 import type { Person } from "@/lib/domain/types";
 import { parsePersonnelSheet } from "@/lib/parsers/personnel";
+import { getWorkbookSnapshot } from "@/lib/sync";
 import { getRequestPersonalSchedule } from "./getRequestPersonalSchedule";
 
 export type ManagerWorkbookContextResult =
@@ -64,17 +59,26 @@ export function getManagerWorkbookSheet(snapshot: RawWorkbookSnapshot, key: Shee
  *    triggers the manager-only fetch below at all.
  * 2. Only once that result is "ok" AND `model.person.isManager === true`
  *    does this fetch the manager-wide batch (personnel + schedule +
- *    settings + potentialH1 + potentialH2) -- ONE additional Google
- *    request, never performed for a normal user or a non-manager hitting
- *    a manager-only route. Both `/manager` and `/manager/fairness` request
- *    the exact same five sources, so neither feature ever adds a second or
- *    third Google fetch on top of this one.
- * 3. Defense in depth: re-resolves the authenticated identity against the
- *    FRESH manager snapshot's own freshly-parsed personnel sheet, and
- *    re-checks `isManager` there too. If that second check fails for any
- *    reason (personnel changed between the two fetches, a stale/edited
+ *    settings + potentialH1 + potentialH2) -- via `getWorkbookSnapshot`
+ *    (`lib/sync`), never performed for a normal user or a non-manager
+ *    hitting a manager-only route. Both `/manager` and `/manager/fairness`
+ *    request the exact same five sources, so a manager tapping between
+ *    them within the cache's short TTL reuses the same snapshot instead
+ *    of a fresh Google request each time -- see `getWorkbookSnapshot`'s
+ *    own docs for why this is safe to cache (shared, non-personal data
+ *    only) and how it stays isolated from the personal 3-source set.
+ * 3. Defense in depth: re-resolves the authenticated identity (a live
+ *    Supabase call, NEVER cached) against the (possibly cache-reused)
+ *    manager snapshot's own freshly-parsed personnel sheet, and re-checks
+ *    `isManager` there too. If that second check fails for any reason
+ *    (personnel changed since that snapshot was fetched, a stale/edited
  *    record, anything), this fails closed as "forbidden" -- the already-
- *    fetched manager data is discarded, never returned to a caller.
+ *    fetched manager data is discarded, never returned to a caller. The
+ *    cache's short TTL bounds how old "since that snapshot was fetched"
+ *    can be -- this check is still genuinely re-run every single request,
+ *    just possibly against data up to `SNAPSHOT_CACHE_REVALIDATE_SECONDS`
+ *    old rather than an instantaneous read, the same explicit tradeoff
+ *    the cache makes everywhere else.
  *
  * Callers that need more than the raw snapshot (e.g. Manager Overview's
  * shift schedule / date range / event parsing) do that parsing themselves
@@ -105,7 +109,7 @@ export async function loadManagerWorkbookContext(
     return { status: "forbidden" };
   }
 
-  const snapshot = await fetchRawWorkbookSnapshot(sources);
+  const snapshot = await getWorkbookSnapshot(sources);
 
   // Defense in depth: re-verify identity + manager status against the FRESH snapshot, never trust the first check alone.
   const identity = await getAuthenticatedIdentity();
