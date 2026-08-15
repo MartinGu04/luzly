@@ -104,7 +104,21 @@ describe("manager client-boundary guard (PR #14 §36)", () => {
   });
 });
 
-describe("39. no browser notification logic exists yet", () => {
+/**
+ * PR #28 (PWA foundation) deliberately introduces a real, carefully-scoped
+ * `navigator.serviceWorker.register(...)` call
+ * (`components/pwa/ServiceWorkerManager.tsx`) -- so the OLD, broader
+ * version of this guard (banning `navigator.serviceWorker` outright) is
+ * now obsolete and would fail on exactly the code this PR was asked to
+ * add. The invariant that actually matters going forward, restated: no
+ * source file may show a real BROWSER PERMISSION PROMPT or create a real
+ * PUSH SUBSCRIPTION yet -- that is explicit user opt-in UI reserved for a
+ * future Push Notifications PR (see `lib/pwa/README.md`). Service Worker
+ * *registration* (lifecycle only, no offline caching, no push
+ * subscription) is the one browser-notification-adjacent API this PR is
+ * intentionally allowed to use.
+ */
+describe("39. no notification permission prompt or push subscription exists yet", () => {
   function findComponentFiles(dir: string): string[] {
     const entries = fs.readdirSync(dir, { withFileTypes: true });
     let results: string[] = [];
@@ -122,8 +136,8 @@ describe("39. no browser notification logic exists yet", () => {
   const NOTIFICATION_PATTERNS = [
     /Notification\.requestPermission/,
     /new Notification\(/,
-    /navigator\.serviceWorker/,
-    /registerServiceWorker/,
+    /pushManager\.subscribe/,
+    /\.subscribe\(\s*\{\s*userVisibleOnly/,
   ];
 
   const sourceRoot = path.resolve(__dirname, "..");
@@ -133,12 +147,17 @@ describe("39. no browser notification logic exists yet", () => {
     expect(files.length).toBeGreaterThan(0);
   });
 
-  it("no source file calls the browser Notification/ServiceWorker APIs", () => {
+  it("no source file requests notification permission or creates a push subscription", () => {
     for (const file of files) {
       const content = fs.readFileSync(file, "utf8");
       for (const pattern of NOTIFICATION_PATTERNS) {
         expect(content).not.toMatch(pattern);
       }
     }
+  });
+
+  it("Service Worker registration, where it exists, is confined to the one dedicated PWA component", () => {
+    const registrationCallers = files.filter((file) => /navigator\.serviceWorker\.register\(/.test(fs.readFileSync(file, "utf8")));
+    expect(registrationCallers).toEqual([path.join(sourceRoot, "components", "pwa", "ServiceWorkerManager.tsx")]);
   });
 });
