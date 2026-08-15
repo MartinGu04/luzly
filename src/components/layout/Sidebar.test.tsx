@@ -19,25 +19,17 @@ function renderWithTheme(ui: ReactElement) {
 }
 
 describe("Sidebar", () => {
-  it("renders /duties, /schedule, /with-me, /conflicts, and / as real enabled links", () => {
+  it("renders /duties, /schedule, and / as real enabled links", () => {
     renderWithTheme(<Sidebar />);
     expect(screen.getByRole("link", { name: /תורנויות/ })).toHaveAttribute("href", "/duties");
     expect(screen.getByRole("link", { name: /לוח משמרות/ })).toHaveAttribute("href", "/schedule");
-    expect(screen.getByRole("link", { name: /מי איתי/ })).toHaveAttribute("href", "/with-me");
-    expect(screen.getByRole("link", { name: /התנגשויות/ })).toHaveAttribute("href", "/conflicts");
     expect(screen.getByRole("link", { name: /לוח בקרה/ })).toHaveAttribute("href", "/");
   });
 
-  it("marks /conflicts as the active route with aria-current", () => {
-    usePathname.mockReturnValue("/conflicts");
+  it("no longer renders מי איתי or התנגשויות as standalone destinations (nav/people-selector consolidation pass)", () => {
     renderWithTheme(<Sidebar />);
-    expect(screen.getByRole("link", { name: /התנגשויות/ })).toHaveAttribute("aria-current", "page");
-  });
-
-  it("does not mark /conflicts as active when viewing a different route", () => {
-    usePathname.mockReturnValue("/duties");
-    renderWithTheme(<Sidebar />);
-    expect(screen.getByRole("link", { name: /התנגשויות/ })).not.toHaveAttribute("aria-current");
+    expect(screen.queryByRole("link", { name: /מי איתי/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: /התנגשויות/ })).toBeNull();
   });
 
   it("marks /duties as the active route with aria-current", () => {
@@ -50,18 +42,6 @@ describe("Sidebar", () => {
     usePathname.mockReturnValue("/schedule");
     renderWithTheme(<Sidebar />);
     expect(screen.getByRole("link", { name: /תורנויות/ })).not.toHaveAttribute("aria-current");
-  });
-
-  it("marks /with-me as the active route with aria-current", () => {
-    usePathname.mockReturnValue("/with-me");
-    renderWithTheme(<Sidebar />);
-    expect(screen.getByRole("link", { name: /מי איתי/ })).toHaveAttribute("aria-current", "page");
-  });
-
-  it("does not mark /with-me as active when viewing a different route", () => {
-    usePathname.mockReturnValue("/duties");
-    renderWithTheme(<Sidebar />);
-    expect(screen.getByRole("link", { name: /מי איתי/ })).not.toHaveAttribute("aria-current");
   });
 
   it("no navItems entry is disabled anymore -- every rendered item is a real link (sidebar/mobile-nav refinement pass)", () => {
@@ -97,7 +77,7 @@ describe("Sidebar", () => {
     it("existing enabled routes remain visible for a manager too", () => {
       renderWithTheme(<Sidebar person={{ name: "דני מנהל", isManager: true, avatarUrl: null }} />);
       expect(screen.getByRole("link", { name: /תורנויות/ })).toHaveAttribute("href", "/duties");
-      expect(screen.getByRole("link", { name: /התנגשויות/ })).toHaveAttribute("href", "/conflicts");
+      expect(screen.getByRole("link", { name: /לוח משמרות/ })).toHaveAttribute("href", "/schedule");
     });
 
     it("neither the removed reminders item nor the removed sync item ever renders, for a manager either", () => {

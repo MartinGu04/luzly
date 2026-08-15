@@ -46,7 +46,7 @@ function PersonRow({ person, current }: { person: ManagerPersonSummary; current:
   );
 }
 
-function groupCount(group: RosterTopGroup): number {
+function groupCount(group: RosterTopGroup<ManagerPersonSummary>): number {
   return group.subgroups.length > 0
     ? group.subgroups.reduce((sum, subgroup) => sum + subgroup.people.length, 0)
     : group.people.length;

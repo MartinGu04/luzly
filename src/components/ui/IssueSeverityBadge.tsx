@@ -35,8 +35,9 @@ export const ISSUE_SEVERITY_BG_CLASS: Record<IssueSeverity, string> = {
  * restrained pulse on the icon only, review/orange, info/neutral accent.
  * Icon-only by design (same idiom as `CoverageBadge` owning coverage's
  * icon/color mapping) so callers stay free to add their own label/layout
- * around it. Reused by the dashboard's `IssuesPanel` and `/conflicts` so
- * the same finding never reads as a different severity in two places.
+ * around it. Reused by the dashboard's `IssuesPanel` and the shared
+ * `@/components/issues` row/group components so the same finding never
+ * reads as a different severity in two places.
  */
 export function IssueSeverityBadge({ severity, className = "" }: IssueSeverityBadgeProps) {
   const Icon = SEVERITY_ICON[severity];

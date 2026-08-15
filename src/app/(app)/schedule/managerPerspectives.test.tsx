@@ -51,8 +51,8 @@ function personalModel(overrides: Partial<PersonalScheduleReadModel> = {}): Pers
 
 function roster(): ScheduleRosterOption[] {
   return [
-    { id: "p_daniel", name: "דניאל כהן" },
-    { id: "p_eitan", name: "איתן דוגמה" },
+    { id: "p_daniel", name: "דניאל כהן", personnelType: null, isSupervisor: false, isTechnician: false },
+    { id: "p_eitan", name: "איתן דוגמה", personnelType: null, isSupervisor: false, isTechnician: false },
   ];
 }
 

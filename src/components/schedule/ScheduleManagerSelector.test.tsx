@@ -17,8 +17,8 @@ afterEach(() => {
 });
 
 const PEOPLE = [
-  { id: "p_daniel", name: "דניאל כהן" },
-  { id: "p_eitan", name: "איתן דוגמה" },
+  { id: "p_daniel", name: "דניאל כהן", personnelType: null, isSupervisor: false, isTechnician: false },
+  { id: "p_eitan", name: "איתן דוגמה", personnelType: null, isSupervisor: false, isTechnician: false },
 ];
 
 function openListbox() {
@@ -102,7 +102,7 @@ describe("ScheduleManagerSelector — keyboard/accessibility", () => {
   it("Escape closes the listbox and returns focus to the trigger", () => {
     render(<ScheduleManagerSelector managerName="מרטין גוסין" people={PEOPLE} perspective="self" selectedPersonId={null} />);
     openListbox();
-    fireEvent.keyDown(screen.getByRole("listbox"), { key: "Escape" });
+    fireEvent.keyDown(screen.getByRole("searchbox"), { key: "Escape" });
     expect(screen.queryByRole("listbox")).toBeNull();
     expect(screen.getByRole("button")).toHaveFocus();
   });
@@ -111,9 +111,9 @@ describe("ScheduleManagerSelector — keyboard/accessibility", () => {
     useSearchParams.mockReturnValue(new URLSearchParams());
     render(<ScheduleManagerSelector managerName="מרטין גוסין" people={PEOPLE} perspective="self" selectedPersonId={null} />);
     openListbox();
-    const listbox = screen.getByRole("listbox");
-    fireEvent.keyDown(listbox, { key: "ArrowDown" });
-    fireEvent.keyDown(listbox, { key: "Enter" });
+    const searchbox = screen.getByRole("searchbox");
+    fireEvent.keyDown(searchbox, { key: "ArrowDown" });
+    fireEvent.keyDown(searchbox, { key: "Enter" });
     expect(push).toHaveBeenCalledWith("/schedule?person=all");
   });
 
@@ -127,5 +127,18 @@ describe("ScheduleManagerSelector — keyboard/accessibility", () => {
   it("the trigger has a contextual accessible label including the current selection", () => {
     render(<ScheduleManagerSelector managerName="מרטין גוסין" people={PEOPLE} perspective="all" selectedPersonId={null} />);
     expect(screen.getByRole("button", { name: /מציג לוח עבור: כולם/ })).toBeInTheDocument();
+  });
+});
+
+describe("ScheduleManagerSelector — data-driven grouping", () => {
+  it("groups the roster by קבע/סדיר/מילואים when that data is present -- data-driven, not hardcoded", () => {
+    const grouped = [
+      { id: "p1", name: "קבוע/ה", personnelType: "קבע", isSupervisor: false, isTechnician: false },
+      { id: "p2", name: "מילואימניק/ית", personnelType: "מילואים", isSupervisor: false, isTechnician: false },
+    ];
+    render(<ScheduleManagerSelector managerName="מרטין גוסין" people={grouped} perspective="self" selectedPersonId={null} />);
+    openListbox();
+    expect(screen.getByText("קבע")).toBeInTheDocument();
+    expect(screen.getByText("מילואים")).toBeInTheDocument();
   });
 });

@@ -32,6 +32,7 @@
   for the full PWA foundation this belongs to. Mounted once in
   `app/layout.tsx`, never per-page.
 
-Feature-specific components (duties, conflicts, ...) get their own
-subfolder once those modules exist. Components render data handed to them
-by `lib/domain`/`lib/readModels` — they never parse raw spreadsheet cells.
+Feature-specific components (duties, manager, issues, people, ...) get
+their own subfolder once those modules exist. Components render data
+handed to them by `lib/domain`/`lib/readModels` — they never parse raw
+spreadsheet cells.

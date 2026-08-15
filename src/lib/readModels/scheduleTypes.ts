@@ -11,10 +11,19 @@ import type { PersonalScheduleReadModel } from "./types";
  */
 export type SchedulePerspective = "self" | "all" | "person";
 
-/** The only shape the manager perspective selector ever receives -- never a full `Person`, never email. */
+/**
+ * The only shape the manager perspective selector ever receives -- never a
+ * full `Person`, never email. Carries `personnelType`/`isSupervisor`/
+ * `isTechnician` (never more) so the shared `PersonPicker` can group people
+ * into קבע/סדיר(אחמ״שים/טכנאים)/מילואים the same way the manager roster
+ * does, purely data-driven -- no separate grouping source of truth.
+ */
 export interface ScheduleRosterOption {
   id: string;
   name: string;
+  personnelType: string | null;
+  isSupervisor: boolean;
+  isTechnician: boolean;
 }
 
 /**

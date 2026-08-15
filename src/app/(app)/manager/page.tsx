@@ -1,5 +1,5 @@
 import { ConfigurationErrorState } from "@/components/dashboard/ConfigurationErrorState";
-import type { ConflictIssueView } from "@/components/conflicts/types";
+import type { IssueRowView } from "@/components/issues/types";
 import { ManagerAttentionSection } from "@/components/manager/ManagerAttentionSection";
 import { ManagerCommandBar } from "@/components/manager/ManagerCommandBar";
 import { ManagerCoverageSection } from "@/components/manager/ManagerCoverageSection";
@@ -17,8 +17,8 @@ import { ManagerSubNav } from "@/components/manager/ManagerSubNav";
 import { ManagerSummaryStrip } from "@/components/manager/ManagerSummaryStrip";
 import type {
   ManagerAbsenceRowView,
+  ManagerAttentionItem,
   ManagerDutyRowView,
-  ManagerIssueRowView,
   ManagerPotentialRowView,
   ManagerShiftGroupView,
 } from "@/components/manager/types";
@@ -68,7 +68,7 @@ interface ManagerPageProps {
 }
 
 // ---------------------------------------------------------------------------
-// View builders (page-local, same convention as /duties, /with-me, /conflicts)
+// View builders (page-local, same convention as /duties and the rest of this app)
 // ---------------------------------------------------------------------------
 
 const COVERAGE_ISSUE_REASONS = new Set<ManagerIssue["reason"]>(["shift_coverage_missing", "shift_coverage_partial"]);
@@ -101,7 +101,7 @@ function buildManagerIssueRowView(
   todayDate: string,
   index: number,
   coverageByDatePeriod: ReadonlyMap<string, ManagerShiftOverviewEntry>,
-): ManagerIssueRowView {
+): IssueRowView {
   return {
     key: `${issue.personId}-${issue.reason}-${issue.date}-${index}`,
     personName: issue.personName,
@@ -119,8 +119,8 @@ function buildManagerIssueRowView(
   };
 }
 
-/** Same projection `/conflicts` uses for `PersonalIssue` -- duplicated here (page-local) rather than shared across routes, matching this codebase's existing per-page builder convention. `reasonLabel` uses the SAME role-aware `personalIssueReasonLabel` /conflicts and the dashboard already use, so this drill-down never falls back to the generic "חסר כיסוי" wording those two routes already fixed. */
-function buildSelectedPersonIssueView(issue: PersonalIssue, todayDate: string, index: number): ConflictIssueView {
+/** Same projection the dashboard's `IssuesPanel` uses for `PersonalIssue` -- duplicated here (page-local) rather than shared across routes, matching this codebase's existing per-page builder convention. `reasonLabel` uses the SAME role-aware `personalIssueReasonLabel` the dashboard already uses, so this drill-down never falls back to the generic "חסר כיסוי" wording. */
+function buildSelectedPersonIssueView(issue: PersonalIssue, todayDate: string, index: number): IssueRowView {
   return {
     key: `${issue.reason}-${issue.date}-${index}`,
     severity: issue.severity,
@@ -264,7 +264,11 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
   const { model } = result;
   const todayDate = model.localNow.date;
   const hrefParams = toHrefParams(model);
-  const people = model.roster.map((person) => ({ id: person.id, name: person.name }));
+  // `ManagerPersonSummary` already carries personnelType/isSupervisor/
+  // isTechnician -- passed straight through to `ManagerPersonSelector` so
+  // it can group people the same way `ManagerRosterSection` does, instead
+  // of stripping those fields to a bare `{id, name}` projection first.
+  const people = model.roster;
 
   if (model.selectedPersonId && model.selectedPerson) {
     const selected = model.selectedPerson;
@@ -317,15 +321,28 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
   const issueViews = model.issues.map((issue, index) =>
     buildManagerIssueRowView(issue, todayDate, index, coverageByDatePeriod),
   );
-  const criticalIssueViews = issueViews.filter((view) => view.severity === "critical");
-  const reviewIssueViews = issueViews.filter((view) => view.severity === "review");
 
   const potentialRowViews = model.potentialRequirements.map((row, index) =>
     buildManagerPotentialRowView(row, todayDate, index),
   );
-  const potentialProblemViews = potentialRowViews.filter(
-    (row) => row.status === "missing" || row.status === "partial" || row.sourceConflictNote !== null,
-  );
+  // A Potential problem's own `status` decides which "דורש טיפול" severity
+  // bucket it joins: "missing" is as urgent as a critical operational issue,
+  // "partial" (or an otherwise-covered requirement with a source conflict
+  // worth a look) belongs alongside review-level issues. Never a third,
+  // separately-labeled section -- the manager never needs to know this row
+  // came from Potential reconciliation rather than `detectOperationalIssues`.
+  const criticalItems: ManagerAttentionItem[] = [
+    ...issueViews.filter((view) => view.severity === "critical").map((view) => ({ kind: "issue" as const, view })),
+    ...potentialRowViews
+      .filter((row) => row.status === "missing")
+      .map((view) => ({ kind: "potential" as const, view })),
+  ];
+  const reviewItems: ManagerAttentionItem[] = [
+    ...issueViews.filter((view) => view.severity === "review").map((view) => ({ kind: "issue" as const, view })),
+    ...potentialRowViews
+      .filter((row) => row.status !== "missing" && (row.status === "partial" || row.sourceConflictNote !== null))
+      .map((view) => ({ kind: "potential" as const, view })),
+  ];
 
   return (
     <div className="flex flex-col gap-6">
@@ -341,11 +358,7 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
       />
       {summary ? <ManagerSummaryStrip summary={summary} /> : null}
 
-      <ManagerAttentionSection
-        criticalIssues={criticalIssueViews}
-        reviewIssues={reviewIssueViews}
-        potentialProblems={potentialProblemViews}
-      />
+      <ManagerAttentionSection criticalItems={criticalItems} reviewItems={reviewItems} />
 
       {!model.problemsOnly ? (
         <>

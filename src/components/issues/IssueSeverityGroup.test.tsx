@@ -2,14 +2,14 @@ import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import type { ConflictIssueView } from "./types";
+import type { IssueRowView } from "./types";
 import { IssueSeverityGroup } from "./IssueSeverityGroup";
 
 afterEach(() => {
   cleanup();
 });
 
-function view(overrides: Partial<ConflictIssueView> = {}): ConflictIssueView {
+function view(overrides: Partial<IssueRowView> = {}): IssueRowView {
   return {
     key: "k1",
     severity: "critical",
@@ -47,7 +47,7 @@ describe("IssueSeverityGroup", () => {
     expect(container.querySelectorAll("li").length).toBe(2);
   });
 
-  describe("critical visual treatment (Design Pass PR #20)", () => {
+  describe("critical visual treatment", () => {
     it("critical gets the pulse marker and the critical surface", () => {
       const { container } = render(<IssueSeverityGroup severity="critical" views={[view()]} />);
       expect(container.querySelector(".animate-pulse-dot")).not.toBeNull();

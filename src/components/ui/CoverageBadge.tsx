@@ -26,8 +26,7 @@ const COVERAGE_TEXT_CLASS: Record<CoverageStatus, string> = {
  * label + semantic color, driven only by the domain's own `CoverageStatus`
  * (never a raw enum string on screen). Used anywhere a shift's coverage
  * needs a first-class, at-a-glance treatment (the dashboard's
- * `CounterpartPanel` and the `/with-me` screen), so the tone/icon mapping
- * lives in exactly one place.
+ * `CounterpartPanel`), so the tone/icon mapping lives in exactly one place.
  */
 export function CoverageBadge({ status, className = "" }: CoverageBadgeProps) {
   const Icon = COVERAGE_ICON[status];

@@ -18,7 +18,7 @@ afterEach(() => {
 });
 
 const CURRENT: ManagerHrefParams = { personId: null, range: "7d", month: null, problemsOnly: false };
-const PEOPLE = [{ id: "p1", name: "מרטין בדיקה" }];
+const PEOPLE = [{ id: "p1", name: "מרטין בדיקה", personnelType: null, isSupervisor: false, isTechnician: false }];
 
 describe("ManagerCommandBar", () => {
   it("renders the person selector, range selector, and freshness status", () => {

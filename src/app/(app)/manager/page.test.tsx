@@ -194,7 +194,7 @@ describe("ManagerPage — everyone view", () => {
   it("empty state: no problems shows the calm success panel", async () => {
     getRequestManagerOverview.mockResolvedValue(okResult(model()));
     await renderPage();
-    expect(screen.getByText("אין כרגע דברים שדורשים התייחסות בטווח שנבחר")).toBeInTheDocument();
+    expect(screen.getByText("אין כרגע דברים שדורשים טיפול בטווח שנבחר")).toBeInTheDocument();
   });
 
   it("shows the אזור מנהל title (no מנהל chip) and the subnav with סקירה active", async () => {
@@ -650,7 +650,7 @@ describe("ManagerPage — selected person view", () => {
     expect(container.querySelector("aside")).toBeNull();
   });
 
-  it("names the missing role for a coverage issue, the SAME role-aware wording /conflicts and the dashboard use -- never the generic 'חסר כיסוי' fallback", async () => {
+  it("names the missing role for a coverage issue, the SAME role-aware wording the dashboard uses -- never the generic 'חסר כיסוי' fallback", async () => {
     getRequestManagerOverview.mockResolvedValue(
       okResult(
         model({
