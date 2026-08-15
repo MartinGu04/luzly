@@ -140,6 +140,38 @@ describe("deriveDutyActions — weekend kitchen uses the same rule", () => {
   });
 });
 
+describe("deriveDutyActions — evacuation_on_call is excluded from the check-in flow", () => {
+  it("a one-day evacuation_on_call block produces no action at all", () => {
+    const events = [dutyEvent("evacuation_on_call", { date: "2026-01-05" })];
+    const blocks = buildDutyBlocks(events);
+    const actions = deriveDutyActions(blocks);
+    expect(actions).toHaveLength(0);
+  });
+
+  it("a multi-day evacuation_on_call block produces no actions on any of its dates", () => {
+    const events = [
+      dutyEvent("evacuation_on_call", { date: "2026-01-05" }),
+      dutyEvent("evacuation_on_call", { date: "2026-01-06" }),
+      dutyEvent("evacuation_on_call", { date: "2026-01-07" }),
+    ];
+    const blocks = buildDutyBlocks(events);
+    const actions = deriveDutyActions(blocks);
+    expect(actions).toHaveLength(0);
+  });
+
+  it("an evacuation_on_call block alongside an unrelated guard block: only the guard block gets actions", () => {
+    const events = [
+      dutyEvent("evacuation_on_call", { date: "2026-01-05", personId: "p_evac" }),
+      guardEvent("2026-01-05", 1, { personId: "p_guard" }),
+    ];
+    const blocks = buildDutyBlocks(events);
+    const actions = deriveDutyActions(blocks);
+    expect(actions).toHaveLength(1);
+    expect(actions[0].personId).toBe("p_guard");
+    expect(actions.every((action) => action.dutyBlock.dutyFamily !== "evacuation_on_call")).toBe(true);
+  });
+});
+
 describe("deriveDutyActions — independent one-day blocks", () => {
   it("34. two separate one-day blocks each produce their own action", () => {
     const events = [guardEvent("2026-01-05", 1), guardEvent("2026-01-07", 1)];

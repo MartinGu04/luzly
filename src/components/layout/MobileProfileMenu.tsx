@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
+import { useFormStatus } from "react-dom";
 import Link from "next/link";
-import { LogOut, Moon, Sun, UserCog } from "lucide-react";
+import { Loader2, LogOut, Moon, Sun, UserCog } from "lucide-react";
 import { signOutAction } from "@/lib/auth/actions";
 import { Avatar } from "@/components/ui/Avatar";
 import { useEffectiveTheme, useTheme } from "@/lib/theme/ThemeProvider";
@@ -12,6 +13,32 @@ interface MobileProfileMenuProps {
   isManager: boolean;
   /** Presentation-only Google account photo -- see `lib/auth/currentUser.ts`. `null` falls back to initials in `Avatar`. */
   avatarUrl: string | null;
+}
+
+/**
+ * The form's submit button, split out so `useFormStatus` reflects the
+ * enclosing `<form action={signOutAction}>`'s real pending state --
+ * disabling the button and swapping in a spinner for the network round
+ * trip, so a second tap can't fire a duplicate sign-out.
+ */
+function SignOutMenuItem() {
+  const { pending } = useFormStatus();
+  return (
+    <button
+      type="submit"
+      role="menuitem"
+      disabled={pending}
+      aria-busy={pending}
+      className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-start text-sm font-medium text-critical transition-colors duration-150 hover:bg-critical/10 disabled:cursor-not-allowed disabled:opacity-70"
+    >
+      {pending ? (
+        <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" strokeWidth={1.75} />
+      ) : (
+        <LogOut className="h-4 w-4" aria-hidden="true" strokeWidth={1.75} />
+      )}
+      {pending ? "מתנתק..." : "התנתקות"}
+    </button>
+  );
 }
 
 /**
@@ -62,7 +89,6 @@ export function MobileProfileMenu({ name, isManager, avatarUrl }: MobileProfileM
 
   function toggleTheme() {
     setTheme(effectiveTheme === "dark" ? "light" : "dark");
-    setOpen(false);
   }
 
   return (
@@ -132,14 +158,7 @@ export function MobileProfileMenu({ name, isManager, avatarUrl }: MobileProfileM
           <div className="my-1 h-px bg-border" />
 
           <form action={signOutAction}>
-            <button
-              type="submit"
-              role="menuitem"
-              className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-start text-sm font-medium text-critical transition-colors duration-150 hover:bg-critical/10"
-            >
-              <LogOut className="h-4 w-4" aria-hidden="true" strokeWidth={1.75} />
-              התנתקות
-            </button>
+            <SignOutMenuItem />
           </form>
         </div>
       ) : null}

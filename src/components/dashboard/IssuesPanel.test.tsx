@@ -52,6 +52,21 @@ describe("IssuesPanel", () => {
     expect(container.querySelectorAll("li")).toHaveLength(5);
   });
 
+  it("names the missing role for a coverage issue on a known shift, instead of the generic wording", () => {
+    render(
+      <IssuesPanel
+        issues={[
+          issue({
+            reason: "shift_coverage_missing",
+            targetEvent: { date: "2026-08-12", category: "shift", title: "טכנאי יום", role: "technician", period: "day" },
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByText('חסר אחמ"ש למשמרת שלך')).toBeInTheDocument();
+    expect(screen.queryByText("חסר כיסוי למשמרת שלך")).toBeNull();
+  });
+
   it("27. never renders a raw IssueReason machine value", () => {
     render(<IssuesPanel issues={[issue({ reason: "shift_coverage_missing" })]} />);
     expect(screen.queryByText(/shift_coverage_missing/)).toBeNull();

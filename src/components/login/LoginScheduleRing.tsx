@@ -135,7 +135,7 @@ interface LoginScheduleRingProps {
  */
 export function LoginScheduleRing({ children }: LoginScheduleRingProps) {
   return (
-    <div className="relative mx-auto w-[clamp(19rem,88vw,26rem)] lg:mx-0 lg:w-[clamp(24rem,32vw,30rem)] xl:w-[clamp(30rem,42vw,42rem)]">
+    <div className="relative mx-auto w-[clamp(13rem,58vw,17rem)] sm:w-[clamp(19rem,88vw,26rem)] lg:mx-0 lg:w-[clamp(24rem,32vw,30rem)] xl:w-[clamp(30rem,42vw,42rem)]">
       <div className="relative aspect-square w-full">
         <div
           aria-hidden="true"

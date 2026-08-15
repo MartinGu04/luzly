@@ -27,13 +27,20 @@ const DUTY_CHECK_IN_LOCAL_TIME = "13:00";
  * Multi-day block -> one action on every actual date EXCEPT the final one
  * (the last day never gets a check-in). This is the same rule for every
  * duty family, including weekend_kitchen -- no second, family-specific
- * reminder engine. Dates come only from what's actually in the block
- * (`dutyBlock.dates`); no calendar holes are ever filled.
+ * reminder engine -- with exactly one exclusion: `evacuation_on_call`
+ * (כונן פינויים) never gets a check-in action at all, by product decision
+ * (that duty type doesn't use this alert/check flow). Excluded at the
+ * source here, not filtered out downstream, so no consumer of
+ * `DerivedDutyAction`/`PersonalDutyAction` can ever surface one for it.
+ * Dates come only from what's actually in the block (`dutyBlock.dates`);
+ * no calendar holes are ever filled.
  */
 export function deriveDutyActions(blocks: readonly DutyBlock[]): DerivedDutyAction[] {
   const actions: DerivedDutyAction[] = [];
 
   for (const block of blocks) {
+    if (block.dutyFamily === "evacuation_on_call") continue;
+
     const actionDates = block.dates.length <= 1 ? block.dates : block.dates.slice(0, -1);
 
     for (const date of actionDates) {

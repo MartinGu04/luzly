@@ -122,7 +122,7 @@ export default async function SchedulePage({ searchParams }: SchedulePageProps) 
   const defaultSelectedDate = days[model.localNow.date] ? model.localNow.date : (inMonthDates[0] ?? null);
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4 sm:gap-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <ScheduleHeader
           monthLabel={formatHebrewMonthYear(displayMonthKey.year, displayMonthKey.month)}

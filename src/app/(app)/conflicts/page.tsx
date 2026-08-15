@@ -13,8 +13,8 @@ import {
   issueSummaryLabel,
   issueTargetEmoji,
   issueTargetTitle,
+  personalIssueReasonLabel,
 } from "@/lib/presentation/issue";
-import { issueReasonLabel } from "@/lib/presentation/labels";
 import { formatMissingIntervals } from "@/lib/presentation/scheduleTime";
 import { getRequestPersonalSchedule } from "@/lib/readModels/getRequestPersonalSchedule";
 import type { PersonalIssue } from "@/lib/readModels/types";
@@ -25,7 +25,7 @@ function buildConflictIssueView(issue: PersonalIssue, todayDate: string, index: 
   return {
     key: `${issue.reason}-${issue.date}-${index}`,
     severity: issue.severity,
-    reasonLabel: issueReasonLabel(issue.reason),
+    reasonLabel: personalIssueReasonLabel(issue),
     dateLabel: issueDateLabel(issue.date, todayDate),
     targetEmoji: issue.targetEvent ? issueTargetEmoji(issue.targetEvent) : null,
     targetTitle: issue.targetEvent ? issueTargetTitle(issue.targetEvent) : null,
@@ -64,7 +64,7 @@ export default async function ConflictsPage() {
   const hasCritical = model.issues.some((issue) => issue.severity === "critical");
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4 sm:gap-6">
       <ConflictsHeader />
       <DataFreshnessStatus fetchedAt={model.fetchedAt} />
 

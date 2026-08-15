@@ -1,6 +1,6 @@
 import { ShieldCheck } from "lucide-react";
 import type { PersonalIssue } from "@/lib/readModels/types";
-import { issueReasonLabel } from "@/lib/presentation/labels";
+import { personalIssueReasonLabel } from "@/lib/presentation/issue";
 import { formatCompactDate } from "@/lib/presentation/hebrewDate";
 import { Panel } from "@/components/ui/Panel";
 import {
@@ -42,7 +42,7 @@ export function IssuesPanel({ issues }: IssuesPanelProps) {
             >
               <IssueSeverityBadge severity={issue.severity} className="mt-0.5 h-4 w-4 shrink-0" />
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-foreground">{issueReasonLabel(issue.reason)}</p>
+                <p className="text-sm font-medium text-foreground">{personalIssueReasonLabel(issue)}</p>
                 {compactDate ? <p className="mt-0.5 text-xs text-muted">{compactDate}</p> : null}
               </div>
             </li>

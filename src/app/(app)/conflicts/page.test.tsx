@@ -339,6 +339,25 @@ describe("ConflictsPage — reason presentation", () => {
       expect(container.textContent).not.toContain(reason);
     }
   });
+
+  it("names the missing role for a coverage issue on a known shift, instead of the generic wording", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(
+      okResult(
+        model({
+          issues: [
+            issue({
+              reason: "shift_coverage_missing",
+              severity: "critical",
+              targetEvent: { date: "2026-08-13", category: "shift", title: "טכנאי יום", role: "technician", period: "day" },
+            }),
+          ],
+        }),
+      ),
+    );
+    render(await ConflictsPage());
+    expect(screen.getByText('חסר אחמ"ש למשמרת שלך')).toBeInTheDocument();
+    expect(screen.queryByText("חסר כיסוי למשמרת שלך")).toBeNull();
+  });
 });
 
 describe("ConflictsPage — target presentation", () => {

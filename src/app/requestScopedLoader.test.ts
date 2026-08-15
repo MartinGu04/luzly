@@ -18,7 +18,7 @@ import path from "node:path";
 describe("3. layout/page reuse the same request-scoped loader, never a second direct call", () => {
   const appDir = path.resolve(__dirname, "(app)");
   const layoutSource = fs.readFileSync(path.join(appDir, "layout.tsx"), "utf8");
-  const pageSource = fs.readFileSync(path.join(appDir, "page.tsx"), "utf8");
+  const pageSource = fs.readFileSync(path.join(appDir, "(dashboard)", "page.tsx"), "utf8");
   const scheduleSource = fs.readFileSync(path.join(appDir, "schedule", "page.tsx"), "utf8");
   const dutiesSource = fs.readFileSync(path.join(appDir, "duties", "page.tsx"), "utf8");
   const withMeSource = fs.readFileSync(path.join(appDir, "with-me", "page.tsx"), "utf8");

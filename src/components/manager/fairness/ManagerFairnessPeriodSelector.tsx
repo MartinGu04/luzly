@@ -17,24 +17,30 @@ const TAB_BASE =
 /**
  * Server-rendered period switch, plain `Link`s only (PR #15 §24). Switching
  * period always clears `?person=` -- a person selected in one period's
- * fairness table has no meaning in the other period's rows.
+ * fairness table has no meaning in the other period's rows. The "תקופות"
+ * label above it is purely a small, subtle context cue (same idiom as the
+ * app's other quiet section labels) -- the segmented control otherwise
+ * appeared with no indication of what "1–6 / 7–12" refers to.
  */
 export function ManagerFairnessPeriodSelector({ current }: ManagerFairnessPeriodSelectorProps) {
   return (
-    <nav aria-label="בחירת תקופה" className="inline-flex items-center gap-1 rounded-full bg-overlay-soft p-1">
-      {PERIOD_OPTIONS.map((option) => {
-        const isActive = current === option.key;
-        return (
-          <Link
-            key={option.key}
-            href={buildManagerFairnessHref({ period: option.key, personId: null })}
-            aria-current={isActive ? "page" : undefined}
-            className={`${TAB_BASE} ${isActive ? "bg-surface-1 text-primary shadow-sm" : "text-muted hover:text-foreground"}`}
-          >
-            {option.label}
-          </Link>
-        );
-      })}
-    </nav>
+    <div className="flex flex-col gap-1.5">
+      <span className="text-xs font-semibold text-muted-2">תקופות</span>
+      <nav aria-label="בחירת תקופה" className="inline-flex items-center gap-1 rounded-full bg-overlay-soft p-1">
+        {PERIOD_OPTIONS.map((option) => {
+          const isActive = current === option.key;
+          return (
+            <Link
+              key={option.key}
+              href={buildManagerFairnessHref({ period: option.key, personId: null })}
+              aria-current={isActive ? "page" : undefined}
+              className={`${TAB_BASE} ${isActive ? "bg-surface-1 text-primary shadow-sm" : "text-muted hover:text-foreground"}`}
+            >
+              {option.label}
+            </Link>
+          );
+        })}
+      </nav>
+    </div>
   );
 }

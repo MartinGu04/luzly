@@ -105,7 +105,7 @@ export default async function WithMePage() {
   );
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4 sm:gap-6">
       <WithMeHeader />
       <DataFreshnessStatus fetchedAt={model.fetchedAt} />
 
