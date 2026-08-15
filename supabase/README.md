@@ -44,9 +44,20 @@ supabase db push
 
 `src/lib/push/migration.test.ts` is a text-level regression guard on this
 file's security-critical shape (RLS enabled, grants restricted to
-`authenticated`, no service-role dependency) -- it cannot verify the SQL
-actually runs against a real Postgres, since none exists in this
-environment.
+`authenticated`, no service-role dependency, the cross-user key-match
+check) -- it does not execute the SQL, so it can't prove runtime
+behavior on its own.
+
+`src/lib/push/upsertPushSubscriptionRpc.integration.test.ts` genuinely
+DOES run this migration against a real PostgreSQL -- it creates a
+throwaway database, stubs just enough of Supabase's `auth` schema, loads
+this file verbatim, and exercises the exact reassignment/idempotency/
+anonymous-denied scenarios the RPC is designed to enforce. It probes for
+a reachable Postgres at import time and skips itself entirely (never
+fails) when none is found, since this repository has no CI-provisioned
+database -- see that file's own docstring. Point `TEST_DATABASE_URL` at
+any reachable Postgres (a role with `CREATEDB`) to run it; it was run
+for real against a local PostgreSQL 16 during this PR's development.
 
 ## Extending this later
 

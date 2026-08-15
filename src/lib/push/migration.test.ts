@@ -3,12 +3,24 @@ import fs from "node:fs";
 import path from "node:path";
 
 /**
- * There is no live Postgres in this sandbox to actually run the
- * migration against, so this is a text-level regression guard on the
- * security-critical shape of `supabase/migrations/*_push_subscriptions.sql`
- * (RLS enabled, no over-broad grants, no service-role dependency) --
- * catching an accidental regression (e.g. someone widening a grant to
- * `anon` or `public`) even though it can't verify the SQL actually runs.
+ * A text-level regression guard on the security-critical SHAPE of
+ * `supabase/migrations/*_push_subscriptions.sql` (RLS enabled, no
+ * over-broad grants, no service-role dependency, the cross-user
+ * reassignment key check) -- catching an accidental regression (e.g.
+ * someone widening a grant to `anon`/`public`, or dropping the key-match
+ * check) purely by inspecting the SQL text.
+ *
+ * IMPORTANT SCOPE NOTE: this file does NOT execute the migration against
+ * a real PostgreSQL server, so it cannot prove the SQL actually compiles
+ * or behaves correctly at runtime (a typo in the PL/pgSQL body, a wrong
+ * branch, an off-by-one in the exception handling -- none of that would
+ * be caught here). A genuine runtime proof of the exact scenarios this
+ * PR's review asked for (new endpoint / same-user idempotent / matching-
+ * key reassignment / mismatched-key rejection / untouched-on-failure /
+ * anon-cannot-execute) lives in `upsertPushSubscriptionRpc.integration.test.ts`,
+ * which runs the ACTUAL migration file against a real local PostgreSQL --
+ * see that file's own docstring for why it's a separate, self-skipping
+ * suite rather than part of this one.
  */
 const MIGRATIONS_DIR = path.join(__dirname, "..", "..", "..", "supabase", "migrations");
 
@@ -18,7 +30,7 @@ function readPushSubscriptionsMigration(): string {
   return fs.readFileSync(path.join(MIGRATIONS_DIR, files[0]), "utf8");
 }
 
-describe("push_subscriptions migration -- security shape", () => {
+describe("push_subscriptions migration -- security shape (text-level only, see docstring)", () => {
   const sql = readPushSubscriptionsMigration();
 
   it("enables row level security on the table", () => {
@@ -56,8 +68,30 @@ describe("push_subscriptions migration -- security shape", () => {
     expect(sql).toMatch(/grant execute on function public\.upsert_push_subscription[\s\S]*?to authenticated/i);
   });
 
-  it("the upsert RPC is idempotent via ON CONFLICT (endpoint)", () => {
-    expect(sql).toMatch(/on conflict\s*\(endpoint\)\s*do update/i);
+  it("reassigning an endpoint already owned by a DIFFERENT user requires the supplied p256dh AND auth to match the stored values", () => {
+    expect(sql).toMatch(/existing\.p256dh\s*=\s*p_p256dh\s+and\s+existing\.auth\s*=\s*p_auth/i);
+  });
+
+  it("locks the target row (SELECT ... FOR UPDATE) before deciding whether to reassign -- no check-then-write race window", () => {
+    expect(sql).toMatch(/select \* into existing from public\.push_subscriptions where endpoint = p_endpoint for update/i);
+  });
+
+  it("fails closed with a generic exception on a key mismatch -- never names the existing owner or reveals stored values", () => {
+    const exceptionLines = sql.match(/raise exception[^;]*;/gi) ?? [];
+    expect(exceptionLines.length).toBeGreaterThanOrEqual(2);
+    for (const line of exceptionLines) {
+      expect(line).not.toMatch(/existing\.user_id/i);
+      expect(line).not.toMatch(/existing\.p256dh/i);
+      expect(line).not.toMatch(/existing\.auth\b/i);
+    }
+  });
+
+  it("same-user re-registration is an idempotent UPDATE, not a fresh INSERT", () => {
+    expect(sql).toMatch(/if existing\.user_id = auth\.uid\(\) then[\s\S]{0,200}update public\.push_subscriptions/i);
+  });
+
+  it("handles a concurrent-insert race for a brand-new endpoint (unique_violation) rather than erroring outright", () => {
+    expect(sql).toMatch(/exception when unique_violation then/i);
   });
 
   it("cascades deletion when the owning auth user is deleted", () => {
