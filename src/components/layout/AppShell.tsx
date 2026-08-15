@@ -28,8 +28,15 @@ interface AppShellProps {
  * flex-row-reverse needed) plus a main column. Its `IdentityFooter` is the
  * desktop sign-out affordance. The sidebar is `sticky`/viewport-bound (see
  * `Sidebar`), so it never stretches down with tall page content -- this
- * outer row only needs `min-h-screen`, not any special alignment, since an
+ * outer row only needs `min-h-dvh`, not any special alignment, since an
  * explicit-height flex item ignores the container's default stretch.
+ * `dvh` (not the legacy `vh`/`screen`), same as `Sidebar`'s own `h-dvh` --
+ * `100vh` on a mobile browser is sized to the LARGEST possible viewport
+ * (chrome collapsed), which is taller than what's actually visible on
+ * first paint. A `min-height` pinned to that inflated number stretches the
+ * shell (and the page) past its own real content, past `BottomNav`'s
+ * clearance, into a large scrollable empty region below everything visible
+ * -- `dvh` tracks the viewport's actual current size instead.
  *
  * Mobile/tablet: no sidebar at all -- a fixed bottom navigation bar instead
  * (see BottomNav), which has no identity slot of its own, so
@@ -49,9 +56,9 @@ interface AppShellProps {
  */
 export function AppShell({ children, person, initialClockTime = null }: AppShellProps) {
   return (
-    <div className="flex min-h-screen bg-background text-foreground">
+    <div className="flex min-h-dvh bg-background text-foreground">
       <Sidebar person={person} />
-      <div className="flex min-h-screen w-full flex-1 flex-col">
+      <div className="flex min-h-dvh w-full flex-1 flex-col">
         {person ? (
           <MobileIdentityBar name={person.name} isManager={person.isManager} avatarUrl={person.avatarUrl} />
         ) : null}

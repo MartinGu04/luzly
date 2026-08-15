@@ -8,6 +8,7 @@ import {
   issueSummaryLabel,
   issueTargetEmoji,
   issueTargetTitle,
+  personalIssueReasonLabel,
 } from "./issue";
 
 function target(overrides: Partial<PersonalIssueTargetSummary> = {}): PersonalIssueTargetSummary {
@@ -116,6 +117,55 @@ describe("issueTargetTitle / issueTargetEmoji", () => {
   it("a shift target with unknown role/period falls back to its own honest title", () => {
     const unknownTarget = target({ role: null, period: "unspecified", title: "משמרת" });
     expect(issueTargetTitle(unknownTarget)).toBe("משמרת");
+  });
+});
+
+describe("personalIssueReasonLabel", () => {
+  it("shift_coverage_missing on a technician's own shift names the missing supervisor, not generic coverage wording", () => {
+    const label = personalIssueReasonLabel({
+      reason: "shift_coverage_missing",
+      targetEvent: target({ role: "technician" }),
+    });
+    expect(label).toBe('חסר אחמ"ש למשמרת שלך');
+    expect(label).not.toBe("חסר כיסוי למשמרת שלך");
+  });
+
+  it("shift_coverage_missing on a supervisor's own shift names the missing technician", () => {
+    const label = personalIssueReasonLabel({
+      reason: "shift_coverage_missing",
+      targetEvent: target({ role: "supervisor" }),
+    });
+    expect(label).toBe("חסר טכנאי למשמרת שלך");
+  });
+
+  it("shift_coverage_partial names the role whose coverage is only partial", () => {
+    const label = personalIssueReasonLabel({
+      reason: "shift_coverage_partial",
+      targetEvent: target({ role: "technician" }),
+    });
+    expect(label).toBe('כיסוי אחמ"ש חלקי למשמרת שלך');
+  });
+
+  it("falls back to the generic wording when there is no targetEvent to derive a role from", () => {
+    expect(personalIssueReasonLabel({ reason: "shift_coverage_missing", targetEvent: null })).toBe(
+      "חסר כיסוי למשמרת שלך",
+    );
+  });
+
+  it("falls back to the generic wording when the assignee's own role on the shift is unspecified", () => {
+    const label = personalIssueReasonLabel({
+      reason: "shift_coverage_missing",
+      targetEvent: target({ role: null }),
+    });
+    expect(label).toBe("חסר כיסוי למשמרת שלך");
+  });
+
+  it("non-coverage reasons are unaffected, same as the generic label", () => {
+    const label = personalIssueReasonLabel({
+      reason: "invalid_shift_time",
+      targetEvent: target({ role: "technician" }),
+    });
+    expect(label).toBe("שעות המשמרת דורשות בדיקה");
   });
 });
 

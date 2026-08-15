@@ -21,4 +21,14 @@ describe("ConflictsSummary", () => {
     render(<ConflictsSummary summary="1 לבדיקה · 1 לתשומת לב" hasCritical={false} />);
     expect(screen.getByText("1 לבדיקה · 1 לתשומת לב").className).not.toMatch(/text-critical/);
   });
+
+  it("shows a subtle pulse indicator when hasCritical is true, reusing the shared PulseIndicator", () => {
+    const { container } = render(<ConflictsSummary summary="1 דחוף · 1 לבדיקה" hasCritical />);
+    expect(container.querySelector(".animate-pulse-dot")).toBeInTheDocument();
+  });
+
+  it("never shows a pulse indicator when hasCritical is false", () => {
+    const { container } = render(<ConflictsSummary summary="1 לבדיקה · 1 לתשומת לב" hasCritical={false} />);
+    expect(container.querySelector(".animate-pulse-dot")).toBeNull();
+  });
 });

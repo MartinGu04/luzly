@@ -33,12 +33,12 @@ interface LoginHeroProps {
  */
 export function LoginHero({ initialClockTime, weekdayLabel, dayNumber, monthLabel, hasAuthError }: LoginHeroProps) {
   return (
-    <div className="relative mx-auto flex w-full max-w-[1680px] flex-1 flex-col px-6 pb-10 pt-6 sm:px-10 sm:pt-8 lg:px-16 lg:py-10 xl:px-24">
+    <div className="relative mx-auto flex w-full max-w-[1680px] flex-1 flex-col px-6 pb-6 pt-5 sm:px-10 sm:pb-10 sm:pt-8 lg:px-16 lg:py-10 xl:px-24">
       <div className="flex justify-center lg:justify-start">
         <LoginHeaderLogo />
       </div>
 
-      <div className="mt-10 grid grid-cols-1 gap-y-9 sm:mt-12 lg:mt-14 lg:grid-cols-[1fr_1fr] lg:items-center lg:gap-x-16 lg:gap-y-8 xl:gap-x-24">
+      <div className="mt-6 grid grid-cols-1 gap-y-6 sm:mt-12 sm:gap-y-9 lg:mt-14 lg:grid-cols-[1fr_1fr] lg:items-center lg:gap-x-16 lg:gap-y-8 xl:gap-x-24">
         <div className="order-1 flex flex-col items-center text-center lg:order-none lg:col-start-2 lg:row-start-1 lg:items-start lg:text-start">
           <p className="text-sm font-semibold text-[#b39bfa] sm:text-base lg:text-xl lg:tracking-wide">
             {LOGIN_HERO_EYEBROW}
@@ -85,7 +85,7 @@ export function LoginHero({ initialClockTime, weekdayLabel, dayNumber, monthLabe
         </div>
       </div>
 
-      <div className="mt-12 lg:mt-auto lg:pt-16">
+      <div className="lg:mt-auto lg:pt-16">
         <LoginFeatureStrip />
       </div>
     </div>

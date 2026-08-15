@@ -4,8 +4,10 @@ import { buildShiftSchedule } from "./shiftSchedule";
 import {
   analyzeShiftCounterparts,
   analyzeUnitShiftCoverage,
+  buildShiftRoster,
   clipInterval,
   computeMissingIntervals,
+  hasMultiSupervisorStaffing,
   mergeIntervals,
 } from "./shiftCoverage";
 
@@ -608,5 +610,194 @@ describe("analyzeUnitShiftCoverage — per-role diagnostics (Design Pass PR #21 
     const result = analyzeUnitShiftCoverage("day", [tech, sup], schedule);
     expect(result.coverageStatus).toBe("partial");
     expect(result.missingIntervals).toEqual([{ startMinute: 720, endMinute: 1170 }]);
+  });
+});
+
+describe("hasMultiSupervisorStaffing", () => {
+  it("two distinct non-shadow supervisors -> true", () => {
+    const martin = supervisorDay();
+    const ilay = supervisorDay();
+    expect(hasMultiSupervisorStaffing([martin, ilay])).toBe(true);
+  });
+
+  it("a single supervisor -> false", () => {
+    expect(hasMultiSupervisorStaffing([supervisorDay()])).toBe(false);
+  });
+
+  it("two Events for the SAME person are not double-counted as two supervisors", () => {
+    const samePerson = "p_martin";
+    const morningHalf = supervisorDay({ personId: samePerson, endTimeOverride: "12:00" });
+    const afternoonHalf = supervisorDay({ personId: samePerson, startTimeOverride: "12:00" });
+    expect(hasMultiSupervisorStaffing([morningHalf, afternoonHalf])).toBe(false);
+  });
+
+  it("a shadow supervisor never counts toward the two -- one real + one shadow is still false", () => {
+    const real = supervisorDay();
+    const shadow = supervisorDay({ shadow: true });
+    expect(hasMultiSupervisorStaffing([real, shadow])).toBe(false);
+  });
+
+  it("technicians never count toward the supervisor headcount", () => {
+    expect(hasMultiSupervisorStaffing([supervisorDay(), technicianDay(), technicianDay()])).toBe(false);
+  });
+
+  it("no events -> false", () => {
+    expect(hasMultiSupervisorStaffing([])).toBe(false);
+  });
+});
+
+describe("analyzeShiftCounterparts — multi-supervisor staffing waiver (2 supervisors, 0 technicians is valid)", () => {
+  it("a supervisor target with a second supervisor and NO technician reads as full coverage, not missing", () => {
+    const martin = supervisorDay();
+    const ilay = supervisorDay();
+    const result = analyzeShiftCounterparts(martin, [martin, ilay], schedule);
+    expect(result.coverageStatus).toBe("full");
+    expect(result.missingIntervals).toEqual([]);
+    // The underlying structural fact -- zero technician counterparts -- is still honestly reported.
+    expect(result.primaryCounterparts).toEqual([]);
+  });
+
+  it("a LONE supervisor with no technician and no second supervisor still reads as missing (existing behavior preserved)", () => {
+    const martin = supervisorDay();
+    const result = analyzeShiftCounterparts(martin, [martin], schedule);
+    expect(result.coverageStatus).toBe("missing");
+    expect(result.missingIntervals).toEqual([{ startMinute: 450, endMinute: 1170 }]);
+  });
+
+  it("normal supervisor + technician coverage is unaffected by the waiver (still full via the real technician)", () => {
+    const sup = supervisorDay();
+    const tech = technicianDay();
+    const result = analyzeShiftCounterparts(sup, [sup, tech], schedule);
+    expect(result.coverageStatus).toBe("full");
+    expect(result.primaryCounterparts).toEqual([tech]);
+  });
+
+  it("the waiver is never symmetric: a technician target with a second technician and no supervisor stays missing", () => {
+    const techA = technicianDay();
+    const techB = technicianDay();
+    const result = analyzeShiftCounterparts(techA, [techA, techB], schedule);
+    expect(result.coverageStatus).toBe("missing");
+  });
+
+  it("the waiver only applies to a fully-missing gap, never a PARTIAL technician gap alongside 2 supervisors", () => {
+    const martin = supervisorDay();
+    const ilay = supervisorDay();
+    const partialTech = technicianDay({ endTimeOverride: "12:00" }); // covers only 07:30-12:00
+    const result = analyzeShiftCounterparts(martin, [martin, ilay, partialTech], schedule);
+    expect(result.coverageStatus).toBe("partial");
+    expect(result.missingIntervals).toEqual([{ startMinute: 720, endMinute: 1170 }]);
+  });
+});
+
+describe("analyzeUnitShiftCoverage — multi-supervisor staffing waiver (2 supervisors, 0 technicians is valid)", () => {
+  it("2 supervisors + 0 technicians => valid, no missing-technician issue", () => {
+    const martin = supervisorDay();
+    const ilay = supervisorDay();
+    const result = analyzeUnitShiftCoverage("day", [martin, ilay], schedule);
+    expect(result.coverageStatus).toBe("full");
+    expect(result.missingIntervals).toEqual([]);
+    expect(result.roleCoverage.technician).toEqual({ status: "full", missingIntervals: [] });
+    expect(result.roleCoverage.supervisor).toEqual({ status: "full", missingIntervals: [] });
+  });
+
+  it("1 supervisor + 0 technicians retains the existing missing-coverage behavior", () => {
+    const result = analyzeUnitShiftCoverage("day", [supervisorDay()], schedule);
+    expect(result.coverageStatus).toBe("missing");
+    expect(result.roleCoverage.technician).toEqual({
+      status: "missing",
+      missingIntervals: [{ startMinute: 450, endMinute: 1170 }],
+    });
+  });
+
+  it("normal supervisor + technician coverage remains valid, unaffected by the waiver", () => {
+    const result = analyzeUnitShiftCoverage("day", [technicianDay(), supervisorDay()], schedule);
+    expect(result.coverageStatus).toBe("full");
+    expect(result.roleCoverage.technician).toEqual({ status: "full", missingIntervals: [] });
+  });
+
+  it("the waiver is never symmetric: 2 technicians + 0 supervisors stays missing (no such rule has been defined)", () => {
+    const result = analyzeUnitShiftCoverage("day", [technicianDay(), technicianDay()], schedule);
+    expect(result.coverageStatus).toBe("missing");
+    expect(result.roleCoverage.supervisor).toEqual({
+      status: "missing",
+      missingIntervals: [{ startMinute: 450, endMinute: 1170 }],
+    });
+  });
+
+  it("the waiver never applies when supervisor coverage itself has a gap -- both roles genuinely incomplete stays missing", () => {
+    const partialMartin = supervisorDay({ endTimeOverride: "12:00" }); // 07:30-12:00
+    const gappedIlay = supervisorDay({ startTimeOverride: "14:00" }); // 14:00-19:30, leaves 12:00-14:00 uncovered
+    const result = analyzeUnitShiftCoverage("day", [partialMartin, gappedIlay], schedule);
+    expect(result.coverageStatus).toBe("missing"); // technician provably zero still wins -- supervisor isn't clean either
+    expect(result.roleCoverage.technician.status).toBe("missing");
+  });
+
+  it("a shadow second supervisor never counts toward the waiver -- stays missing", () => {
+    const martin = supervisorDay();
+    const shadowSupervisor = supervisorDay({ shadow: true });
+    const result = analyzeUnitShiftCoverage("day", [martin, shadowSupervisor], schedule);
+    expect(result.coverageStatus).toBe("missing");
+    expect(result.roleCoverage.technician.status).toBe("missing");
+  });
+});
+
+describe("buildShiftRoster — מי איתי roster context, separate from coverage validity", () => {
+  it("a same-role colleague (e.g. a second supervisor) IS on the roster, unlike analyzeShiftCounterparts", () => {
+    const martin = supervisorDay();
+    const ilay = supervisorDay();
+    const roster = buildShiftRoster(martin, [martin, ilay]);
+    expect(roster.primaryRoster).toEqual([ilay]);
+
+    // The narrower opposite-role-only view stays exactly as before -- these are two different questions.
+    const counterparts = analyzeShiftCounterparts(martin, [martin, ilay], schedule);
+    expect(counterparts.primaryCounterparts).toEqual([]);
+  });
+
+  it("an opposite-role colleague is still on the roster too (roster is a superset, not a replacement)", () => {
+    const sup = supervisorDay();
+    const tech = technicianDay();
+    const roster = buildShiftRoster(sup, [sup, tech]);
+    expect(roster.primaryRoster).toEqual([tech]);
+  });
+
+  it("the target's own Events are always excluded, even a second Event for the same person (split shift)", () => {
+    const myFirstHalf = supervisorDay({ personId: "p_me", endTimeOverride: "12:00" });
+    const mySecondHalf = supervisorDay({ personId: "p_me", startTimeOverride: "12:00" });
+    const roster = buildShiftRoster(myFirstHalf, [myFirstHalf, mySecondHalf]);
+    expect(roster.primaryRoster).toEqual([]);
+  });
+
+  it("a different date/period colleague never appears on the roster", () => {
+    const target = supervisorDay({ date: "2026-01-05", period: "day" });
+    const otherDate = supervisorDay({ date: "2026-01-06", period: "day" });
+    const otherPeriod = supervisorDay({ date: "2026-01-05", period: "night" });
+    const roster = buildShiftRoster(target, [target, otherDate, otherPeriod]);
+    expect(roster.primaryRoster).toEqual([]);
+  });
+
+  it("shadow colleagues stay in their own separate list, never counted as primary roster", () => {
+    const martin = supervisorDay();
+    const shadowIlay = supervisorDay({ shadow: true });
+    const roster = buildShiftRoster(martin, [martin, shadowIlay]);
+    expect(roster.primaryRoster).toEqual([]);
+    expect(roster.shadowRoster).toEqual([shadowIlay]);
+  });
+
+  it("a non-shift target safely returns an empty roster, never throws", () => {
+    const dutyTarget = supervisorDay({ category: "duty", role: null, period: "unspecified" });
+    expect(() => buildShiftRoster(dutyTarget, [dutyTarget])).not.toThrow();
+    expect(buildShiftRoster(dutyTarget, [dutyTarget])).toEqual({
+      target: dutyTarget,
+      primaryRoster: [],
+      shadowRoster: [],
+    });
+  });
+
+  it("duty/absence/status Events in the input are never treated as shift roster members", () => {
+    const target = supervisorDay();
+    const dutyEvent = supervisorDay({ category: "duty", role: "technician", dutyFamily: "guard", slot: 1 });
+    const absenceEvent = supervisorDay({ category: "absence", role: null });
+    const roster = buildShiftRoster(target, [target, dutyEvent, absenceEvent]);
+    expect(roster.primaryRoster).toEqual([]);
   });
 });

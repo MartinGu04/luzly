@@ -31,10 +31,10 @@ import {
   issueGuidanceLabel,
   issueTargetEmoji,
   issueTargetTitle,
+  personalIssueReasonLabel,
 } from "@/lib/presentation/issue";
 import {
   absenceKindLabel,
-  issueReasonLabel,
   managerIssueReasonLabel,
   periodLabel,
   roleLabel,
@@ -119,12 +119,12 @@ function buildManagerIssueRowView(
   };
 }
 
-/** Same projection `/conflicts` uses for `PersonalIssue` -- duplicated here (page-local) rather than shared across routes, matching this codebase's existing per-page builder convention. */
+/** Same projection `/conflicts` uses for `PersonalIssue` -- duplicated here (page-local) rather than shared across routes, matching this codebase's existing per-page builder convention. `reasonLabel` uses the SAME role-aware `personalIssueReasonLabel` /conflicts and the dashboard already use, so this drill-down never falls back to the generic "חסר כיסוי" wording those two routes already fixed. */
 function buildSelectedPersonIssueView(issue: PersonalIssue, todayDate: string, index: number): ConflictIssueView {
   return {
     key: `${issue.reason}-${issue.date}-${index}`,
     severity: issue.severity,
-    reasonLabel: issueReasonLabel(issue.reason),
+    reasonLabel: personalIssueReasonLabel(issue),
     dateLabel: issueDateLabel(issue.date, todayDate),
     targetEmoji: issue.targetEvent ? issueTargetEmoji(issue.targetEvent) : null,
     targetTitle: issue.targetEvent ? issueTargetTitle(issue.targetEvent) : null,

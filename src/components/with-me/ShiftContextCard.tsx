@@ -15,7 +15,12 @@ const SHOWS_MISSING_CALLOUT: ReadonlySet<ShiftContextView["coverageStatus"]> = n
  * One shift's team context: title/date, coverage status, an optional
  * missing-coverage callout, then the primary and shadow teammate sections
  * kept visually distinct -- a shadow/handover teammate is never presented
- * as resolving a coverage gap.
+ * as resolving a coverage gap. `primaryCounterparts`/`shadowCounterparts`
+ * are the shift ROSTER (everyone else actually on this shift, any role --
+ * a second supervisor alongside the viewer shows up here too), not only
+ * the opposite role; `coverageStatus` above is the separate, independent
+ * staffing-validity verdict (see `PersonalShiftContext`) -- a same-role-only
+ * roster can still legitimately show a "full" badge.
  */
 export function ShiftContextCard({ view, emphasized }: ShiftContextCardProps) {
   const hasCounterparts = view.primaryCounterparts.length > 0 || view.shadowCounterparts.length > 0;

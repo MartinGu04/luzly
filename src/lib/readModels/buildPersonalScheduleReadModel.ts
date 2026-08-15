@@ -13,7 +13,7 @@ import {
   type IssueSeverity,
   type OperationalIssue,
 } from "@/lib/domain/operationalIssues";
-import { analyzeShiftCounterparts } from "@/lib/domain/shiftCoverage";
+import { analyzeShiftCounterparts, buildShiftRoster } from "@/lib/domain/shiftCoverage";
 import { resolveEventShiftInterval, type ShiftSchedule } from "@/lib/domain/shiftSchedule";
 import type { Person } from "@/lib/domain/types";
 import type {
@@ -310,33 +310,60 @@ function toCounterpart(event: Event): PersonalCounterpart {
   };
 }
 
+/**
+ * Sorted (see `compareCounterpartEvents`), then collapsed to one Event per
+ * distinct `personId` -- a genuine split-shift colleague with two Events
+ * for the same date+period shows as ONE roster row (their earliest-starting
+ * segment, since sorting runs first), never two. Domain-level
+ * `buildShiftRoster` deliberately keeps every real Event; this dedup is a
+ * read-model presentation decision, not a structural one.
+ */
+function sortAndDedupeRoster(events: readonly Event[], schedule: ShiftSchedule): Event[] {
+  const sorted = [...events].sort((a, b) => compareCounterpartEvents(a, b, schedule));
+  const seenPersonIds = new Set<string>();
+  const deduped: Event[] = [];
+  for (const event of sorted) {
+    if (seenPersonIds.has(event.personId)) continue;
+    seenPersonIds.add(event.personId);
+    deduped.push(event);
+  }
+  return deduped;
+}
+
 function buildShiftContext(
   target: Event,
   allEvents: readonly Event[],
   schedule: ShiftSchedule,
 ): PersonalShiftContext {
-  const analysis = analyzeShiftCounterparts(target, allEvents, schedule);
-  const sortCounterparts = (counterparts: readonly Event[]) =>
-    [...counterparts].sort((a, b) => compareCounterpartEvents(a, b, schedule));
+  // Coverage validity (does the OPPOSITE role adequately cover me, including
+  // the multi-supervisor staffing waiver) and roster/companionship (who else
+  // is actually on this shift, any role) are deliberately two separate
+  // domain questions -- see `analyzeShiftCounterparts` vs `buildShiftRoster`.
+  // "מי איתי" must never be read as an implicit coverage algorithm: the
+  // people listed below can include same-role colleagues that this
+  // `coverageStatus` never counts as coverage for either role.
+  const coverage = analyzeShiftCounterparts(target, allEvents, schedule);
+  const roster = buildShiftRoster(target, allEvents);
 
   return {
     date: target.date,
     period: target.period,
     role: target.role,
-    coverageStatus: analysis.coverageStatus,
-    missingIntervals: analysis.missingIntervals,
-    primaryCounterparts: sortCounterparts(analysis.primaryCounterparts).map(toCounterpart),
-    shadowCounterparts: sortCounterparts(analysis.shadowCounterparts).map(toCounterpart),
+    coverageStatus: coverage.coverageStatus,
+    missingIntervals: coverage.missingIntervals,
+    primaryCounterparts: sortAndDedupeRoster(roster.primaryRoster, schedule).map(toCounterpart),
+    shadowCounterparts: sortAndDedupeRoster(roster.shadowRoster, schedule).map(toCounterpart),
   };
 }
 
 /**
- * Total, deterministic order for a target shift's counterpart Events --
- * `analyzeShiftCounterparts` preserves whatever order its input Event array
- * happened to have, so this is what keeps the serialized counterpart lists
- * stable regardless of the full server-side Event set's order.
- * `sourceSheet`/`sourceCell` are used only as the final internal tie-break;
- * neither is ever present on the exposed `PersonalCounterpart`.
+ * Total, deterministic order for a target shift's roster Events -- both
+ * `analyzeShiftCounterparts` and `buildShiftRoster` preserve whatever order
+ * their input Event array happened to have, so this is what keeps the
+ * serialized counterpart/roster lists stable regardless of the full
+ * server-side Event set's order. `sourceSheet`/`sourceCell` are used only
+ * as the final internal tie-break; neither is ever present on the exposed
+ * `PersonalCounterpart`.
  */
 function compareCounterpartEvents(a: Event, b: Event, schedule: ShiftSchedule): number {
   const startA = effectiveStartMinuteForSort(a, schedule);

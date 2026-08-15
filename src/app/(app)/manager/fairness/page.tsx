@@ -122,7 +122,7 @@ export default async function ManagerFairnessPage({ searchParams }: ManagerFairn
       <ManagerFairnessHeader periodLabel={model.period.label} />
       <DataFreshnessStatus fetchedAt={model.fetchedAt} />
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-end justify-between gap-3">
         <ManagerFairnessPeriodSelector current={model.period.key} />
         <ManagerFairnessTargetsNote
           supervisorTarget={model.targets.supervisorTarget}

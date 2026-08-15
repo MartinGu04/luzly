@@ -649,6 +649,31 @@ describe("ManagerPage — selected person view", () => {
     expect(screen.queryByRole("button", { name: "התנתקות" })).toBeNull();
     expect(container.querySelector("aside")).toBeNull();
   });
+
+  it("names the missing role for a coverage issue, the SAME role-aware wording /conflicts and the dashboard use -- never the generic 'חסר כיסוי' fallback", async () => {
+    getRequestManagerOverview.mockResolvedValue(
+      okResult(
+        model({
+          selectedPersonId: "p_martin",
+          selectedPerson: personalModel({
+            issues: [
+              {
+                reason: "shift_coverage_missing",
+                severity: "critical",
+                date: "2026-08-13",
+                missingIntervals: null,
+                metadata: null,
+                targetEvent: { date: "2026-08-13", category: "shift", title: "טכנאי יום", role: "technician", period: "day" },
+              },
+            ],
+          }),
+        }),
+      ),
+    );
+    await renderPage({ person: "p_martin" });
+    expect(screen.getByText('חסר אחמ"ש למשמרת שלך')).toBeInTheDocument();
+    expect(screen.queryByText("חסר כיסוי למשמרת שלך")).toBeNull();
+  });
 });
 
 describe("ManagerPage — data freshness uses ManagerOverviewReadModel.fetchedAt (PR #17 §10/§19)", () => {

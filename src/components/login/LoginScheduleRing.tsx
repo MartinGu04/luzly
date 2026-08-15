@@ -69,9 +69,15 @@ const FLOATING_CARDS: FloatingCardSpec[] = [
 
 function FloatingCard({ card }: { card: FloatingCardSpec }) {
   const { Icon } = card;
+  // The "night" card sits near the very bottom of the ring (top-[96%] on
+  // mobile) -- on a real phone that collides with the Google CTA sitting
+  // right below the ring, unlike the other cards which stay clear. Hidden
+  // below `sm` only (this card, not the whole ring/layout); still shown
+  // from `sm` up, where the ring has more room and there's no collision.
+  const displayClassName = card.key === "night" ? "hidden sm:flex" : "flex";
   return (
     <div
-      className={`absolute flex w-max max-w-[8.25rem] items-center gap-1.5 rounded-2xl bg-[#161227]/90 px-2 py-1.5 shadow-[0_16px_32px_-14px_rgba(0,0,0,0.6)] ring-1 ring-white/10 backdrop-blur-sm sm:max-w-[9.5rem] sm:gap-2 sm:px-2.5 sm:py-2 lg:max-w-[10rem] lg:gap-2 lg:px-3 lg:py-2 xl:max-w-[13rem] xl:gap-3 xl:rounded-3xl xl:px-4 xl:py-3 ${card.positionClassName}`}
+      className={`absolute ${displayClassName} w-max max-w-[8.25rem] items-center gap-1.5 rounded-2xl bg-[#161227]/90 px-2 py-1.5 shadow-[0_16px_32px_-14px_rgba(0,0,0,0.6)] ring-1 ring-white/10 backdrop-blur-sm sm:max-w-[9.5rem] sm:gap-2 sm:px-2.5 sm:py-2 lg:max-w-[10rem] lg:gap-2 lg:px-3 lg:py-2 xl:max-w-[13rem] xl:gap-3 xl:rounded-3xl xl:px-4 xl:py-3 ${card.positionClassName}`}
     >
       <span
         className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-xl sm:h-8 sm:w-8 lg:h-9 lg:w-9 xl:h-11 xl:w-11 xl:rounded-2xl ${card.badgeClass}`}
@@ -135,7 +141,7 @@ interface LoginScheduleRingProps {
  */
 export function LoginScheduleRing({ children }: LoginScheduleRingProps) {
   return (
-    <div className="relative mx-auto w-[clamp(19rem,88vw,26rem)] lg:mx-0 lg:w-[clamp(24rem,32vw,30rem)] xl:w-[clamp(30rem,42vw,42rem)]">
+    <div className="relative mx-auto w-[clamp(13rem,58vw,17rem)] sm:w-[clamp(19rem,88vw,26rem)] lg:mx-0 lg:w-[clamp(24rem,32vw,30rem)] xl:w-[clamp(30rem,42vw,42rem)]">
       <div className="relative aspect-square w-full">
         <div
           aria-hidden="true"

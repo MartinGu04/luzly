@@ -47,7 +47,10 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   const dayNumber = parseCalendarDate(localNow.date)?.day ?? null;
 
   return (
-    <div className="relative isolate flex min-h-dvh flex-col overflow-hidden bg-[#05070d]">
+    <div
+      className="relative isolate flex min-h-dvh flex-col overflow-hidden bg-[#05070d]"
+      style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+    >
       <div aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10">
         <div className="absolute -top-24 -start-20 h-[26rem] w-[26rem] rounded-full bg-[#241a45]/50 blur-3xl animate-ambient-glow" />
         <div

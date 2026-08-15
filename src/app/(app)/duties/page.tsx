@@ -20,7 +20,7 @@ import {
   summarizePendingActions,
 } from "@/lib/presentation/duty";
 import { formatDateRange } from "@/lib/presentation/hebrewDate";
-import { formatHebrewCalendarDate, getHolidayContext } from "@/lib/presentation/hebrewCalendar";
+import { getHolidayContext } from "@/lib/presentation/hebrewCalendar";
 import { getRequestPersonalSchedule } from "@/lib/readModels/getRequestPersonalSchedule";
 import type { PersonalDutyAction, PersonalDutyBlock } from "@/lib/readModels/types";
 
@@ -107,14 +107,13 @@ export default async function DutiesPage({ searchParams }: DutiesPageProps) {
   const historyPreview = suppressRedundantUpcomingEmptyState ? historyBlocks(model.dutyBlocks, todayDate, 5) : [];
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4 sm:gap-6">
       <DutiesHeader />
       <DataFreshnessStatus fetchedAt={model.fetchedAt} />
 
       <DutyFocusSection
         status={focus.status}
         blocks={focus.blocks.map((block) => buildDutyBlockView(block, model.dutyActions, model.localNow))}
-        hebrewDateLabel={focusDate ? formatHebrewCalendarDate(focusDate) : null}
         holiday={focusDate ? getHolidayContext(focusDate) : null}
       />
 

@@ -3,6 +3,18 @@
  * column, timeline -- never fake text/data. Uses the shared `.skeleton`
  * shimmer utility (globals.css), which is itself disabled under
  * `prefers-reduced-motion`.
+ *
+ * Deliberately lives inside its own `(dashboard)` route group instead of
+ * at the shared `(app)/` level. A `loading.tsx` placed at `(app)/` would
+ * wrap EVERY sibling route's `{children}` (schedule/duties/with-me/
+ * conflicts/manager, not just `/`) in one Suspense boundary -- so tapping
+ * bottom-nav to a different route while scrolled down would suspend on
+ * THIS fallback first, and since a route change scrolls to top as soon as
+ * the new segment (even a fallback) mounts, the outgoing page would
+ * visibly jump to its own top before the destination ever appears. Scoping
+ * this loading state to `/` only, via a nested group that adds no URL
+ * segment, keeps every other route's navigation a single direct
+ * transition with no intermediate fallback/scroll jump.
  */
 export default function DashboardLoading() {
   return (

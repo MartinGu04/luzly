@@ -683,6 +683,34 @@ describe("currentShiftContexts / nextShiftContexts — colleague privacy", () =>
     expect(JSON.stringify(forward.currentShiftContexts)).toBe(JSON.stringify(reversed.currentShiftContexts));
   });
 
+  it("a same-role colleague (two supervisors, no technician) appears in primaryCounterparts, and coverageStatus is full -- the new multi-supervisor staffing rule", () => {
+    const events = [
+      myShift({ date: "2026-08-12", period: "day", role: "supervisor" }),
+      colleagueShift({ date: "2026-08-12", period: "day", role: "supervisor" }),
+    ];
+    const model = build({
+      events,
+      people: [me({ isTechnician: false, isSupervisor: true }), colleague({ isTechnician: false, isSupervisor: true })],
+    });
+    expect(model.currentShiftContexts).toHaveLength(1);
+    const context = model.currentShiftContexts[0];
+    expect(context.primaryCounterparts.map((c) => c.personId)).toEqual([COLLEAGUE_ID]);
+    expect(context.primaryCounterparts[0].role).toBe("supervisor");
+    expect(context.coverageStatus).toBe("full");
+    expect(context.missingIntervals).toEqual([]);
+  });
+
+  it("a split-shift colleague with two Events for the same date+period shows as ONE roster row, not two", () => {
+    const events = [
+      myShift({ date: "2026-08-12", period: "day", role: "technician" }),
+      colleagueShift({ date: "2026-08-12", period: "day", role: "supervisor", endTimeOverride: "12:00" }),
+      colleagueShift({ date: "2026-08-12", period: "day", role: "supervisor", startTimeOverride: "12:00" }),
+    ];
+    const model = build({ events, people: [me(), colleague()] });
+    expect(model.currentShiftContexts[0].primaryCounterparts).toHaveLength(1);
+    expect(model.currentShiftContexts[0].primaryCounterparts[0].personId).toBe(COLLEAGUE_ID);
+  });
+
   it("4. shadow counterpart order is also deterministic regardless of input order", () => {
     const c2 = colleague({ id: "p_colleague2", name: "משה בדיקה", email: "moshe@example.invalid" });
     const events = [

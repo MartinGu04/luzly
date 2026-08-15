@@ -1,8 +1,38 @@
+import type { EventRole } from "@/lib/domain/event";
 import type { IssueReason, IssueSeverity } from "@/lib/domain/operationalIssues";
 import type { PersonalIssue, PersonalIssueTargetSummary } from "@/lib/readModels/types";
 import { assignmentEmoji } from "./emoji";
 import { formatHebrewWeekdayAndDate, relativeDayLabel } from "./hebrewDate";
-import { periodLabel, requiredCapabilityLabel, roleLabel } from "./labels";
+import { issueReasonLabel, periodLabel, requiredCapabilityLabel, roleLabel } from "./labels";
+
+function oppositeRole(role: EventRole): EventRole {
+  if (role === "supervisor") return "technician";
+  if (role === "technician") return "supervisor";
+  return null;
+}
+
+/**
+ * Role-specific coverage wording for a `shift_coverage_missing`/
+ * `shift_coverage_partial` `PersonalIssue` -- "חסר טכנאי למשמרת שלך" /
+ * "חסר אחמ״ש למשמרת שלך" instead of the generic "חסר כיסוי למשמרת שלך",
+ * derived from the SAME counterpart role `analyzeShiftCounterparts()`
+ * already searched for (the opposite of the assignee's own
+ * `targetEvent.role`) -- never a second coverage algorithm, never guessed
+ * from rendered names. Falls back to the existing generic
+ * `issueReasonLabel` text whenever the missing role can't be determined
+ * (no `targetEvent`, or the assignee's own role on it is unspecified) or
+ * the reason isn't a coverage issue at all.
+ */
+export function personalIssueReasonLabel(issue: Pick<PersonalIssue, "reason" | "targetEvent">): string {
+  const fallback = issueReasonLabel(issue.reason);
+  if (issue.reason !== "shift_coverage_missing" && issue.reason !== "shift_coverage_partial") return fallback;
+
+  const missingRole = issue.targetEvent ? oppositeRole(issue.targetEvent.role) : null;
+  const label = missingRole ? roleLabel(missingRole) : null;
+  if (!label) return fallback;
+
+  return issue.reason === "shift_coverage_missing" ? `חסר ${label} למשמרת שלך` : `כיסוי ${label} חלקי למשמרת שלך`;
+}
 
 const ISSUE_GUIDANCE_LABELS: Record<IssueReason, string> = {
   blocking_absence_with_assignment: "בדוק איזה מהשניים נכון בסידור.",

@@ -36,4 +36,20 @@ describe("LoginScheduleRing", () => {
     const svg = container.querySelector("svg");
     expect(svg).toHaveAttribute("aria-hidden", "true");
   });
+
+  it("hides only the night-shift card below `sm` -- it collides with the CTA on real phones, the other cards don't", () => {
+    const { getByText } = render(
+      <LoginScheduleRing>
+        <span>mobile clock slot</span>
+      </LoginScheduleRing>,
+    );
+    const nightCard = getByText("משמרת לילה").closest("div.absolute");
+    expect(nightCard?.className).toContain("hidden");
+    expect(nightCard?.className).toContain("sm:flex");
+
+    for (const title of ["משמרת ערב", "משמרת בוקר", "חופש", "תורנות"]) {
+      const card = getByText(title).closest("div.absolute");
+      expect(card?.className).not.toContain("hidden");
+    }
+  });
 });

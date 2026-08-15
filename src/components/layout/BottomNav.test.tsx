@@ -1,10 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { BottomNav } from "./BottomNav";
 import { navItems } from "./nav-items";
 
 const usePathname = vi.fn(() => "/");
 vi.mock("next/navigation", () => ({ usePathname: () => usePathname() }));
+
+const linkStatus = { pending: false };
+vi.mock("next/link", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("next/link")>();
+  return { ...actual, useLinkStatus: () => linkStatus };
+});
 
 afterEach(() => {
   cleanup();
@@ -107,5 +113,34 @@ describe("BottomNav", () => {
     const { container } = render(<BottomNav />);
     const disabled = container.querySelectorAll('[aria-disabled="true"]');
     disabled.forEach((el) => expect(el.tagName).not.toBe("A"));
+  });
+});
+
+describe("BottomNav — pending navigation feedback", () => {
+  afterEach(() => {
+    linkStatus.pending = false;
+  });
+
+  it("a non-pending link is not aria-busy and shows its normal icon, never a spinner", () => {
+    const { container } = render(<BottomNav />);
+    const scheduleLink = screen.getByRole("link", { name: "משמרות" });
+    expect(scheduleLink).toHaveAttribute("aria-busy", "false");
+    expect(container.querySelector(".animate-spin")).toBeNull();
+  });
+
+  it("a link whose navigation is pending is aria-busy and shows a spinner instead of its normal icon", () => {
+    linkStatus.pending = true;
+    const { container } = render(<BottomNav />);
+    const scheduleLink = screen.getByRole("link", { name: "משמרות" });
+    expect(scheduleLink).toHaveAttribute("aria-busy", "true");
+    expect(container.querySelector(".animate-spin")).toBeInTheDocument();
+  });
+
+  it("tapping an already-pending link does not fire a second, redundant navigation", () => {
+    linkStatus.pending = true;
+    render(<BottomNav />);
+    const scheduleLink = screen.getByRole("link", { name: "משמרות" });
+    const notPrevented = fireEvent.click(scheduleLink);
+    expect(notPrevented).toBe(false);
   });
 });

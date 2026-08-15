@@ -123,11 +123,11 @@ describe("MobileProfileMenu — single-button theme toggle", () => {
     expect(screen.getByRole("menuitem", { name: "עבור למצב בהיר" })).toBeInTheDocument();
   });
 
-  it("closes the menu after toggling theme", () => {
+  it("keeps the menu open after toggling theme", () => {
     renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} avatarUrl={null} />);
     fireEvent.click(screen.getByRole("button", { name: /תפריט פרופיל/ }));
     fireEvent.click(screen.getByRole("menuitem", { name: "עבור למצב כהה" }));
-    expect(screen.queryByRole("menu")).toBeNull();
+    expect(screen.getByRole("menu")).toBeInTheDocument();
   });
 
   it("never renders the 3-option system/light/dark segmented control inside the menu", () => {
