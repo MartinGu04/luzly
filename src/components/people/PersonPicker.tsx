@@ -99,26 +99,34 @@ export function PersonPicker({
   const groups = useMemo(() => groupRosterHierarchy(people), [people]);
   const normalizedQuery = query.trim().toLowerCase();
 
-  const { rows, selectableRows } = useMemo(() => {
+  // `leadingRows` and `groupedRows` (headers + matching people) are kept
+  // separate from each other so rendering can show leading options
+  // unconditionally while swapping ONLY the grouped-people area for a
+  // no-matches message -- never hiding a row that `selectableRows` (used
+  // for keyboard highlight/Enter/aria-activedescendant) still considers
+  // selectable. `selectableRows` is always exactly the flattened set of
+  // rows actually rendered, in DOM order, so a highlighted/keyboard-
+  // selected option is never absent from the page.
+  const { leadingRows, groupedRows, selectableRows } = useMemo(() => {
     const matches = (name: string) => normalizedQuery === "" || name.toLowerCase().includes(normalizedQuery);
 
-    const rows: PopupRow[] = [];
-    const selectableRows: SelectableRow[] = [];
+    const leadingRows: SelectableRow[] = leadingOptions.map((leading) => ({
+      kind: "leading",
+      value: leading.value,
+      label: leading.label,
+    }));
 
-    for (const leading of leadingOptions) {
-      const row: SelectableRow = { kind: "leading", value: leading.value, label: leading.label };
-      rows.push(row);
-      selectableRows.push(row);
-    }
+    const groupedRows: PopupRow[] = [];
+    const personRows: SelectableRow[] = [];
 
     function pushPeopleUnderHeader(headerKey: string, headerLabel: string, groupPeople: readonly PersonPickerPerson[]) {
       const matching = groupPeople.filter((person) => matches(person.name));
       if (matching.length === 0) return;
-      rows.push({ kind: "header", key: headerKey, label: headerLabel });
+      groupedRows.push({ kind: "header", key: headerKey, label: headerLabel });
       for (const person of matching) {
         const row: SelectableRow = { kind: "person", value: person.id, label: person.name };
-        rows.push(row);
-        selectableRows.push(row);
+        groupedRows.push(row);
+        personRows.push(row);
       }
     }
 
@@ -132,8 +140,10 @@ export function PersonPicker({
       pushPeopleUnderHeader(group.group, group.label, group.people);
     }
 
-    return { rows, selectableRows };
+    return { leadingRows, groupedRows, selectableRows: [...leadingRows, ...personRows] };
   }, [groups, leadingOptions, normalizedQuery]);
+
+  const hasNoMatches = normalizedQuery !== "" && groupedRows.length === 0;
 
   // Clamped at render time (never via an effect + setState) -- a search
   // query can shrink `selectableRows` between renders, and the raw
@@ -239,6 +249,30 @@ export function PersonPicker({
 
   const highlightedValue = selectableRows[clampedHighlightedIndex]?.value;
 
+  function renderOptionRow(row: SelectableRow) {
+    const isSelected = row.value === selectedValue;
+    const isHighlighted = row.value === highlightedValue;
+    return (
+      <li
+        key={row.value}
+        ref={(node) => {
+          optionRefs.current.set(row.value, node);
+        }}
+        id={`${listboxId}-option-${row.value}`}
+        role="option"
+        aria-selected={isSelected}
+        onMouseEnter={() => setHighlightedIndex(selectableRows.indexOf(row))}
+        onClick={() => selectRow(row)}
+        className={`flex cursor-pointer items-center justify-between gap-2 rounded-xl px-3 py-2 text-sm transition-colors duration-150 ${
+          isHighlighted ? "bg-overlay-strong text-foreground" : "text-foreground"
+        }`}
+      >
+        <span className="truncate">{row.label}</span>
+        {isSelected ? <Check className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" strokeWidth={2} /> : null}
+      </li>
+    );
+  }
+
   return (
     <div ref={containerRef} className="relative">
       <button
@@ -282,14 +316,24 @@ export function PersonPicker({
             id={listboxId}
             role="listbox"
             aria-label={listAriaLabel}
+            // A pointerdown on a non-focusable `<li role="option">` would
+            // otherwise blur the search input (the actually-focused
+            // element) BEFORE the browser fires `click` -- `handlePopupBlur`
+            // then closes/unmounts the popup mid-interaction, so the option
+            // that was clicked is gone from the DOM by the time `click`
+            // would fire and `onClick`/`selectRow` never runs. Blocking the
+            // mousedown's default action keeps focus on the input for the
+            // whole click, so selection can complete before anything closes.
+            onMouseDown={(event) => event.preventDefault()}
             className="max-h-64 overflow-y-auto"
           >
-            {normalizedQuery !== "" && !selectableRows.some((row) => row.kind === "person") ? (
+            {leadingRows.map((row) => renderOptionRow(row))}
+            {hasNoMatches ? (
               <li role="presentation" className="px-3 py-2 text-sm text-muted">
                 {noMatchesLabel}
               </li>
             ) : (
-              rows.map((row) => {
+              groupedRows.map((row) => {
                 if (row.kind === "header") {
                   return (
                     <li key={row.key} role="presentation" className="px-3 pt-2.5 pb-1 text-[11px] font-semibold text-muted-2 first:pt-1">
@@ -297,28 +341,7 @@ export function PersonPicker({
                     </li>
                   );
                 }
-
-                const isSelected = row.value === selectedValue;
-                const isHighlighted = row.value === highlightedValue;
-                return (
-                  <li
-                    key={row.value}
-                    ref={(node) => {
-                      optionRefs.current.set(row.value, node);
-                    }}
-                    id={`${listboxId}-option-${row.value}`}
-                    role="option"
-                    aria-selected={isSelected}
-                    onMouseEnter={() => setHighlightedIndex(selectableRows.indexOf(row))}
-                    onClick={() => selectRow(row)}
-                    className={`flex cursor-pointer items-center justify-between gap-2 rounded-xl px-3 py-2 text-sm transition-colors duration-150 ${
-                      isHighlighted ? "bg-overlay-strong text-foreground" : "text-foreground"
-                    }`}
-                  >
-                    <span className="truncate">{row.label}</span>
-                    {isSelected ? <Check className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" strokeWidth={2} /> : null}
-                  </li>
-                );
+                return renderOptionRow(row);
               })
             )}
           </ul>

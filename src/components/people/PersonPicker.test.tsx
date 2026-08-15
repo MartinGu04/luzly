@@ -262,3 +262,132 @@ describe("PersonPicker — selection and keyboard", () => {
     expect(screen.getByRole("button")).toHaveAttribute("aria-label", "בחירת איש/אשת צוות: כולם");
   });
 });
+
+/**
+ * Regression coverage for a real bug: clicking an option did nothing.
+ * `fireEvent.click(option)` alone (used above) does NOT reproduce it --
+ * jsdom doesn't automatically blur a focused element just because
+ * mousedown landed on a different, non-focusable one, so those tests
+ * passed even with the bug present. A real browser does: mousedown on the
+ * non-focusable `<li role="option">` blurs the focused search input
+ * (relatedTarget ends up outside the picker, e.g. <body>) BEFORE `click`
+ * fires -- UNLESS the mousedown's default action was prevented, which is
+ * exactly what stops a real browser's focus-shift algorithm from running.
+ * `realClick` reproduces that ordering explicitly, gated on
+ * `fireEvent.mouseDown`'s own return value (`false` once
+ * `preventDefault()` was called during dispatch) so this test actually
+ * exercises the fix rather than unconditionally simulating a blur that a
+ * real browser would never fire once mousedown is prevented.
+ */
+function realClick(element: HTMLElement) {
+  const searchbox = screen.getByRole("searchbox");
+  const mousedownNotPrevented = fireEvent.mouseDown(element);
+  if (mousedownNotPrevented) {
+    fireEvent.blur(searchbox, { relatedTarget: document.body });
+  }
+  fireEvent.mouseUp(element);
+  fireEvent.click(element);
+}
+
+describe("PersonPicker — real click event ordering (mousedown blurs the input before click fires)", () => {
+  const people = [person({ id: "p1", name: "אדם ראשון" }), person({ id: "p2", name: "אדם שני" })];
+
+  it("clicking a person with the real mousedown->blur->mouseup->click sequence still selects them", () => {
+    const onSelect = vi.fn();
+    render(<PersonPicker {...BASE_PROPS} people={people} onSelect={onSelect} />);
+    openPopup();
+    realClick(screen.getByRole("option", { name: "אדם ראשון" }));
+    expect(onSelect).toHaveBeenCalledWith("p1");
+  });
+
+  it("clicking the leading option (כולם) with the real event sequence still selects it", () => {
+    const onSelect = vi.fn();
+    render(<PersonPicker {...BASE_PROPS} people={people} onSelect={onSelect} selectedValue="p1" />);
+    openPopup();
+    realClick(screen.getByRole("option", { name: "כולם" }));
+    expect(onSelect).toHaveBeenCalledWith("all");
+  });
+
+  it("the popup closes after a real-sequence selection", () => {
+    const onSelect = vi.fn();
+    render(<PersonPicker {...BASE_PROPS} people={people} onSelect={onSelect} />);
+    openPopup();
+    realClick(screen.getByRole("option", { name: "אדם ראשון" }));
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
+  it("a real mousedown on an element outside the picker still closes it without selecting", () => {
+    const onSelect = vi.fn();
+    render(<PersonPicker {...BASE_PROPS} people={people} onSelect={onSelect} />);
+    openPopup();
+    const outside = document.createElement("div");
+    document.body.appendChild(outside);
+    fireEvent.mouseDown(outside);
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(onSelect).not.toHaveBeenCalled();
+    document.body.removeChild(outside);
+  });
+
+  it("keyboard Enter selection is unaffected by the mousedown fix", () => {
+    const onSelect = vi.fn();
+    render(<PersonPicker {...BASE_PROPS} people={people} onSelect={onSelect} />);
+    openPopup();
+    const searchbox = screen.getByRole("searchbox");
+    fireEvent.keyDown(searchbox, { key: "ArrowDown" });
+    fireEvent.keyDown(searchbox, { key: "Enter" });
+    expect(onSelect).toHaveBeenCalledWith("p1");
+  });
+
+  it("Tab/Shift+Tab away (a genuine keyboard-driven blur, not a mousedown one) still closes the popup", () => {
+    const onSelect = vi.fn();
+    render(<PersonPicker {...BASE_PROPS} people={people} onSelect={onSelect} />);
+    openPopup();
+    fireEvent.blur(screen.getByRole("searchbox"), { relatedTarget: document.body });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+});
+
+describe("PersonPicker — zero-search-results state never leaves a hidden selectable option", () => {
+  const people = [person({ id: "p1", name: "אדם ראשון" }), person({ id: "p2", name: "אדם שני" })];
+
+  it("every rendered role=\"option\" is exactly the set of keyboard-selectable rows once a search matches nobody", () => {
+    render(<PersonPicker {...BASE_PROPS} people={people} />);
+    openPopup();
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "לא קיים בכלל" } });
+
+    expect(screen.getByText("לא נמצאו התאמות")).toBeInTheDocument();
+    // Leading options remain rendered as real, selectable options -- only
+    // the person rows (and their headers) are replaced by the message.
+    const options = screen.getAllByRole("option");
+    expect(options.map((option) => option.textContent)).toEqual(["כולם"]);
+  });
+
+  it("the no-matches message itself is never announced as a selectable option", () => {
+    render(<PersonPicker {...BASE_PROPS} people={people} />);
+    openPopup();
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "לא קיים בכלל" } });
+    const message = screen.getByText("לא נמצאו התאמות");
+    expect(message).toHaveAttribute("role", "presentation");
+  });
+
+  it("keyboard highlight/Enter in the zero-match state only ever reaches a rendered leading option, never a hidden person row", () => {
+    const onSelect = vi.fn();
+    // Start from a person already selected (not the leading "כולם" option)
+    // so that highlighting/selecting "כולם" after the search empties out
+    // is a real, observable change -- not a same-value no-op.
+    render(<PersonPicker {...BASE_PROPS} people={people} onSelect={onSelect} selectedValue="p1" />);
+    openPopup();
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "לא קיים בכלל" } });
+
+    const searchbox = screen.getByRole("searchbox");
+    // aria-activedescendant must reference an id that is actually in the DOM.
+    const activeId = searchbox.getAttribute("aria-activedescendant");
+    expect(activeId).not.toBeNull();
+    expect(document.getElementById(activeId as string)).not.toBeNull();
+    expect(document.getElementById(activeId as string)).toHaveTextContent("כולם");
+
+    fireEvent.keyDown(searchbox, { key: "Enter" });
+    expect(onSelect).toHaveBeenCalledWith("all");
+  });
+});
