@@ -28,10 +28,10 @@ describe("visibleNavItems", () => {
     expect(manager?.inBottomNav).toBe(false);
   });
 
-  it("the bottom-nav set stays at exactly five items regardless of manager status", () => {
+  it("the bottom-nav set stays at exactly three items regardless of manager status", () => {
     for (const isManager of [true, false]) {
       const bottomNavCount = visibleNavItems(isManager).filter((item) => item.inBottomNav).length;
-      expect(bottomNavCount).toBe(5);
+      expect(bottomNavCount).toBe(3);
     }
   });
 });
@@ -47,7 +47,7 @@ describe("navItems — obsolete sync placeholder removed (PR #18)", () => {
 
   it("every other enabled route is unchanged", () => {
     const enabledHrefs = navItems.filter((item) => item.enabled).map((item) => item.href);
-    expect(enabledHrefs).toEqual(["/", "/schedule", "/duties", "/with-me", "/conflicts", "/manager"]);
+    expect(enabledHrefs).toEqual(["/", "/schedule", "/duties", "/manager"]);
   });
 
   it("manager visibility rules are unchanged", () => {
@@ -81,5 +81,21 @@ describe("navItems — manager nav label rename (Design Pass, PR #19)", () => {
   it("the /manager route itself is unchanged -- this is a wording-only rename", () => {
     const manager = navItems.find((item) => item.label === "אזור מנהל");
     expect(manager?.href).toBe("/manager");
+  });
+});
+
+describe("navItems — \"מי איתי\" and \"התנגשויות\" removed as standalone destinations (nav/people-selector consolidation pass)", () => {
+  it('"מי איתי" / "/with-me" is not in navItems anymore -- it stays only as the existing dashboard presentation', () => {
+    expect(navItems.some((item) => item.href === "/with-me")).toBe(false);
+    expect(navItems.some((item) => item.label === "מי איתי" || item.shortLabel === "מי איתי")).toBe(false);
+  });
+
+  it('"התנגשויות" / "/conflicts" is not in navItems anymore -- conflict/coverage detection now surfaces via the manager\'s "דורש טיפול" section', () => {
+    expect(navItems.some((item) => item.href === "/conflicts")).toBe(false);
+    expect(navItems.some((item) => item.label === "התנגשויות" || item.shortLabel === "התנגשויות")).toBe(false);
+  });
+
+  it("no navItems entry is disabled -- every remaining item is a real, live link", () => {
+    expect(navItems.every((item) => item.enabled)).toBe(true);
   });
 });

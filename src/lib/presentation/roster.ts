@@ -1,5 +1,3 @@
-import type { ManagerPersonSummary } from "@/lib/readModels/managerTypes";
-
 export type RosterPersonnelTypeGroup = "permanent" | "regular" | "reserve" | "unclassified";
 
 const PERSONNEL_TYPE_GROUP_LABEL: Record<RosterPersonnelTypeGroup, string> = {
@@ -49,43 +47,60 @@ export function regularRoleGroupLabel(group: RosterRegularRoleGroup): string {
  * changes the underlying domain flags, it only decides which ONE
  * presentation bucket a person lands in.
  */
-export function classifyRegularRole(
-  person: Pick<ManagerPersonSummary, "isSupervisor" | "isTechnician">,
-): RosterRegularRoleGroup {
+export function classifyRegularRole(person: Pick<PersonGroupable, "isSupervisor" | "isTechnician">): RosterRegularRoleGroup {
   if (person.isSupervisor) return "supervisor";
   if (person.isTechnician) return "technician";
   return "other";
 }
 
-export interface RosterRegularSubgroup {
-  group: RosterRegularRoleGroup;
-  label: string;
-  people: ManagerPersonSummary[];
+/**
+ * The minimal real-data shape `groupRosterHierarchy` needs -- deliberately
+ * a small `Pick`-style interface rather than the full `Person`/
+ * `ManagerPersonSummary` record, so any typed projection carrying these
+ * three fields (a roster row, a person-picker option, ...) can reuse this
+ * ONE grouping function instead of re-implementing the קבע/סדיר/מילואים
+ * hierarchy per screen.
+ */
+export interface PersonGroupable {
+  personnelType: string | null;
+  isSupervisor: boolean;
+  isTechnician: boolean;
 }
 
-export interface RosterTopGroup {
+export interface RosterRegularSubgroup<T extends PersonGroupable> {
+  group: RosterRegularRoleGroup;
+  label: string;
+  people: T[];
+}
+
+export interface RosterTopGroup<T extends PersonGroupable> {
   group: RosterPersonnelTypeGroup;
   label: string;
   /** Direct people rows -- populated for קבע/מילואים/לא מסווג, always empty for סדיר (see `subgroups` instead). */
-  people: ManagerPersonSummary[];
+  people: T[];
   /** Only ever non-empty for the "סדיר" group. */
-  subgroups: RosterRegularSubgroup[];
+  subgroups: RosterRegularSubgroup<T>[];
 }
 
 const TOP_GROUP_ORDER: readonly RosterPersonnelTypeGroup[] = ["permanent", "regular", "reserve", "unclassified"];
 const REGULAR_SUBGROUP_ORDER: readonly RosterRegularRoleGroup[] = ["supervisor", "technician", "other"];
 
 /**
- * The manager roster's presentation hierarchy (Design Pass PR #21 §22):
- * top-level groups קבע/סדיר/מילואים/לא מסווג, each rendered only when
- * non-empty; ONLY סדיר subdivides further into אחמ״שים/טכנאים/אחרים. Every
- * person appears EXACTLY ONCE across the whole result -- never duplicated
- * across groups or subgroups. Presentation-only: never mutates or
- * re-derives `ManagerPersonSummary`'s own flags. Preserves the roster's own
- * existing deterministic order within each (sub)group -- never re-sorts.
+ * The app's one shared קבע/סדיר/מילואים presentation hierarchy (Design Pass
+ * PR #21 §22, generalized for reuse by any people-selection UI): top-level
+ * groups קבע/סדיר/מילואים/לא מסווג, each rendered only when non-empty; ONLY
+ * סדיר subdivides further into אחמ״שים/טכנאים/אחרים. Every person appears
+ * EXACTLY ONCE across the whole result -- never duplicated across groups or
+ * subgroups. Purely data-driven off `personnelType`/`isSupervisor`/
+ * `isTechnician` -- no hardcoded names, no special-casing. Presentation
+ * only: never mutates or re-derives the input's own flags. Preserves the
+ * input's own existing deterministic order within each (sub)group -- never
+ * re-sorts. Generic over `T` so both the manager roster listing and the
+ * shared `PersonPicker` selector reuse this ONE function rather than each
+ * grouping people independently.
  */
-export function groupRosterHierarchy(roster: readonly ManagerPersonSummary[]): RosterTopGroup[] {
-  const byTopGroup = new Map<RosterPersonnelTypeGroup, ManagerPersonSummary[]>();
+export function groupRosterHierarchy<T extends PersonGroupable>(roster: readonly T[]): RosterTopGroup<T>[] {
+  const byTopGroup = new Map<RosterPersonnelTypeGroup, T[]>();
   for (const person of roster) {
     const key = classifyPersonnelType(person.personnelType);
     const bucket = byTopGroup.get(key);
@@ -93,7 +108,7 @@ export function groupRosterHierarchy(roster: readonly ManagerPersonSummary[]): R
     else byTopGroup.set(key, [person]);
   }
 
-  const result: RosterTopGroup[] = [];
+  const result: RosterTopGroup<T>[] = [];
 
   for (const topGroup of TOP_GROUP_ORDER) {
     const people = byTopGroup.get(topGroup);
@@ -104,7 +119,7 @@ export function groupRosterHierarchy(roster: readonly ManagerPersonSummary[]): R
       continue;
     }
 
-    const bySubgroup = new Map<RosterRegularRoleGroup, ManagerPersonSummary[]>();
+    const bySubgroup = new Map<RosterRegularRoleGroup, T[]>();
     for (const person of people) {
       const subKey = classifyRegularRole(person);
       const bucket = bySubgroup.get(subKey);
@@ -112,7 +127,7 @@ export function groupRosterHierarchy(roster: readonly ManagerPersonSummary[]): R
       else bySubgroup.set(subKey, [person]);
     }
 
-    const subgroups: RosterRegularSubgroup[] = [];
+    const subgroups: RosterRegularSubgroup<T>[] = [];
     for (const subGroup of REGULAR_SUBGROUP_ORDER) {
       const subPeople = bySubgroup.get(subGroup);
       if (!subPeople || subPeople.length === 0) continue;

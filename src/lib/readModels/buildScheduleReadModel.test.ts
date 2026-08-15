@@ -161,7 +161,7 @@ describe("buildManagerScheduleReadModel — roster (PR #24 §6)", () => {
     expect(model.roster).toHaveLength(3);
   });
 
-  it("roster options never carry email or any field beyond id/name", () => {
+  it("roster options never carry email or isManager -- only id/name plus the grouping fields the shared PersonPicker needs", () => {
     const model = buildManagerScheduleReadModel({
       manager: MANAGER,
       people: PEOPLE,
@@ -173,7 +173,7 @@ describe("buildManagerScheduleReadModel — roster (PR #24 §6)", () => {
       requestedPersonId: null,
     });
     for (const option of model.roster) {
-      expect(Object.keys(option).sort()).toEqual(["id", "name"]);
+      expect(Object.keys(option).sort()).toEqual(["id", "isSupervisor", "isTechnician", "name", "personnelType"]);
     }
   });
 

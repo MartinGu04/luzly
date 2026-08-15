@@ -14,8 +14,8 @@ const SUPERVISOR_LABEL = roleLabel("supervisor") ?? 'אחמ"ש';
  * follow-up consistency fix). No second coverage algorithm, no guessing
  * from rendered names -- this is presentation-only enrichment of the
  * MANAGER issue view, never a change to `OperationalIssue`/`PersonalIssue`
- * semantics (those stay generic, unchanged, shared with `/conflicts` and
- * personal pages).
+ * semantics (those stay generic, unchanged, shared with the dashboard's
+ * personal issue views).
  *
  * Priority: both roles provably missing outranks a single missing role,
  * which outranks a role-specific partial gap. `fallback` (the existing

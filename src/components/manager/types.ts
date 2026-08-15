@@ -1,21 +1,7 @@
 import type { AbsenceKind, DutyFamily } from "@/lib/domain/event";
-import type { IssueSeverity } from "@/lib/domain/operationalIssues";
 import type { ManagerRequirementStatus } from "@/lib/domain/potentialReconciliation";
 import type { CoverageStatus } from "@/lib/domain/shiftCoverage";
-
-/** Presentation-ready view of one `ManagerIssue` -- personName included since, unlike `/conflicts`, this is everyone's issues, not "your own". */
-export interface ManagerIssueRowView {
-  key: string;
-  personName: string;
-  severity: IssueSeverity;
-  reasonLabel: string;
-  dateLabel: string;
-  targetEmoji: string | null;
-  targetTitle: string | null;
-  missingIntervalLabels: string[] | null;
-  explanation: string | null;
-  guidance: string;
-}
+import type { IssueRowView } from "@/components/issues/types";
 
 /** Presentation-ready view of one `ManagerPotentialRequirementView` row -- "פוטנציאל מול סידור". */
 export interface ManagerPotentialRowView {
@@ -31,6 +17,19 @@ export interface ManagerPotentialRowView {
   /** Set only when the named SOURCE person has a blocking absence internally the same date -- independent of `status` (PR #14 §10). */
   sourceConflictNote: string | null;
 }
+
+/**
+ * One entry in the manager's unified "דורש טיפול" list -- either a real
+ * operational issue (conflict or coverage gap, from `detectOperationalIssues`)
+ * or a Potential-vs-internal staffing problem (from
+ * `reconcilePotentialAllocations`), tagged only so `ManagerAttentionSection`
+ * knows which row component to render. The manager never sees this `kind`
+ * distinction itself -- both render as plain rows under the same "דחוף"/
+ * "לבדיקה" severity groupings, never under separate per-engine headings.
+ */
+export type ManagerAttentionItem =
+  | { kind: "issue"; view: IssueRowView }
+  | { kind: "potential"; view: ManagerPotentialRowView };
 
 /**
  * Explicit per-role coverage diagnostic view -- `message` is null only when

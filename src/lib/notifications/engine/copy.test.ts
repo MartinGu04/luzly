@@ -67,7 +67,7 @@ describe("buildSettledChangeCopy -- team change", () => {
     };
     const copy = buildSettledChangeCopy(change, names);
     expect(copy?.body).toBe("עילאי שפירא שובץ איתך למשמרת היום ביום שלישי");
-    expect(copy?.path).toBe("/with-me");
+    expect(copy?.path).toBe("/");
   });
 
   it("a single colleague leaving says they're no longer assigned", () => {
@@ -129,7 +129,7 @@ describe("buildSettledChangeCopy -- coverage gap", () => {
     const copy = buildSettledChangeCopy(change, names);
     expect(copy?.title).toBe("🚨 חוסר בכיסוי");
     expect(copy?.body).toContain('אחמ"ש');
-    expect(copy?.path).toBe("/conflicts");
+    expect(copy?.path).toBe("/manager");
   });
 
   it("returns null when there is no fresh coverage value to report on", () => {

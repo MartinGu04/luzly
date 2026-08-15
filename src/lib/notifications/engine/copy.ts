@@ -121,7 +121,10 @@ function buildTeamChangeCopy(
   return {
     title: "👥 שינוי בצוות",
     body,
-    path: "/with-me",
+    // "/with-me" was removed as a standalone route (nav/people-selector
+    // consolidation pass) -- "מי איתי" now lives only in its existing
+    // dashboard presentation, so the notification opens the dashboard.
+    path: "/",
     tag: `team-change-${personId}-${date}-${period}`,
   };
 }
@@ -184,7 +187,10 @@ function buildCoverageGapCopy(change: FactChange): NotificationCopy | null {
   return {
     title: "🚨 חוסר בכיסוי",
     body: `חסר ${rolesText} במשמרת ${periodText} ב${weekday}`,
-    path: "/conflicts",
+    // "/conflicts" was removed as a standalone route (nav/people-selector
+    // consolidation pass) -- coverage gaps now surface in the manager's
+    // unified "דורש טיפול" section, so the notification opens /manager.
+    path: "/manager",
     tag: `coverage-gap-${date}-${period}`,
   };
 }

@@ -20,10 +20,9 @@ afterEach(() => {
 describe("BottomNav", () => {
   it("34. any disabled bottom-nav item renders no clickable link -- no dead routes", () => {
     render(<BottomNav />);
-    // The curated bottom-nav set (/, /schedule, /duties, /with-me,
-    // /conflicts) is fully enabled today, so this may currently iterate
-    // zero items -- it's a forward-looking safety net for whenever a
-    // future item is disabled.
+    // The curated bottom-nav set (/, /schedule, /duties) is fully enabled
+    // today, so this may currently iterate zero items -- it's a
+    // forward-looking safety net for whenever a future item is disabled.
     const disabledItems = navItems.filter((item) => item.inBottomNav && !item.enabled);
     for (const item of disabledItems) {
       expect(screen.queryByRole("link", { name: item.label })).toBeNull();
@@ -58,41 +57,14 @@ describe("BottomNav", () => {
     expect(dutiesLink).not.toHaveAttribute("aria-current");
   });
 
-  it("the with-me route is enabled: a real link, not aria-current on a different pathname", () => {
-    render(<BottomNav />);
-    const withMeLink = screen.getByRole("link", { name: "מי איתי" });
-    expect(withMeLink).toHaveAttribute("href", "/with-me");
-    expect(withMeLink).not.toHaveAttribute("aria-current");
-  });
-
-  it("the conflicts route is enabled: a real link, not aria-current on a different pathname", () => {
-    render(<BottomNav />);
-    const conflictsLink = screen.getByRole("link", { name: "התנגשויות" });
-    expect(conflictsLink).toHaveAttribute("href", "/conflicts");
-    expect(conflictsLink).not.toHaveAttribute("aria-current");
-  });
-
-  it("marks /conflicts as the current page when that's the active pathname", () => {
-    usePathname.mockReturnValue("/conflicts");
-    render(<BottomNav />);
-    const conflictsLink = screen.getByRole("link", { current: "page" });
-    expect(conflictsLink).toHaveAttribute("href", "/conflicts");
-  });
-
-  it("the conflicts item's bottom-nav label matches its full nav label -- \"התנגשויות\" (Design Pass PR #22)", () => {
-    render(<BottomNav />);
-    expect(screen.getByText("התנגשויות")).toBeInTheDocument();
-    expect(screen.queryByText("בדיקות")).toBeNull();
-  });
-
   it("the manager-only route is not part of the bottom nav at all", () => {
     render(<BottomNav />);
     expect(screen.queryByText("מנהל")).toBeNull();
   });
 
-  it("renders exactly five bottom-nav items", () => {
+  it("renders exactly three bottom-nav items", () => {
     const { container } = render(<BottomNav />);
-    expect(container.querySelectorAll("li").length).toBe(5);
+    expect(container.querySelectorAll("li").length).toBe(3);
   });
 
   it("marks /duties as the current page when that's the active pathname", () => {
@@ -102,11 +74,10 @@ describe("BottomNav", () => {
     expect(dutiesLink).toHaveAttribute("href", "/duties");
   });
 
-  it("marks /with-me as the current page when that's the active pathname", () => {
-    usePathname.mockReturnValue("/with-me");
+  it("no longer renders מי איתי or התנגשויות -- removed as standalone nav destinations", () => {
     render(<BottomNav />);
-    const withMeLink = screen.getByRole("link", { current: "page" });
-    expect(withMeLink).toHaveAttribute("href", "/with-me");
+    expect(screen.queryByRole("link", { name: "מי איתי" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "התנגשויות" })).toBeNull();
   });
 
   it("any currently-disabled bottom-nav entry would be marked aria-disabled, genuinely non-interactive", () => {

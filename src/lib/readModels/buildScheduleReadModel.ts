@@ -86,7 +86,15 @@ function compareRosterOptions(a: ScheduleRosterOption, b: ScheduleRosterOption):
 function buildRosterOptions(people: readonly Person[], managerId: string): ScheduleRosterOption[] {
   return people
     .filter((person) => person.id !== managerId)
-    .map((person): ScheduleRosterOption => ({ id: person.id, name: person.name }))
+    .map(
+      (person): ScheduleRosterOption => ({
+        id: person.id,
+        name: person.name,
+        personnelType: person.personnelType,
+        isSupervisor: person.isSupervisor,
+        isTechnician: person.isTechnician,
+      }),
+    )
     .sort(compareRosterOptions);
 }
 

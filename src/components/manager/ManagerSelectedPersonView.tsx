@@ -1,6 +1,6 @@
 import { Panel } from "@/components/ui/Panel";
-import { IssueSeverityGroup } from "@/components/conflicts/IssueSeverityGroup";
-import type { ConflictIssueView } from "@/components/conflicts/types";
+import { IssueSeverityGroup } from "@/components/issues/IssueSeverityGroup";
+import type { IssueRowView } from "@/components/issues/types";
 import type { IssueSeverity } from "@/lib/domain/operationalIssues";
 import type { ManagerAbsenceRowView, ManagerDutyRowView } from "./types";
 
@@ -22,7 +22,7 @@ interface ManagerSelectedPersonViewProps {
   person: ManagerSelectedPersonHeaderInfo;
   currentAssignments: ManagerSelectedPersonAssignmentView[];
   nextAssignments: ManagerSelectedPersonAssignmentView[];
-  issues: ConflictIssueView[];
+  issues: IssueRowView[];
   duties: ManagerDutyRowView[];
   absences: ManagerAbsenceRowView[];
 }
@@ -31,11 +31,12 @@ const SEVERITY_GROUP_ORDER: IssueSeverity[] = ["critical", "review", "info"];
 
 /**
  * The manager's focused drill-down for one person (PR #14 §28-30) --
- * reuses the exact same `IssueSeverityGroup`/`ConflictIssueView`
- * presentation `/conflicts` already established, since the selected
- * person's issues come from the SAME `buildPersonalScheduleReadModel()`
- * output, not a reimplementation. This is a manager INSPECTION scope
- * only -- never impersonation; the manager's own identity never changes.
+ * reuses the shared `IssueSeverityGroup`/`IssueRowView` presentation
+ * (`@/components/issues`) also used by the manager's everyone-wide "דורש
+ * טיפול" section, since the selected person's issues come from the SAME
+ * `buildPersonalScheduleReadModel()` output, not a reimplementation. This
+ * is a manager INSPECTION scope only -- never impersonation; the manager's
+ * own identity never changes.
  */
 export function ManagerSelectedPersonView({
   person,

@@ -28,8 +28,8 @@ timestamp anywhere in this codebase.
 - `DataFreshnessStatus.tsx` — the one shared, restrained "how fresh is
   what I'm looking at" metadata row, placed near/below each page's own
   header (never inside it — no header redesign) on every route that
-  renders a read model: `/`, `/schedule`, `/duties`, `/with-me`,
-  `/conflicts` (all `PersonalScheduleReadModel.fetchedAt`), `/manager`
+  renders a read model: `/`, `/schedule`, `/duties`
+  (all `PersonalScheduleReadModel.fetchedAt`), `/manager`
   (`ManagerOverviewReadModel.fetchedAt` — even on the selected-person
   sub-view, never the nested personal `fetchedAt` from that person's own
   `PersonalScheduleReadModel`), and `/manager/fairness`

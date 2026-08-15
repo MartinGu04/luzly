@@ -1,13 +1,14 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { ManagerAttentionSection } from "./ManagerAttentionSection";
-import type { ManagerIssueRowView, ManagerPotentialRowView } from "./types";
+import type { ManagerAttentionItem, ManagerPotentialRowView } from "./types";
+import type { IssueRowView } from "@/components/issues/types";
 
 afterEach(() => {
   cleanup();
 });
 
-function issueView(overrides: Partial<ManagerIssueRowView> = {}): ManagerIssueRowView {
+function issueView(overrides: Partial<IssueRowView> = {}): IssueRowView {
   return {
     key: "k1",
     personName: "מרטין בדיקה",
@@ -36,14 +37,23 @@ function potentialView(overrides: Partial<ManagerPotentialRowView> = {}): Manage
   };
 }
 
+function issueItem(overrides: Partial<IssueRowView> = {}): ManagerAttentionItem {
+  return { kind: "issue", view: issueView(overrides) };
+}
+
+function potentialItem(overrides: Partial<ManagerPotentialRowView> = {}): ManagerAttentionItem {
+  return { kind: "potential", view: potentialView(overrides) };
+}
+
 describe("ManagerAttentionSection", () => {
   it("shows the calm success state when everything is empty", () => {
-    render(<ManagerAttentionSection criticalIssues={[]} reviewIssues={[]} potentialProblems={[]} />);
-    expect(screen.getByText("אין כרגע דברים שדורשים התייחסות בטווח שנבחר")).toBeInTheDocument();
+    render(<ManagerAttentionSection criticalItems={[]} reviewItems={[]} />);
+    expect(screen.getByText("אין כרגע דברים שדורשים טיפול בטווח שנבחר")).toBeInTheDocument();
   });
 
-  it("shows critical issues under the דחוף heading", () => {
-    render(<ManagerAttentionSection criticalIssues={[issueView()]} reviewIssues={[]} potentialProblems={[]} />);
+  it("shows the דורש טיפול heading and critical issues under the דחוף heading", () => {
+    render(<ManagerAttentionSection criticalItems={[issueItem()]} reviewItems={[]} />);
+    expect(screen.getByText("דורש טיפול")).toBeInTheDocument();
     expect(screen.getByText("דחוף")).toBeInTheDocument();
     expect(screen.getByText(/מרטין בדיקה/)).toBeInTheDocument();
   });
@@ -51,25 +61,37 @@ describe("ManagerAttentionSection", () => {
   it("shows review issues under the לבדיקה heading", () => {
     render(
       <ManagerAttentionSection
-        criticalIssues={[]}
-        reviewIssues={[issueView({ severity: "review", key: "k2" })]}
-        potentialProblems={[]}
+        criticalItems={[]}
+        reviewItems={[issueItem({ severity: "review", key: "k2" })]}
       />,
     );
     expect(screen.getByText("לבדיקה")).toBeInTheDocument();
   });
 
-  it("shows potential problems under their own heading", () => {
-    render(<ManagerAttentionSection criticalIssues={[]} reviewIssues={[]} potentialProblems={[potentialView()]} />);
-    expect(screen.getByText(/דרישות Potential שדורשות בדיקה/)).toBeInTheDocument();
+  it("renders a Potential staffing problem as a plain row under a severity heading, never under a separate technical section", () => {
+    render(<ManagerAttentionSection criticalItems={[potentialItem()]} reviewItems={[]} />);
+    expect(screen.getByText("דחוף")).toBeInTheDocument();
+    expect(screen.getByText("כונן פינויים")).toBeInTheDocument();
+    expect(screen.queryByText(/Potential/)).toBeNull();
+  });
+
+  it("mixes issues and Potential problems within the same severity group, in the given order", () => {
+    render(
+      <ManagerAttentionSection
+        criticalItems={[issueItem({ key: "i1" }), potentialItem({ key: "p1" })]}
+        reviewItems={[]}
+      />,
+    );
+    const panel = screen.getByText("דחוף").closest("section");
+    const rows = panel?.querySelectorAll("li") ?? [];
+    expect(rows.length).toBe(2);
   });
 
   it("renders both critical and review sections together without hiding either", () => {
     render(
       <ManagerAttentionSection
-        criticalIssues={[issueView()]}
-        reviewIssues={[issueView({ severity: "review", key: "k2" })]}
-        potentialProblems={[]}
+        criticalItems={[issueItem()]}
+        reviewItems={[issueItem({ severity: "review", key: "k2" })]}
       />,
     );
     expect(screen.getByText("דחוף")).toBeInTheDocument();
