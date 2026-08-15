@@ -4,15 +4,12 @@ import type { ManagerOverviewParams } from "./managerOverviewParams";
 
 const getRequestPersonalSchedule = vi.fn();
 const getAuthenticatedIdentity = vi.fn();
-const fetchRawWorkbookSnapshot = vi.fn();
+const getWorkbookSnapshot = vi.fn();
 const getJerusalemLocalNow = vi.fn();
 
 vi.mock("./getRequestPersonalSchedule", () => ({ getRequestPersonalSchedule }));
 vi.mock("@/lib/auth/currentUser", () => ({ getAuthenticatedIdentity }));
-vi.mock("@/lib/google", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/google")>("@/lib/google");
-  return { ...actual, fetchRawWorkbookSnapshot };
-});
+vi.mock("@/lib/sync", () => ({ getWorkbookSnapshot }));
 vi.mock("@/lib/time/jerusalemClock", () => ({ getJerusalemLocalNow }));
 
 const { loadManagerOverviewReadModel } = await import("./managerOverview");
@@ -87,7 +84,7 @@ function okPersonalResult(isManager: boolean) {
 beforeEach(() => {
   getRequestPersonalSchedule.mockReset();
   getAuthenticatedIdentity.mockReset();
-  fetchRawWorkbookSnapshot.mockReset();
+  getWorkbookSnapshot.mockReset();
   getJerusalemLocalNow.mockReset();
   getJerusalemLocalNow.mockReturnValue({ date: "2026-08-13", minuteOfDay: 600 });
   getAuthenticatedIdentity.mockResolvedValue({
@@ -96,7 +93,7 @@ beforeEach(() => {
     email: "dani@example.invalid",
     avatarUrl: null,
   });
-  fetchRawWorkbookSnapshot.mockResolvedValue(managerSnapshot());
+  getWorkbookSnapshot.mockResolvedValue(managerSnapshot());
 });
 
 describe("loadManagerOverviewReadModel — auth pass-through states", () => {
@@ -104,28 +101,28 @@ describe("loadManagerOverviewReadModel — auth pass-through states", () => {
     getRequestPersonalSchedule.mockResolvedValue({ status: "unauthenticated" });
     const result = await loadManagerOverviewReadModel(DEFAULT_PARAMS);
     expect(result).toEqual({ status: "unauthenticated" });
-    expect(fetchRawWorkbookSnapshot).not.toHaveBeenCalled();
+    expect(getWorkbookSnapshot).not.toHaveBeenCalled();
   });
 
   it("missing_email: no manager fetch", async () => {
     getRequestPersonalSchedule.mockResolvedValue({ status: "missing_email" });
     const result = await loadManagerOverviewReadModel(DEFAULT_PARAMS);
     expect(result).toEqual({ status: "missing_email" });
-    expect(fetchRawWorkbookSnapshot).not.toHaveBeenCalled();
+    expect(getWorkbookSnapshot).not.toHaveBeenCalled();
   });
 
   it("unmapped: no manager fetch", async () => {
     getRequestPersonalSchedule.mockResolvedValue({ status: "unmapped" });
     const result = await loadManagerOverviewReadModel(DEFAULT_PARAMS);
     expect(result).toEqual({ status: "unmapped" });
-    expect(fetchRawWorkbookSnapshot).not.toHaveBeenCalled();
+    expect(getWorkbookSnapshot).not.toHaveBeenCalled();
   });
 
   it("ambiguous_identity: no manager fetch", async () => {
     getRequestPersonalSchedule.mockResolvedValue({ status: "ambiguous_identity" });
     const result = await loadManagerOverviewReadModel(DEFAULT_PARAMS);
     expect(result).toEqual({ status: "ambiguous_identity" });
-    expect(fetchRawWorkbookSnapshot).not.toHaveBeenCalled();
+    expect(getWorkbookSnapshot).not.toHaveBeenCalled();
   });
 
   it("configuration_error: passes the message through, no manager fetch", async () => {
@@ -136,7 +133,7 @@ describe("loadManagerOverviewReadModel — auth pass-through states", () => {
     });
     const result = await loadManagerOverviewReadModel(DEFAULT_PARAMS);
     expect(result).toEqual({ status: "configuration_error", message: "Missing shift start time configuration." });
-    expect(fetchRawWorkbookSnapshot).not.toHaveBeenCalled();
+    expect(getWorkbookSnapshot).not.toHaveBeenCalled();
   });
 });
 
@@ -145,14 +142,14 @@ describe("loadManagerOverviewReadModel — manager authorization", () => {
     getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(false));
     const result = await loadManagerOverviewReadModel(DEFAULT_PARAMS);
     expect(result).toEqual({ status: "forbidden" });
-    expect(fetchRawWorkbookSnapshot).not.toHaveBeenCalled();
+    expect(getWorkbookSnapshot).not.toHaveBeenCalled();
   });
 
   it("manager: the manager batch fetch is allowed, requesting exactly the 5 manager sources", async () => {
     getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(true));
     await loadManagerOverviewReadModel(DEFAULT_PARAMS);
-    expect(fetchRawWorkbookSnapshot).toHaveBeenCalledTimes(1);
-    expect(fetchRawWorkbookSnapshot).toHaveBeenCalledWith([
+    expect(getWorkbookSnapshot).toHaveBeenCalledTimes(1);
+    expect(getWorkbookSnapshot).toHaveBeenCalledWith([
       "personnel",
       "schedule",
       "settings",
@@ -164,7 +161,7 @@ describe("loadManagerOverviewReadModel — manager authorization", () => {
   it("fresh manager snapshot no longer marks the person as manager -> fails closed (forbidden), fetched data is never rendered", async () => {
     getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(true));
     // The FRESH manager-only fetch now returns a personnel sheet where this person is no longer flagged as manager.
-    fetchRawWorkbookSnapshot.mockResolvedValue(
+    getWorkbookSnapshot.mockResolvedValue(
       managerSnapshot({
         personnel: [
           ["שם", "מייל", "מנהל"],
@@ -179,7 +176,7 @@ describe("loadManagerOverviewReadModel — manager authorization", () => {
 
   it("fresh snapshot where the person is no longer mapped at all also fails closed", async () => {
     getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(true));
-    fetchRawWorkbookSnapshot.mockResolvedValue(
+    getWorkbookSnapshot.mockResolvedValue(
       managerSnapshot({ personnel: [["שם", "מייל", "מנהל"], ["מישהו אחר", "other@example.invalid", true]] }),
     );
     const result = await loadManagerOverviewReadModel(DEFAULT_PARAMS);
@@ -188,7 +185,7 @@ describe("loadManagerOverviewReadModel — manager authorization", () => {
 
   it("an invalid/missing shift configuration in the manager fetch fails closed as configuration_error", async () => {
     getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(true));
-    fetchRawWorkbookSnapshot.mockResolvedValue({
+    getWorkbookSnapshot.mockResolvedValue({
       fetchedAt: "2026-08-13T08:00:00.000Z",
       sheets: [
         personnelSheet(MANAGER_PERSONNEL_ROWS),

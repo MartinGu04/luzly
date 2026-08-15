@@ -1,5 +1,6 @@
 import "server-only";
 import type { User } from "@supabase/supabase-js";
+import { timedStage } from "@/lib/config/timingDiagnostics";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 /**
@@ -57,7 +58,10 @@ function extractAvatarUrl(user: User): string | null {
  */
 export async function getAuthenticatedIdentity(): Promise<AuthIdentityResult> {
   const supabase = await createSupabaseServerClient();
-  const { data, error } = await supabase.auth.getUser();
+  // Timing-only diagnostic (see `timedStage`) -- this call itself is
+  // NEVER cached (identity/session data must always be re-verified live),
+  // this only measures how much of navigation latency it accounts for.
+  const { data, error } = await timedStage("auth.getUser", () => supabase.auth.getUser());
 
   if (error || !data.user) return { status: "unauthenticated" };
 

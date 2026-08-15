@@ -1,18 +1,14 @@
 import "server-only";
 import { resolveIdentityAgainstPeople } from "@/lib/auth/resolveCurrentPerson";
 import { getAuthenticatedIdentity } from "@/lib/auth/currentUser";
+import { timedStage, timedSyncStage } from "@/lib/config/timingDiagnostics";
 import { ShiftConfigurationError, buildShiftSchedule, type ShiftSchedule } from "@/lib/domain/shiftSchedule";
-import {
-  fetchRawWorkbookSnapshot,
-  SHEET_SOURCES,
-  type RawSheet,
-  type RawWorkbookSnapshot,
-  type SheetSourceKey,
-} from "@/lib/google";
+import { SHEET_SOURCES, type RawSheet, type RawWorkbookSnapshot, type SheetSourceKey } from "@/lib/google";
 import { parseEvent } from "@/lib/parsers/event";
 import { parsePersonnelSheet } from "@/lib/parsers/personnel";
 import { parseScheduleSheet } from "@/lib/parsers/schedule";
 import { parseSettingsSheet } from "@/lib/parsers/settings";
+import { getWorkbookSnapshot } from "@/lib/sync";
 import { getJerusalemLocalNow } from "@/lib/time/jerusalemClock";
 import { buildPersonalScheduleReadModel, toPersonalProfile } from "./buildPersonalScheduleReadModel";
 import type { PersonalProfile, PersonalScheduleReadModel } from "./types";
@@ -64,8 +60,11 @@ function getSheetByKey(snapshot: RawWorkbookSnapshot, key: SheetSourceKey): RawS
  *
  * 1. Resolves the Supabase identity; a non-authenticated session never
  *    triggers a Google request at all.
- * 2. Batch-fetches personnel + schedule + settings in a single
- *    `fetchRawWorkbookSnapshot` call (never potentialH1/H2).
+ * 2. Gets personnel + schedule + settings via `lib/sync`'s
+ *    `getWorkbookSnapshot` -- a short-TTL cached wrapper around the single
+ *    underlying `fetchRawWorkbookSnapshot` batchGet call (never
+ *    potentialH1/H2) -- so navigating between pages moments apart reuses
+ *    the same recent snapshot instead of re-reading Google every time.
  * 3. Parses personnel and resolves the authenticated Person via the same
  *    fail-closed `resolveIdentityAgainstPeople` behavior `resolveCurrentPerson`
  *    uses — no second personnel fetch/parse.
@@ -75,22 +74,30 @@ function getSheetByKey(snapshot: RawWorkbookSnapshot, key: SheetSourceKey): RawS
  *    (fails closed as `configuration_error` — never a default start time).
  * 6. Delegates all read-model construction to the pure, independently
  *    testable `buildPersonalScheduleReadModel`.
+ *
+ * Wrapped in `timedStage("personalSchedule.total", ...)` so its total
+ * duration is directly comparable against each of its own sub-stages'
+ * timings below -- see `lib/config/timingDiagnostics.ts`.
  */
 export async function loadPersonalScheduleReadModel(): Promise<PersonalScheduleLoadResult> {
+  return timedStage("personalSchedule.total", () => loadPersonalScheduleReadModelInner());
+}
+
+async function loadPersonalScheduleReadModelInner(): Promise<PersonalScheduleLoadResult> {
   const identity = await getAuthenticatedIdentity();
   if (identity.status === "unauthenticated") return { status: "unauthenticated" };
   if (identity.status === "missing_email") return { status: "missing_email" };
 
-  const snapshot = await fetchRawWorkbookSnapshot(REQUIRED_SOURCES);
+  const snapshot = await getWorkbookSnapshot(REQUIRED_SOURCES);
 
-  const people = parsePersonnelSheet(getSheetByKey(snapshot, "personnel"));
+  const people = timedSyncStage("personnel.parse", () => parsePersonnelSheet(getSheetByKey(snapshot, "personnel")));
   const identityResult = resolveIdentityAgainstPeople(identity, people);
 
   if (identityResult.status === "unmapped") return { status: "unmapped" };
   if (identityResult.status === "ambiguous_identity") return { status: "ambiguous_identity" };
   if (identityResult.status !== "ok") return { status: identityResult.status };
 
-  const settings = parseSettingsSheet(getSheetByKey(snapshot, "settings"));
+  const settings = timedSyncStage("settings.parse", () => parseSettingsSheet(getSheetByKey(snapshot, "settings")));
 
   let shiftSchedule: ShiftSchedule;
   try {
@@ -107,17 +114,21 @@ export async function loadPersonalScheduleReadModel(): Promise<PersonalScheduleL
     throw error;
   }
 
-  const rawAssignments = parseScheduleSheet(getSheetByKey(snapshot, "schedule"), people);
-  const events = rawAssignments.map(parseEvent);
-
-  const model = buildPersonalScheduleReadModel({
-    person: identityResult.person,
-    people,
-    events,
-    shiftSchedule,
-    fetchedAt: snapshot.fetchedAt,
-    now: getJerusalemLocalNow(),
+  const events = timedSyncStage("schedule.parse", () => {
+    const rawAssignments = parseScheduleSheet(getSheetByKey(snapshot, "schedule"), people);
+    return rawAssignments.map(parseEvent);
   });
+
+  const model = timedSyncStage("readModel.build", () =>
+    buildPersonalScheduleReadModel({
+      person: identityResult.person,
+      people,
+      events,
+      shiftSchedule,
+      fetchedAt: snapshot.fetchedAt,
+      now: getJerusalemLocalNow(),
+    }),
+  );
 
   return { status: "ok", model, avatarUrl: identity.avatarUrl };
 }

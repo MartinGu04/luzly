@@ -3,6 +3,7 @@
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { RefreshCw } from "lucide-react";
+import { refreshWorkbookSnapshotAction } from "@/lib/sync/actions";
 import { formatDataFreshnessLabel } from "@/lib/presentation/dataFreshness";
 
 interface DataFreshnessStatusProps {
@@ -25,7 +26,10 @@ const RELATIVE_AGE_TICK_MS = 30_000;
  * Restrained, reusable "how fresh is what I'm looking at" metadata row
  * (PR #17) -- supporting context, never a hero card. Google Sheets remains
  * the source of truth; מי-מה-מו only ever holds a read-only, timestamped
- * snapshot of it. The refresh control reruns the CURRENT route's existing
+ * snapshot of it. The refresh control FIRST forces the short-lived
+ * workbook-snapshot cache to expire (`refreshWorkbookSnapshotAction`, see
+ * `lib/sync`) so this is a REAL refresh, never one that quietly returns
+ * the still-cached snapshot, then reruns the CURRENT route's existing
  * Server Component data loader via `router.refresh()` -- no new API
  * route, no direct browser Google call, no writeback, and no automatic
  * polling for new data (only the displayed text re-ticks locally).
@@ -52,7 +56,12 @@ export function DataFreshnessStatus({ fetchedAt, className = "" }: DataFreshness
   }, [fetchedAt]);
 
   function handleRefresh() {
-    startTransition(() => {
+    startTransition(async () => {
+      // Invalidate the workbook-snapshot cache FIRST, then ask Next to
+      // re-render this route -- in that order, never reversed and never
+      // in parallel, so the refresh request can never race ahead of the
+      // invalidation and observe the stale cache entry.
+      await refreshWorkbookSnapshotAction();
       router.refresh();
     });
   }

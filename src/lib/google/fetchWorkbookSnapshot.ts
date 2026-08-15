@@ -1,4 +1,5 @@
 import "server-only";
+import { timedStage } from "@/lib/config/timingDiagnostics";
 import { getGoogleSheetsContext } from "./client";
 import {
   ALL_SHEET_SOURCE_KEYS,
@@ -14,7 +15,9 @@ import type { RawCellValue, RawSheet, RawWorkbookSnapshot } from "./types";
  * potential-duty sheets in particular are only ever returned raw here.
  *
  * This is the only place in the codebase allowed to call the Google Sheets
- * API, and it only ever reads (`spreadsheets.values.batchGet`).
+ * API, and it only ever reads (`spreadsheets.values.batchGet`). ALWAYS a
+ * real network round trip -- see `lib/sync`'s cached wrapper for the
+ * short-TTL reuse layer every read-model loader actually calls.
  */
 export async function fetchRawWorkbookSnapshot(
   sourceKeys: SheetSourceKey[] = ALL_SHEET_SOURCE_KEYS,
@@ -23,12 +26,14 @@ export async function fetchRawWorkbookSnapshot(
 
   const ranges = sourceKeys.map((key) => toFullSheetA1Range(SHEET_SOURCES[key]));
 
-  const response = await sheets.spreadsheets.values.batchGet({
-    spreadsheetId,
-    ranges,
-    valueRenderOption: "FORMATTED_VALUE",
-    dateTimeRenderOption: "FORMATTED_STRING",
-  });
+  const response = await timedStage(`google.batchGet(${sourceKeys.length} sources)`, () =>
+    sheets.spreadsheets.values.batchGet({
+      spreadsheetId,
+      ranges,
+      valueRenderOption: "FORMATTED_VALUE",
+      dateTimeRenderOption: "FORMATTED_STRING",
+    }),
+  );
 
   const valueRanges = response.data.valueRanges ?? [];
 
