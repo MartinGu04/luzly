@@ -26,6 +26,12 @@
   computed server-side — so `@hebcal/core` (used to build that metadata)
   never ships to the client bundle.
 
+- `pwa/` — `ServiceWorkerManager.tsx` (registers `/sw.js` once at the
+  application root, drives the user-controlled "new version available"
+  banner) and `UpdateNotice.tsx` (the banner itself). See `lib/pwa/README`
+  for the full PWA foundation this belongs to. Mounted once in
+  `app/layout.tsx`, never per-page.
+
 Feature-specific components (duties, conflicts, ...) get their own
 subfolder once those modules exist. Components render data handed to them
 by `lib/domain`/`lib/readModels` — they never parse raw spreadsheet cells.
