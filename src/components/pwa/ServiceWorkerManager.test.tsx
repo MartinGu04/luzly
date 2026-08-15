@@ -231,3 +231,29 @@ describe("ServiceWorkerManager — update detection", () => {
     expect(reloadSpy).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("ServiceWorkerManager — first install must never auto-reload", () => {
+  it("no existing controller -> first worker installs/activates -> its own clients.claim() fires controllerchange -> reload count stays 0", async () => {
+    const { container, registerMock } = installFakeServiceWorkerEnvironment();
+    container.controller = null; // first-ever install: nothing controls this page yet
+    const registration = new FakeRegistration();
+    registerMock.mockResolvedValue(registration);
+    const reloadSpy = stubLocationReload();
+
+    render(<ServiceWorkerManager />);
+    await act(async () => {});
+
+    // Simulate sw.js's own activate handler: clients.claim() takes control
+    // of this already-open, previously-uncontrolled page, which the
+    // browser reports via the SAME "controllerchange" event a real
+    // accepted update would use -- but no update was ever offered or
+    // accepted here (no banner, no click).
+    await act(async () => {
+      container.controller = {};
+      container.dispatch("controllerchange");
+    });
+
+    expect(screen.queryByText(/גרסה חדשה/)).toBeNull();
+    expect(reloadSpy).not.toHaveBeenCalled();
+  });
+});

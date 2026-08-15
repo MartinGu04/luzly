@@ -37,13 +37,22 @@ const UPDATE_CHECK_MIN_INTERVAL_MS = 60_000;
  * .controller` is null on a first-ever install. Accepting the update
  * posts "SKIP_WAITING" to the waiting worker; the actual one-time reload
  * happens from the "controllerchange" event once the new worker genuinely
- * takes control, never optimistically before that.
+ * takes control -- but ONLY when that controllerchange follows an
+ * explicitly accepted update (`updateAcceptedRef`). `sw.js` calls
+ * `clients.claim()` on activation, which can itself fire
+ * "controllerchange" for a page that had no controller yet -- i.e. on the
+ * very first install, with no update ever offered or accepted. Without
+ * this gate, that first-install activation would trigger an unwanted,
+ * unexplained reload; gating on explicit acceptance means a
+ * `clients.claim()`-driven controllerchange with nothing accepted is
+ * simply ignored.
  */
 export function ServiceWorkerManager() {
   const [updateReady, setUpdateReady] = useState(false);
   const [activating, setActivating] = useState(false);
   const waitingWorkerRef = useRef<ServiceWorker | null>(null);
   const hasRegisteredRef = useRef(false);
+  const updateAcceptedRef = useRef(false);
 
   useEffect(() => {
     if (!supportsServiceWorker()) return;
@@ -97,6 +106,11 @@ export function ServiceWorkerManager() {
 
     let reloadedOnce = false;
     function handleControllerChange() {
+      // Ignore any controllerchange that was not caused by an explicitly
+      // accepted update -- most notably the FIRST install's own
+      // clients.claim(), which has no waiting worker/user action behind
+      // it at all.
+      if (!updateAcceptedRef.current) return;
       if (reloadedOnce) return;
       reloadedOnce = true;
       window.location.reload();
@@ -113,6 +127,7 @@ export function ServiceWorkerManager() {
 
   function handleUpdateNow() {
     setActivating(true);
+    updateAcceptedRef.current = true;
     waitingWorkerRef.current?.postMessage("SKIP_WAITING");
   }
 
