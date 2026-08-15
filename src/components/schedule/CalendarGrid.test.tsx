@@ -3,6 +3,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { parseCalendarDate } from "@/lib/domain/dutyBlocks";
 import { weekOfYear } from "@/lib/domain/weekOfYear";
 import type { PersonalEventView } from "@/lib/readModels/types";
+import type { HolidayContext } from "@/lib/presentation/hebrewCalendar";
 import { CalendarGrid } from "./CalendarGrid";
 import type { DayMeta } from "./types";
 
@@ -30,6 +31,33 @@ function shiftEvent(overrides: Partial<PersonalEventView> = {}): PersonalEventVi
     ...overrides,
   };
 }
+
+function dutyEvent(overrides: Partial<PersonalEventView> = {}): PersonalEventView {
+  return shiftEvent({
+    title: "שומר 1",
+    rawValue: "שומר 1",
+    category: "duty",
+    role: null,
+    period: "unspecified",
+    dutyFamily: "guard",
+    slot: 1,
+    ...overrides,
+  });
+}
+
+function absenceEvent(overrides: Partial<PersonalEventView> = {}): PersonalEventView {
+  return shiftEvent({
+    title: "חופש",
+    rawValue: "חופש",
+    category: "absence",
+    role: null,
+    period: "unspecified",
+    absenceKind: "vacation",
+    ...overrides,
+  });
+}
+
+const HOLIDAY: HolidayContext = { emoji: "🍎", label: "ראש השנה", kind: "holiday", shortLabel: "חג" };
 
 function dayMeta(date: string, overrides: Partial<DayMeta> = {}): DayMeta {
   const day = Number(date.slice(8, 10));
@@ -263,7 +291,7 @@ describe("CalendarGrid", () => {
         activeShiftDates={[]}
       />,
     );
-    const cell = screen.getByRole("button", { name: /14 באוגוסט/ });
+    const cell = screen.getByRole("button", { name: /11 באוגוסט/ });
     expect(cell.textContent).not.toMatch(/[\u{1F300}-\u{1FAFF}☀-➿]/u);
   });
 
@@ -315,32 +343,80 @@ describe("CalendarGrid", () => {
     });
   });
 
-  describe("in-cell event labels (Design Pass PR #20)", () => {
-    it("shows the event's own (already-safe) title as a compact label inside its day", () => {
+  describe("in-cell indicators are compact and generic ('הלוח שלי' density pass)", () => {
+    it("shows a short generic label ('יום'), never the full assignment title, inside the cell", () => {
       render(
         <CalendarGrid
           grid={WEEK_GRID}
           days={weekDays()}
-          eventsByDate={{ "2026-08-12": [shiftEvent({ date: "2026-08-12", title: "טכנאי יום" })] }}
+          eventsByDate={{ "2026-08-12": [shiftEvent({ date: "2026-08-12", period: "day", title: "טכנאי יום" })] }}
           selectedDate={null}
           onSelectDate={noop}
           activeShiftDates={[]}
         />,
       );
       const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
-      expect(cell.textContent).toContain("טכנאי יום");
+      expect(cell.textContent).toContain("יום");
+      expect(cell.textContent).not.toContain("טכנאי יום");
     });
 
-    it("shows at most 2 event labels, then a '+N' overflow indicator for the rest", () => {
+    it("labels a duty generically as 'תורנות', never the specific duty family/title", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          eventsByDate={{ "2026-08-12": [dutyEvent({ date: "2026-08-12" })] }}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+      expect(cell.textContent).toContain("תורנות");
+      expect(cell.textContent).not.toContain("שומר 1");
+    });
+
+    it("labels an absence with its own kind ('חופש')", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          eventsByDate={{ "2026-08-12": [absenceEvent({ date: "2026-08-12" })] }}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+      expect(cell.textContent).toContain("חופש");
+    });
+
+    it("shows a compact holiday indicator ('חג'), never the specific holiday name, inside the cell", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays({ "2026-08-12": { holiday: HOLIDAY } })}
+          eventsByDate={{}}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+      expect(cell.textContent).toContain("חג");
+      expect(cell.textContent).not.toContain("ראש השנה");
+    });
+
+    it("on wide layouts, shows up to 2 indicators plus a '+N' overflow chip marked visible only from sm: up", () => {
       render(
         <CalendarGrid
           grid={WEEK_GRID}
           days={weekDays()}
           eventsByDate={{
             "2026-08-12": [
-              shiftEvent({ date: "2026-08-12", title: "אירוע ראשון", period: "day" }),
-              shiftEvent({ date: "2026-08-12", title: "אירוע שני", period: "night" }),
-              shiftEvent({ date: "2026-08-12", title: "אירוע שלישי", period: "morning" }),
+              shiftEvent({ date: "2026-08-12", period: "day" }),
+              shiftEvent({ date: "2026-08-12", period: "night" }),
+              dutyEvent({ date: "2026-08-12" }),
             ],
           }}
           selectedDate={null}
@@ -349,23 +425,75 @@ describe("CalendarGrid", () => {
         />,
       );
       const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
-      expect(cell.textContent).toContain("אירוע ראשון");
-      expect(cell.textContent).toContain("אירוע שני");
-      expect(cell.textContent).not.toContain("אירוע שלישי");
-      expect(cell.textContent).toContain("+1");
+      expect(cell.textContent).toContain("יום");
+      expect(cell.textContent).toContain("לילה");
+      expect(cell.textContent).not.toContain("תורנות");
+
+      // Wide overflow ("+1", counting past the 2 visible-on-wide indicators)
+      // is present and marked wide-only.
+      const wideOverflow = screen.getByText("+1");
+      expect(wideOverflow.className).toMatch(/sm:block/);
+      expect(wideOverflow.className).toMatch(/hidden/);
     });
 
-    it("shows no overflow indicator when there are exactly 2 events", () => {
+    it("on narrow layouts, only 1 indicator is meant to show, with a deeper '+N' overflow marked mobile-only", () => {
       render(
         <CalendarGrid
           grid={WEEK_GRID}
           days={weekDays()}
           eventsByDate={{
             "2026-08-12": [
-              shiftEvent({ date: "2026-08-12", title: "אירוע ראשון", period: "day" }),
-              shiftEvent({ date: "2026-08-12", title: "אירוע שני", period: "night" }),
+              shiftEvent({ date: "2026-08-12", period: "day" }),
+              shiftEvent({ date: "2026-08-12", period: "night" }),
+              dutyEvent({ date: "2026-08-12" }),
             ],
           }}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      // The second indicator is present in the DOM (so a real sm:+ viewport
+      // can show it) but marked hidden below sm:.
+      const secondIndicator = screen.getByText("לילה");
+      expect(secondIndicator.className).toMatch(/hidden/);
+      expect(secondIndicator.className).toMatch(/sm:block/);
+
+      // Mobile overflow ("+2", counting past only the 1 indicator meant to
+      // show on a narrow layout) is present and marked mobile-only.
+      const mobileOverflow = screen.getByText("+2");
+      expect(mobileOverflow.className).toMatch(/sm:hidden/);
+    });
+
+    it("shows no wide-layout overflow when there are exactly 2 indicators -- both fit the wide budget", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          eventsByDate={{
+            "2026-08-12": [
+              shiftEvent({ date: "2026-08-12", period: "day" }),
+              shiftEvent({ date: "2026-08-12", period: "night" }),
+            ],
+          }}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      // Exactly 2 indicators fit the wide-layout budget of 2, so there's no
+      // "hidden sm:block" wide overflow chip at all -- only the mobile-only
+      // "+1" (since a narrow layout still shows just 1 indicator) exists.
+      expect(screen.queryByText("+1")).not.toBeNull();
+      expect(screen.getByText("+1").className).toMatch(/sm:hidden/);
+    });
+
+    it("shows no overflow at all, on either layout, when there is exactly 1 indicator", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          eventsByDate={{ "2026-08-12": [shiftEvent({ date: "2026-08-12", period: "day" })] }}
           selectedDate={null}
           onSelectDate={noop}
           activeShiftDates={[]}
@@ -375,7 +503,7 @@ describe("CalendarGrid", () => {
       expect(cell.textContent).not.toMatch(/\+\d/);
     });
 
-    it("a day with no events shows no label", () => {
+    it("a day with no events and no holiday shows no indicator at all", () => {
       render(
         <CalendarGrid
           grid={WEEK_GRID}
@@ -386,8 +514,89 @@ describe("CalendarGrid", () => {
           activeShiftDates={[]}
         />,
       );
+      const cell = screen.getByRole("button", { name: /11 באוגוסט/ });
+      expect(cell.textContent?.trim()).toBe("11");
+    });
+
+    it("the holiday indicator counts toward the same 1-2-plus-overflow budget as events, never bypassing it", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays({ "2026-08-12": { holiday: HOLIDAY } })}
+          eventsByDate={{
+            "2026-08-12": [
+              shiftEvent({ date: "2026-08-12", period: "day" }),
+              shiftEvent({ date: "2026-08-12", period: "night" }),
+            ],
+          }}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+      // Holiday (חג) leads, then the first shift (יום) -- the second shift
+      // (לילה) is pushed past the wide-visible budget of 2.
+      expect(cell.textContent).toContain("חג");
+      expect(cell.textContent).toContain("יום");
+      expect(screen.getByText("+1")).toBeInTheDocument();
+    });
+  });
+
+  describe("weekend distinction (Thursday-Saturday, tasteful and subtle)", () => {
+    it("gives the Thursday/Friday/Saturday weekday header labels a distinct, non-quiet tone", () => {
+      const { container } = render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          eventsByDate={{}}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const headerLabels = container.querySelectorAll("div.grid.flex-1.grid-cols-7 > span");
+      expect(headerLabels).toHaveLength(7);
+      // Sunday (index 0) stays the quiet weekday tone.
+      expect(headerLabels[0].className).toMatch(/text-muted-2/);
+      // Thursday/Friday/Saturday (indices 4-6) get the distinct weekend tone.
+      expect(headerLabels[4].className).toMatch(/text-muted(?!-2)/);
+      expect(headerLabels[5].className).toMatch(/text-muted(?!-2)/);
+      expect(headerLabels[6].className).toMatch(/text-muted(?!-2)/);
+    });
+
+    it("gives an unselected weekend day cell a subtle background wash a weekday cell doesn't get", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          eventsByDate={{}}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      // 2026-08-14 is a Friday (weekend); 2026-08-12 is a Wednesday (weekday).
+      const weekendCell = screen.getByRole("button", { name: /14 באוגוסט/ });
+      const weekdayCell = screen.getByRole("button", { name: /12 באוגוסט/ });
+      expect(weekendCell.className).toMatch(/bg-overlay-faint/);
+      expect(weekdayCell.className).not.toMatch(/bg-overlay-faint/);
+    });
+
+    it("a selected weekend day uses the normal selection background, not the weekend wash", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          eventsByDate={{}}
+          selectedDate="2026-08-14"
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
       const cell = screen.getByRole("button", { name: /14 באוגוסט/ });
-      expect(cell.textContent?.trim()).toBe("14");
+      expect(cell.className).toMatch(/bg-overlay-strong/);
+      expect(cell.className).not.toMatch(/bg-overlay-faint/);
     });
   });
 

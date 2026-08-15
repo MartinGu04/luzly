@@ -39,7 +39,7 @@ export interface BuildManagerScheduleReadModelInput {
   shiftSchedule: ShiftSchedule;
   fetchedAt: string;
   now: LocalNow;
-  /** Every calendar date in the displayed month -- scopes "all" perspective's staffing/duties/absences. Unused for "self"/"person" (`PersonalScheduleReadModel` carries its own full, unscoped `shiftCalendarEvents`, filtered by month at the page like today). */
+  /** Every calendar date in the displayed month -- scopes "all" perspective's staffing/duties/absences. Unused for "self"/"person" (`PersonalScheduleReadModel` carries its own full, unscoped `calendarEvents`, filtered by month at the page like today). */
   monthDates: readonly string[];
   /**
    * Raw, unvalidated `?person=` value -- `null`/omitted means "self", the

@@ -85,6 +85,18 @@ function myDuty(overrides: Partial<Event> = {}): Event {
   });
 }
 
+function myAbsence(overrides: Partial<Event> = {}): Event {
+  return baseEvent({
+    category: "absence",
+    role: null,
+    period: "unspecified",
+    absenceKind: "vacation",
+    title: "חופש",
+    rawValue: "חופש",
+    ...overrides,
+  });
+}
+
 function colleagueShift(overrides: Partial<Event> = {}): Event {
   return baseEvent({
     personId: COLLEAGUE_ID,
@@ -283,62 +295,78 @@ describe("todayEvents / upcomingEvents", () => {
 });
 
 // ---------------------------------------------------------------------------
-// shiftCalendarEvents (personal shift calendar)
+// calendarEvents ("הלוח שלי" personal monthly calendar)
 // ---------------------------------------------------------------------------
 
-describe("shiftCalendarEvents", () => {
+describe("calendarEvents", () => {
   it("includes a historical (finished, past-dated) personal shift", () => {
     const events = [myShift({ date: "2026-08-01", period: "day" })];
     const model = build({ events }); // now = 2026-08-12
-    expect(model.shiftCalendarEvents.some((e) => e.date === "2026-08-01")).toBe(true);
+    expect(model.calendarEvents.some((e) => e.date === "2026-08-01")).toBe(true);
   });
 
   it("includes a currently-running personal shift", () => {
     const events = [myShift({ date: "2026-08-12", period: "day" })];
     const model = build({ events });
-    expect(model.shiftCalendarEvents.some((e) => e.date === "2026-08-12")).toBe(true);
+    expect(model.calendarEvents.some((e) => e.date === "2026-08-12")).toBe(true);
   });
 
   it("includes a future personal shift", () => {
     const events = [myShift({ date: "2026-08-20", period: "day" })];
     const model = build({ events });
-    expect(model.shiftCalendarEvents.some((e) => e.date === "2026-08-20")).toBe(true);
+    expect(model.calendarEvents.some((e) => e.date === "2026-08-20")).toBe(true);
   });
 
-  it("excludes duties", () => {
+  it("includes duties, unlike the old shift-only calendar", () => {
     const events = [myShift({ date: "2026-08-12" }), myDuty({ date: "2026-08-12" })];
     const model = build({ events });
-    expect(model.shiftCalendarEvents.every((e) => e.category === "shift")).toBe(true);
-    expect(model.shiftCalendarEvents).toHaveLength(1);
+    expect(model.calendarEvents).toHaveLength(2);
+    expect(model.calendarEvents.some((e) => e.category === "duty")).toBe(true);
   });
 
-  it("excludes absences", () => {
+  it("includes absences, unlike the old shift-only calendar", () => {
+    const events = [myShift({ date: "2026-08-12" }), myAbsence({ date: "2026-08-13" })];
+    const model = build({ events });
+    expect(model.calendarEvents).toHaveLength(2);
+    expect(model.calendarEvents.some((e) => e.category === "absence")).toBe(true);
+  });
+
+  it("excludes non-calendar-worthy categories (e.g. an internal constraint/status/context row)", () => {
     const events = [
       myShift({ date: "2026-08-12" }),
-      baseEvent({ date: "2026-08-13", category: "absence", absenceKind: "vacation" }),
+      baseEvent({ date: "2026-08-12", category: "constraint", title: "אילוץ" }),
+      baseEvent({ date: "2026-08-12", category: "status", title: "סטטוס" }),
+      baseEvent({ date: "2026-08-12", category: "other", title: "אחר" }),
     ];
     const model = build({ events });
-    expect(model.shiftCalendarEvents.every((e) => e.category === "shift")).toBe(true);
+    expect(model.calendarEvents).toHaveLength(1);
+    expect(model.calendarEvents[0].category).toBe("shift");
   });
 
-  it("excludes an unrelated person's shifts", () => {
+  it("excludes an unrelated person's events", () => {
     const events = [myShift({ date: "2026-08-12" }), colleagueShift({ date: "2026-08-12" })];
     const model = build({ events, people: [me(), colleague()] });
-    expect(model.shiftCalendarEvents).toHaveLength(1);
-    expect(JSON.stringify(model.shiftCalendarEvents)).not.toContain("נועה");
+    expect(model.calendarEvents).toHaveLength(1);
+    expect(JSON.stringify(model.calendarEvents)).not.toContain("נועה");
   });
 
-  it("is sorted deterministically by date, past through future", () => {
+  it("is sorted deterministically by date, past through future, shifts before same-date duties/absences", () => {
     const events = [
       myShift({ date: "2026-08-20", period: "day" }),
-      myShift({ date: "2026-08-01", period: "day" }),
+      myAbsence({ date: "2026-08-01" }),
       myShift({ date: "2026-08-12", period: "day" }),
+      myDuty({ date: "2026-08-12" }),
     ];
     const model = build({ events });
-    expect(model.shiftCalendarEvents.map((e) => e.date)).toEqual(["2026-08-01", "2026-08-12", "2026-08-20"]);
+    expect(model.calendarEvents.map((e) => [e.date, e.category])).toEqual([
+      ["2026-08-01", "absence"],
+      ["2026-08-12", "shift"],
+      ["2026-08-12", "duty"],
+      ["2026-08-20", "shift"],
+    ]);
   });
 
-  it("preserves tentative/shadow/role/period/overrides and resolved timing", () => {
+  it("preserves tentative/shadow/role/period/overrides and resolved timing for a shift", () => {
     const events = [
       myShift({
         date: "2026-08-12",
@@ -350,7 +378,7 @@ describe("shiftCalendarEvents", () => {
       }),
     ];
     const model = build({ events });
-    const [event] = model.shiftCalendarEvents;
+    const [event] = model.calendarEvents;
     expect(event.certainty).toBe("tentative");
     expect(event.shadow).toBe(true);
     expect(event.role).toBe("supervisor");
@@ -359,12 +387,27 @@ describe("shiftCalendarEvents", () => {
     expect(event.timing.status).toBe("resolved");
   });
 
-  it("never exposes sourceSheet/sourceCell/email on any shiftCalendarEvents entry", () => {
-    const events = [myShift({ date: "2026-08-12" })];
+  it("preserves dutyFamily/slot on a duty entry", () => {
+    const events = [myDuty({ date: "2026-08-12", dutyFamily: "reserve", slot: 2 })];
     const model = build({ events });
-    expect(model.shiftCalendarEvents[0]).not.toHaveProperty("sourceSheet");
-    expect(model.shiftCalendarEvents[0]).not.toHaveProperty("sourceCell");
-    expect(JSON.stringify(model.shiftCalendarEvents)).not.toContain("dani@example.invalid");
+    expect(model.calendarEvents[0].dutyFamily).toBe("reserve");
+    expect(model.calendarEvents[0].slot).toBe(2);
+  });
+
+  it("preserves absenceKind on an absence entry", () => {
+    const events = [myAbsence({ date: "2026-08-12", absenceKind: "after" })];
+    const model = build({ events });
+    expect(model.calendarEvents[0].absenceKind).toBe("after");
+  });
+
+  it("never exposes sourceSheet/sourceCell/email on any calendarEvents entry", () => {
+    const events = [myShift({ date: "2026-08-12" }), myDuty({ date: "2026-08-12" }), myAbsence({ date: "2026-08-13" })];
+    const model = build({ events });
+    for (const event of model.calendarEvents) {
+      expect(event).not.toHaveProperty("sourceSheet");
+      expect(event).not.toHaveProperty("sourceCell");
+    }
+    expect(JSON.stringify(model.calendarEvents)).not.toContain("dani@example.invalid");
   });
 });
 

@@ -102,12 +102,12 @@ describe("ScheduleCalendar", () => {
     expect(selectedDayPanel().queryByText("טכנאי יום")).toBeNull();
   });
 
-  it("still shows the calendar grid's own event label for a date, even once it's no longer selected", () => {
+  it("still shows the calendar grid's own compact indicator for a date, even once it's no longer selected", () => {
     render(
       <ScheduleCalendar
         grid={WEEK_GRID}
         days={weekDays()}
-        monthEvents={[shiftEvent({ date: "2026-08-12", title: "טכנאי יום" })]}
+        monthEvents={[shiftEvent({ date: "2026-08-12", title: "טכנאי יום", period: "day" })]}
         defaultSelectedDate="2026-08-12"
         activeShiftDates={[]}
       />,
@@ -117,11 +117,11 @@ describe("ScheduleCalendar", () => {
       screen.getByRole("button", { name: /13 באוגוסט/ }).click();
     });
 
-    // The 12th's own cell still shows its event label; only the panel moved.
-    expect(screen.getByRole("button", { name: /12 באוגוסט/ }).textContent).toContain("טכנאי יום");
+    // The 12th's own cell still shows its compact indicator; only the panel moved.
+    expect(screen.getByRole("button", { name: /12 באוגוסט/ }).textContent).toContain("יום");
   });
 
-  it("shows the empty-day message when the selected day has no shifts", () => {
+  it("shows the free-day message when the selected day has nothing scheduled", () => {
     render(
       <ScheduleCalendar
         grid={WEEK_GRID}
@@ -131,7 +131,7 @@ describe("ScheduleCalendar", () => {
         activeShiftDates={[]}
       />,
     );
-    expect(selectedDayPanel().getByText("אין לך משמרת ביום הזה 😌")).toBeInTheDocument();
+    expect(selectedDayPanel().getByText("היום פנוי אצלך 😌")).toBeInTheDocument();
   });
 
   it("renders no selected-day panel when defaultSelectedDate is null", () => {
@@ -145,6 +145,49 @@ describe("ScheduleCalendar", () => {
       />,
     );
     expect(screen.queryByRole("region", { name: "פרטי היום הנבחר" })).toBeNull();
+  });
+
+  it("shows a duty in the selected-day panel -- not just shifts (הלוח שלי)", () => {
+    const dutyEvent = shiftEvent({
+      date: "2026-08-12",
+      title: "שומר 1",
+      category: "duty",
+      role: null,
+      period: "unspecified",
+      dutyFamily: "guard",
+      slot: 1,
+    });
+    render(
+      <ScheduleCalendar
+        grid={WEEK_GRID}
+        days={weekDays()}
+        monthEvents={[dutyEvent]}
+        defaultSelectedDate="2026-08-12"
+        activeShiftDates={[]}
+      />,
+    );
+    expect(selectedDayPanel().getByText("שומר 1")).toBeInTheDocument();
+  });
+
+  it("shows an absence in the selected-day panel", () => {
+    const absence = shiftEvent({
+      date: "2026-08-12",
+      title: "חופש",
+      category: "absence",
+      role: null,
+      period: "unspecified",
+      absenceKind: "vacation",
+    });
+    render(
+      <ScheduleCalendar
+        grid={WEEK_GRID}
+        days={weekDays()}
+        monthEvents={[absence]}
+        defaultSelectedDate="2026-08-12"
+        activeShiftDates={[]}
+      />,
+    );
+    expect(selectedDayPanel().getAllByText("חופש").length).toBeGreaterThan(0);
   });
 
   it("only ever renders events belonging to this month's monthEvents prop -- no unrelated data", () => {

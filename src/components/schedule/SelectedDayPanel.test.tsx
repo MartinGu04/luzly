@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import type { PersonalEventView } from "@/lib/readModels/types";
+import type { HolidayContext } from "@/lib/presentation/hebrewCalendar";
 import { SelectedDayPanel } from "./SelectedDayPanel";
 import type { DayMeta } from "./types";
 
@@ -29,6 +30,35 @@ function shiftEvent(overrides: Partial<PersonalEventView> = {}): PersonalEventVi
   };
 }
 
+function dutyEvent(overrides: Partial<PersonalEventView> = {}): PersonalEventView {
+  return shiftEvent({
+    title: "שומר 1",
+    rawValue: "שומר 1",
+    category: "duty",
+    role: null,
+    period: "unspecified",
+    dutyFamily: "guard",
+    slot: 1,
+    ...overrides,
+  });
+}
+
+function absenceEvent(overrides: Partial<PersonalEventView> = {}): PersonalEventView {
+  return shiftEvent({
+    title: "חופש",
+    rawValue: "חופש",
+    category: "absence",
+    role: null,
+    period: "unspecified",
+    absenceKind: "vacation",
+    ...overrides,
+  });
+}
+
+function holiday(overrides: Partial<HolidayContext> = {}): HolidayContext {
+  return { emoji: "🍎", label: "ראש השנה", kind: "holiday", shortLabel: "חג", ...overrides };
+}
+
 function meta(overrides: Partial<DayMeta> = {}): DayMeta {
   return {
     date: "2026-08-16",
@@ -52,9 +82,9 @@ describe("SelectedDayPanel", () => {
     expect(screen.getByText("יום ראשון · 16 באוגוסט · ג׳ באלול תשפ״ו")).toBeInTheDocument();
   });
 
-  it("shows the empty-day message when there are no shifts", () => {
+  it("shows a calm free-day message when there is nothing scheduled", () => {
     render(<SelectedDayPanel dayMeta={meta()} events={[]} />);
-    expect(screen.getByText("אין לך משמרת ביום הזה 😌")).toBeInTheDocument();
+    expect(screen.getByText("היום פנוי אצלך 😌")).toBeInTheDocument();
   });
 
   it("shows a resolved TimeRange for a resolved shift", () => {
@@ -81,15 +111,20 @@ describe("SelectedDayPanel", () => {
     expect(screen.getByText("השעה טרם מוגדרת")).toBeInTheDocument();
   });
 
-  it("shows a holiday chip when the day has holiday context", () => {
+  it("shows a holiday chip with the full specific name when the day has holiday context", () => {
+    render(<SelectedDayPanel dayMeta={meta({ holiday: holiday() })} events={[]} />);
+    expect(screen.getByText("ראש השנה")).toBeInTheDocument();
+    expect(screen.getByText("🍎")).toBeInTheDocument();
+  });
+
+  it("shows the holiday's kind-specific full wording (Chol HaMoed), never just the generic short label", () => {
     render(
       <SelectedDayPanel
-        dayMeta={meta({ holiday: { emoji: "🍎", label: "ראש השנה" } })}
+        dayMeta={meta({ holiday: holiday({ label: "חול המועד סוכות", kind: "cholHamoed", shortLabel: "חוה״מ" }) })}
         events={[]}
       />,
     );
-    expect(screen.getByText("ראש השנה")).toBeInTheDocument();
-    expect(screen.getByText("🍎")).toBeInTheDocument();
+    expect(screen.getByText("חול המועד סוכות")).toBeInTheDocument();
   });
 
   it("shows a tentative badge for a tentative shift", () => {
@@ -112,7 +147,7 @@ describe("SelectedDayPanel", () => {
     expect(screen.getByText("טכנאי לילה")).toBeInTheDocument();
   });
 
-  it("shows role/period as a subtitle line", () => {
+  it("shows role/period as a subtitle line for a shift", () => {
     render(<SelectedDayPanel dayMeta={meta()} events={[shiftEvent({ role: "technician", period: "day" })]} />);
     expect(screen.getByText("טכנאי · יום")).toBeInTheDocument();
   });
@@ -120,5 +155,59 @@ describe("SelectedDayPanel", () => {
   it("shows the semantic shift emoji from the typed period field", () => {
     render(<SelectedDayPanel dayMeta={meta()} events={[shiftEvent({ period: "night" })]} />);
     expect(screen.getByText("🌙")).toBeInTheDocument();
+  });
+
+  describe("duties are shown in full detail", () => {
+    it("shows the duty's title and family+slot subtitle", () => {
+      render(<SelectedDayPanel dayMeta={meta()} events={[dutyEvent({ dutyFamily: "guard", slot: 1 })]} />);
+      expect(screen.getByText("שומר 1")).toBeInTheDocument();
+      expect(screen.getByText("שמירה 1")).toBeInTheDocument();
+    });
+
+    it("shows the duty's semantic emoji", () => {
+      render(<SelectedDayPanel dayMeta={meta()} events={[dutyEvent({ dutyFamily: "guard" })]} />);
+      expect(screen.getByText("🛡️")).toBeInTheDocument();
+    });
+
+    it("never shows a time row for a duty -- it isn't a timed shift", () => {
+      render(<SelectedDayPanel dayMeta={meta()} events={[dutyEvent()]} />);
+      expect(screen.queryByText("השעה טרם מוגדרת")).toBeNull();
+    });
+
+    it("a duty and a shift on the same day both render in full, never merged", () => {
+      const events = [shiftEvent({ period: "day" }), dutyEvent()];
+      render(<SelectedDayPanel dayMeta={meta()} events={events} />);
+      expect(screen.getByText("טכנאי יום")).toBeInTheDocument();
+      expect(screen.getByText("שומר 1")).toBeInTheDocument();
+    });
+  });
+
+  describe("absences are shown in full detail", () => {
+    it("shows the absence's title and its kind label as a subtitle", () => {
+      render(<SelectedDayPanel dayMeta={meta()} events={[absenceEvent({ absenceKind: "vacation" })]} />);
+      expect(screen.getAllByText("חופש").length).toBeGreaterThan(0);
+    });
+
+    it("distinguishes an 'after' absence from vacation", () => {
+      render(<SelectedDayPanel dayMeta={meta()} events={[absenceEvent({ absenceKind: "after", title: "אפטר" })]} />);
+      expect(screen.getAllByText("אפטר").length).toBeGreaterThan(0);
+      expect(screen.queryByText("חופש")).toBeNull();
+    });
+
+    it("never shows a time row for an absence", () => {
+      render(<SelectedDayPanel dayMeta={meta()} events={[absenceEvent()]} />);
+      expect(screen.queryByText("השעה טרם מוגדרת")).toBeNull();
+    });
+  });
+
+  it("shows a change note when the event carries one", () => {
+    render(<SelectedDayPanel dayMeta={meta()} events={[shiftEvent({ changeNote: "הוחלף מלילה ליום" })]} />);
+    expect(screen.getByText("הוחלף מלילה ליום")).toBeInTheDocument();
+  });
+
+  it("never shows a change-note line when there isn't one", () => {
+    render(<SelectedDayPanel dayMeta={meta()} events={[shiftEvent({ changeNote: null })]} />);
+    // No stray empty line for the change note beyond the subtitle content already asserted elsewhere.
+    expect(screen.queryByText("null")).toBeNull();
   });
 });

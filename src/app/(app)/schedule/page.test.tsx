@@ -51,7 +51,7 @@ function model(overrides: Partial<PersonalScheduleReadModel> = {}): PersonalSche
     localNow: { date: "2026-08-12", minuteOfDay: 600 },
     todayEvents: [],
     upcomingEvents: [],
-    shiftCalendarEvents: [],
+    calendarEvents: [],
     currentAssignments: [],
     nextAssignmentGroup: null,
     currentShiftContexts: [],
@@ -111,7 +111,7 @@ describe("SchedulePage — selected day resets on month change (regression)", ()
     getRequestPersonalSchedule.mockResolvedValue(
       okResult(
         model({
-          shiftCalendarEvents: [
+          calendarEvents: [
             shiftEvent({ date: "2026-08-20", title: "משמרת אוגוסט מיוחדת" }),
             shiftEvent({ date: "2026-09-01", title: "משמרת ספטמבר" }),
           ],
@@ -151,7 +151,7 @@ describe("SchedulePage — active shift accent is event-date-aware, not tied to 
       okResult(
         model({
           localNow: { date: "2026-08-12", minuteOfDay: 600 },
-          shiftCalendarEvents: [shiftEvent({ date: "2026-08-12" })],
+          calendarEvents: [shiftEvent({ date: "2026-08-12" })],
           currentAssignments: [assignmentEvent({ date: "2026-08-12" })],
         }),
       ),
@@ -168,7 +168,7 @@ describe("SchedulePage — active shift accent is event-date-aware, not tied to 
         model({
           // "Now" is 02:00 on the 13th, but the still-running overnight shift's Event date is the 12th.
           localNow: { date: "2026-08-13", minuteOfDay: 2 * 60 },
-          shiftCalendarEvents: [shiftEvent({ date: "2026-08-12", period: "night" })],
+          calendarEvents: [shiftEvent({ date: "2026-08-12", period: "night" })],
           currentAssignments: [assignmentEvent({ date: "2026-08-12", period: "night" })],
         }),
       ),
@@ -228,7 +228,7 @@ describe("SchedulePage — configuration_error", () => {
 describe("SchedulePage — content", () => {
   it("renders the month's shift events and the selected-day panel by default on today", async () => {
     getRequestPersonalSchedule.mockResolvedValue(
-      okResult(model({ shiftCalendarEvents: [shiftEvent({ date: "2026-08-12" })] })),
+      okResult(model({ calendarEvents: [shiftEvent({ date: "2026-08-12" })] })),
     );
     const element = await SchedulePage({ searchParams: searchParams() });
     render(element);
@@ -237,7 +237,7 @@ describe("SchedulePage — content", () => {
 
   it("does not render a shift from a different month", async () => {
     getRequestPersonalSchedule.mockResolvedValue(
-      okResult(model({ shiftCalendarEvents: [shiftEvent({ date: "2026-09-05", title: "טכנאי ספטמבר" })] })),
+      okResult(model({ calendarEvents: [shiftEvent({ date: "2026-09-05", title: "טכנאי ספטמבר" })] })),
     );
     const element = await SchedulePage({ searchParams: searchParams() });
     render(element);
@@ -246,7 +246,7 @@ describe("SchedulePage — content", () => {
 
   it("never leaks raw workbook/identity keys or an email into the rendered output", async () => {
     getRequestPersonalSchedule.mockResolvedValue(
-      okResult(model({ shiftCalendarEvents: [shiftEvent({ date: "2026-08-12" })] })),
+      okResult(model({ calendarEvents: [shiftEvent({ date: "2026-08-12" })] })),
     );
     const element = await SchedulePage({ searchParams: searchParams() });
     const { container } = render(element);
@@ -260,6 +260,61 @@ describe("SchedulePage — content", () => {
     const element = await SchedulePage({ searchParams: searchParams() });
     const { container } = render(element);
     expect(container.querySelector("aside")).toBeNull();
+  });
+
+  it("shows the 'הלוח שלי' page title, not the old 'לוח משמרות' framing", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(okResult(model()));
+    const element = await SchedulePage({ searchParams: searchParams() });
+    render(element);
+    expect(screen.getByRole("heading", { name: "הלוח שלי" })).toBeInTheDocument();
+  });
+});
+
+describe("SchedulePage — הלוח שלי represents more than shifts alone", () => {
+  it("shows a duty in the selected-day panel end-to-end, from the real read model through the real page", async () => {
+    const duty = shiftEvent({
+      date: "2026-08-12",
+      title: "שומר 1",
+      category: "duty",
+      role: null,
+      period: "unspecified",
+      dutyFamily: "guard",
+      slot: 1,
+    });
+    getRequestPersonalSchedule.mockResolvedValue(okResult(model({ calendarEvents: [duty] })));
+    const element = await SchedulePage({ searchParams: searchParams() });
+    render(element);
+    expect(selectedDayPanel().getByText("שומר 1")).toBeInTheDocument();
+    // The compact grid cell shows the generic short label, not the full duty title.
+    const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+    expect(cell.textContent).toContain("תורנות");
+    expect(cell.textContent).not.toContain("שומר 1");
+  });
+
+  it("shows an absence in the selected-day panel end-to-end", async () => {
+    const absence = shiftEvent({
+      date: "2026-08-12",
+      title: "חופש",
+      category: "absence",
+      role: null,
+      period: "unspecified",
+      absenceKind: "vacation",
+    });
+    getRequestPersonalSchedule.mockResolvedValue(okResult(model({ calendarEvents: [absence] })));
+    const element = await SchedulePage({ searchParams: searchParams() });
+    render(element);
+    expect(selectedDayPanel().getAllByText("חופש").length).toBeGreaterThan(0);
+  });
+
+  it("shows the day's holiday context end-to-end, compactly in the grid and in full in the selected-day panel", async () => {
+    // 2026-09-12 is Rosh Hashana (see hebrewCalendar.test.ts).
+    getRequestPersonalSchedule.mockResolvedValue(okResult(model({ localNow: { date: "2026-09-12", minuteOfDay: 600 } })));
+    const element = await SchedulePage({ searchParams: searchParams("2026-09") });
+    render(element);
+    const cell = screen.getByRole("button", { name: /12 בספטמבר/ });
+    expect(cell.textContent).toContain("חג");
+    expect(cell.textContent).not.toContain("ראש השנה");
+    expect(selectedDayPanel().getByText("ראש השנה")).toBeInTheDocument();
   });
 });
 

@@ -67,8 +67,8 @@ export function buildPersonalScheduleReadModel(
     .filter((event) => isEventStillRelevant(event, shiftSchedule, now))
     .map((event) => toEventView(event, shiftSchedule, now));
 
-  const shiftCalendarEvents = sortedPersonEvents
-    .filter((event) => event.category === "shift")
+  const calendarEvents = sortedPersonEvents
+    .filter((event) => isCalendarDisplayEvent(event))
     .map((event) => toEventView(event, shiftSchedule, now));
 
   const assignmentEvents = sortedPersonEvents.filter(isAssignmentEvent);
@@ -120,7 +120,7 @@ export function buildPersonalScheduleReadModel(
     localNow: now,
     todayEvents,
     upcomingEvents,
-    shiftCalendarEvents,
+    calendarEvents,
     currentAssignments,
     nextAssignmentGroup,
     currentShiftContexts,
@@ -133,6 +133,11 @@ export function buildPersonalScheduleReadModel(
 
 function isAssignmentEvent(event: Event): boolean {
   return event.category === "shift" || event.category === "duty";
+}
+
+/** "הלוח שלי"'s calendar-worthy categories -- shift, duty, and absence. Every other `EventCategory` is internal bookkeeping, never a calendar entry on its own. */
+function isCalendarDisplayEvent(event: Event): boolean {
+  return event.category === "shift" || event.category === "duty" || event.category === "absence";
 }
 
 // ---------------------------------------------------------------------------

@@ -37,7 +37,7 @@ function personalModel(overrides: Partial<PersonalScheduleReadModel> = {}): Pers
     localNow: { date: "2026-08-12", minuteOfDay: 600 },
     todayEvents: [],
     upcomingEvents: [],
-    shiftCalendarEvents: [],
+    calendarEvents: [],
     currentAssignments: [],
     nextAssignmentGroup: null,
     currentShiftContexts: [],
@@ -194,7 +194,7 @@ describe("SchedulePage — selected-person empty month (PR #24 §12)", () => {
           selectedPersonName: "דניאל כהן",
           personal: personalModel({
             person: { id: "p_daniel", name: "דניאל כהן", isManager: false, isTechnician: true, isSupervisor: false, personnelType: null },
-            shiftCalendarEvents: [],
+            calendarEvents: [],
           }),
         }),
       ),
@@ -207,7 +207,7 @@ describe("SchedulePage — selected-person empty month (PR #24 §12)", () => {
   });
 
   it("does not show the empty note in self mode even with zero shifts", async () => {
-    getRequestSchedule.mockResolvedValue(okResult(managerSelfModel({ personal: personalModel({ shiftCalendarEvents: [] }) })));
+    getRequestSchedule.mockResolvedValue(okResult(managerSelfModel({ personal: personalModel({ calendarEvents: [] }) })));
     const element = await SchedulePage({ searchParams: searchParams() });
     render(element);
     expect(screen.queryByText(/משמרות בתקופה הזו/)).toBeNull();

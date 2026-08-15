@@ -1,8 +1,6 @@
-import { HDate, HebrewCalendar } from "@hebcal/core";
+import { HDate, HebrewCalendar, flags as hebcalFlags } from "@hebcal/core";
 import { daysInCalendarMonth } from "@/lib/domain/calendarMonth";
 import { parseCalendarDate, type CalendarDate } from "@/lib/domain/dutyBlocks";
-
-const EREV_PREFIX = "Erev ";
 
 /**
  * A local-component `Date` (never a parsed ISO string, never `new Date()`).
@@ -65,15 +63,33 @@ export function formatHebrewMonthRange(year: number, month: number): string | nu
   return `${months} ${start.year}`;
 }
 
+/**
+ * Which of the three day-types a holiday context represents -- "הלוח שלי"
+ * needs to distinguish these explicitly (the compact grid indicator and
+ * the selected-day detail both read `label`/`shortLabel`, already worded
+ * for the right kind, rather than re-deriving it from the raw string).
+ */
+export type HolidayKind = "holiday" | "erev" | "cholHamoed";
+
 export interface HolidayContext {
   emoji: string;
+  /** Full, specific wording for the selected-day detail -- e.g. "סוכות" / "ערב סוכות" / "חול המועד סוכות". */
   label: string;
+  kind: HolidayKind;
+  /** Compact, generic wording for the month-grid indicator -- "חג" / "ערב חג" / "חוה״מ". Never the specific holiday name -- that would force a long title into a cell meant only for scanning. */
+  shortLabel: string;
 }
 
 interface HolidayInfo {
   emoji: string;
   label: string;
 }
+
+const SHORT_LABEL_BY_KIND: Record<HolidayKind, string> = {
+  holiday: "חג",
+  erev: "ערב חג",
+  cholHamoed: "חוה״מ",
+};
 
 /**
  * Only holidays meaningful enough to surface in a daily glance. Deliberately
@@ -99,12 +115,13 @@ const KNOWN_HOLIDAYS: Partial<Record<string, HolidayInfo>> = {
 };
 
 /**
- * The single most meaningful holiday/Erev-holiday context for `dateStr`, or
- * null on an ordinary day. Driven entirely by @hebcal/core's deterministic
- * Israel holiday schedule (`il: true`) -- never fuzzy-matched against the
- * workbook's own "חגים" sheet, which describes holiday staffing/assignments,
- * not authoritative Gregorian holiday dates. "Erev" is read from the
- * library's own event description, never guessed from time of day.
+ * The single most meaningful holiday/Erev/Chol HaMoed context for
+ * `dateStr`, or null on an ordinary day. Driven entirely by @hebcal/core's
+ * deterministic Israel holiday schedule (`il: true`) -- never fuzzy-matched
+ * against the workbook's own "חגים" sheet, which describes holiday
+ * staffing/assignments, not authoritative Gregorian holiday dates. `kind`
+ * is read from the library's own event flags (`EREV`/`CHOL_HAMOED`), never
+ * guessed from time of day or string-matched against the description.
  */
 export function getHolidayContext(dateStr: string): HolidayContext | null {
   const parsed = parseCalendarDate(dateStr);
@@ -114,8 +131,23 @@ export function getHolidayContext(dateStr: string): HolidayContext | null {
   for (const event of events) {
     const info = KNOWN_HOLIDAYS[event.basename()];
     if (!info) continue;
-    const isErev = event.getDesc().startsWith(EREV_PREFIX);
-    return { emoji: info.emoji, label: isErev ? `ערב ${info.label}` : info.label };
+
+    const eventFlags = event.getFlags();
+    const kind: HolidayKind =
+      (eventFlags & hebcalFlags.EREV) !== 0
+        ? "erev"
+        : (eventFlags & hebcalFlags.CHOL_HAMOED) !== 0
+          ? "cholHamoed"
+          : "holiday";
+
+    const label =
+      kind === "erev"
+        ? `ערב ${info.label}`
+        : kind === "cholHamoed"
+          ? `חול המועד ${info.label}`
+          : info.label;
+
+    return { emoji: info.emoji, label, kind, shortLabel: SHORT_LABEL_BY_KIND[kind] };
   }
   return null;
 }

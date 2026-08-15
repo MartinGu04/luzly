@@ -22,7 +22,7 @@ describe("Sidebar", () => {
   it("renders /duties, /schedule, and / as real enabled links", () => {
     renderWithTheme(<Sidebar />);
     expect(screen.getByRole("link", { name: /תורנויות/ })).toHaveAttribute("href", "/duties");
-    expect(screen.getByRole("link", { name: /לוח משמרות/ })).toHaveAttribute("href", "/schedule");
+    expect(screen.getByRole("link", { name: /הלוח שלי/ })).toHaveAttribute("href", "/schedule");
     expect(screen.getByRole("link", { name: /לוח בקרה/ })).toHaveAttribute("href", "/");
   });
 
@@ -77,7 +77,7 @@ describe("Sidebar", () => {
     it("existing enabled routes remain visible for a manager too", () => {
       renderWithTheme(<Sidebar person={{ name: "דני מנהל", isManager: true, avatarUrl: null }} />);
       expect(screen.getByRole("link", { name: /תורנויות/ })).toHaveAttribute("href", "/duties");
-      expect(screen.getByRole("link", { name: /לוח משמרות/ })).toHaveAttribute("href", "/schedule");
+      expect(screen.getByRole("link", { name: /הלוח שלי/ })).toHaveAttribute("href", "/schedule");
     });
 
     it("neither the removed reminders item nor the removed sync item ever renders, for a manager either", () => {

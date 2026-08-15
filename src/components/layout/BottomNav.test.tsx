@@ -45,7 +45,7 @@ describe("BottomNav", () => {
 
   it("the schedule route is enabled: a real link, not aria-current on a different pathname", () => {
     render(<BottomNav />);
-    const scheduleLink = screen.getByRole("link", { name: "משמרות" });
+    const scheduleLink = screen.getByRole("link", { name: "הלוח שלי" });
     expect(scheduleLink).toHaveAttribute("href", "/schedule");
     expect(scheduleLink).not.toHaveAttribute("aria-current");
   });
@@ -94,7 +94,7 @@ describe("BottomNav — pending navigation feedback", () => {
 
   it("a non-pending link is not aria-busy and shows its normal icon, never a spinner", () => {
     const { container } = render(<BottomNav />);
-    const scheduleLink = screen.getByRole("link", { name: "משמרות" });
+    const scheduleLink = screen.getByRole("link", { name: "הלוח שלי" });
     expect(scheduleLink).toHaveAttribute("aria-busy", "false");
     expect(container.querySelector(".animate-spin")).toBeNull();
   });
@@ -102,7 +102,7 @@ describe("BottomNav — pending navigation feedback", () => {
   it("a link whose navigation is pending is aria-busy and shows a spinner instead of its normal icon", () => {
     linkStatus.pending = true;
     const { container } = render(<BottomNav />);
-    const scheduleLink = screen.getByRole("link", { name: "משמרות" });
+    const scheduleLink = screen.getByRole("link", { name: "הלוח שלי" });
     expect(scheduleLink).toHaveAttribute("aria-busy", "true");
     expect(container.querySelector(".animate-spin")).toBeInTheDocument();
   });
@@ -110,7 +110,7 @@ describe("BottomNav — pending navigation feedback", () => {
   it("tapping an already-pending link does not fire a second, redundant navigation", () => {
     linkStatus.pending = true;
     render(<BottomNav />);
-    const scheduleLink = screen.getByRole("link", { name: "משמרות" });
+    const scheduleLink = screen.getByRole("link", { name: "הלוח שלי" });
     const notPrevented = fireEvent.click(scheduleLink);
     expect(notPrevented).toBe(false);
   });

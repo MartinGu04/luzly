@@ -9,7 +9,7 @@ afterEach(() => {
 describe("ScheduleHeader", () => {
   it("shows the page title and the month label", () => {
     render(<ScheduleHeader monthLabel="אוגוסט 2026" monthRangeSubtitle="אב–אלול תשפ״ו" />);
-    expect(screen.getByRole("heading", { name: "לוח משמרות" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "הלוח שלי" })).toBeInTheDocument();
     expect(screen.getByText("אוגוסט 2026")).toBeInTheDocument();
     expect(screen.getByText("אב–אלול תשפ״ו")).toBeInTheDocument();
   });
@@ -22,7 +22,7 @@ describe("ScheduleHeader", () => {
 
   it("keeps the page title as the strongest line", () => {
     render(<ScheduleHeader monthLabel="אוגוסט 2026" monthRangeSubtitle={null} />);
-    const heading = screen.getByRole("heading", { name: "לוח משמרות" });
+    const heading = screen.getByRole("heading", { name: "הלוח שלי" });
     expect(heading.tagName).toBe("H1");
   });
 });

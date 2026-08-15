@@ -10,7 +10,7 @@ import type { DayMeta } from "./types";
 interface ScheduleCalendarProps {
   grid: (string | null)[];
   days: Record<string, DayMeta>;
-  /** The displayed month's own shift Events only -- never the full read model. */
+  /** The displayed month's own shift/duty/absence Events only -- never the full read model. */
   monthEvents: PersonalEventView[];
   defaultSelectedDate: string | null;
   /** Event dates (not necessarily today) of every currently-running personal shift -- see CalendarGrid. */
@@ -18,10 +18,11 @@ interface ScheduleCalendarProps {
 }
 
 /**
- * The only client boundary on `/schedule`: owns which day is selected.
- * Receives nothing beyond this month's already-safe shift Events and
- * presentation-safe calendar metadata (`DayMeta`) -- never the full
- * `PersonalScheduleReadModel`, never counterpart/coworker data.
+ * The only client boundary on "הלוח שלי" (`/schedule`): owns which day is
+ * selected. Receives nothing beyond this month's already-safe shift/duty/
+ * absence Events and presentation-safe calendar metadata (`DayMeta`) --
+ * never the full `PersonalScheduleReadModel`, never counterpart/coworker
+ * data.
  *
  * Desktop: a two-column layout -- the calendar leads (roughly 70% of the
  * width), the selected day's detail sits beside it in a ~380px side

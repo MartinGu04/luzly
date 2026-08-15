@@ -69,6 +69,18 @@ export function firstWeekdayOfCalendarMonth(year: number, month: number): number
   return dayOfWeek({ year, month, day: 1 });
 }
 
+/**
+ * Whether a Sunday-first grid column (0=Sunday .. 6=Saturday -- the same
+ * index `buildMonthGrid`'s Sunday-first weeks use) falls on the Israeli
+ * weekend, Thursday through Saturday. The one place this convention is
+ * defined -- matches the Thu-Fri-Sat span `weekend_kitchen` duty
+ * completeness already assumes (`dutyBlocks.ts`) -- so calendar UI never
+ * hardcodes its own weekend rule.
+ */
+export function isWeekendColumn(columnIndex: number): boolean {
+  return columnIndex >= 4;
+}
+
 function pad2(n: number): string {
   return String(n).padStart(2, "0");
 }

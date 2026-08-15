@@ -220,7 +220,7 @@ describe("buildManagerScheduleReadModel — self mode reuses buildPersonalSchedu
 });
 
 describe("buildManagerScheduleReadModel — person mode (PR #24 §10-12)", () => {
-  it("selected person's shiftCalendarEvents are their own real events", () => {
+  it("selected person's calendarEvents are their own real events", () => {
     const events = [
       event({ personId: DANIEL.id, personName: DANIEL.name, date: "2026-08-13" }),
       event({ personId: EITAN.id, personName: EITAN.name, date: "2026-08-13", role: "supervisor" }),
@@ -235,8 +235,8 @@ describe("buildManagerScheduleReadModel — person mode (PR #24 §10-12)", () =>
       monthDates: AUGUST_DATES,
       requestedPersonId: DANIEL.id,
     });
-    expect(model.personal?.shiftCalendarEvents).toHaveLength(1);
-    expect(model.personal?.shiftCalendarEvents[0].title).toBe("טכנאי יום");
+    expect(model.personal?.calendarEvents).toHaveLength(1);
+    expect(model.personal?.calendarEvents[0].title).toBe("טכנאי יום");
   });
 
   it("a person with zero shift events this month still gets a personal model (page renders the empty-month note, not this builder)", () => {
@@ -250,7 +250,7 @@ describe("buildManagerScheduleReadModel — person mode (PR #24 §10-12)", () =>
       monthDates: AUGUST_DATES,
       requestedPersonId: DANIEL.id,
     });
-    expect(model.personal?.shiftCalendarEvents).toEqual([]);
+    expect(model.personal?.calendarEvents).toEqual([]);
   });
 });
 
