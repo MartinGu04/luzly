@@ -29,6 +29,9 @@ export const TOMORROW_SHIFT_REMINDER_TIME: LocalClockTime = { hour: 20, minute: 
 /** 20:00 Asia/Jerusalem, the day before the duty. */
 export const TOMORROW_DUTY_REMINDER_TIME: LocalClockTime = { hour: 20, minute: 0 };
 
+/** 20:00 Asia/Jerusalem, the day before a logistics-withdrawal (משיכות מהלוגיסטיקה) assignment. */
+export const TOMORROW_LOGISTICS_WITHDRAWAL_REMINDER_TIME: LocalClockTime = { hour: 20, minute: 0 };
+
 /** 18:00 Asia/Jerusalem, Sunday. */
 export const CONSTRAINTS_SUNDAY_REMINDER_TIME: LocalClockTime = { hour: 18, minute: 0 };
 

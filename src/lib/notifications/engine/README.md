@@ -24,6 +24,13 @@ implements; this file is the module map.
   reusing `lib/presentation/labels.ts`/`hebrewDate.ts` for existing
   Hebrew naming. Falls back to a concise generic message rather than
   inventing details it can't safely express.
+- `logisticsWithdrawal.ts` (pure) -- detects a logistics-withdrawal
+  (משיכות מהלוגיסטיקה) assignment from the ALREADY-parsed `Event` stream.
+  There is no dedicated Sheet column/parser for this -- `lib/parsers/event.ts`'s
+  classifier already lets unrecognized cell text fall through to
+  `category: "other"` with the text preserved verbatim, and that's what
+  a "משיכות" cell produces today. This module is a keyword filter over
+  that existing output, nothing more -- see its own docstring.
 
 ## Server-only orchestration
 
@@ -43,9 +50,12 @@ implements; this file is the module map.
   handles.
 - `changeDetection.ts` -- baseline init/rollover (silent, spec section
   9), diff, debounce settle, and manager-only coverage-gap gating.
-- `reminders.ts` -- tomorrow shift/duty reminders (cross week
-  boundaries, upsert-or-cancel semantics) and weekly constraints
-  reminders (all push-enabled users, Sunday/Monday only).
+- `reminders.ts` -- tomorrow shift/duty/logistics-withdrawal reminders
+  (cross week boundaries, upsert-or-cancel semantics -- a moved
+  assignment cancels the old recipient's job and creates the new
+  recipient's, since dedupe_key includes the resolved user id) and
+  weekly constraints reminders (all push-enabled users, Sunday/Monday
+  only).
 - `delivery.ts` -- claims due outbox jobs, fans out to every active
   subscription per recipient, reuses PR #29's `sendPush` classification
   (permanent 404/410 -> delete subscription; transient -> never delete,
