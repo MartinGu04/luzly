@@ -125,10 +125,21 @@ export async function setObservedFact(weekStart: string, factKey: string, catego
   if (error) throw error;
 }
 
+/** Clears a week's observed facts and pending changes (week rollover). Throws on either delete failing -- a partial/failed cleanup must never be silently treated as success (that would leak the previous week's stale state into the new week's diff base). */
 export async function clearWeekState(weekStart: string): Promise<void> {
   const supabase = getNotificationServiceClient();
-  await supabase.from("observed_notification_facts").delete().eq("week_start_date", weekStart);
-  await supabase.from("pending_notification_changes").delete().eq("week_start_date", weekStart);
+
+  const { error: observedError } = await supabase
+    .from("observed_notification_facts")
+    .delete()
+    .eq("week_start_date", weekStart);
+  if (observedError) throw observedError;
+
+  const { error: pendingError } = await supabase
+    .from("pending_notification_changes")
+    .delete()
+    .eq("week_start_date", weekStart);
+  if (pendingError) throw pendingError;
 }
 
 // ---------------------------------------------------------------------------
@@ -137,27 +148,34 @@ export async function clearWeekState(weekStart: string): Promise<void> {
 
 /**
  * Applies a fresh tick's fact readings against the pending-changes
- * table: opens a new debounce candidate, extends an already-open one
- * (recomputing `settle_at` to `now() + debounce`, keeping
- * `original_value` from the first observation -- see the column
- * omission trick in the upsert payload below), or cancels one that has
- * returned to its original value within the window (PR #30 spec section
- * 11). Returns nothing; `changeDetection.ts` re-reads what's actually
- * due separately via `claimDuePendingChanges`.
+ * table. For each candidate key, compares the fresh value against BOTH
+ * the pending row's `original_value` and its `latest_value` -- never
+ * `original_value` alone, and NEVER treats a worker tick itself as
+ * evidence of a new change:
  *
- * Takes `changedKeys` (this tick's observed-vs-fresh diff) AND every
- * currently-open pending row for the week -- not `changedKeys` alone --
- * as its candidate set. This matters for the exact "evening -> morning
- * -> evening" scenario the spec calls out: once "morning" is observed,
- * a pending row opens (original=evening, latest=morning) while
- * `observed_notification_facts` itself is untouched (still "evening")
- * until the row eventually settles. If the NEXT tick reads "evening"
- * again, that no longer differs from the still-unsettled observed value
- * -- so it would never appear in a plain observed-vs-fresh diff at all,
- * and the open pending row would be silently orphaned to settle later
- * as a false "evening -> morning" notification. Re-checking every open
- * row against the fresh reading each tick (regardless of whether it's
- * in `changedKeys`) is what correctly cancels it instead.
+ *  - fresh === original_value -> the value returned to where it started;
+ *    delete/cancel the row, send nothing (spec section 11: "evening ->
+ *    morning -> evening... then no notification should be sent").
+ *  - fresh === latest_value (and !== original_value) -> this is the SAME
+ *    value already recorded from a previous tick, merely observed again
+ *    -- the row is left COMPLETELY untouched (`last_changed_at`/
+ *    `settle_at` never move). This is the fix for the bug where a
+ *    5-minute worker cadence re-diffing an unsettled `observed`-vs-fresh
+ *    pair every tick would otherwise keep pushing `settle_at` forward
+ *    forever and the change would never settle.
+ *  - fresh differs from BOTH -> a genuinely NEW value since the row was
+ *    last updated; extends the debounce (`last_changed_at = now()`,
+ *    `settle_at = now() + debounce`) and updates `latest_value`,
+ *    preserving `original_value` from the first observation untouched.
+ *  - no existing row and fresh !== the diff's own oldValue -> opens a
+ *    brand-new pending row.
+ *
+ * Takes `changes` (this tick's observed-vs-fresh diff) AND every
+ * currently-open pending row for the week -- not `changes` alone -- as
+ * its candidate set, so a key that reverted to its original value can
+ * still be detected and cancelled even on a tick where it no longer
+ * differs from the still-unsettled `observed_notification_facts` value
+ * (and therefore wouldn't appear in `changes` at all).
  */
 export async function applyPendingChanges(
   weekStart: string,
@@ -167,19 +185,25 @@ export async function applyPendingChanges(
   const supabase = getNotificationServiceClient();
 
   // Every currently-open pending row for the week -- not just the keys
-  // this tick's diff touched -- see this function's own docstring for
-  // why a key that reverted to its original value can be absent from
-  // `changes` entirely while still needing to be cancelled.
+  // this tick's diff touched -- see this function's own docstring.
   const { data: existingRows, error: fetchError } = await supabase
     .from("pending_notification_changes")
-    .select("fact_key, category, original_value")
+    .select("fact_key, category, original_value, latest_value")
     .eq("week_start_date", weekStart);
   if (fetchError) throw fetchError;
 
   const existingByKey = new Map(
-    ((existingRows ?? []) as { fact_key: string; category: SemanticFactCategory; original_value: Record<string, unknown> }[]).map(
-      (row) => [row.fact_key, { category: row.category, originalValue: fromStoredValue(row.original_value) }],
-    ),
+    (
+      (existingRows ?? []) as {
+        fact_key: string;
+        category: SemanticFactCategory;
+        original_value: Record<string, unknown>;
+        latest_value: Record<string, unknown>;
+      }[]
+    ).map((row) => [
+      row.fact_key,
+      { category: row.category, originalValue: fromStoredValue(row.original_value), latestValue: fromStoredValue(row.latest_value) },
+    ]),
   );
 
   const now = new Date();
@@ -189,7 +213,12 @@ export async function applyPendingChanges(
   const toCancel: string[] = [];
   const handledKeys = new Set<string>();
 
-  function reconcile(key: string, category: SemanticFactCategory, freshValue: SemanticFactValue | null, fallbackOriginal: SemanticFactValue | null): void {
+  function reconcile(
+    key: string,
+    category: SemanticFactCategory,
+    freshValue: SemanticFactValue | null,
+    fallbackOriginal: SemanticFactValue | null,
+  ): void {
     if (handledKeys.has(key)) return;
     handledKeys.add(key);
 
@@ -198,6 +227,15 @@ export async function applyPendingChanges(
 
     if (JSON.stringify(originalValue) === JSON.stringify(freshValue)) {
       if (existing) toCancel.push(key);
+      return;
+    }
+
+    // The fresh value is identical to what's already recorded as
+    // `latest_value` -- this is the SAME still-debouncing change being
+    // observed again by another worker tick, not a new change. Leave
+    // the row's timestamps completely alone; polling itself is never
+    // evidence of a new change.
+    if (existing && JSON.stringify(existing.latestValue) === JSON.stringify(freshValue)) {
       return;
     }
 
@@ -219,9 +257,9 @@ export async function applyPendingChanges(
 
   // Every open pending row NOT touched by this tick's diff means the
   // fresh reading now matches the still-unsettled observed value again
-  // -- re-check it against its OWN original value, since that's exactly
-  // the "reverted to original" case a plain observed-vs-fresh diff
-  // cannot see.
+  // -- re-check it against its own original/latest values, since that's
+  // exactly the "reverted to original" case a plain observed-vs-fresh
+  // diff cannot see.
   for (const [key, existing] of existingByKey) {
     if (handledKeys.has(key)) continue;
     const freshValue = freshFacts.get(key)?.value ?? null;
