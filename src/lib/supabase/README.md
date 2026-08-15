@@ -28,4 +28,17 @@ renewed cookies onto the response; it does not perform route protection
 itself (that stays server-side in `(app)/layout.tsx`).
 
 No service-role/secret key exists anywhere in this codebase — only the
-public publishable key, on both the browser and server clients.
+public publishable key, on both the browser and server clients — with
+ONE deliberate, documented exception:
+
+- `serviceRoleClient.ts` — `createSupabaseServiceRoleClient()` (PR #30).
+  Bypasses RLS entirely, reading `SUPABASE_SERVICE_ROLE_KEY`. Exists
+  solely for the automatic-notification Cron worker
+  (`src/app/internal/notifications/tick/route.ts` and
+  `src/lib/notifications/engine/`), which runs with no logged-in
+  user/session, so no RLS-scoped client can resolve recipients across
+  users or write internal engine state. Never a module-level singleton.
+  Its import sites are held to an exact allowlist of two files by
+  `src/app/notificationServiceRoleBoundary.test.ts`, and
+  `config.test.ts` in this directory still enforces the original
+  zero-service-role invariant on every OTHER file here.

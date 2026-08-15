@@ -59,9 +59,41 @@ database -- see that file's own docstring. Point `TEST_DATABASE_URL` at
 any reachable Postgres (a role with `CREATEDB`) to run it; it was run
 for real against a local PostgreSQL 16 during this PR's development.
 
+## `migrations/20260815130000_create_notification_engine.sql` (PR #30)
+
+Durable state for the automatic notification worker: baseline/rollover
+tracking, normalized semantic facts, debounced pending changes, and the
+notification outbox + per-device deliveries. Apply it the same way as
+above (Dashboard SQL Editor or `supabase db push`), to every Supabase
+project this app talks to, AFTER the push_subscriptions migration
+(`notification_deliveries` references `push_subscriptions`).
+
+Unlike the push_subscriptions migration, this ONE migration's three
+functions (`advance_notification_baseline`,
+`claim_due_pending_notification_changes`, `claim_due_notification_jobs`)
+are granted to `service_role` only, not `authenticated` — the worker has
+no logged-in user to key `auth.uid()` off, and every one of its five
+tables enables RLS with zero policies (default-deny for
+anon/authenticated either way). See the migration file's own top comment
+for why this is a deliberate, narrowly-scoped exception to the
+zero-service-role convention above, and
+`src/lib/supabase/serviceRoleClient.ts` for the one Supabase client
+allowed to use it.
+
+`src/lib/notifications/engine/migration.test.ts` is this migration's
+text-level security-shape guard (same pattern as
+`lib/push/migration.test.ts`).
+`src/lib/notifications/engine/notificationEngineFunctions.integration.test.ts`
+genuinely runs it against a real PostgreSQL, including real concurrent-
+connection proofs of the `for update`/`for update skip locked` claiming
+behavior — same self-skipping-when-no-database convention as
+`upsertPushSubscriptionRpc.integration.test.ts`.
+
 ## Extending this later
 
 Any future migration goes in this same directory, named
 `<timestamp>_<description>.sql`, following the same explicit-RLS,
-no-service-role, ownership-derived-from-`auth.uid()` pattern established
-here.
+ownership-derived-from-`auth.uid()`-where-applicable pattern established
+here — and the no-service-role convention specifically, unless a new
+case has the same genuine no-user-session justification PR #30's worker
+does.

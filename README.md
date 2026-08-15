@@ -31,21 +31,25 @@ Web Push (VAPID) sections for the two auth-adjacent groups. Never commit
 `.env.local` or any file containing a real key.
 
 Web Push requires a one-time database migration too -- see
-`supabase/README.md`.
+`supabase/README.md`. The automatic notification worker (PR #30) needs a
+second migration plus `SUPABASE_SERVICE_ROLE_KEY`/
+`NOTIFICATION_WORKER_SECRET` -- see `supabase/README.md` and
+`src/lib/notifications/engine/README.md`.
 
 ## Project layout
 
 ```
-src/app/              Next.js routes
+src/app/              Next.js routes (including the internal notification worker route)
 src/components/       UI (layout shell, generic building blocks, pwa/ notification UI)
 src/lib/google/       Google Sheets API access (read-only)
 src/lib/parsers/      raw sheet data -> typed domain objects
 src/lib/domain/       scheduling business rules
-src/lib/sync/         workbook-snapshot caching/freshness
+src/lib/sync/         workbook-snapshot caching/freshness (30s navigation cache)
 src/lib/auth/         authentication & permissions
 src/lib/push/         Web Push mechanics (VAPID, payload contract, send/classify)
 src/lib/notifications/ push subscription persistence (Supabase) + Server Actions
-supabase/migrations/  SQL migrations (currently: push_subscriptions)
+src/lib/notifications/engine/ automatic notification worker (PR #30)
+supabase/migrations/  SQL migrations (push_subscriptions, notification engine)
 ```
 
 See `CLAUDE.md` for the permanent engineering rules.
