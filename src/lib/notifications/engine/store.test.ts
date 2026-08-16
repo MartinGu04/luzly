@@ -274,3 +274,145 @@ describe("applyPendingChanges -- repeated worker ticks at 5-minute cadence", () 
     expect(rows.has(KEY)).toBe(false); // no pending row left to ever settle -- zero notifications
   });
 });
+
+describe("getRecentSettledJobsForRecipient (PR #36 dashboard recap)", () => {
+  interface FakeJobRow {
+    id: string;
+    category: string;
+    title: string;
+    body: string;
+    path: string;
+    source_ref: string | null;
+    created_at: string;
+    recipient_user_id: string;
+    status?: string;
+  }
+
+  /** A minimal, faithful fake of `.from("notification_jobs").select().eq().in().gte().order().limit()` -- same style as `makeStatefulFakeSupabase` above, scoped to this one query shape. */
+  function makeJobsFakeSupabase(rows: FakeJobRow[]) {
+    const calls: Record<string, unknown> = {};
+    const client = {
+      from: (table: string) => {
+        if (table !== "notification_jobs") throw new Error(`unexpected table ${table}`);
+        let filtered = [...rows];
+        const builder = {
+          select: (columns: string) => {
+            calls.select = columns;
+            return builder;
+          },
+          eq: (column: string, value: unknown) => {
+            calls.eq = [column, value];
+            filtered = filtered.filter((row) => (row as unknown as Record<string, unknown>)[column] === value);
+            return builder;
+          },
+          in: (column: string, values: unknown[]) => {
+            calls.in = [column, values];
+            filtered = filtered.filter((row) => values.includes((row as unknown as Record<string, unknown>)[column]));
+            return builder;
+          },
+          gte: (column: string, value: string) => {
+            calls.gte = [column, value];
+            filtered = filtered.filter((row) => String((row as unknown as Record<string, unknown>)[column]) >= value);
+            return builder;
+          },
+          order: (column: string, opts: { ascending: boolean }) => {
+            calls.order = [column, opts];
+            filtered = [...filtered].sort((a, b) => {
+              const av = String((a as unknown as Record<string, unknown>)[column]);
+              const bv = String((b as unknown as Record<string, unknown>)[column]);
+              const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+              return opts.ascending ? cmp : -cmp;
+            });
+            return builder;
+          },
+          limit: (n: number) => {
+            calls.limit = n;
+            return Promise.resolve({ data: filtered.slice(0, n), error: null });
+          },
+        };
+        return builder;
+      },
+    };
+    return { client, calls };
+  }
+
+  function jobRow(overrides: Partial<FakeJobRow> = {}): FakeJobRow {
+    return {
+      id: "job_1",
+      category: "shift_change",
+      title: "⚠️ שינוי בשיבוץ",
+      body: "השיבוץ שלך ליום חמישי השתנה: יום → לילה",
+      path: "/schedule",
+      source_ref: "shift:p_me:2026-08-19",
+      created_at: "2026-08-16T10:00:00.000Z",
+      recipient_user_id: "u_me",
+      status: "completed",
+      ...overrides,
+    };
+  }
+
+  it("filters by recipient_user_id, category IN (...), and created_at >= sinceIso", async () => {
+    const { client, calls } = makeJobsFakeSupabase([jobRow()]);
+    const { getRecentSettledJobsForRecipient } = await loadModule(client);
+
+    const rows = await getRecentSettledJobsForRecipient(
+      "u_me",
+      ["shift_change", "team_change", "duty_change"],
+      "2026-08-13T10:00:00.000Z",
+      3,
+    );
+
+    expect(calls.eq).toEqual(["recipient_user_id", "u_me"]);
+    expect(calls.in).toEqual(["category", ["shift_change", "team_change", "duty_change"]]);
+    expect(calls.gte).toEqual(["created_at", "2026-08-13T10:00:00.000Z"]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).toBe("job_1");
+  });
+
+  it("never returns another recipient's rows", async () => {
+    const { client } = makeJobsFakeSupabase([jobRow({ id: "mine", recipient_user_id: "u_me" }), jobRow({ id: "theirs", recipient_user_id: "u_other" })]);
+    const { getRecentSettledJobsForRecipient } = await loadModule(client);
+
+    const rows = await getRecentSettledJobsForRecipient("u_me", ["shift_change"], "2026-08-01T00:00:00.000Z", 10);
+
+    expect(rows.map((r) => r.id)).toEqual(["mine"]);
+  });
+
+  it("orders newest first and respects the limit", async () => {
+    const { client, calls } = makeJobsFakeSupabase([
+      jobRow({ id: "old", created_at: "2026-08-14T00:00:00.000Z" }),
+      jobRow({ id: "new", created_at: "2026-08-16T00:00:00.000Z" }),
+      jobRow({ id: "mid", created_at: "2026-08-15T00:00:00.000Z" }),
+    ]);
+    const { getRecentSettledJobsForRecipient } = await loadModule(client);
+
+    const rows = await getRecentSettledJobsForRecipient("u_me", ["shift_change"], "2026-08-01T00:00:00.000Z", 2);
+
+    expect(calls.order).toEqual(["created_at", { ascending: false }]);
+    expect(calls.limit).toBe(2);
+    expect(rows.map((r) => r.id)).toEqual(["new", "mid"]);
+  });
+
+  it("includes jobs regardless of push-delivery status -- never filters on status", async () => {
+    const { client } = makeJobsFakeSupabase([
+      jobRow({ id: "a", status: "completed" }),
+      jobRow({ id: "b", status: "failed" }),
+      jobRow({ id: "c", status: "skipped" }),
+      jobRow({ id: "d", status: "pending" }),
+    ]);
+    const { getRecentSettledJobsForRecipient } = await loadModule(client);
+
+    const rows = await getRecentSettledJobsForRecipient("u_me", ["shift_change"], "2026-08-01T00:00:00.000Z", 10);
+
+    expect(rows.map((r) => r.id).sort()).toEqual(["a", "b", "c", "d"]);
+  });
+
+  it("never exposes internal columns (recipient_user_id, status, etc.) on the returned rows", async () => {
+    const { client } = makeJobsFakeSupabase([jobRow()]);
+    const { getRecentSettledJobsForRecipient } = await loadModule(client);
+
+    const [row] = await getRecentSettledJobsForRecipient("u_me", ["shift_change"], "2026-08-01T00:00:00.000Z", 3);
+
+    expect(Object.keys(row).sort()).toEqual(["body", "category", "createdAt", "id", "path", "sourceRef", "title"]);
+  });
+});

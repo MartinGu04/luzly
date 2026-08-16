@@ -487,6 +487,60 @@ export async function setJobStatus(id: string, status: JobFinalStatus, lastError
   if (error) throw error;
 }
 
+export interface RecentSettledJobRow {
+  id: string;
+  category: string;
+  title: string;
+  body: string;
+  path: string;
+  sourceRef: string | null;
+  createdAt: string;
+}
+
+/**
+ * Read-only lookup of ONE recipient's own recent settled-change jobs --
+ * powers the personal dashboard's "מה השתנה" recap (PR #36), never the
+ * worker itself. Deliberately selects ONLY presentation-safe columns --
+ * never `recipient_user_id`, `dedupe_key`, `attempts`, `last_error`,
+ * `status`, `scheduled_for`, `claimed_at`, `tag`, or `updated_at`. The
+ * caller (`lib/readModels/recentDashboardChanges.ts`) maps this straight
+ * into a small typed read model -- never a raw row into React.
+ *
+ * Deliberately NO `status` filter: whether a job's push delivery
+ * completed, was skipped, or failed is irrelevant here -- a settled
+ * semantic change is a real event the moment its job row exists,
+ * independent of delivery outcome. Coupling this recap's visibility to
+ * delivery status would be exactly the "second baseline system" this
+ * feature is designed to avoid becoming.
+ */
+export async function getRecentSettledJobsForRecipient(
+  recipientUserId: string,
+  categories: readonly string[],
+  sinceIso: string,
+  limit: number,
+): Promise<RecentSettledJobRow[]> {
+  const supabase = getNotificationServiceClient();
+  const { data, error } = await supabase
+    .from("notification_jobs")
+    .select("id, category, title, body, path, source_ref, created_at")
+    .eq("recipient_user_id", recipientUserId)
+    .in("category", categories)
+    .gte("created_at", sinceIso)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+
+  return ((data ?? []) as Record<string, unknown>[]).map((row) => ({
+    id: row.id as string,
+    category: row.category as string,
+    title: row.title as string,
+    body: row.body as string,
+    path: row.path as string,
+    sourceRef: row.source_ref as string | null,
+    createdAt: row.created_at as string,
+  }));
+}
+
 // ---------------------------------------------------------------------------
 // Deliveries (per push subscription / device)
 // ---------------------------------------------------------------------------

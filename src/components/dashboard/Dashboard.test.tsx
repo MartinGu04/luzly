@@ -232,3 +232,39 @@ describe("Dashboard — data freshness uses PersonalScheduleReadModel.fetchedAt 
     expect(screen.getByTestId("freshness")).toHaveTextContent("2026-08-13T10:45:00.000Z");
   });
 });
+
+describe("Dashboard — PR #36 'מה השתנה' recap wiring", () => {
+  it("regression: no recentChanges prop at all renders no trace of the recap (existing callers/tests are unaffected)", () => {
+    render(<Dashboard model={model()} />);
+    expect(screen.queryByText("מה השתנה")).toBeNull();
+  });
+
+  it("an explicit empty recentChanges array also renders no trace of the recap", () => {
+    render(<Dashboard model={model()} recentChanges={[]} />);
+    expect(screen.queryByText("מה השתנה")).toBeNull();
+  });
+
+  it("a populated recentChanges renders the recap heading, without hiding/replacing the Hero", () => {
+    const currentShift = assignment({ title: "טכנאי יום" });
+    render(
+      <Dashboard
+        model={model({ currentAssignments: [currentShift] })}
+        recentChanges={[
+          {
+            key: "change:job_1",
+            category: "shift",
+            title: "⚠️ שינוי בשיבוץ",
+            body: "השיבוץ שלך ליום חמישי השתנה: יום → לילה",
+            happenedAt: "2026-08-12T07:42:00.000Z",
+            href: "/schedule?date=2026-08-19",
+            date: "2026-08-19",
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("מה השתנה")).toBeInTheDocument();
+    expect(screen.getByText("פעיל עכשיו")).toBeInTheDocument(); // Hero's own current-assignment story, still present
+    expect(screen.getByText("השיבוץ שלך ליום חמישי השתנה: יום → לילה")).toBeInTheDocument();
+  });
+});

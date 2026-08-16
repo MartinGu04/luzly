@@ -1,0 +1,68 @@
+import Link from "next/link";
+import { Panel } from "@/components/ui/Panel";
+import { formatRecentChangeRelativeTime } from "@/lib/presentation/relativeChangeTime";
+import type { RecentDashboardChange, RecentDashboardChangeCategory } from "@/lib/readModels/recentDashboardChangesTypes";
+
+interface RecentChangesPanelProps {
+  changes: RecentDashboardChange[];
+  /** Defaults to the real current instant; tests pass a fixed value for deterministic relative-time labels. */
+  now?: Date;
+}
+
+/** The SAME cue already used in the real push notification for this exact event (`lib/notifications/engine/copy.ts`) -- consistency with what the user may have already seen, never a third parallel visual language. */
+const CATEGORY_EMOJI: Record<RecentDashboardChangeCategory, string> = {
+  shift: "⚠️",
+  team: "👥",
+  duty: "🔄",
+};
+
+/**
+ * "מה השתנה" -- a tiny, calm recap of recently SETTLED personal
+ * shift/team/duty changes (PR #36). This is NOT the Notification Bell and
+ * NOT a notification inbox: read-only, no unread state, no mark-as-read,
+ * no history page.
+ *
+ * Renders NOTHING at all when `changes` is empty -- no placeholder card,
+ * no "אין שינויים", no skeleton slot. A dashboard with nothing to recap
+ * must look exactly like it did before this feature existed.
+ *
+ * `body` is the settled notification's own already-Hebrew-worded copy,
+ * reused verbatim -- never regenerated here. The generic `title` (e.g.
+ * "⚠️ שינוי בשיבוץ") is deliberately never rendered next to it -- it would
+ * only repeat what the category emoji + body already say; it's kept
+ * `sr-only` for a screen reader's benefit instead. Deliberately no
+ * severity ring/red background even for a shift change -- an ordinary
+ * activity recap, not an alert.
+ *
+ * `body` is allowed to wrap (never `truncate`) -- unlike a title, hiding
+ * part of the actual change description would defeat the panel's whole
+ * purpose.
+ */
+export function RecentChangesPanel({ changes, now = new Date() }: RecentChangesPanelProps) {
+  if (changes.length === 0) return null;
+
+  return (
+    <Panel variant="panel">
+      <h3 className="text-sm font-semibold text-foreground">מה השתנה</h3>
+      <ul className="mt-3 space-y-1">
+        {changes.map((change) => (
+          <li key={change.key}>
+            <Link
+              href={change.href}
+              className="flex items-start gap-3 rounded-xl px-2 py-2.5 transition-colors duration-200 hover:bg-overlay-faint focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+            >
+              <span aria-hidden="true" className="mt-0.5 shrink-0 text-sm leading-none">
+                {CATEGORY_EMOJI[change.category]}
+              </span>
+              <span className="sr-only">{change.title}</span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm text-foreground">{change.body}</p>
+                <p className="mt-0.5 text-xs text-muted">{formatRecentChangeRelativeTime(change.happenedAt, now)}</p>
+              </div>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </Panel>
+  );
+}
