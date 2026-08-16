@@ -1,15 +1,86 @@
 "use client";
 
-import Link from "next/link";
+import { useEffect, useState } from "react";
+import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
+import { Loader2 } from "lucide-react";
 import { BrandMark } from "@/components/brand/BrandMark";
 import { NotificationBell } from "@/components/pwa/NotificationBell";
 import { SearchTriggerButton } from "@/components/search/SearchTriggerButton";
-import { visibleNavItems } from "./nav-items";
+import { visibleNavItems, type NavItem } from "./nav-items";
 import { IdentityFooter } from "./IdentityFooter";
 
 interface SidebarProps {
   person?: { name: string; isManager: boolean; avatarUrl: string | null };
+}
+
+/**
+ * Reports the enclosing `<Link>`'s own pending-navigation state up to
+ * `SidebarLink`, same bridging pattern `BottomNav`'s `LinkPendingWatcher`
+ * uses -- `useLinkStatus` must be called from a component that is itself a
+ * DESCENDANT of `<Link>`, never the `<Link>` (or an ancestor) directly.
+ * Renders nothing.
+ */
+function LinkPendingWatcher({ onPendingChange }: { onPendingChange: (pending: boolean) => void }) {
+  const { pending } = useLinkStatus();
+  useEffect(() => {
+    onPendingChange(pending);
+  }, [pending, onPendingChange]);
+  return null;
+}
+
+interface SidebarLinkProps {
+  item: NavItem;
+  isActive: boolean;
+}
+
+/**
+ * One enabled desktop nav destination. Before PR #38 the active-route
+ * highlight only ever updated once a whole navigation had actually
+ * completed (driven purely by `usePathname()`), so a click gave zero
+ * immediate feedback -- desktop navigation could feel unresponsive even
+ * when the underlying page loaded quickly. This now mirrors `BottomNav`'s
+ * own solution exactly: `useLinkStatus` reports THIS link's real
+ * Next.js pending-transition state (not a client-only guess), so a click
+ * gets instant visual feedback (the icon swaps to a small spinner, the
+ * link becomes `aria-busy`) without touching any other item, and a second
+ * click on an already-pending destination is a no-op rather than firing a
+ * redundant duplicate navigation.
+ */
+function SidebarLink({ item, isActive }: SidebarLinkProps) {
+  const [pending, setPending] = useState(false);
+  const Icon = item.icon;
+
+  return (
+    <Link
+      href={item.href}
+      aria-current={isActive ? "page" : undefined}
+      aria-busy={pending}
+      onClick={(event) => {
+        if (pending) event.preventDefault();
+      }}
+      className={`group relative flex min-h-[48px] items-center gap-3 rounded-xl px-3.5 py-3 text-[15px] font-medium transition-colors duration-200 ${
+        isActive
+          ? "bg-sidebar-active text-sidebar-foreground ring-1 ring-sidebar-active-ring"
+          : "text-sidebar-foreground hover:bg-sidebar-hover"
+      }`}
+    >
+      <LinkPendingWatcher onPendingChange={setPending} />
+      {isActive ? (
+        <span aria-hidden="true" className="absolute inset-y-1.5 end-0 w-[3px] rounded-full bg-primary" />
+      ) : null}
+      {pending ? (
+        <Loader2 className="h-[20px] w-[20px] shrink-0 animate-spin text-primary" aria-hidden="true" strokeWidth={1.75} />
+      ) : (
+        <Icon
+          className={`h-[20px] w-[20px] shrink-0 ${isActive ? "text-primary" : "opacity-80"}`}
+          aria-hidden="true"
+          strokeWidth={1.75}
+        />
+      )}
+      {item.label}
+    </Link>
+  );
 }
 
 /**
@@ -64,31 +135,7 @@ export function Sidebar({ person }: SidebarProps) {
             );
           }
 
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              aria-current={isActive ? "page" : undefined}
-              className={`group relative flex min-h-[48px] items-center gap-3 rounded-xl px-3.5 py-3 text-[15px] font-medium transition-colors duration-200 ${
-                isActive
-                  ? "bg-sidebar-active text-sidebar-foreground ring-1 ring-sidebar-active-ring"
-                  : "text-sidebar-foreground hover:bg-sidebar-hover"
-              }`}
-            >
-              {isActive ? (
-                <span
-                  aria-hidden="true"
-                  className="absolute inset-y-1.5 end-0 w-[3px] rounded-full bg-primary"
-                />
-              ) : null}
-              <Icon
-                className={`h-[20px] w-[20px] shrink-0 ${isActive ? "text-primary" : "opacity-80"}`}
-                aria-hidden="true"
-                strokeWidth={1.75}
-              />
-              {item.label}
-            </Link>
-          );
+          return <SidebarLink key={item.href} item={item} isActive={isActive} />;
         })}
       </nav>
 

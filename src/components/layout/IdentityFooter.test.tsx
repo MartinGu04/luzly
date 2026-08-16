@@ -107,6 +107,38 @@ describe("IdentityFooter — single-action theme control (not the 3-option Theme
   });
 });
 
+describe("IdentityFooter — footer hierarchy (PR #38 desktop shell polish)", () => {
+  it("version and theme control appear ABOVE the user/profile row in DOM order", () => {
+    const { container } = renderWithTheme(<IdentityFooter name="דני בדיקה" isManager={false} avatarUrl={null} />);
+    const version = screen.getByText(new RegExp(APP_VERSION.replace(/\./g, "\\.")));
+    const nameNode = screen.getByText("דני בדיקה");
+    const position = version.compareDocumentPosition(nameNode);
+    // DOCUMENT_POSITION_FOLLOWING (4): nameNode comes AFTER version in the tree.
+    expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(container).toBeTruthy();
+  });
+
+  it("the user/profile row is the LAST child block, anchoring the bottom of the footer", () => {
+    renderWithTheme(<IdentityFooter name="דני בדיקה" isManager={false} avatarUrl={null} />);
+    const signOut = screen.getByRole("button", { name: "התנתקות" });
+    const footer = signOut.closest("div.border-t") as HTMLElement;
+    const lastChild = footer.lastElementChild;
+    expect(lastChild?.contains(signOut)).toBe(true);
+  });
+
+  it("the desktop theme control renders icon-only -- no visible text label", () => {
+    renderWithTheme(<IdentityFooter name="דני בדיקה" isManager={false} avatarUrl={null} />);
+    const action = screen.getByRole("button", { name: "מצב כהה" });
+    expect(action.textContent).toBe("");
+  });
+
+  it("the desktop theme control has a title tooltip matching its accessible label", () => {
+    renderWithTheme(<IdentityFooter name="דני בדיקה" isManager={false} avatarUrl={null} />);
+    const action = screen.getByRole("button", { name: "מצב כהה" });
+    expect(action).toHaveAttribute("title", "מצב כהה");
+  });
+});
+
 describe("IdentityFooter — avatar photo", () => {
   it("passes avatarUrl through to the Avatar (image element present when given a photo)", () => {
     const { container } = renderWithTheme(

@@ -1,4 +1,4 @@
-import { isWeekendColumn } from "@/lib/domain/calendarMonth";
+import { isWeekendColumn, type CalendarGridCell } from "@/lib/domain/calendarMonth";
 import { parseCalendarDate } from "@/lib/domain/dutyBlocks";
 import { weekOfYear } from "@/lib/domain/weekOfYear";
 import { buildDayIndicators, type CalendarDayIndicator } from "@/lib/presentation/calendarDayIndicator";
@@ -7,8 +7,8 @@ import type { PersonalEventView } from "@/lib/readModels/types";
 import type { DayMeta } from "./types";
 
 interface CalendarGridProps {
-  /** Sunday-first, padded to complete weeks -- see `buildMonthGrid`. */
-  grid: (string | null)[];
+  /** Sunday-first, always exactly 6 complete weeks (42 cells) -- see `buildMonthGrid`. */
+  grid: CalendarGridCell[];
   days: Record<string, DayMeta>;
   eventsByDate: Record<string, PersonalEventView[]>;
   selectedDate: string | null;
@@ -33,18 +33,23 @@ interface CalendarGridProps {
 const MAX_INDICATORS_PER_DAY = 2;
 
 /** A Sunday-first 7-cell slice of `grid` -- one calendar row. */
-function chunkIntoWeeks(grid: (string | null)[]): (string | null)[][] {
-  const weeks: (string | null)[][] = [];
+function chunkIntoWeeks(grid: CalendarGridCell[]): CalendarGridCell[][] {
+  const weeks: CalendarGridCell[][] = [];
   for (let i = 0; i < grid.length; i += 7) weeks.push(grid.slice(i, i + 7));
   return weeks;
 }
 
-/** The Sunday-first week-of-year for a row, from its first real (non-null) date -- see `weekOfYear` for why any date in the row gives the same result. */
-function weekRowNumber(week: (string | null)[]): number | null {
-  const firstReal = week.find((date): date is string => date !== null);
-  if (!firstReal) return null;
-  const parsed = parseCalendarDate(firstReal);
+/** The Sunday-first week-of-year for a row, from its first cell's date -- see `weekOfYear` for why any date in the row gives the same result. */
+function weekRowNumber(week: CalendarGridCell[]): number | null {
+  const first = week[0];
+  if (!first) return null;
+  const parsed = parseCalendarDate(first.date);
   return parsed ? weekOfYear(parsed) : null;
+}
+
+/** The plain day-of-month number from a "YYYY-MM-DD" string -- used for outside-month cells, which have no `DayMeta` (that's only built for the displayed month's own dates). */
+function dayNumberFromDate(date: string): number {
+  return Number(date.slice(8, 10));
 }
 
 /**
@@ -103,8 +108,18 @@ function OverflowChip({ count, className = "" }: { count: number; className?: st
  * on what a given event actually is.
  *
  * Thursday-Saturday columns (the Israeli weekend, see
- * `isWeekendColumn`) get a subtle background wash -- both header and
- * cells -- so the week's shape is easy to recognize without being noisy.
+ * `isWeekendColumn`) get a subtle, dedicated wash (`bg-weekend-tint`,
+ * intentionally tuned separately per theme -- see globals.css) -- both
+ * header and cells -- so the week's shape is easy to recognize without
+ * being noisy. "Today"'s own accent lives on a separate layer (the
+ * day-number badge) and always stays visible regardless of weekend/
+ * selection background.
+ *
+ * The grid is always exactly 6 weeks (42 cells, see `buildMonthGrid`) so
+ * its rendered height never changes between months -- leading/trailing
+ * cells outside the displayed month show that adjacent month's real date,
+ * visually subdued and non-interactive (never a blank "ghost" cell, and
+ * never a second interactive calendar).
  */
 export function CalendarGrid({
   grid,
@@ -119,7 +134,7 @@ export function CalendarGrid({
 
   return (
     <div>
-      <div className="flex items-stretch gap-1 px-0.5 pb-2 sm:gap-1.5">
+      <div className="flex items-stretch gap-1 border-b border-border px-0.5 pb-2 sm:gap-1.5">
         <span aria-hidden="true" className="w-5 shrink-0 sm:w-6" />
         <div className="grid flex-1 grid-cols-7 gap-1 text-center text-[11px] font-medium sm:gap-1.5 sm:text-xs">
           {SHORT_WEEKDAY_LABELS.map((label, index) => (
@@ -130,7 +145,7 @@ export function CalendarGrid({
         </div>
       </div>
 
-      <div className="flex flex-col gap-1 sm:gap-1.5">
+      <div className="flex flex-col gap-1 pt-2 sm:gap-1.5">
         {weeks.map((week, weekIndex) => {
           const weekNumber = weekRowNumber(week);
 
@@ -144,9 +159,24 @@ export function CalendarGrid({
               </div>
 
               <div className="grid flex-1 grid-cols-7 gap-1 sm:gap-1.5">
-                {week.map((date, index) => {
-                  if (!date) return <div key={`blank-${weekIndex}-${index}`} aria-hidden="true" />;
+                {week.map((cell, index) => {
+                  const isWeekend = isWeekendColumn(index);
 
+                  if (!cell.inMonth) {
+                    return (
+                      <div
+                        key={cell.date}
+                        aria-hidden="true"
+                        className={`flex h-[58px] items-start justify-start rounded-lg p-1 text-[11px] font-medium text-muted-2 opacity-40 sm:h-20 sm:rounded-xl sm:p-1.5 sm:text-xs lg:h-[84px] ${
+                          isWeekend ? "bg-weekend-tint" : ""
+                        }`}
+                      >
+                        {dayNumberFromDate(cell.date)}
+                      </div>
+                    );
+                  }
+
+                  const date = cell.date;
                   const meta = days[date];
                   if (!meta) return <div key={date} aria-hidden="true" />;
 
@@ -158,7 +188,6 @@ export function CalendarGrid({
                   const hasTentative = dayEvents.some((event) => event.certainty === "tentative");
                   const isSelected = date === selectedDate;
                   const isActiveShiftDate = activeShiftDateSet.has(date);
-                  const isWeekend = isWeekendColumn(index);
 
                   return (
                     <button
@@ -171,7 +200,7 @@ export function CalendarGrid({
                         isSelected
                           ? "bg-overlay-strong ring-1 ring-border-strong"
                           : isWeekend
-                            ? "bg-overlay-faint hover:bg-overlay-soft"
+                            ? "bg-weekend-tint hover:bg-overlay-soft"
                             : "hover:bg-overlay-soft"
                       } ${meta.isPast && !isSelected ? "opacity-60" : ""}`}
                     >

@@ -1,17 +1,23 @@
 import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ThemeProvider } from "@/lib/theme/ThemeProvider";
 import { APP_NAME } from "@/lib/config/productName";
 import { Sidebar } from "./Sidebar";
 import { navItems } from "./nav-items";
 
 const usePathname = vi.fn(() => "/");
+const linkStatus = { pending: false };
 vi.mock("next/navigation", () => ({ usePathname: () => usePathname() }));
+vi.mock("next/link", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("next/link")>();
+  return { ...actual, useLinkStatus: () => linkStatus };
+});
 
 afterEach(() => {
   cleanup();
   usePathname.mockReturnValue("/");
+  linkStatus.pending = false;
 });
 
 function renderWithTheme(ui: ReactElement) {
@@ -97,6 +103,32 @@ describe("Sidebar — brand identity (PR #23)", () => {
     expect(container.querySelector('img[src*="symbol.png"]')).toBeInTheDocument();
     expect(container.textContent).not.toMatch(/luzly/i);
   });
+});
+
+describe("Sidebar — pending navigation feedback (PR #38 desktop nav performance)", () => {
+  it("a non-pending link is not aria-busy and shows its normal icon, never a spinner", () => {
+    const { container } = renderWithTheme(<Sidebar />);
+    const scheduleLink = screen.getByRole("link", { name: /הלוח שלי/ });
+    expect(scheduleLink).toHaveAttribute("aria-busy", "false");
+    expect(container.querySelector(".animate-spin")).toBeNull();
+  });
+
+  it("a link whose navigation is pending is aria-busy and shows a spinner immediately, giving instant click feedback", () => {
+    linkStatus.pending = true;
+    const { container } = renderWithTheme(<Sidebar />);
+    const scheduleLink = screen.getByRole("link", { name: /הלוח שלי/ });
+    expect(scheduleLink).toHaveAttribute("aria-busy", "true");
+    expect(container.querySelector(".animate-spin")).toBeInTheDocument();
+  });
+
+  it("clicking an already-pending link does not fire a second, redundant navigation", () => {
+    linkStatus.pending = true;
+    renderWithTheme(<Sidebar />);
+    const scheduleLink = screen.getByRole("link", { name: /הלוח שלי/ });
+    const notPrevented = fireEvent.click(scheduleLink);
+    expect(notPrevented).toBe(false);
+  });
+
 });
 
 describe("Sidebar — width and layout", () => {

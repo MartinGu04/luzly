@@ -53,9 +53,19 @@ export const dynamic = "force-dynamic";
  * "re-verify, don't thread raw data across read-model boundaries" pattern
  * `loadScheduleReadModel`'s manager branch already uses. `null` (only on
  * `configuration_error`) makes the whole feature quietly unavailable.
+ *
+ * These two loaders (PR #38) run CONCURRENTLY via `Promise.all` rather than
+ * one `await` after the other -- they have no data dependency on each
+ * other (the search read model independently re-resolves identity and its
+ * own workbook read, see `loadSearchReadModel`), so awaiting them
+ * sequentially was pure unnecessary latency on every single navigation
+ * into this route group, gating this whole shell's render (including the
+ * persistent Sidebar) behind the sum of both calls instead of the slower of
+ * the two. This never changes what either call does or how its result is
+ * used below -- only when the second one starts.
  */
 export default async function ProtectedLayout({ children }: { children: ReactNode }) {
-  const result = await getRequestPersonalSchedule();
+  const [result, searchResult] = await Promise.all([getRequestPersonalSchedule(), getRequestSearchReadModel()]);
 
   if (result.status === "unauthenticated") {
     redirect("/login");
@@ -87,7 +97,6 @@ export default async function ProtectedLayout({ children }: { children: ReactNod
   const initialClockTime =
     result.status === "ok" ? `${formatScheduleMinute(result.model.localNow.minuteOfDay)}:00` : null;
 
-  const searchResult = await getRequestSearchReadModel();
   const searchReadModel = searchResult.status === "ok" ? searchResult.model : null;
 
   return (

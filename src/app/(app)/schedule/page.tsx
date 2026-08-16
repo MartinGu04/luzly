@@ -13,6 +13,7 @@ import {
   formatMonthParam,
   parseMonthParam,
   shiftCalendarMonth,
+  type CalendarGridCell,
   type CalendarMonthKey,
 } from "@/lib/domain/calendarMonth";
 import { parseCalendarDate } from "@/lib/domain/dutyBlocks";
@@ -123,7 +124,7 @@ export default async function SchedulePage({ searchParams }: SchedulePageProps) 
   const monthParam = formatMonthParam(displayMonthKey);
 
   const grid = buildMonthGrid(displayMonthKey.year, displayMonthKey.month);
-  const inMonthDates = grid.filter((cell): cell is string => cell !== null);
+  const inMonthDates = grid.filter((cell) => cell.inMonth).map((cell) => cell.date);
 
   const days: Record<string, DayMeta> = {};
   for (const date of inMonthDates) {
@@ -170,7 +171,6 @@ export default async function SchedulePage({ searchParams }: SchedulePageProps) 
 
       {model.perspective === "all" && model.everyone ? (
         <ScheduleEveryoneCalendar
-          key={monthParam}
           grid={grid}
           days={days}
           dayViews={buildScheduleEveryoneDayViews(
@@ -183,7 +183,6 @@ export default async function SchedulePage({ searchParams }: SchedulePageProps) 
         />
       ) : model.personal ? (
         <PersonalPerspective
-          monthParam={monthParam}
           grid={grid}
           days={days}
           defaultSelectedDate={defaultSelectedDate}
@@ -199,8 +198,7 @@ export default async function SchedulePage({ searchParams }: SchedulePageProps) 
 }
 
 interface PersonalPerspectiveProps {
-  monthParam: string;
-  grid: (string | null)[];
+  grid: CalendarGridCell[];
   days: Record<string, DayMeta>;
   defaultSelectedDate: string | null;
   monthEvents: PersonalEventView[];
@@ -217,7 +215,6 @@ interface PersonalPerspectiveProps {
  * selected colleague has no shifts this month at all.
  */
 function PersonalPerspective({
-  monthParam,
   grid,
   days,
   defaultSelectedDate,
@@ -235,7 +232,6 @@ function PersonalPerspective({
         </Panel>
       ) : null}
       <ScheduleCalendar
-        key={monthParam}
         grid={grid}
         days={days}
         monthEvents={monthEvents}

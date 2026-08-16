@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import type { CalendarGridCell } from "@/lib/domain/calendarMonth";
 import type { PersonalEventView } from "@/lib/readModels/types";
 import { Panel } from "@/components/ui/Panel";
 import { CalendarGrid } from "./CalendarGrid";
@@ -8,7 +9,7 @@ import { SelectedDayPanel } from "./SelectedDayPanel";
 import type { DayMeta } from "./types";
 
 interface ScheduleCalendarProps {
-  grid: (string | null)[];
+  grid: CalendarGridCell[];
   days: Record<string, DayMeta>;
   /** The displayed month's own shift/duty/absence Events only -- never the full read model. */
   monthEvents: PersonalEventView[];
@@ -29,24 +30,22 @@ interface ScheduleCalendarProps {
  * column, never as a giant full-width card stacked below. Mobile keeps
  * the simpler stacked layout (detail below the calendar).
  *
- * Switching months is a normal server navigation (see `MonthNav`), but a
- * server-prop change alone does NOT guarantee this component's local
- * `selectedDate` state resets -- React only recreates state when the
- * component's *identity* changes. The page keys this component by the
- * month param (`key={monthParam}`) specifically so a month change forces a
- * fresh mount with a fresh `defaultSelectedDate`, rather than carrying the
- * previous month's selected day forward.
- *
- * A genuine external navigation to a specific day (global search's
- * `?date=` deep link, PR #35) needs to select that day WITHOUT changing the
- * month key -- `selectedDate` re-syncs whenever `defaultSelectedDate`'s
- * VALUE actually changes, using React's own "adjusting state when a prop
- * changes" pattern (a setState call during render, guarded by comparing
- * against a tracked previous value) rather than an effect -- no extra
- * render pass, no risk of the stale selection flashing first. This never
- * fights an in-page click or an automatic revalidation (PR #34):
- * revalidating the SAME URL re-renders with the exact same
- * `defaultSelectedDate` string, so the guard never re-fires.
+ * Switching months is a normal server navigation (see `MonthNav`). This
+ * component is deliberately NEVER remounted for a month change (PR #38 --
+ * the page no longer keys it by the month param) so the browser keeps
+ * diffing/patching the SAME calendar instance instead of destroying and
+ * recreating the whole subtree, which is what caused a visible page jump.
+ * `selectedDate` still needs to reset to the new month's own default,
+ * though -- `defaultSelectedDate` re-syncs whenever its VALUE actually
+ * changes (whether from a month change OR a genuine external navigation to
+ * a specific day, e.g. global search's `?date=` deep link, PR #35), using
+ * React's own "adjusting state when a prop changes" pattern (a setState
+ * call during render, guarded by comparing against a tracked previous
+ * value) rather than an effect -- no extra render pass, no risk of the
+ * stale selection flashing first. This never fights an in-page click or an
+ * automatic revalidation (PR #34): revalidating the SAME URL re-renders
+ * with the exact same `defaultSelectedDate` string, so the guard never
+ * re-fires.
  */
 export function ScheduleCalendar({
   grid,
