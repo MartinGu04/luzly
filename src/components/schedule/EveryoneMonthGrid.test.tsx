@@ -260,5 +260,67 @@ describe("EveryoneMonthGrid", () => {
       const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
       expect(cell.textContent).toContain("+1");
     });
+
+    it("shows the night-period staffing summary text inside the cell too, not just day", () => {
+      render(
+        <EveryoneMonthGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          dayViews={{
+            "2026-08-12": dayView({
+              night: {
+                period: "night",
+                label: "לילה",
+                emoji: "🌙",
+                technicians: { people: [{ key: "p2", name: "עומר פרץ", tentative: false }], status: "full", message: null },
+                supervisors: { people: [], status: "not_evaluable", message: null },
+                shadowTechnicianNames: [],
+                shadowSupervisorNames: [],
+                coverageStatus: "full",
+              },
+            }),
+          }}
+          selectedDate={null}
+          onSelectDate={noop}
+        />,
+      );
+      const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+      expect(cell.textContent).toContain("עומר פרץ");
+    });
+
+    it("colors the mobile-only status dot by coverage status -- missing coverage gets the critical color, never a generic neutral one", () => {
+      render(
+        <EveryoneMonthGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          dayViews={{
+            "2026-08-12": dayView({
+              day: {
+                period: "day",
+                label: "יום",
+                emoji: "☀️",
+                technicians: { people: [], status: "missing", message: "חסר טכנאי" },
+                supervisors: { people: [], status: "not_evaluable", message: null },
+                shadowTechnicianNames: [],
+                shadowSupervisorNames: [],
+                coverageStatus: "missing",
+              },
+            }),
+          }}
+          selectedDate={null}
+          onSelectDate={noop}
+        />,
+      );
+      const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+      expect(cell.querySelector(".bg-critical")).not.toBeNull();
+    });
+
+    it("a day with no staffing data at all shows 'אין נתונים' rather than a blank/missing summary", () => {
+      render(
+        <EveryoneMonthGrid grid={WEEK_GRID} days={weekDays()} dayViews={{}} selectedDate={null} onSelectDate={noop} />,
+      );
+      const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+      expect(cell.textContent).toContain("אין נתונים");
+    });
   });
 });

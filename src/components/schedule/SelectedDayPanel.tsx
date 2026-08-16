@@ -4,6 +4,7 @@ import type { PersonalEventView } from "@/lib/readModels/types";
 import { Badge } from "@/components/ui/Badge";
 import { Panel } from "@/components/ui/Panel";
 import { TimeRange } from "@/components/dashboard/TimeRange";
+import { SELECTED_DAY_PANEL_MIN_HEIGHT_CLASS } from "./CalendarSurface";
 import type { DayMeta } from "./types";
 
 interface SelectedDayPanelProps {
@@ -53,7 +54,7 @@ export function SelectedDayPanel({ dayMeta, events }: SelectedDayPanelProps) {
 
   return (
     <section aria-label="פרטי היום הנבחר">
-      <Panel variant="panel">
+      <Panel variant="panel" className={SELECTED_DAY_PANEL_MIN_HEIGHT_CLASS}>
         <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
           <p className="text-base font-bold text-foreground sm:text-lg">{dayMeta.dateLabel}</p>
           {dayMeta.holiday ? (

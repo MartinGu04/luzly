@@ -63,7 +63,7 @@ describe("ScheduleManagerSelector — navigation preserves month (PR #24 §8)", 
     render(<ScheduleManagerSelector managerName="מרטין גוסין" people={PEOPLE} perspective="self" selectedPersonId={null} />);
     openListbox();
     fireEvent.click(screen.getByRole("option", { name: "כולם" }));
-    expect(push).toHaveBeenCalledWith("/schedule?month=2026-08&person=all");
+    expect(push).toHaveBeenCalledWith("/schedule?month=2026-08&person=all", { scroll: false });
   });
 
   it("selecting a roster person sets person=<id> and preserves the month param", () => {
@@ -71,7 +71,7 @@ describe("ScheduleManagerSelector — navigation preserves month (PR #24 §8)", 
     render(<ScheduleManagerSelector managerName="מרטין גוסין" people={PEOPLE} perspective="self" selectedPersonId={null} />);
     openListbox();
     fireEvent.click(screen.getByRole("option", { name: "דניאל כהן" }));
-    expect(push).toHaveBeenCalledWith("/schedule?month=2026-08&person=p_daniel");
+    expect(push).toHaveBeenCalledWith("/schedule?month=2026-08&person=p_daniel", { scroll: false });
   });
 
   it("selecting 'אני' removes the person param entirely rather than writing person=self", () => {
@@ -79,7 +79,7 @@ describe("ScheduleManagerSelector — navigation preserves month (PR #24 §8)", 
     render(<ScheduleManagerSelector managerName="מרטין גוסין" people={PEOPLE} perspective="all" selectedPersonId={null} />);
     openListbox();
     fireEvent.click(screen.getByRole("option", { name: "אני — מרטין גוסין" }));
-    expect(push).toHaveBeenCalledWith("/schedule?month=2026-08");
+    expect(push).toHaveBeenCalledWith("/schedule?month=2026-08", { scroll: false });
   });
 
   it("selecting the already-selected option does not navigate", () => {
@@ -114,7 +114,7 @@ describe("ScheduleManagerSelector — keyboard/accessibility", () => {
     const searchbox = screen.getByRole("searchbox");
     fireEvent.keyDown(searchbox, { key: "ArrowDown" });
     fireEvent.keyDown(searchbox, { key: "Enter" });
-    expect(push).toHaveBeenCalledWith("/schedule?person=all");
+    expect(push).toHaveBeenCalledWith("/schedule?person=all", { scroll: false });
   });
 
   it("clicking outside the control closes the listbox", () => {

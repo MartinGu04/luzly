@@ -148,14 +148,26 @@ export default async function SchedulePage({ searchParams }: SchedulePageProps) 
   const requestedDate = rawDate && Object.hasOwn(days, rawDate) ? rawDate : null;
   const defaultSelectedDate = requestedDate ?? (days[model.localNow.date] ? model.localNow.date : (inMonthDates[0] ?? null));
 
+  // `displayMonthKey.month` always comes from a validated CalendarMonthKey
+  // (1-12, via `parseMonthParam`/`calendarMonthOfLocalNow`), so this never
+  // actually falls back in practice -- the `?? ""` only satisfies
+  // `formatHebrewMonthYear`'s defensive `string | null` return type.
+  const monthLabel = formatHebrewMonthYear(displayMonthKey.year, displayMonthKey.month) ?? "";
+
   return (
     <div className="flex flex-col gap-4 sm:gap-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <ScheduleHeader
-          monthLabel={formatHebrewMonthYear(displayMonthKey.year, displayMonthKey.month)}
+          monthLabel={monthLabel}
           monthRangeSubtitle={formatHebrewMonthRange(displayMonthKey.year, displayMonthKey.month)}
         />
-        <MonthNav prevHref={prevHref} nextHref={nextHref} todayHref={todayHref} isOnCurrentMonth={isOnCurrentMonth} />
+        <MonthNav
+          prevHref={prevHref}
+          nextHref={nextHref}
+          todayHref={todayHref}
+          isOnCurrentMonth={isOnCurrentMonth}
+          monthLabel={monthLabel}
+        />
       </div>
 
       {model.manager ? (

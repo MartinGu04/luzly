@@ -1,9 +1,16 @@
-import { isWeekendColumn, type CalendarGridCell } from "@/lib/domain/calendarMonth";
-import { parseCalendarDate } from "@/lib/domain/dutyBlocks";
-import { weekOfYear } from "@/lib/domain/weekOfYear";
+import type { CalendarGridCell } from "@/lib/domain/calendarMonth";
 import { buildDayIndicators, type CalendarDayIndicator } from "@/lib/presentation/calendarDayIndicator";
-import { SHORT_WEEKDAY_LABELS } from "@/lib/presentation/hebrewDate";
 import type { PersonalEventView } from "@/lib/readModels/types";
+import {
+  CalendarDayCell,
+  CalendarWeekRow,
+  CalendarWeekdayHeader,
+  IndicatorChip,
+  OverflowChip,
+  OutOfMonthCell,
+  cellBorderClasses,
+  chunkIntoWeeks,
+} from "./CalendarSurface";
 import type { DayMeta } from "./types";
 
 interface CalendarGridProps {
@@ -32,73 +39,28 @@ interface CalendarGridProps {
  */
 const MAX_INDICATORS_PER_DAY = 2;
 
-/** A Sunday-first 7-cell slice of `grid` -- one calendar row. */
-function chunkIntoWeeks(grid: CalendarGridCell[]): CalendarGridCell[][] {
-  const weeks: CalendarGridCell[][] = [];
-  for (let i = 0; i < grid.length; i += 7) weeks.push(grid.slice(i, i + 7));
-  return weeks;
-}
+function IndicatorChips({ indicators }: { indicators: CalendarDayIndicator[] }) {
+  const visibleIndicators = indicators.slice(0, MAX_INDICATORS_PER_DAY);
+  const mobileOverflow = Math.max(indicators.length - 1, 0);
+  const wideOverflow = Math.max(indicators.length - MAX_INDICATORS_PER_DAY, 0);
 
-/** The Sunday-first week-of-year for a row, from its first cell's date -- see `weekOfYear` for why any date in the row gives the same result. */
-function weekRowNumber(week: CalendarGridCell[]): number | null {
-  const first = week[0];
-  if (!first) return null;
-  const parsed = parseCalendarDate(first.date);
-  return parsed ? weekOfYear(parsed) : null;
-}
+  if (visibleIndicators.length === 0) return null;
 
-/** The plain day-of-month number from a "YYYY-MM-DD" string -- used for outside-month cells, which have no `DayMeta` (that's only built for the displayed month's own dates). */
-function dayNumberFromDate(date: string): number {
-  return Number(date.slice(8, 10));
-}
-
-/**
- * The shared per-cell grid-line treatment: only a bottom + inline-end
- * border per cell (never both sides of every cell), the standard technique
- * for a continuous table grid without doubled/thicker shared edges -- the
- * FIRST column additionally draws its own inline-start edge, and the FIRST
- * row its own top edge, so the whole 7x6 matrix reads as one bordered
- * rectangle. Always full-opacity/full-strength -- grid structure is never
- * part of what past/future de-emphasis fades (see `CELL_CONTENT` below).
- */
-function cellBorderClasses(columnIndex: number, isFirstRow: boolean): string {
-  const start = columnIndex === 0 ? "border-s" : "";
-  const top = isFirstRow ? "border-t" : "";
-  return `border-b border-e border-border ${start} ${top}`.trim();
-}
-
-/**
- * One personal-event indicator. Below `sm:` this NEVER renders truncated
- * text -- only the event's own semantic emoji, or (when a category has no
- * fitting emoji, e.g. an "אפטר"/medical/day_off absence) a small neutral
- * dot, so a narrow cell never shows a clipped "…" fragment. The short word
- * label itself only appears from `sm:` up, where the cell has room for it.
- */
-function IndicatorChip({ indicator, className = "" }: { indicator: CalendarDayIndicator; className?: string }) {
   return (
-    <span
-      className={`flex min-w-0 items-center gap-1 rounded bg-overlay-soft px-1 text-[9px] leading-[13px] text-foreground sm:text-[10px] sm:leading-4 ${className}`}
-    >
-      {indicator.emoji ? (
-        <span aria-hidden="true" className="shrink-0">
-          {indicator.emoji}
-        </span>
-      ) : (
-        <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-border-strong sm:hidden" />
-      )}
-      <span className="hidden truncate sm:inline">{indicator.label}</span>
-    </span>
-  );
-}
-
-function OverflowChip({ count, className = "" }: { count: number; className?: string }) {
-  return (
-    <span
-      dir="ltr"
-      className={`px-1 text-[9px] font-medium leading-[13px] text-muted-2 sm:text-[10px] sm:leading-4 ${className}`}
-    >
-      +{count}
-    </span>
+    <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-hidden">
+      {visibleIndicators[0] ? (
+        <IndicatorChip emoji={visibleIndicators[0].emoji} label={visibleIndicators[0].label} />
+      ) : null}
+      {visibleIndicators[1] ? (
+        <IndicatorChip
+          emoji={visibleIndicators[1].emoji}
+          label={visibleIndicators[1].label}
+          className="hidden sm:flex"
+        />
+      ) : null}
+      {mobileOverflow > 0 ? <OverflowChip count={mobileOverflow} className="sm:hidden" /> : null}
+      {wideOverflow > 0 ? <OverflowChip count={wideOverflow} className="hidden sm:block" /> : null}
+    </div>
   );
 }
 
@@ -109,47 +71,22 @@ function OverflowChip({ count, className = "" }: { count: number; className?: st
  * `EveryoneMonthGrid`'s own holiday placement -- never competing with the
  * person's own events for space), plus at most two compact PERSONAL-EVENT
  * indicators covering shifts/duties/absences, then a "+N" overflow rather
- * than an ever-growing list. Below `sm:`, an indicator shows only its
- * emoji (or a small neutral dot when it has none) -- never truncated text
- * -- so a narrow cell never looks like content was squeezed in by force;
- * the short word label itself only appears from `sm:` up. The FULL
- * breakdown for a day lives only in `SelectedDayPanel`, next to/below this
- * grid -- this component never tries to say everything about a day, only
- * enough to recognize it at a glance. Purely presentational -- selection
- * state lives in the client parent (`ScheduleCalendar`) so this component
- * has no state of its own and is trivial to render/test in isolation.
- * Indicator labels come from the shared `buildDayIndicators` helper (never
- * invented here), so a day cell and the selected-day detail always agree
- * on what a given event actually is.
+ * than an ever-growing list. The FULL breakdown for a day lives only in
+ * `SelectedDayPanel`, next to/below this grid -- this component never tries
+ * to say everything about a day, only enough to recognize it at a glance.
+ * Purely presentational -- selection state lives in the client parent
+ * (`ScheduleCalendar`) so this component has no state of its own and is
+ * trivial to render/test in isolation. Indicator labels come from the
+ * shared `buildDayIndicators` helper (never invented here), so a day cell
+ * and the selected-day detail always agree on what a given event actually
+ * is.
  *
- * ONE continuous grid surface (visual redesign, PR #38 follow-up), not 42
- * individual rounded cards: cells are flat and touch directly, separated
- * only by a hairline `border-border` grid line (`cellBorderClasses`), with
- * the whole 7x6 matrix's OUTER corners rounded via `overflow-hidden` on
- * its wrapping container -- the rounding lives at the surface level, not
- * on every cell. Thursday-Saturday columns (the Israeli weekend, see
- * `isWeekendColumn`) get a subtle, dedicated wash (`bg-weekend-tint`,
- * intentionally tuned separately per theme -- see globals.css) that reads
- * as a continuous column treatment now that cells touch, rather than a
- * stack of separate purple boxes. "Today"'s own accent lives on a
- * separate layer (the day-number badge) and always stays visible
- * regardless of weekend/selection background.
- *
- * Past-date de-emphasis (`meta.isPast`) is applied ONLY to a cell's inner
- * CONTENT wrapper, never to the cell/button itself -- so a past weekend
- * still shows the exact same `bg-weekend-tint`/grid-line strength as a
- * future weekend (PR #38 follow-up fix: applying `opacity` to the whole
- * button previously faded the weekend wash too, making past and future
- * weekends look like two different visual categories, which was never the
- * intent -- only the day number/events/indicators should read as "already
- * happened").
- *
- * The grid is always exactly 6 weeks (42 cells, see `buildMonthGrid`) so
- * its rendered height never changes between months -- leading/trailing
- * cells outside the displayed month show that adjacent month's real date,
- * visually subdued (content-only, same as past-date fading) and
- * non-interactive, participating in the SAME bordered grid geometry
- * rather than looking like a detached, disabled card.
+ * Every structural piece (weekday header, week rows, cell shell, height
+ * budget, indicator chips) comes from `CalendarSurface` (PR #38 shell-
+ * unification round) -- the exact same primitives `EveryoneMonthGrid` uses,
+ * so the two calendar surfaces can never drift into different geometry.
+ * Only the CONTENT this component feeds into that shell (personal event
+ * indicators, via `buildDayIndicators`) is its own.
  */
 export function CalendarGrid({
   grid,
@@ -164,126 +101,61 @@ export function CalendarGrid({
 
   return (
     <div>
-      <div className="flex items-stretch gap-1 border-b border-border pb-2 sm:gap-1.5">
-        <span aria-hidden="true" className="w-5 shrink-0 sm:w-6" />
-        <div className="grid flex-1 grid-cols-7 gap-1 text-center text-[11px] font-medium sm:gap-1.5 sm:text-xs">
-          {SHORT_WEEKDAY_LABELS.map((label, index) => (
-            <span key={index} className={isWeekendColumn(index) ? "text-muted" : "text-muted-2"}>
-              {label}
-            </span>
-          ))}
-        </div>
-      </div>
+      <CalendarWeekdayHeader />
 
       <div className="flex flex-col pt-2">
         {weeks.map((week, weekIndex) => {
-          const weekNumber = weekRowNumber(week);
           const isFirstRow = weekIndex === 0;
+          const isLastRow = weekIndex === weeks.length - 1;
 
           return (
-            <div key={weekIndex} className="flex items-stretch">
-              <div
-                className="flex w-5 shrink-0 items-center justify-center text-[10px] font-medium text-muted-2 sm:w-6"
-                aria-label={weekNumber !== null ? `שבוע ${weekNumber}` : undefined}
-              >
-                <span aria-hidden="true">{weekNumber ?? ""}</span>
-              </div>
+            <CalendarWeekRow key={weekIndex} week={week} isFirstRow={isFirstRow} isLastRow={isLastRow}>
+              {week.map((cell, index) => {
+                if (!cell.inMonth) {
+                  return <OutOfMonthCell key={cell.date} cell={cell} columnIndex={index} isFirstRow={isFirstRow} />;
+                }
 
-              <div
-                className={`grid flex-1 grid-cols-7 overflow-hidden ${isFirstRow ? "rounded-t-xl" : ""} ${weekIndex === weeks.length - 1 ? "rounded-b-xl" : ""}`}
-              >
-                {week.map((cell, index) => {
-                  const isWeekend = isWeekendColumn(index);
-                  const borderClasses = cellBorderClasses(index, isFirstRow);
-
-                  if (!cell.inMonth) {
-                    return (
-                      <div
-                        key={cell.date}
-                        aria-hidden="true"
-                        className={`flex h-[58px] items-start justify-start p-1 sm:h-20 sm:p-1.5 lg:h-[84px] ${borderClasses} ${
-                          isWeekend ? "bg-weekend-tint" : ""
-                        }`}
-                      >
-                        <span className="text-[11px] font-medium text-muted-2 opacity-40 sm:text-xs">
-                          {dayNumberFromDate(cell.date)}
-                        </span>
-                      </div>
-                    );
-                  }
-
-                  const date = cell.date;
-                  const meta = days[date];
-                  if (!meta) return <div key={date} aria-hidden="true" className={borderClasses} />;
-
-                  const dayEvents = eventsByDate[date] ?? [];
-                  const indicators = buildDayIndicators(dayEvents);
-                  const visibleIndicators = indicators.slice(0, MAX_INDICATORS_PER_DAY);
-                  const mobileOverflow = Math.max(indicators.length - 1, 0);
-                  const wideOverflow = Math.max(indicators.length - MAX_INDICATORS_PER_DAY, 0);
-                  const hasTentative = dayEvents.some((event) => event.certainty === "tentative");
-                  const isSelected = date === selectedDate;
-                  const isActiveShiftDate = activeShiftDateSet.has(date);
-                  const isPast = meta.isPast && !isSelected;
-
+                const date = cell.date;
+                const meta = days[date];
+                if (!meta) {
                   return (
-                    <button
-                      key={date}
-                      type="button"
-                      onClick={() => onSelectDate(date)}
-                      aria-pressed={isSelected}
-                      aria-label={meta.dateLabel}
-                      className={`flex h-[58px] flex-col items-stretch p-1 text-start transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:-outline-offset-2 focus-visible:outline-primary sm:h-20 sm:p-1.5 lg:h-[84px] ${borderClasses} ${
-                        isSelected
-                          ? "bg-overlay-strong ring-2 ring-inset ring-primary/40"
-                          : isWeekend
-                            ? "bg-weekend-tint hover:bg-overlay-soft"
-                            : "hover:bg-overlay-soft"
-                      }`}
-                    >
-                      <div className={`flex h-full flex-col gap-0.5 ${isPast ? "opacity-60" : ""}`}>
-                        <div className="flex shrink-0 items-center justify-between">
-                          <span
-                            className={`flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-medium sm:h-6 sm:w-6 sm:text-xs ${
-                              isActiveShiftDate
-                                ? "bg-primary text-primary-foreground"
-                                : meta.isToday
-                                  ? "text-primary ring-1 ring-primary"
-                                  : "text-foreground"
-                            }`}
-                          >
-                            {meta.dayNumber}
-                          </span>
-                          <div className="flex shrink-0 items-center gap-1">
-                            {meta.holiday ? (
-                              <span aria-hidden="true" className="text-[10px] sm:text-xs">
-                                {meta.holiday.emoji}
-                              </span>
-                            ) : null}
-                            {hasTentative ? (
-                              <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning" />
-                            ) : null}
-                          </div>
-                        </div>
-
-                        {visibleIndicators.length > 0 ? (
-                          <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-hidden">
-                            {visibleIndicators[0] ? <IndicatorChip indicator={visibleIndicators[0]} /> : null}
-                            {visibleIndicators[1] ? (
-                              <IndicatorChip indicator={visibleIndicators[1]} className="hidden sm:flex" />
-                            ) : null}
-                            {mobileOverflow > 0 ? <OverflowChip count={mobileOverflow} className="sm:hidden" /> : null}
-                            {wideOverflow > 0 ? (
-                              <OverflowChip count={wideOverflow} className="hidden sm:block" />
-                            ) : null}
-                          </div>
-                        ) : null}
-                      </div>
-                    </button>
+                    <div key={date} aria-hidden="true" className={cellBorderClasses(index, isFirstRow)} />
                   );
-                })}
-              </div>
-            </div>
+                }
+
+                const dayEvents = eventsByDate[date] ?? [];
+                const indicators = buildDayIndicators(dayEvents);
+                const hasTentative = dayEvents.some((event) => event.certainty === "tentative");
+                const isSelected = date === selectedDate;
+
+                return (
+                  <CalendarDayCell
+                    key={date}
+                    date={date}
+                    meta={meta}
+                    columnIndex={index}
+                    isFirstRow={isFirstRow}
+                    isSelected={isSelected}
+                    onSelect={onSelectDate}
+                    dayNumberActive={activeShiftDateSet.has(date)}
+                    headerExtra={
+                      <>
+                        {meta.holiday ? (
+                          <span aria-hidden="true" className="text-[10px] sm:text-xs">
+                            {meta.holiday.emoji}
+                          </span>
+                        ) : null}
+                        {hasTentative ? (
+                          <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning" />
+                        ) : null}
+                      </>
+                    }
+                  >
+                    <IndicatorChips indicators={indicators} />
+                  </CalendarDayCell>
+                );
+              })}
+            </CalendarWeekRow>
           );
         })}
       </div>
