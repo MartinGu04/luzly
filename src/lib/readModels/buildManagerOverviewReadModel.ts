@@ -1,5 +1,6 @@
 import type { ManagerDateRange } from "@/lib/domain/dateRange";
 import type { Event } from "@/lib/domain/event";
+import { resolveFairnessPeriod } from "@/lib/domain/fairnessPeriod";
 import type { LocalNow } from "@/lib/domain/localNow";
 import {
   detectOperationalIssues,
@@ -12,6 +13,7 @@ import {
   type ManagerRequirementReconciliation,
 } from "@/lib/domain/potentialReconciliation";
 import { scopeManagerPotentialAllocation } from "@/lib/domain/potentialSourceOwnership";
+import type { ReserveRoleParticipationByPeriod } from "@/lib/domain/reserveParticipation";
 import { buildShiftCoverageRecommendation } from "@/lib/domain/shiftCoverageRecommendation";
 import type { ShiftSchedule } from "@/lib/domain/shiftSchedule";
 import type { Person } from "@/lib/domain/types";
@@ -42,6 +44,13 @@ export interface BuildManagerOverviewReadModelInput {
    * `isManagerOwnedPotentialAllocation` below.
    */
   potentialAllocations: readonly PotentialAllocation[];
+  /**
+   * PR #39 -- both half-year Potential sheets' Fairness-table participation
+   * evidence, already structurally parsed/derived by the caller (never a
+   * raw `RawSheet`/score here). Which side (h1/h2) applies is resolved per
+   * ISSUE, from that issue's own `date` -- see `toManagerIssueRecommendation`.
+   */
+  reserveParticipationByPeriod: ReserveRoleParticipationByPeriod;
   shiftSchedule: ShiftSchedule;
   fetchedAt: string;
   now: LocalNow;
@@ -67,6 +76,7 @@ export function buildManagerOverviewReadModel(
     people,
     events,
     potentialAllocations,
+    reserveParticipationByPeriod,
     shiftSchedule,
     fetchedAt,
     now,
@@ -86,7 +96,7 @@ export function buildManagerOverviewReadModel(
   const issues = detectOperationalIssues(events, people, shiftSchedule)
     .filter((issue) => rangeDates.has(issue.date))
     .sort(compareManagerIssues)
-    .map((issue) => toManagerIssue(issue, peopleById, people, events, shiftSchedule));
+    .map((issue) => toManagerIssue(issue, peopleById, people, events, shiftSchedule, reserveParticipationByPeriod));
 
   const coverageOverview = buildShiftStaffingOverview(events, shiftSchedule, rangeDates);
 
@@ -198,6 +208,7 @@ function toManagerIssue(
   people: readonly Person[],
   events: readonly Event[],
   shiftSchedule: ShiftSchedule,
+  reserveParticipationByPeriod: ReserveRoleParticipationByPeriod,
 ): ManagerIssue {
   return {
     personId: issue.personId,
@@ -208,7 +219,14 @@ function toManagerIssue(
     missingIntervals: issue.missingIntervals,
     metadata: issue.metadata,
     targetEvent: issue.targetEvent ? toIssueTargetSummary(issue.targetEvent) : null,
-    recommendation: toManagerIssueRecommendation(issue, people, events, shiftSchedule, peopleById),
+    recommendation: toManagerIssueRecommendation(
+      issue,
+      people,
+      events,
+      shiftSchedule,
+      peopleById,
+      reserveParticipationByPeriod,
+    ),
   };
 }
 
@@ -219,6 +237,13 @@ function toManagerIssue(
  * candidate can be safely established). Resolves candidate ids to safe
  * `{personId, personName}` pairs here -- the domain layer only ever deals
  * in ids, never names/raw `Person`.
+ *
+ * PR #39: selects which half-year's Fairness participation evidence
+ * applies via `resolveFairnessPeriod`, keyed off THIS issue's own `date`
+ * (never a single "now" for the whole overview) -- an issue in a past/
+ * future month still gets evaluated against the Fairness table that
+ * actually covers it, exactly like Manager Fairness's own period
+ * resolution (`managerFairness.ts`) does for its page-level `?period=`.
  */
 function toManagerIssueRecommendation(
   issue: OperationalIssue,
@@ -226,8 +251,11 @@ function toManagerIssueRecommendation(
   events: readonly Event[],
   shiftSchedule: ShiftSchedule,
   peopleById: ReadonlyMap<string, Person>,
+  reserveParticipationByPeriod: ReserveRoleParticipationByPeriod,
 ): ManagerIssueRecommendation | null {
-  const recommendation = buildShiftCoverageRecommendation(issue, people, events, shiftSchedule);
+  const period = resolveFairnessPeriod(null, { date: issue.date, minuteOfDay: 0 });
+  const reserveParticipation = reserveParticipationByPeriod[period];
+  const recommendation = buildShiftCoverageRecommendation(issue, people, events, shiftSchedule, reserveParticipation);
   if (!recommendation) return null;
 
   const toCandidate = (personId: string): ManagerRecommendationCandidate => ({

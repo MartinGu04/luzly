@@ -5,6 +5,7 @@ import type { LocalNow } from "@/lib/domain/localNow";
 import { buildShiftSchedule } from "@/lib/domain/shiftSchedule";
 import type { Person } from "@/lib/domain/types";
 import type { PotentialAllocation } from "@/lib/domain/potentialAllocation";
+import { EMPTY_RESERVE_ROLE_PARTICIPATION } from "@/lib/domain/reserveParticipation";
 import { buildManagerOverviewReadModel } from "./buildManagerOverviewReadModel";
 
 // day 07:30-19:30, night 19:30-07:30(+1)
@@ -17,6 +18,12 @@ function nextCell(): string {
   return `C${cellCounter}`;
 }
 
+// Default personnelType is "חובה" (regular/mandatory service, PR #39) so
+// every existing fixture person is automatically eligible for shift-
+// coverage recommendations without needing Fairness/shift participation
+// evidence -- the same normal-pool status these fixtures always implicitly
+// represented, now made explicit. Tests that specifically exercise
+// permanent/reserve/unclassified participation override this.
 function person(overrides: Partial<Person> = {}): Person {
   return {
     id: "p_x",
@@ -25,7 +32,7 @@ function person(overrides: Partial<Person> = {}): Person {
     isManager: false,
     isTechnician: false,
     isSupervisor: false,
-    personnelType: null,
+    personnelType: "חובה",
     ...overrides,
   };
 }
@@ -84,6 +91,7 @@ function buildModel(overrides: Partial<Parameters<typeof buildManagerOverviewRea
     people: [MANAGER, MARTIN, EITAN, NOA],
     events: [],
     potentialAllocations: [],
+    reserveParticipationByPeriod: { h1: EMPTY_RESERVE_ROLE_PARTICIPATION, h2: EMPTY_RESERVE_ROLE_PARTICIPATION },
     shiftSchedule: schedule,
     fetchedAt: "2026-08-13T08:00:00.000Z",
     now,
@@ -213,6 +221,69 @@ describe("buildManagerOverviewReadModel — coverage recommendation (PR #37)", (
     const issue = model.issues.find((i) => i.reason === "shift_coverage_missing")!;
     const [candidate] = issue.recommendation?.primaryCandidates ?? [];
     expect(candidate && Object.keys(candidate).sort()).toEqual(["personId", "personName"]);
+  });
+});
+
+describe("buildManagerOverviewReadModel — PR #39 reserve participation wired end-to-end", () => {
+  const RESERVE_TECH = person({ id: "p_reserve_tech", name: "מילואים טכנאי", personnelType: "מילואים", isTechnician: true });
+
+  /** A one-date range anchored on `date` -- bypasses `resolveManagerDateRange`'s "now"-relative resolution so a fixed H1 (Jan-Jun) or H2 (Jul-Dec) date can be exercised regardless of this file's shared `now`. */
+  function singleDateRange(date: string) {
+    return { key: "today" as const, startDate: date, endDate: date, dates: [date], month: null };
+  }
+
+  it("a reservist with technician Fairness evidence ONLY in H1 is recommended for an H1-dated issue", () => {
+    const events: Event[] = [
+      event({ personId: EITAN.id, personName: EITAN.name, date: "2026-02-10", category: "shift", role: "supervisor", period: "day" }),
+    ];
+    const model = buildModel({
+      events,
+      people: [MANAGER, EITAN, RESERVE_TECH],
+      range: singleDateRange("2026-02-10"),
+      reserveParticipationByPeriod: {
+        h1: { technicianPersonIds: new Set([RESERVE_TECH.id]), supervisorPersonIds: new Set() },
+        h2: EMPTY_RESERVE_ROLE_PARTICIPATION,
+      },
+    });
+    const issue = model.issues.find((i) => i.reason === "shift_coverage_missing")!;
+    expect(issue).toBeDefined();
+    expect(issue.recommendation?.primaryCandidates).toEqual([{ personId: RESERVE_TECH.id, personName: RESERVE_TECH.name }]);
+  });
+
+  it("the SAME reservist (H1-only evidence) is NOT recommended for an H2-dated issue -- the period is resolved per issue date", () => {
+    const events: Event[] = [
+      event({ personId: EITAN.id, personName: EITAN.name, date: "2026-09-10", category: "shift", role: "supervisor", period: "day" }),
+    ];
+    const model = buildModel({
+      events,
+      people: [MANAGER, EITAN, RESERVE_TECH],
+      range: singleDateRange("2026-09-10"),
+      reserveParticipationByPeriod: {
+        h1: { technicianPersonIds: new Set([RESERVE_TECH.id]), supervisorPersonIds: new Set() },
+        h2: EMPTY_RESERVE_ROLE_PARTICIPATION,
+      },
+    });
+    const issue = model.issues.find((i) => i.reason === "shift_coverage_missing")!;
+    expect(issue).toBeDefined();
+    expect(issue.recommendation).toBeNull();
+  });
+
+  it("a permanent person is excluded end-to-end through the full read model, even with capability and Fairness evidence", () => {
+    const PERM_TECH = person({ id: "p_perm_tech", name: "קבוע טכנאי", personnelType: "קבע", isTechnician: true });
+    const events: Event[] = [
+      event({ personId: EITAN.id, personName: EITAN.name, date: "2026-08-13", category: "shift", role: "supervisor", period: "day" }),
+    ];
+    const model = buildModel({
+      events,
+      people: [MANAGER, EITAN, PERM_TECH],
+      reserveParticipationByPeriod: {
+        h1: EMPTY_RESERVE_ROLE_PARTICIPATION,
+        h2: { technicianPersonIds: new Set([PERM_TECH.id]), supervisorPersonIds: new Set() },
+      },
+    });
+    const issue = model.issues.find((i) => i.reason === "shift_coverage_missing")!;
+    expect(issue).toBeDefined();
+    expect(issue.recommendation).toBeNull();
   });
 });
 

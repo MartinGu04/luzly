@@ -1,7 +1,9 @@
 import "server-only";
 import { resolveManagerDateRange } from "@/lib/domain/dateRange";
+import { deriveReserveRoleParticipation } from "@/lib/domain/reserveParticipation";
 import { ShiftConfigurationError, buildShiftSchedule, type ShiftSchedule } from "@/lib/domain/shiftSchedule";
 import { parseEvent } from "@/lib/parsers/event";
+import { parseFairnessTable } from "@/lib/parsers/fairness";
 import { parsePotentialSheet } from "@/lib/parsers/potential";
 import { parseScheduleSheet } from "@/lib/parsers/schedule";
 import { parseSettingsSheet } from "@/lib/parsers/settings";
@@ -58,6 +60,22 @@ export async function loadManagerOverviewReadModel(
     ...parsePotentialSheet(getManagerWorkbookSheet(snapshot, "potentialH2"), people),
   ];
 
+  // PR #39 -- the SAME two Potential sheets, already in this manager batch
+  // (no extra Google fetch), also each carry a separate "טבלת צדק"
+  // Fairness table (PR #15's `parseFairnessTable`) whose current allocation
+  // is the reservist shift-coverage-recommendation participation evidence.
+  // Only `resolvedPersonId`/`allocationLabel` ever reach
+  // `deriveReserveRoleParticipation` -- scores/exemptions/source cells never
+  // leave this Fairness-table parse.
+  const reserveParticipationByPeriod = {
+    h1: deriveReserveRoleParticipation(
+      parseFairnessTable(getManagerWorkbookSheet(snapshot, "potentialH1"), people).personRows,
+    ),
+    h2: deriveReserveRoleParticipation(
+      parseFairnessTable(getManagerWorkbookSheet(snapshot, "potentialH2"), people).personRows,
+    ),
+  };
+
   const now = getJerusalemLocalNow();
   const range = resolveManagerDateRange(params.range, params.month, now);
 
@@ -66,6 +84,7 @@ export async function loadManagerOverviewReadModel(
     people,
     events,
     potentialAllocations,
+    reserveParticipationByPeriod,
     shiftSchedule,
     fetchedAt: snapshot.fetchedAt,
     now,

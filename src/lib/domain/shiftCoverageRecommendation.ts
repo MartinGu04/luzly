@@ -2,6 +2,8 @@ import { addCalendarDays, formatCalendarDate, subtractCalendarDays } from "./dat
 import { isNextCalendarDay, parseCalendarDate } from "./dutyBlocks";
 import type { Event, EventRole } from "./event";
 import { BLOCKING_ABSENCE_KINDS, type OperationalIssue } from "./operationalIssues";
+import { classifyPersonnelType } from "@/lib/presentation/roster";
+import { EMPTY_RESERVE_ROLE_PARTICIPATION, type ReserveRoleParticipation } from "./reserveParticipation";
 import { findShiftGroupEvents } from "./shiftCoverage";
 import { MINUTES_PER_DAY, resolveEventShiftInterval, type MinuteInterval, type ShiftSchedule } from "./shiftSchedule";
 import type { Person } from "./types";
@@ -50,10 +52,6 @@ function oppositeRole(role: EventRole): MissingCoverageRole | null {
 function compareCandidates(a: Person, b: Person): number {
   if (a.name !== b.name) return a.name < b.name ? -1 : 1;
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-}
-
-function orderAndLimit(candidates: readonly Person[]): string[] {
-  return [...candidates].sort(compareCandidates).slice(0, MAX_RECOMMENDATION_CANDIDATES).map((person) => person.id);
 }
 
 // ---------------------------------------------------------------------------
@@ -246,6 +244,155 @@ function isEligibleCandidate(
 }
 
 // ---------------------------------------------------------------------------
+// Participation (PR #39) -- a SEPARATE, EARLIER concept from the interval-
+// compatibility "Eligibility" checks above. This decides whether a person
+// participates in role R's shift ROTATION AT ALL; only once that's proven
+// do the existing absence/constraint/overlap checks even run. Capability
+// flags (`isTechnician`/`isSupervisor`) alone are deliberately no longer
+// enough -- see each personnel-type branch below.
+// ---------------------------------------------------------------------------
+
+/**
+ * A confirmed shift Event proving CURRENT participation in role R must fall
+ * within this many calendar days of the issue's own date -- an old or far-
+ * future shift proves nothing about whether the person is active in the
+ * rotation right now. No existing bounded operational horizon in this
+ * domain fits this need (`RECENT_DASHBOARD_CHANGES_HORIZON_HOURS` is an
+ * hours-since-a-timestamp window for an unrelated dashboard feature), so
+ * this is PR #39's own small, explicitly conservative constant -- a
+ * reservist's Fairness allocation (see `reserveParticipation.ts`) is
+ * always checked FIRST and is the stronger signal; this date-window shift
+ * check is only the fallback when no Fairness evidence exists.
+ */
+export const RESERVE_RECENT_SHIFT_EVIDENCE_WINDOW_DAYS = 14;
+
+/**
+ * Every calendar date within `windowDays` on EITHER side of `centerDate`,
+ * inclusive of `centerDate` itself -- built from the same
+ * `addCalendarDays`/`subtractCalendarDays` primitives this module already
+ * uses elsewhere, never new date/UTC arithmetic.
+ */
+function datesWithinWindow(centerDate: string, windowDays: number): ReadonlySet<string> {
+  const parsed = parseCalendarDate(centerDate);
+  const dates = new Set<string>([centerDate]);
+  if (!parsed) return dates;
+
+  let forward = parsed;
+  let backward = parsed;
+  for (let i = 0; i < windowDays; i++) {
+    forward = addCalendarDays(forward, 1);
+    dates.add(formatCalendarDate(forward));
+    backward = subtractCalendarDays(backward, 1);
+    dates.add(formatCalendarDate(backward));
+  }
+  return dates;
+}
+
+/**
+ * Reserve evidence source B: a CONFIRMED (never tentative) shift Event, in
+ * the SAME role R, dated within `RESERVE_RECENT_SHIFT_EVIDENCE_WINDOW_DAYS`
+ * calendar days of the issue's date. A wrong-role shift, a tentative one,
+ * or one outside the window proves nothing and is silently ignored --
+ * never partial credit, never combined across role/date to manufacture
+ * evidence that no single Event actually provides.
+ */
+function hasRecentConfirmedSameRoleShift(
+  candidateEvents: readonly Event[],
+  role: MissingCoverageRole,
+  issueDate: string,
+): boolean {
+  const windowDates = datesWithinWindow(issueDate, RESERVE_RECENT_SHIFT_EVIDENCE_WINDOW_DAYS);
+  return candidateEvents.some(
+    (event) =>
+      event.category === "shift" &&
+      event.certainty === "confirmed" &&
+      event.role === role &&
+      windowDates.has(event.date),
+  );
+}
+
+/**
+ * Whether `candidate` currently participates in role R's shift rotation at
+ * all -- checked BEFORE any interval-compatibility check above:
+ *
+ * - no role capability (`isTechnician`/`isSupervisor` false for R) -> never.
+ * - permanent-service (`קבע`, `classifyPersonnelType` -> "permanent") ->
+ *   NEVER, regardless of capability flags or any Fairness/shift evidence.
+ *   Applies identically whether this is being checked for the technician
+ *   pool, the supervisor pool, or the technician last-resort fallback.
+ * - regular/mandatory-service (`חובה`, -> "regular") -> participates
+ *   whenever capable, no further evidence required (the normal shift
+ *   pool).
+ * - reserve (`מילואים`, -> "reserve") -> capability is NOT enough by
+ *   itself. Needs at least one of: (A) the already-selected period's
+ *   Fairness table resolves this person's row uniquely with an allocation
+ *   label matching R (`reserveParticipation`, computed by the caller via
+ *   `deriveReserveRoleParticipation` -- see that module for exactly which
+ *   period/rows), or (B) `hasRecentConfirmedSameRoleShift`.
+ * - anything else (`classifyPersonnelType` -> "unclassified": missing or
+ *   unrecognized `personnelType`) -> never. Mi-Ma-Mo does not guess a
+ *   person's service category from silence.
+ */
+function participatesInRoleRotation(
+  candidate: Person,
+  role: MissingCoverageRole,
+  candidateEvents: readonly Event[],
+  issueDate: string,
+  reserveParticipation: ReserveRoleParticipation,
+): boolean {
+  const hasCapability = role === "technician" ? candidate.isTechnician : candidate.isSupervisor;
+  if (!hasCapability) return false;
+
+  const category = classifyPersonnelType(candidate.personnelType);
+  if (category === "permanent") return false;
+  if (category === "regular") return true;
+  if (category !== "reserve") return false; // "unclassified" -- conservative exclusion.
+
+  const fairnessEvidence =
+    role === "technician" ? reserveParticipation.technicianPersonIds : reserveParticipation.supervisorPersonIds;
+  if (fairnessEvidence.has(candidate.id)) return true;
+
+  return hasRecentConfirmedSameRoleShift(candidateEvents, role, issueDate);
+}
+
+function isCandidateEligibleForRole(
+  candidate: Person,
+  role: MissingCoverageRole,
+  issueDate: string,
+  missingIntervals: readonly MinuteInterval[],
+  allEvents: readonly Event[],
+  schedule: ShiftSchedule,
+  reserveParticipation: ReserveRoleParticipation,
+): boolean {
+  const candidateEvents = allEvents.filter((event) => event.personId === candidate.id);
+  if (!participatesInRoleRotation(candidate, role, candidateEvents, issueDate, reserveParticipation)) return false;
+  return isEligibleCandidate(candidate, issueDate, missingIntervals, allEvents, schedule);
+}
+
+/** Splits an already-participation-and-interval-eligible pool by personnel-type category, for regular-before-reserve ordering. Never contains "permanent"/"unclassified" people -- `participatesInRoleRotation` already excluded them. */
+function splitByServiceCategory(eligible: readonly Person[]): { regular: Person[]; reserve: Person[] } {
+  const regular: Person[] = [];
+  const reserve: Person[] = [];
+  for (const person of eligible) {
+    const category = classifyPersonnelType(person.personnelType);
+    if (category === "regular") regular.push(person);
+    else if (category === "reserve") reserve.push(person);
+  }
+  return { regular, reserve };
+}
+
+/**
+ * Regular candidates always precede reservists in the deterministic short
+ * list (spec: "This is not a fairness/best-person ranking") -- each group
+ * keeps the SAME existing name-then-id order `orderAndLimit` always used,
+ * and the combined list is still capped at `MAX_RECOMMENDATION_CANDIDATES`.
+ */
+function combineRegularThenReserve(regular: readonly Person[], reserve: readonly Person[]): string[] {
+  const ordered = [...[...regular].sort(compareCandidates), ...[...reserve].sort(compareCandidates)];
+  return ordered.slice(0, MAX_RECOMMENDATION_CANDIDATES).map((person) => person.id);
+}
+
+// ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
 
@@ -257,12 +404,21 @@ function isEligibleCandidate(
  * candidates in every pool this issue's missing role allows. A `null`
  * result must always be treated as "no recommendation", never retried
  * with looser rules.
+ *
+ * `reserveParticipation` (PR #39) is the CALLER's already-resolved Fairness
+ * evidence for the ONE period (H1/H2) relevant to `issue.date` -- this
+ * function itself never picks a period or touches a raw Fairness row/
+ * score; see `reserveParticipation.ts` and `lib/domain/fairnessPeriod.ts`
+ * for how the caller derives/selects it. Omitting it (default: no
+ * evidence at all) is always the SAFE direction -- it can only make
+ * reservists LESS likely to qualify, never more.
  */
 export function buildShiftCoverageRecommendation(
   issue: OperationalIssue,
   people: readonly Person[],
   events: readonly Event[],
   schedule: ShiftSchedule,
+  reserveParticipation: ReserveRoleParticipation = EMPTY_RESERVE_ROLE_PARTICIPATION,
 ): ShiftCoverageRecommendation | null {
   if (issue.reason !== "shift_coverage_missing" && issue.reason !== "shift_coverage_partial") return null;
   if (!issue.targetEvent || !issue.missingIntervals || issue.missingIntervals.length === 0) return null;
@@ -278,23 +434,42 @@ export function buildShiftCoverageRecommendation(
     findShiftGroupEvents(events, issue.date, targetPeriod).map((event) => event.personId),
   );
 
-  const eligiblePool = (pool: readonly Person[]): Person[] =>
+  const eligiblePool = (pool: readonly Person[], role: MissingCoverageRole): Person[] =>
     pool
       .filter((person) => !alreadyOnShift.has(person.id))
-      .filter((person) => isEligibleCandidate(person, issue.date, missingIntervals, events, schedule));
+      .filter((person) =>
+        isCandidateEligibleForRole(person, role, issue.date, missingIntervals, events, schedule, reserveParticipation),
+      );
 
   if (missingRole === "supervisor") {
-    const eligible = eligiblePool(people.filter((person) => person.isSupervisor));
+    const eligible = eligiblePool(people.filter((person) => person.isSupervisor), "supervisor");
     if (eligible.length === 0) return null;
-    return { missingRole, primaryCandidateIds: orderAndLimit(eligible), fallbackCandidateIds: [] };
+    const { regular, reserve } = splitByServiceCategory(eligible);
+    return { missingRole, primaryCandidateIds: combineRegularThenReserve(regular, reserve), fallbackCandidateIds: [] };
   }
 
-  const primaryEligible = eligiblePool(people.filter((person) => person.isTechnician && !person.isSupervisor));
+  const primaryEligible = eligiblePool(
+    people.filter((person) => person.isTechnician && !person.isSupervisor),
+    "technician",
+  );
   if (primaryEligible.length > 0) {
-    return { missingRole, primaryCandidateIds: orderAndLimit(primaryEligible), fallbackCandidateIds: [] };
+    const { regular, reserve } = splitByServiceCategory(primaryEligible);
+    return { missingRole, primaryCandidateIds: combineRegularThenReserve(regular, reserve), fallbackCandidateIds: [] };
   }
 
-  const fallbackEligible = eligiblePool(people.filter((person) => person.isTechnician && person.isSupervisor));
+  // Last-resort fallback (dual-role people): still gated on TECHNICIAN
+  // participation specifically -- a reservist's supervisor-role Fairness/
+  // shift evidence never qualifies them here, only technician evidence
+  // does (spec: "Supervisor evidence alone is insufficient").
+  const fallbackEligible = eligiblePool(
+    people.filter((person) => person.isTechnician && person.isSupervisor),
+    "technician",
+  );
   if (fallbackEligible.length === 0) return null;
-  return { missingRole, primaryCandidateIds: [], fallbackCandidateIds: orderAndLimit(fallbackEligible) };
+  const { regular: fallbackRegular, reserve: fallbackReserve } = splitByServiceCategory(fallbackEligible);
+  return {
+    missingRole,
+    primaryCandidateIds: [],
+    fallbackCandidateIds: combineRegularThenReserve(fallbackRegular, fallbackReserve),
+  };
 }
