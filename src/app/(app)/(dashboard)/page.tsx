@@ -1,6 +1,7 @@
 import { Dashboard } from "@/components/dashboard/Dashboard";
 import { ConfigurationErrorState } from "@/components/dashboard/ConfigurationErrorState";
 import { getRequestPersonalSchedule } from "@/lib/readModels/getRequestPersonalSchedule";
+import { getRequestRecentDashboardChanges } from "@/lib/readModels/getRequestRecentDashboardChanges";
 
 /**
  * By the time this page renders, the protected layout has already gated
@@ -9,6 +10,11 @@ import { getRequestPersonalSchedule } from "@/lib/readModels/getRequestPersonalS
  * `getRequestPersonalSchedule()` again reuses the SAME request-scoped
  * result the layout already computed (React `cache()`), so this performs
  * no additional Google request.
+ *
+ * `getRequestRecentDashboardChanges()` (PR #36's "מה השתנה" recap) is a
+ * SEPARATE, optional call -- it never throws (see its own docstring), so
+ * a failure there can never turn this page into `ConfigurationErrorState`;
+ * the personal schedule stays the page's one load-bearing dependency.
  */
 export default async function DashboardPage() {
   const result = await getRequestPersonalSchedule();
@@ -17,5 +23,7 @@ export default async function DashboardPage() {
     return <ConfigurationErrorState />;
   }
 
-  return <Dashboard model={result.model} />;
+  const recentChanges = await getRequestRecentDashboardChanges();
+
+  return <Dashboard model={result.model} recentChanges={recentChanges} />;
 }

@@ -1,14 +1,18 @@
 import { BLOCKING_ABSENCE_KINDS } from "@/lib/domain/operationalIssues";
 import { DataFreshnessStatus } from "@/components/ui/DataFreshnessStatus";
 import type { PersonalEventView, PersonalScheduleReadModel } from "@/lib/readModels/types";
+import type { RecentDashboardChange } from "@/lib/readModels/recentDashboardChangesTypes";
 import { Header } from "./Header";
 import { Hero } from "./Hero";
 import { IssuesPanel } from "./IssuesPanel";
+import { RecentChangesPanel } from "./RecentChangesPanel";
 import { TodayTimeline } from "./TodayTimeline";
 import { UpcomingSection } from "./UpcomingSection";
 
 interface DashboardProps {
   model: PersonalScheduleReadModel;
+  /** PR #36's "מה השתנה" recap -- defaults to empty so every existing caller/test is unaffected; `RecentChangesPanel` itself renders nothing for an empty list. */
+  recentChanges?: RecentDashboardChange[];
 }
 
 /** A known blocking absence (vacation/abroad/medical/day_off) dated today, reusing the domain's own "blocking" semantics -- never redefined here. */
@@ -29,7 +33,7 @@ function findVacationEvent(todayEvents: readonly PersonalEventView[]): PersonalE
  * contextual column (issues, upcoming) on desktop; a single stacked column
  * on mobile, hero-first.
  */
-export function Dashboard({ model }: DashboardProps) {
+export function Dashboard({ model, recentChanges = [] }: DashboardProps) {
   const hasCurrentAssignment = model.currentAssignments.length > 0;
 
   // Vacation only becomes the hero's story when nothing is currently
@@ -79,6 +83,12 @@ export function Dashboard({ model }: DashboardProps) {
               localNow={model.localNow}
             />
           </div>
+
+          {recentChanges.length > 0 ? (
+            <div className="animate-fade-up" style={{ animationDelay: "120ms" }}>
+              <RecentChangesPanel changes={recentChanges} />
+            </div>
+          ) : null}
         </div>
 
         <div className="flex flex-col gap-6 lg:order-2">
