@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { redirect } from "next/navigation";
+import { AppRevalidator } from "@/components/layout/AppRevalidator";
 import { AppShell } from "@/components/layout/AppShell";
 import { AccessDeniedScreen } from "@/components/auth/AccessDeniedScreen";
 import { getRequestPersonalSchedule } from "@/lib/readModels/getRequestPersonalSchedule";
@@ -36,6 +37,11 @@ export const dynamic = "force-dynamic";
  * person still gets the real app shell (sidebar/identity) -- the dashboard
  * page itself renders the polished "can't compute shift hours" state in
  * its content area.
+ *
+ * `AppRevalidator` (PR #34) is mounted here as a sibling of `AppShell`,
+ * the same way `ServiceWorkerManager` sits beside `{children}` in the root
+ * layout -- present on every authenticated page, absent from the
+ * `AccessDeniedScreen` branch (nothing to keep fresh for a denied user).
  */
 export default async function ProtectedLayout({ children }: { children: ReactNode }) {
   const result = await getRequestPersonalSchedule();
@@ -71,11 +77,14 @@ export default async function ProtectedLayout({ children }: { children: ReactNod
     result.status === "ok" ? `${formatScheduleMinute(result.model.localNow.minuteOfDay)}:00` : null;
 
   return (
-    <AppShell
-      person={{ name: person.name, isManager: person.isManager, avatarUrl }}
-      initialClockTime={initialClockTime}
-    >
-      {children}
-    </AppShell>
+    <>
+      <AppRevalidator />
+      <AppShell
+        person={{ name: person.name, isManager: person.isManager, avatarUrl }}
+        initialClockTime={initialClockTime}
+      >
+        {children}
+      </AppShell>
+    </>
   );
 }

@@ -1,4 +1,4 @@
-import type { ReactElement } from "react";
+import type { ComponentProps, ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { ThemeProvider } from "@/lib/theme/ThemeProvider";
@@ -14,10 +14,29 @@ const redirect = vi.fn((path: string) => {
 });
 
 vi.mock("@/lib/readModels/getRequestPersonalSchedule", () => ({ getRequestPersonalSchedule }));
-vi.mock("next/navigation", () => ({ redirect, usePathname: () => "/" }));
+vi.mock("next/navigation", () => ({
+  redirect,
+  usePathname: () => "/",
+  useRouter: () => ({ refresh: vi.fn() }),
+}));
 
 const { default: ProtectedLayout } = await import("./layout");
 const { AppShell } = await import("@/components/layout/AppShell");
+
+/**
+ * `ProtectedLayout` returns a Fragment wrapping AppRevalidator and AppShell
+ * (PR #34), not AppShell directly -- the same sibling-mount shape the root
+ * layout already uses for ServiceWorkerManager. Tests that need to inspect
+ * the resolved AppShell element's own type/props dig it out of the
+ * Fragment's children instead of assuming it's the root.
+ */
+function findAppShellElement(element: ReactElement): ReactElement<ComponentProps<typeof AppShell>> {
+  const children = (element.props as { children: ReactElement | ReactElement[] }).children;
+  const childArray = Array.isArray(children) ? children : [children];
+  const appShellElement = childArray.find((child) => child.type === AppShell);
+  if (!appShellElement) throw new Error("AppShell element not found in ProtectedLayout's output");
+  return appShellElement as ReactElement<ComponentProps<typeof AppShell>>;
+}
 
 function profile(overrides: Partial<PersonalProfile> = {}): PersonalProfile {
   return {
@@ -178,9 +197,10 @@ describe("(app) layout — server-side auth gating", () => {
     getRequestPersonalSchedule.mockResolvedValue(okResult(profile()));
 
     const element = await ProtectedLayout({ children: <div>x</div> });
+    const appShellElement = findAppShellElement(element);
 
-    expect(element.type).toBe(AppShell);
-    expect(element.props.initialClockTime).toBe("10:00:00");
+    expect(appShellElement.type).toBe(AppShell);
+    expect(appShellElement.props.initialClockTime).toBe("10:00:00");
     expect(getRequestPersonalSchedule).toHaveBeenCalledTimes(1);
   });
 
@@ -192,9 +212,10 @@ describe("(app) layout — server-side auth gating", () => {
     });
 
     const element = await ProtectedLayout({ children: <div>x</div> });
+    const appShellElement = findAppShellElement(element);
 
-    expect(element.type).toBe(AppShell);
-    expect(element.props.initialClockTime).toBeNull();
+    expect(appShellElement.type).toBe(AppShell);
+    expect(appShellElement.props.initialClockTime).toBeNull();
     expect(() => renderWithTheme(element)).not.toThrow();
   });
 
@@ -218,18 +239,20 @@ describe("(app) layout — avatarUrl (presentation-only Google account photo)", 
     getRequestPersonalSchedule.mockResolvedValue(okResult(profile(), "https://lh3.googleusercontent.com/a/photo.jpg"));
 
     const element = await ProtectedLayout({ children: <div>x</div> });
+    const appShellElement = findAppShellElement(element);
 
-    expect(element.type).toBe(AppShell);
-    expect(element.props.person.avatarUrl).toBe("https://lh3.googleusercontent.com/a/photo.jpg");
+    expect(appShellElement.type).toBe(AppShell);
+    expect(appShellElement.props.person!.avatarUrl).toBe("https://lh3.googleusercontent.com/a/photo.jpg");
   });
 
   it("passes null through (not undefined/crash) when the read model has no avatarUrl", async () => {
     getRequestPersonalSchedule.mockResolvedValue(okResult(profile(), null));
 
     const element = await ProtectedLayout({ children: <div>x</div> });
+    const appShellElement = findAppShellElement(element);
 
-    expect(element.type).toBe(AppShell);
-    expect(element.props.person.avatarUrl).toBeNull();
+    expect(appShellElement.type).toBe(AppShell);
+    expect(appShellElement.props.person!.avatarUrl).toBeNull();
   });
 
   it("also flows through for a configuration_error result, alongside the resolved identity", async () => {
@@ -241,9 +264,10 @@ describe("(app) layout — avatarUrl (presentation-only Google account photo)", 
     });
 
     const element = await ProtectedLayout({ children: <div>x</div> });
+    const appShellElement = findAppShellElement(element);
 
-    expect(element.type).toBe(AppShell);
-    expect(element.props.person.avatarUrl).toBe("https://lh3.googleusercontent.com/a/noa.jpg");
+    expect(appShellElement.type).toBe(AppShell);
+    expect(appShellElement.props.person!.avatarUrl).toBe("https://lh3.googleusercontent.com/a/noa.jpg");
   });
 
   it("renders an actual <img> for a real avatarUrl and reaches both the desktop and mobile Avatar instances", async () => {
