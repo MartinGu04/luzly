@@ -190,6 +190,51 @@ describe("ScheduleCalendar", () => {
     expect(selectedDayPanel().getAllByText("חופש").length).toBeGreaterThan(0);
   });
 
+  it("12. a server re-render with fresh props (simulating an automatic revalidation) never resets the user's selected day", () => {
+    const { rerender } = render(
+      <ScheduleCalendar
+        grid={WEEK_GRID}
+        days={weekDays()}
+        monthEvents={[
+          shiftEvent({ date: "2026-08-12", title: "טכנאי יום" }),
+          shiftEvent({ date: "2026-08-13", title: "טכנאי לילה", period: "night" }),
+        ]}
+        defaultSelectedDate="2026-08-12"
+        activeShiftDates={[]}
+      />,
+    );
+
+    act(() => {
+      screen.getByRole("button", { name: /13 באוגוסט/ }).click();
+    });
+    expect(selectedDayPanel().getByText("טכנאי לילה")).toBeInTheDocument();
+
+    // The page always passes the SAME `defaultSelectedDate` -- it's the
+    // server's original resolved "today"/first-of-month pick, not something
+    // that tracks the user's in-browser click. A revalidation re-renders
+    // this same component instance (same `key`, see ScheduleCalendar's own
+    // docstring) with fresh event data but that identical prop -- selection
+    // state must survive because React never re-initializes `useState` on a
+    // prop change alone.
+    rerender(
+      <ScheduleCalendar
+        grid={WEEK_GRID}
+        days={weekDays()}
+        monthEvents={[
+          shiftEvent({ date: "2026-08-12", title: "טכנאי יום" }),
+          shiftEvent({ date: "2026-08-13", title: "טכנאי לילה", period: "night" }),
+          shiftEvent({ date: "2026-08-13", title: "עדכון חדש", period: "night" }),
+        ]}
+        defaultSelectedDate="2026-08-12"
+        activeShiftDates={[]}
+      />,
+    );
+
+    expect(selectedDayPanel().getByText("טכנאי לילה")).toBeInTheDocument();
+    expect(selectedDayPanel().getByText("עדכון חדש")).toBeInTheDocument();
+    expect(selectedDayPanel().queryByText("טכנאי יום")).toBeNull();
+  });
+
   it("only ever renders events belonging to this month's monthEvents prop -- no unrelated data", () => {
     const { container } = render(
       <ScheduleCalendar
