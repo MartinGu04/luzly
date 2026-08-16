@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { BrandMark } from "@/components/brand/BrandMark";
 import { NotificationBell } from "@/components/pwa/NotificationBell";
+import { SearchTriggerButton } from "@/components/search/SearchTriggerButton";
 import { visibleNavItems } from "./nav-items";
 import { IdentityFooter } from "./IdentityFooter";
 
@@ -36,6 +37,10 @@ export function Sidebar({ person }: SidebarProps) {
       <div className="flex items-center justify-between gap-3 px-6 pt-8 pb-6">
         <BrandMark size="md" className="text-sidebar-foreground" />
         <NotificationBell variant="sidebar" />
+      </div>
+
+      <div className="px-4 pb-2">
+        <SearchTriggerButton variant="sidebar" />
       </div>
 
       <nav className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto px-4 py-2" aria-label="ניווט ראשי">

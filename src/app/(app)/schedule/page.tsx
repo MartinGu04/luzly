@@ -15,6 +15,7 @@ import {
   shiftCalendarMonth,
   type CalendarMonthKey,
 } from "@/lib/domain/calendarMonth";
+import { parseCalendarDate } from "@/lib/domain/dutyBlocks";
 import { formatHebrewCalendarDate, formatHebrewMonthRange, getHolidayContext } from "@/lib/presentation/hebrewCalendar";
 import { formatHebrewMonthYear, formatHebrewWeekdayAndDate } from "@/lib/presentation/hebrewDate";
 import { buildScheduleEveryoneDayViews } from "@/lib/presentation/scheduleEveryone";
@@ -41,7 +42,7 @@ function buildDayMeta(date: string, todayDate: string): DayMeta {
 type SearchParamValue = string | string[] | undefined;
 
 interface SchedulePageProps {
-  searchParams: Promise<{ month?: SearchParamValue; person?: SearchParamValue }>;
+  searchParams: Promise<{ month?: SearchParamValue; person?: SearchParamValue; date?: SearchParamValue }>;
 }
 
 function firstParam(value: SearchParamValue): string | undefined {
@@ -94,8 +95,23 @@ export default async function SchedulePage({ searchParams }: SchedulePageProps) 
   const params = await searchParams;
   const rawMonth = firstParam(params.month) ?? null;
   const rawPerson = firstParam(params.person) ?? null;
+  const rawDate = firstParam(params.date) ?? null;
 
-  const result = await getRequestSchedule(rawMonth, rawPerson);
+  // `?date=` is self-sufficient: when a valid date is supplied and no
+  // explicit `?month=` overrides it, the displayed/requested month is
+  // derived from the date itself -- otherwise a cross-month/year search
+  // result (e.g. `?date=2026-09-01` while August is the resolved default)
+  // would silently open the WRONG month and the date would never be found
+  // in that month's grid. An explicit `?month=` (valid or not) always wins
+  // -- its own existing fallback-to-current-month behavior for an invalid
+  // value is unchanged.
+  const requestedDateMonth = rawMonth === null && rawDate ? parseCalendarDate(rawDate) : null;
+  const dateMonthOverride = requestedDateMonth
+    ? formatMonthParam({ year: requestedDateMonth.year, month: requestedDateMonth.month })
+    : null;
+  const effectiveRawMonth = dateMonthOverride ?? rawMonth;
+
+  const result = await getRequestSchedule(effectiveRawMonth, rawPerson);
   if (result.status !== "ok") {
     return <ConfigurationErrorState />;
   }
@@ -103,7 +119,7 @@ export default async function SchedulePage({ searchParams }: SchedulePageProps) 
   const { model } = result;
 
   const currentMonthKey = calendarMonthOfLocalNow(model.localNow);
-  const displayMonthKey = parseMonthParam(rawMonth) ?? currentMonthKey;
+  const displayMonthKey = parseMonthParam(effectiveRawMonth) ?? currentMonthKey;
   const monthParam = formatMonthParam(displayMonthKey);
 
   const grid = buildMonthGrid(displayMonthKey.year, displayMonthKey.month);
@@ -122,7 +138,14 @@ export default async function SchedulePage({ searchParams }: SchedulePageProps) 
   const nextHref = scheduleHref(nextMonthKey, model.perspective, model.selectedPersonId);
   const todayHref = scheduleHref(null, model.perspective, model.selectedPersonId);
 
-  const defaultSelectedDate = days[model.localNow.date] ? model.localNow.date : (inMonthDates[0] ?? null);
+  // A deep-linked `?date=` (e.g. from global search) selects that day, but
+  // only when it's actually a real, in-grid date -- `Object.hasOwn` (never
+  // plain `days[rawDate]`) so an adversarial param can't reach up the
+  // prototype chain. An out-of-month or garbage `?date=` is silently
+  // ignored, falling back to the existing today-or-first-of-month default,
+  // never a crash and never a fabricated selection.
+  const requestedDate = rawDate && Object.hasOwn(days, rawDate) ? rawDate : null;
+  const defaultSelectedDate = requestedDate ?? (days[model.localNow.date] ? model.localNow.date : (inMonthDates[0] ?? null));
 
   return (
     <div className="flex flex-col gap-4 sm:gap-6">

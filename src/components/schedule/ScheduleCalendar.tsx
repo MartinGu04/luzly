@@ -36,6 +36,17 @@ interface ScheduleCalendarProps {
  * month param (`key={monthParam}`) specifically so a month change forces a
  * fresh mount with a fresh `defaultSelectedDate`, rather than carrying the
  * previous month's selected day forward.
+ *
+ * A genuine external navigation to a specific day (global search's
+ * `?date=` deep link, PR #35) needs to select that day WITHOUT changing the
+ * month key -- `selectedDate` re-syncs whenever `defaultSelectedDate`'s
+ * VALUE actually changes, using React's own "adjusting state when a prop
+ * changes" pattern (a setState call during render, guarded by comparing
+ * against a tracked previous value) rather than an effect -- no extra
+ * render pass, no risk of the stale selection flashing first. This never
+ * fights an in-page click or an automatic revalidation (PR #34):
+ * revalidating the SAME URL re-renders with the exact same
+ * `defaultSelectedDate` string, so the guard never re-fires.
  */
 export function ScheduleCalendar({
   grid,
@@ -45,6 +56,12 @@ export function ScheduleCalendar({
   activeShiftDates,
 }: ScheduleCalendarProps) {
   const [selectedDate, setSelectedDate] = useState<string | null>(defaultSelectedDate);
+  const [syncedDefaultSelectedDate, setSyncedDefaultSelectedDate] = useState(defaultSelectedDate);
+
+  if (defaultSelectedDate !== syncedDefaultSelectedDate) {
+    setSyncedDefaultSelectedDate(defaultSelectedDate);
+    setSelectedDate(defaultSelectedDate);
+  }
 
   const eventsByDate = useMemo(() => {
     const map: Record<string, PersonalEventView[]> = {};

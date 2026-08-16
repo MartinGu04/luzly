@@ -3,7 +3,9 @@ import { redirect } from "next/navigation";
 import { AppRevalidator } from "@/components/layout/AppRevalidator";
 import { AppShell } from "@/components/layout/AppShell";
 import { AccessDeniedScreen } from "@/components/auth/AccessDeniedScreen";
+import { SearchPaletteProvider } from "@/components/search/SearchPaletteProvider";
 import { getRequestPersonalSchedule } from "@/lib/readModels/getRequestPersonalSchedule";
+import { getRequestSearchReadModel } from "@/lib/readModels/getRequestSearchReadModel";
 import { formatScheduleMinute } from "@/lib/presentation/scheduleTime";
 
 /**
@@ -42,6 +44,15 @@ export const dynamic = "force-dynamic";
  * the same way `ServiceWorkerManager` sits beside `{children}` in the root
  * layout -- present on every authenticated page, absent from the
  * `AccessDeniedScreen` branch (nothing to keep fresh for a denied user).
+ *
+ * `SearchPaletteProvider` (PR #35) wraps `AppShell` so trigger buttons deep
+ * inside it (`Sidebar`, `MobileIdentityBar`) share one palette instance via
+ * context. Its `searchReadModel` comes from a SEPARATE `getRequestSearchReadModel()`
+ * call, independently re-verifying identity/config rather than threading
+ * `result`'s already-narrowed personal read model through -- the same
+ * "re-verify, don't thread raw data across read-model boundaries" pattern
+ * `loadScheduleReadModel`'s manager branch already uses. `null` (only on
+ * `configuration_error`) makes the whole feature quietly unavailable.
  */
 export default async function ProtectedLayout({ children }: { children: ReactNode }) {
   const result = await getRequestPersonalSchedule();
@@ -76,15 +87,20 @@ export default async function ProtectedLayout({ children }: { children: ReactNod
   const initialClockTime =
     result.status === "ok" ? `${formatScheduleMinute(result.model.localNow.minuteOfDay)}:00` : null;
 
+  const searchResult = await getRequestSearchReadModel();
+  const searchReadModel = searchResult.status === "ok" ? searchResult.model : null;
+
   return (
     <>
       <AppRevalidator />
-      <AppShell
-        person={{ name: person.name, isManager: person.isManager, avatarUrl }}
-        initialClockTime={initialClockTime}
-      >
-        {children}
-      </AppShell>
+      <SearchPaletteProvider searchReadModel={searchReadModel}>
+        <AppShell
+          person={{ name: person.name, isManager: person.isManager, avatarUrl }}
+          initialClockTime={initialClockTime}
+        >
+          {children}
+        </AppShell>
+      </SearchPaletteProvider>
     </>
   );
 }

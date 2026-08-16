@@ -5,6 +5,8 @@ import {
   formatCalendarDate,
   parseManagerRangeParam,
   resolveManagerDateRange,
+  resolveNearestCalendarDate,
+  resolveNextWeekdayDate,
   subtractCalendarDays,
 } from "./dateRange";
 
@@ -167,5 +169,66 @@ describe("resolveManagerDateRange", () => {
     for (const date of range.dates) {
       expect(date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     }
+  });
+});
+
+// 2026-08-12 is a Wednesday.
+describe("resolveNearestCalendarDate (search date-query resolution)", () => {
+  it("3. resolves a day.month later this year to this year's occurrence", () => {
+    expect(resolveNearestCalendarDate(19, 8, localNow("2026-08-12"))).toBe("2026-08-19");
+  });
+
+  it("resolves to today itself when day.month IS today", () => {
+    expect(resolveNearestCalendarDate(12, 8, localNow("2026-08-12"))).toBe("2026-08-12");
+  });
+
+  it("rolls to next year when the day.month has already passed this year", () => {
+    expect(resolveNearestCalendarDate(1, 1, localNow("2026-08-12"))).toBe("2027-01-01");
+  });
+
+  it("returns null for a day that never exists in that month, in either candidate year", () => {
+    expect(resolveNearestCalendarDate(31, 4, localNow("2026-08-12"))).toBeNull();
+  });
+
+  it("returns null for Feb 29 when neither this year nor next year is a leap year", () => {
+    // 2026 and 2027 are both non-leap; 2028 is, but this function never looks further than next year.
+    expect(resolveNearestCalendarDate(29, 2, localNow("2026-08-12"))).toBeNull();
+  });
+
+  it("returns null for a structurally invalid day/month", () => {
+    expect(resolveNearestCalendarDate(0, 8, localNow("2026-08-12"))).toBeNull();
+    expect(resolveNearestCalendarDate(19, 13, localNow("2026-08-12"))).toBeNull();
+    expect(resolveNearestCalendarDate(19, 0, localNow("2026-08-12"))).toBeNull();
+    expect(resolveNearestCalendarDate(1.5, 8, localNow("2026-08-12"))).toBeNull();
+  });
+
+  it("returns null for an unparseable localNow.date", () => {
+    expect(resolveNearestCalendarDate(19, 8, localNow("not-a-date"))).toBeNull();
+  });
+});
+
+describe("resolveNextWeekdayDate (search weekday-query resolution)", () => {
+  it("18. prefers TODAY when the requested weekday matches today, rather than skipping a week", () => {
+    // Wednesday = index 3.
+    expect(resolveNextWeekdayDate(3, localNow("2026-08-12"))).toBe("2026-08-12");
+  });
+
+  it("resolves the very next occurrence later this week", () => {
+    // Thursday = index 4, the day after Wednesday 2026-08-12.
+    expect(resolveNextWeekdayDate(4, localNow("2026-08-12"))).toBe("2026-08-13");
+  });
+
+  it("resolves forward into next week when the weekday already passed this week", () => {
+    // Tuesday = index 2, already passed this week as of Wednesday.
+    expect(resolveNextWeekdayDate(2, localNow("2026-08-12"))).toBe("2026-08-18");
+  });
+
+  it("crosses a month boundary correctly", () => {
+    // Sunday = index 0, the next one after Wednesday 2026-08-12 is 2026-08-16.
+    expect(resolveNextWeekdayDate(0, localNow("2026-08-12"))).toBe("2026-08-16");
+  });
+
+  it("returns null for an unparseable localNow.date", () => {
+    expect(resolveNextWeekdayDate(0, localNow("not-a-date"))).toBeNull();
   });
 });

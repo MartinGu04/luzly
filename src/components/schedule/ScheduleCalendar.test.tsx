@@ -235,6 +235,40 @@ describe("ScheduleCalendar", () => {
     expect(selectedDayPanel().queryByText("טכנאי יום")).toBeNull();
   });
 
+  it("a genuinely NEW defaultSelectedDate (e.g. a search deep-link navigation) DOES update the selection, unlike an unchanged revalidation re-render", () => {
+    const { rerender } = render(
+      <ScheduleCalendar
+        grid={WEEK_GRID}
+        days={weekDays()}
+        monthEvents={[
+          shiftEvent({ date: "2026-08-12", title: "טכנאי יום" }),
+          shiftEvent({ date: "2026-08-14", title: "טכנאי לילה", period: "night" }),
+        ]}
+        defaultSelectedDate="2026-08-12"
+        activeShiftDates={[]}
+      />,
+    );
+    expect(selectedDayPanel().getByText("טכנאי יום")).toBeInTheDocument();
+
+    // Same month (same key upstream), but a NEW defaultSelectedDate value --
+    // simulates clicking a global-search date result while already on this month.
+    rerender(
+      <ScheduleCalendar
+        grid={WEEK_GRID}
+        days={weekDays()}
+        monthEvents={[
+          shiftEvent({ date: "2026-08-12", title: "טכנאי יום" }),
+          shiftEvent({ date: "2026-08-14", title: "טכנאי לילה", period: "night" }),
+        ]}
+        defaultSelectedDate="2026-08-14"
+        activeShiftDates={[]}
+      />,
+    );
+
+    expect(selectedDayPanel().getByText("טכנאי לילה")).toBeInTheDocument();
+    expect(selectedDayPanel().queryByText("טכנאי יום")).toBeNull();
+  });
+
   it("only ever renders events belonging to this month's monthEvents prop -- no unrelated data", () => {
     const { container } = render(
       <ScheduleCalendar

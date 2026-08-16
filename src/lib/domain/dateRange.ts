@@ -1,7 +1,7 @@
 import type { CalendarMonthKey } from "./calendarMonth";
 import { daysInCalendarMonth, parseMonthParam } from "./calendarMonth";
 import type { CalendarDate } from "./dutyBlocks";
-import { parseCalendarDate } from "./dutyBlocks";
+import { dayOfWeek, parseCalendarDate } from "./dutyBlocks";
 import type { LocalNow } from "./localNow";
 
 /**
@@ -85,6 +85,44 @@ export function subtractCalendarDays(date: CalendarDate, n: number): CalendarDat
   }
 
   return { year, month, day };
+}
+
+/**
+ * Resolves a bare "day.month" (no year) to the nearest calendar date that
+ * is today or later -- this year's occurrence if it hasn't passed yet,
+ * otherwise next year's. Used by search's date-query parsing ("19.8"),
+ * never by anything that already has an explicit year. Returns null for a
+ * structurally invalid day/month (day/month out of range, or a day that
+ * doesn't exist in that month even the following year -- e.g. day=31,
+ * month=2) or an unparseable `localNow.date`, never a guessed date.
+ */
+export function resolveNearestCalendarDate(day: number, month: number, localNow: LocalNow): string | null {
+  if (!Number.isInteger(day) || !Number.isInteger(month) || month < 1 || month > 12 || day < 1) return null;
+
+  const today = parseCalendarDate(localNow.date);
+  if (!today) return null;
+
+  if (day <= daysInCalendarMonth(today.year, month)) {
+    const thisYear = formatCalendarDate({ year: today.year, month, day });
+    if (thisYear >= localNow.date) return thisYear;
+  }
+
+  if (day > daysInCalendarMonth(today.year + 1, month)) return null;
+  return formatCalendarDate({ year: today.year + 1, month, day });
+}
+
+/**
+ * Resolves a weekday index (0=Sunday..6=Saturday, matching `dayOfWeek`) to
+ * the nearest date that is today or later -- prefers TODAY when it already
+ * falls on the requested weekday, rather than skipping ahead a full week.
+ * Returns null only when `localNow.date` itself is unparseable.
+ */
+export function resolveNextWeekdayDate(weekdayIndex: number, localNow: LocalNow): string | null {
+  const today = parseCalendarDate(localNow.date);
+  if (!today) return null;
+
+  const offset = (weekdayIndex - dayOfWeek(today) + 7) % 7;
+  return formatCalendarDate(addCalendarDays(today, offset));
 }
 
 export interface ManagerDateRange {
