@@ -1,4 +1,5 @@
 import { resolveFairnessAllocationRole } from "./fairnessAnalysis";
+import type { FairnessPeriodIdentity } from "./fairnessPeriod";
 import type { FairnessPersonRow } from "./fairnessTable";
 
 /**
@@ -21,17 +22,55 @@ export const EMPTY_RESERVE_ROLE_PARTICIPATION: ReserveRoleParticipation = {
 };
 
 /**
+ * One half-year Potential/Fairness sheet's participation evidence, tagged
+ * with the calendar YEAR that source sheet actually represents (PR #39
+ * follow-up -- "year-safe Fairness evidence"). `year` comes from
+ * structurally parsing the real source tab name
+ * (`lib/google/parseSourcePeriodYear`), never from "now" and never
+ * hardcoded -- the currently configured `potentialH1`/`potentialH2` tabs
+ * only ever cover ONE specific year at a time (e.g. "1-6/2026"), and an
+ * issue from a different year must never silently borrow that evidence
+ * just because it also resolves to "h1". `null` when the source tab name
+ * doesn't carry a parseable year at all -- treated as "never a match",
+ * never a guess.
+ */
+export interface ReserveRoleParticipationSource {
+  year: number | null;
+  participation: ReserveRoleParticipation;
+}
+
+/**
  * Both half-year Potential sheets' Fairness participation, computed once
- * per manager-overview load -- the caller then picks ONE side (via
- * `resolveFairnessPeriod`, keyed off each individual issue's OWN date, not
- * a single "now") when it's time to build a specific issue's
- * recommendation. Both sides are already available from the SAME manager
- * workbook snapshot every manager feature already fetches (PR #15) -- this
- * never triggers a second/extra Google request.
+ * per manager-overview load -- the caller resolves which ONE side (and
+ * whether its year actually matches) applies to a specific issue via
+ * `resolveReserveRoleParticipation` below. Both sides are already
+ * available from the SAME manager workbook snapshot every manager feature
+ * already fetches (PR #15) -- this never triggers a second/extra Google
+ * request.
  */
 export interface ReserveRoleParticipationByPeriod {
-  h1: ReserveRoleParticipation;
-  h2: ReserveRoleParticipation;
+  h1: ReserveRoleParticipationSource;
+  h2: ReserveRoleParticipationSource;
+}
+
+/**
+ * The ONE centralized place "does this evidence source actually apply to
+ * the requested period?" is decided (PR #39 follow-up) -- every caller
+ * (currently just `buildManagerOverviewReadModel`) goes through this
+ * rather than re-deriving/comparing years itself. Picks the `key`-matching
+ * side of `byPeriod`, then requires its `year` to EXACTLY equal
+ * `requested.year` -- a same-half-different-year source (e.g. h1-2026
+ * evidence requested for an h1-2027 issue) or an unparseable source year
+ * (`null`) both fall back to `EMPTY_RESERVE_ROLE_PARTICIPATION`, the safe
+ * "no evidence" direction, never a guess forward/backward across years.
+ */
+export function resolveReserveRoleParticipation(
+  byPeriod: ReserveRoleParticipationByPeriod,
+  requested: FairnessPeriodIdentity,
+): ReserveRoleParticipation {
+  const source = byPeriod[requested.key];
+  if (source.year === null || source.year !== requested.year) return EMPTY_RESERVE_ROLE_PARTICIPATION;
+  return source.participation;
 }
 
 /**

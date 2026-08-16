@@ -2,7 +2,7 @@ import { addCalendarDays, formatCalendarDate, subtractCalendarDays } from "./dat
 import { isNextCalendarDay, parseCalendarDate } from "./dutyBlocks";
 import type { Event, EventRole } from "./event";
 import { BLOCKING_ABSENCE_KINDS, type OperationalIssue } from "./operationalIssues";
-import { classifyPersonnelType } from "@/lib/presentation/roster";
+import { classifyPersonnelType } from "./personnelType";
 import { EMPTY_RESERVE_ROLE_PARTICIPATION, type ReserveRoleParticipation } from "./reserveParticipation";
 import { findShiftGroupEvents } from "./shiftCoverage";
 import { MINUTES_PER_DAY, resolveEventShiftInterval, type MinuteInterval, type ShiftSchedule } from "./shiftSchedule";

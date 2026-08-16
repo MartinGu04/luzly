@@ -1,6 +1,6 @@
 import type { ManagerDateRange } from "@/lib/domain/dateRange";
 import type { Event } from "@/lib/domain/event";
-import { resolveFairnessPeriod } from "@/lib/domain/fairnessPeriod";
+import { resolveFairnessPeriodIdentity } from "@/lib/domain/fairnessPeriod";
 import type { LocalNow } from "@/lib/domain/localNow";
 import {
   detectOperationalIssues,
@@ -13,7 +13,7 @@ import {
   type ManagerRequirementReconciliation,
 } from "@/lib/domain/potentialReconciliation";
 import { scopeManagerPotentialAllocation } from "@/lib/domain/potentialSourceOwnership";
-import type { ReserveRoleParticipationByPeriod } from "@/lib/domain/reserveParticipation";
+import { resolveReserveRoleParticipation, type ReserveRoleParticipationByPeriod } from "@/lib/domain/reserveParticipation";
 import { buildShiftCoverageRecommendation } from "@/lib/domain/shiftCoverageRecommendation";
 import type { ShiftSchedule } from "@/lib/domain/shiftSchedule";
 import type { Person } from "@/lib/domain/types";
@@ -239,11 +239,16 @@ function toManagerIssue(
  * in ids, never names/raw `Person`.
  *
  * PR #39: selects which half-year's Fairness participation evidence
- * applies via `resolveFairnessPeriod`, keyed off THIS issue's own `date`
- * (never a single "now" for the whole overview) -- an issue in a past/
- * future month still gets evaluated against the Fairness table that
+ * applies via `resolveFairnessPeriodIdentity`, keyed off THIS issue's own
+ * `date` (never a single "now" for the whole overview) -- an issue in a
+ * past/future month still gets evaluated against the Fairness table that
  * actually covers it, exactly like Manager Fairness's own period
  * resolution (`managerFairness.ts`) does for its page-level `?period=`.
+ * `resolveReserveRoleParticipation` additionally requires that resolved
+ * period's YEAR to match the evidence source's own year -- an issue whose
+ * date resolves to "h1" but falls in a DIFFERENT year than the fetched h1
+ * sheet actually represents gets no Fairness evidence at all (safe empty),
+ * never a same-half evidence set borrowed across years.
  */
 function toManagerIssueRecommendation(
   issue: OperationalIssue,
@@ -253,8 +258,8 @@ function toManagerIssueRecommendation(
   peopleById: ReadonlyMap<string, Person>,
   reserveParticipationByPeriod: ReserveRoleParticipationByPeriod,
 ): ManagerIssueRecommendation | null {
-  const period = resolveFairnessPeriod(null, { date: issue.date, minuteOfDay: 0 });
-  const reserveParticipation = reserveParticipationByPeriod[period];
+  const requestedPeriod = resolveFairnessPeriodIdentity(null, { date: issue.date, minuteOfDay: 0 });
+  const reserveParticipation = resolveReserveRoleParticipation(reserveParticipationByPeriod, requestedPeriod);
   const recommendation = buildShiftCoverageRecommendation(issue, people, events, shiftSchedule, reserveParticipation);
   if (!recommendation) return null;
 

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { fairnessPeriodLabel, parseFairnessPeriodParam, resolveFairnessPeriod } from "./fairnessPeriod";
+import {
+  fairnessPeriodLabel,
+  parseFairnessPeriodParam,
+  resolveFairnessPeriod,
+  resolveFairnessPeriodIdentity,
+} from "./fairnessPeriod";
 
 describe("parseFairnessPeriodParam — strict allowlist", () => {
   it("accepts h1/h2", () => {
@@ -28,6 +33,24 @@ describe("resolveFairnessPeriod — Jerusalem LocalNow only, never browser-local
   it("Jul-Dec falls back to h2 when the param is invalid/missing", () => {
     expect(resolveFairnessPeriod(undefined, { date: "2026-08-13", minuteOfDay: 0 })).toBe("h2");
     expect(resolveFairnessPeriod("bogus", { date: "2026-12-31", minuteOfDay: 0 })).toBe("h2");
+  });
+});
+
+describe("resolveFairnessPeriodIdentity — key AND year together (PR #39 year-safety)", () => {
+  it("pairs the resolved key with the year read from the same date", () => {
+    expect(resolveFairnessPeriodIdentity(null, { date: "2026-03-15", minuteOfDay: 0 })).toEqual({ key: "h1", year: 2026 });
+    expect(resolveFairnessPeriodIdentity(null, { date: "2026-09-01", minuteOfDay: 0 })).toEqual({ key: "h2", year: 2026 });
+  });
+
+  it("two dates a year apart resolve to the SAME key but a DIFFERENT identity", () => {
+    const y2026 = resolveFairnessPeriodIdentity(null, { date: "2026-02-10", minuteOfDay: 0 });
+    const y2027 = resolveFairnessPeriodIdentity(null, { date: "2027-02-10", minuteOfDay: 0 });
+    expect(y2026.key).toBe(y2027.key);
+    expect(y2026).not.toEqual(y2027);
+  });
+
+  it("an explicit param still wins, exactly like resolveFairnessPeriod", () => {
+    expect(resolveFairnessPeriodIdentity("h2", { date: "2026-02-10", minuteOfDay: 0 })).toEqual({ key: "h2", year: 2026 });
   });
 });
 

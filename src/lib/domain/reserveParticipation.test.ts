@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { FairnessPersonRow } from "./fairnessTable";
-import { deriveReserveRoleParticipation, EMPTY_RESERVE_ROLE_PARTICIPATION } from "./reserveParticipation";
+import {
+  deriveReserveRoleParticipation,
+  EMPTY_RESERVE_ROLE_PARTICIPATION,
+  resolveReserveRoleParticipation,
+  type ReserveRoleParticipationByPeriod,
+  type ReserveRoleParticipationSource,
+} from "./reserveParticipation";
 
 let cellCounter = 0;
 function row(overrides: Partial<FairnessPersonRow> = {}): FairnessPersonRow {
@@ -75,5 +81,50 @@ describe("EMPTY_RESERVE_ROLE_PARTICIPATION", () => {
   it("is genuinely empty on both sides -- the safe default for 'no evidence at all'", () => {
     expect(EMPTY_RESERVE_ROLE_PARTICIPATION.technicianPersonIds.size).toBe(0);
     expect(EMPTY_RESERVE_ROLE_PARTICIPATION.supervisorPersonIds.size).toBe(0);
+  });
+});
+
+describe("resolveReserveRoleParticipation -- PR #39 year-safety", () => {
+  function source(year: number | null, technicianIds: string[] = []): ReserveRoleParticipationSource {
+    return { year, participation: { technicianPersonIds: new Set(technicianIds), supervisorPersonIds: new Set() } };
+  }
+
+  const EMPTY_SOURCE = source(null);
+
+  function byPeriod(h1: ReserveRoleParticipationSource, h2: ReserveRoleParticipationSource): ReserveRoleParticipationByPeriod {
+    return { h1, h2 };
+  }
+
+  it("returns the h1 source's participation when the requested year matches", () => {
+    const evidence = source(2026, ["p_1"]);
+    const result = resolveReserveRoleParticipation(byPeriod(evidence, EMPTY_SOURCE), { key: "h1", year: 2026 });
+    expect(result.technicianPersonIds.has("p_1")).toBe(true);
+  });
+
+  it("returns the h2 source's participation when the requested year matches", () => {
+    const evidence = source(2026, ["p_1"]);
+    const result = resolveReserveRoleParticipation(byPeriod(EMPTY_SOURCE, evidence), { key: "h2", year: 2026 });
+    expect(result.technicianPersonIds.has("p_1")).toBe(true);
+  });
+
+  it("returns EMPTY when the requested year does NOT match the source's year, even for the correct half", () => {
+    const evidence = source(2026, ["p_1"]);
+    const result = resolveReserveRoleParticipation(byPeriod(evidence, EMPTY_SOURCE), { key: "h1", year: 2027 });
+    expect(result.technicianPersonIds.size).toBe(0);
+    expect(result.supervisorPersonIds.size).toBe(0);
+  });
+
+  it("returns EMPTY when the source's year could not be parsed at all (null)", () => {
+    const evidence = source(null, ["p_1"]);
+    const result = resolveReserveRoleParticipation(byPeriod(evidence, EMPTY_SOURCE), { key: "h1", year: 2026 });
+    expect(result.technicianPersonIds.size).toBe(0);
+  });
+
+  it("never reads the OTHER half's source, even if it happens to match the requested year", () => {
+    const h1Evidence = source(2026, ["p_1"]);
+    const h2Evidence = source(2026, ["p_2"]);
+    const result = resolveReserveRoleParticipation(byPeriod(h1Evidence, h2Evidence), { key: "h1", year: 2026 });
+    expect(result.technicianPersonIds.has("p_1")).toBe(true);
+    expect(result.technicianPersonIds.has("p_2")).toBe(false);
   });
 });

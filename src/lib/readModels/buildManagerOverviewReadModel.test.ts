@@ -5,8 +5,24 @@ import type { LocalNow } from "@/lib/domain/localNow";
 import { buildShiftSchedule } from "@/lib/domain/shiftSchedule";
 import type { Person } from "@/lib/domain/types";
 import type { PotentialAllocation } from "@/lib/domain/potentialAllocation";
-import { EMPTY_RESERVE_ROLE_PARTICIPATION } from "@/lib/domain/reserveParticipation";
+import type { ReserveRoleParticipationSource } from "@/lib/domain/reserveParticipation";
 import { buildManagerOverviewReadModel } from "./buildManagerOverviewReadModel";
+
+/** A `ReserveRoleParticipationSource` tagged with the (real or `null`) year its source sheet represents -- the shape `managerOverview.ts` now builds via `parseSourcePeriodYear`. */
+function reserveSource(
+  year: number | null,
+  overrides: { technicianIds?: string[]; supervisorIds?: string[] } = {},
+): ReserveRoleParticipationSource {
+  return {
+    year,
+    participation: {
+      technicianPersonIds: new Set(overrides.technicianIds ?? []),
+      supervisorPersonIds: new Set(overrides.supervisorIds ?? []),
+    },
+  };
+}
+
+const EMPTY_SOURCE = reserveSource(null);
 
 // day 07:30-19:30, night 19:30-07:30(+1)
 const schedule = buildShiftSchedule("07:30");
@@ -91,7 +107,7 @@ function buildModel(overrides: Partial<Parameters<typeof buildManagerOverviewRea
     people: [MANAGER, MARTIN, EITAN, NOA],
     events: [],
     potentialAllocations: [],
-    reserveParticipationByPeriod: { h1: EMPTY_RESERVE_ROLE_PARTICIPATION, h2: EMPTY_RESERVE_ROLE_PARTICIPATION },
+    reserveParticipationByPeriod: { h1: EMPTY_SOURCE, h2: EMPTY_SOURCE },
     shiftSchedule: schedule,
     fetchedAt: "2026-08-13T08:00:00.000Z",
     now,
@@ -227,12 +243,12 @@ describe("buildManagerOverviewReadModel — coverage recommendation (PR #37)", (
 describe("buildManagerOverviewReadModel — PR #39 reserve participation wired end-to-end", () => {
   const RESERVE_TECH = person({ id: "p_reserve_tech", name: "מילואים טכנאי", personnelType: "מילואים", isTechnician: true });
 
-  /** A one-date range anchored on `date` -- bypasses `resolveManagerDateRange`'s "now"-relative resolution so a fixed H1 (Jan-Jun) or H2 (Jul-Dec) date can be exercised regardless of this file's shared `now`. */
+  /** A one-date range anchored on `date` -- bypasses `resolveManagerDateRange`'s "now"-relative resolution so a fixed H1 (Jan-Jun) or H2 (Jul-Dec) date, in any year, can be exercised regardless of this file's shared `now`. */
   function singleDateRange(date: string) {
     return { key: "today" as const, startDate: date, endDate: date, dates: [date], month: null };
   }
 
-  it("a reservist with technician Fairness evidence ONLY in H1 is recommended for an H1-dated issue", () => {
+  it("a reservist with technician Fairness evidence ONLY in H1 2026 is recommended for an H1 2026 issue", () => {
     const events: Event[] = [
       event({ personId: EITAN.id, personName: EITAN.name, date: "2026-02-10", category: "shift", role: "supervisor", period: "day" }),
     ];
@@ -241,8 +257,8 @@ describe("buildManagerOverviewReadModel — PR #39 reserve participation wired e
       people: [MANAGER, EITAN, RESERVE_TECH],
       range: singleDateRange("2026-02-10"),
       reserveParticipationByPeriod: {
-        h1: { technicianPersonIds: new Set([RESERVE_TECH.id]), supervisorPersonIds: new Set() },
-        h2: EMPTY_RESERVE_ROLE_PARTICIPATION,
+        h1: reserveSource(2026, { technicianIds: [RESERVE_TECH.id] }),
+        h2: EMPTY_SOURCE,
       },
     });
     const issue = model.issues.find((i) => i.reason === "shift_coverage_missing")!;
@@ -250,7 +266,7 @@ describe("buildManagerOverviewReadModel — PR #39 reserve participation wired e
     expect(issue.recommendation?.primaryCandidates).toEqual([{ personId: RESERVE_TECH.id, personName: RESERVE_TECH.name }]);
   });
 
-  it("the SAME reservist (H1-only evidence) is NOT recommended for an H2-dated issue -- the period is resolved per issue date", () => {
+  it("the SAME reservist (H1 2026 evidence) is recommended for an H2 2026 issue when the H2 source ALSO carries their evidence -- proving H2 is genuinely used, not just H1 suppressed", () => {
     const events: Event[] = [
       event({ personId: EITAN.id, personName: EITAN.name, date: "2026-09-10", category: "shift", role: "supervisor", period: "day" }),
     ];
@@ -259,13 +275,70 @@ describe("buildManagerOverviewReadModel — PR #39 reserve participation wired e
       people: [MANAGER, EITAN, RESERVE_TECH],
       range: singleDateRange("2026-09-10"),
       reserveParticipationByPeriod: {
-        h1: { technicianPersonIds: new Set([RESERVE_TECH.id]), supervisorPersonIds: new Set() },
-        h2: EMPTY_RESERVE_ROLE_PARTICIPATION,
+        h1: EMPTY_SOURCE,
+        h2: reserveSource(2026, { technicianIds: [RESERVE_TECH.id] }),
+      },
+    });
+    const issue = model.issues.find((i) => i.reason === "shift_coverage_missing")!;
+    expect(issue).toBeDefined();
+    expect(issue.recommendation?.primaryCandidates).toEqual([{ personId: RESERVE_TECH.id, personName: RESERVE_TECH.name }]);
+  });
+
+  it("the SAME reservist (H1 2026-only evidence) is NOT recommended for an H2 2026 issue -- the HALF is resolved per issue date", () => {
+    const events: Event[] = [
+      event({ personId: EITAN.id, personName: EITAN.name, date: "2026-09-10", category: "shift", role: "supervisor", period: "day" }),
+    ];
+    const model = buildModel({
+      events,
+      people: [MANAGER, EITAN, RESERVE_TECH],
+      range: singleDateRange("2026-09-10"),
+      reserveParticipationByPeriod: {
+        h1: reserveSource(2026, { technicianIds: [RESERVE_TECH.id] }),
+        h2: EMPTY_SOURCE,
       },
     });
     const issue = model.issues.find((i) => i.reason === "shift_coverage_missing")!;
     expect(issue).toBeDefined();
     expect(issue.recommendation).toBeNull();
+  });
+
+  it("year-safety: an H1 2027 issue does NOT inherit H1 2026 Fairness evidence, even though both resolve to the same half ('h1')", () => {
+    const events: Event[] = [
+      event({ personId: EITAN.id, personName: EITAN.name, date: "2027-02-10", category: "shift", role: "supervisor", period: "day" }),
+    ];
+    const model = buildModel({
+      events,
+      people: [MANAGER, EITAN, RESERVE_TECH],
+      range: singleDateRange("2027-02-10"),
+      reserveParticipationByPeriod: {
+        // Only H1-2026 evidence exists (the currently configured source sheet) -- no H1-2027 source exists at all.
+        h1: reserveSource(2026, { technicianIds: [RESERVE_TECH.id] }),
+        h2: EMPTY_SOURCE,
+      },
+    });
+    const issue = model.issues.find((i) => i.reason === "shift_coverage_missing")!;
+    expect(issue).toBeDefined();
+    expect(issue.recommendation).toBeNull();
+  });
+
+  it("year-safety: a 2027 reservist may still qualify through a valid recent same-role shift, independent of the (year-mismatched) Fairness evidence", () => {
+    const events: Event[] = [
+      event({ personId: EITAN.id, personName: EITAN.name, date: "2027-02-10", category: "shift", role: "supervisor", period: "day" }),
+      // A confirmed technician shift 5 days before the issue -- inside the recent-shift evidence window.
+      event({ personId: RESERVE_TECH.id, personName: RESERVE_TECH.name, date: "2027-02-05", category: "shift", role: "technician", period: "day", certainty: "confirmed" }),
+    ];
+    const model = buildModel({
+      events,
+      people: [MANAGER, EITAN, RESERVE_TECH],
+      range: singleDateRange("2027-02-10"),
+      reserveParticipationByPeriod: {
+        h1: reserveSource(2026, {}), // year-mismatched, and carries no evidence for RESERVE_TECH anyway
+        h2: EMPTY_SOURCE,
+      },
+    });
+    const issue = model.issues.find((i) => i.reason === "shift_coverage_missing")!;
+    expect(issue).toBeDefined();
+    expect(issue.recommendation?.primaryCandidates).toEqual([{ personId: RESERVE_TECH.id, personName: RESERVE_TECH.name }]);
   });
 
   it("a permanent person is excluded end-to-end through the full read model, even with capability and Fairness evidence", () => {
@@ -277,8 +350,8 @@ describe("buildManagerOverviewReadModel — PR #39 reserve participation wired e
       events,
       people: [MANAGER, EITAN, PERM_TECH],
       reserveParticipationByPeriod: {
-        h1: EMPTY_RESERVE_ROLE_PARTICIPATION,
-        h2: { technicianPersonIds: new Set([PERM_TECH.id]), supervisorPersonIds: new Set() },
+        h1: EMPTY_SOURCE,
+        h2: reserveSource(2026, { technicianIds: [PERM_TECH.id] }),
       },
     });
     const issue = model.issues.find((i) => i.reason === "shift_coverage_missing")!;

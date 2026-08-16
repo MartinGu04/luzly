@@ -1,4 +1,14 @@
-export type RosterPersonnelTypeGroup = "permanent" | "regular" | "reserve" | "unclassified";
+import { classifyPersonnelType, type PersonnelServiceCategory } from "@/lib/domain/personnelType";
+
+// Re-exported so existing presentation-layer consumers of this module keep
+// working unchanged -- the classification itself now lives in
+// `lib/domain/personnelType.ts` (PR #39 follow-up: this was domain
+// semantics, not a presentation concern, and `shiftCoverageRecommendation.ts`
+// needed it too; duplicating the normalization there was the bug this
+// fixes). Never redefined here -- this file adds only the Hebrew LABELS
+// and the roster-specific grouping/hierarchy built on top of it.
+export type RosterPersonnelTypeGroup = PersonnelServiceCategory;
+export { classifyPersonnelType };
 
 const PERSONNEL_TYPE_GROUP_LABEL: Record<RosterPersonnelTypeGroup, string> = {
   permanent: "קבע",
@@ -9,22 +19,6 @@ const PERSONNEL_TYPE_GROUP_LABEL: Record<RosterPersonnelTypeGroup, string> = {
 
 export function personnelTypeGroupLabel(group: RosterPersonnelTypeGroup): string {
   return PERSONNEL_TYPE_GROUP_LABEL[group];
-}
-
-/**
- * Pure `personnelType` -> roster top-level group mapping (Design Pass PR
- * #21 §22): "קבע"->קבע, "חובה"->סדיר, "מילואים"->מילואים. Whitespace is
- * trimmed/collapsed only -- no fuzzy classification, no partial match. A
- * `null`/unrecognized value always falls to "לא מסווג" -- a person is NEVER
- * dropped from the roster for having an unrecognized or missing type.
- */
-export function classifyPersonnelType(personnelType: string | null): RosterPersonnelTypeGroup {
-  if (personnelType === null) return "unclassified";
-  const normalized = personnelType.replace(/\s+/g, " ").trim();
-  if (normalized === "קבע") return "permanent";
-  if (normalized === "חובה") return "regular";
-  if (normalized === "מילואים") return "reserve";
-  return "unclassified";
 }
 
 export type RosterRegularRoleGroup = "supervisor" | "technician" | "other";
