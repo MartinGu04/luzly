@@ -71,11 +71,14 @@ function scheduleHref(
 }
 
 /**
- * The Schedule page -- "לוח משמרות" (PR #24). For a normal user this is
- * still exactly the personal shift calendar it always was: `model.manager`
- * is always null, `model.perspective` is always "self", and no manager UI
- * ever renders, no matter what `?person=` the URL carries (the server-side
- * floor lives in `getRequestSchedule` and its orchestration layer, never here).
+ * "הלוח שלי" -- the personal monthly calendar (formerly "לוח משמרות", a
+ * shift-only calendar; see `CalendarGrid`/`SelectedDayPanel`/
+ * `calendarEvents` for the shift+duty+absence+holiday widening). For a
+ * normal user this is still exactly the personal calendar it always was:
+ * `model.manager` is always null, `model.perspective` is always "self",
+ * and no manager UI ever renders, no matter what `?person=` the URL
+ * carries (the server-side floor lives in `getRequestSchedule` and its
+ * orchestration layer, never here).
  *
  * For an authorized manager, `getRequestSchedule` additionally resolves
  * which of the three perspectives (self / everyone / one person) to show,
@@ -161,7 +164,7 @@ export default async function SchedulePage({ searchParams }: SchedulePageProps) 
           grid={grid}
           days={days}
           defaultSelectedDate={defaultSelectedDate}
-          monthEvents={model.personal.shiftCalendarEvents.filter((event) => event.date.startsWith(`${monthParam}-`))}
+          monthEvents={model.personal.calendarEvents.filter((event) => event.date.startsWith(`${monthParam}-`))}
           activeShiftDates={model.personal.currentAssignments
             .filter((assignment) => assignment.category === "shift")
             .map((assignment) => assignment.date)}

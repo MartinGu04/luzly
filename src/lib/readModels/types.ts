@@ -177,14 +177,15 @@ export interface PersonalScheduleReadModel {
   upcomingEvents: PersonalEventView[];
 
   /**
-   * The authenticated person's own shift Events -- past, current, and
-   * future, every one present in the parsed schedule (unlike
+   * The authenticated person's own shift, duty, and absence Events -- past,
+   * current, and future, every one present in the parsed schedule (unlike
    * `upcomingEvents`, which deliberately excludes finished history). Powers
-   * the `/schedule` personal shift calendar only. Duties and absences are
-   * excluded on purpose: this is a shift calendar, not a full personal
-   * timeline. Deterministically ordered, same as every other array here.
+   * "הלוח שלי" (`/schedule`), the personal monthly calendar. Deliberately
+   * excludes every other `EventCategory` (constraint/status/context/
+   * change_note/other/unknown) -- those aren't calendar-worthy entries on
+   * their own. Deterministically ordered, same as every other array here.
    */
-  shiftCalendarEvents: PersonalEventView[];
+  calendarEvents: PersonalEventView[];
 
   currentAssignments: PersonalAssignmentView[];
   nextAssignmentGroup: PersonalNextAssignmentGroup | null;

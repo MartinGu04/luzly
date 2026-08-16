@@ -36,7 +36,7 @@ export interface NavItem {
 // underlying detection logic (`detectOperationalIssues`) is untouched.
 export const navItems: NavItem[] = [
   { label: "לוח בקרה", shortLabel: "היום שלי", href: "/", enabled: true, icon: LayoutDashboard, inBottomNav: true },
-  { label: "לוח משמרות", shortLabel: "משמרות", href: "/schedule", enabled: true, icon: CalendarDays, inBottomNav: true },
+  { label: "הלוח שלי", shortLabel: "הלוח שלי", href: "/schedule", enabled: true, icon: CalendarDays, inBottomNav: true },
   { label: "תורנויות", shortLabel: "תורנויות", href: "/duties", enabled: true, icon: ShieldCheck, inBottomNav: true },
   { label: "אזור מנהל", shortLabel: "מנהל", href: "/manager", enabled: true, icon: UserCog, inBottomNav: false, managerOnly: true },
 ];

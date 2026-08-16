@@ -4,6 +4,7 @@ import {
   daysInCalendarMonth,
   firstWeekdayOfCalendarMonth,
   formatMonthParam,
+  isWeekendColumn,
   parseMonthParam,
   shiftCalendarMonth,
 } from "./calendarMonth";
@@ -128,5 +129,20 @@ describe("buildMonthGrid", () => {
     const dates = grid.filter((cell): cell is string => cell !== null);
     expect(dates).toHaveLength(29);
     expect(dates[dates.length - 1]).toBe("2024-02-29");
+  });
+});
+
+describe("isWeekendColumn", () => {
+  it("treats Sunday through Wednesday (columns 0-3) as weekdays", () => {
+    expect(isWeekendColumn(0)).toBe(false);
+    expect(isWeekendColumn(1)).toBe(false);
+    expect(isWeekendColumn(2)).toBe(false);
+    expect(isWeekendColumn(3)).toBe(false);
+  });
+
+  it("treats Thursday, Friday, and Saturday (columns 4-6) as the weekend", () => {
+    expect(isWeekendColumn(4)).toBe(true);
+    expect(isWeekendColumn(5)).toBe(true);
+    expect(isWeekendColumn(6)).toBe(true);
   });
 });

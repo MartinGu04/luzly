@@ -41,7 +41,7 @@ function okResult(person: PersonalProfile, avatarUrl: string | null = null) {
       localNow: { date: "2026-08-12", minuteOfDay: 600 },
       todayEvents: [],
       upcomingEvents: [],
-      shiftCalendarEvents: [],
+      calendarEvents: [],
       currentAssignments: [],
       nextAssignmentGroup: null,
       currentShiftContexts: [],

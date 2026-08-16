@@ -69,7 +69,7 @@ function okPersonalResult(isManager: boolean) {
       localNow: { date: "2026-08-13", minuteOfDay: 600 },
       todayEvents: [],
       upcomingEvents: [],
-      shiftCalendarEvents: [],
+      calendarEvents: [],
       currentAssignments: [],
       nextAssignmentGroup: null,
       currentShiftContexts: [],

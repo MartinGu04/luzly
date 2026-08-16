@@ -38,41 +38,114 @@ describe("getHolidayContext", () => {
   });
 
   it("distinguishes Erev Rosh Hashana from Rosh Hashana itself", () => {
-    expect(getHolidayContext("2026-09-11")).toEqual({ emoji: "🍎", label: "ערב ראש השנה" });
-    expect(getHolidayContext("2026-09-12")).toEqual({ emoji: "🍎", label: "ראש השנה" });
+    expect(getHolidayContext("2026-09-11")).toEqual({
+      emoji: "🍎",
+      label: "ערב ראש השנה",
+      kind: "erev",
+      shortLabel: "ערב חג",
+    });
+    expect(getHolidayContext("2026-09-12")).toEqual({
+      emoji: "🍎",
+      label: "ראש השנה",
+      kind: "holiday",
+      shortLabel: "חג",
+    });
   });
 
   it("maps Yom Kippur and its eve", () => {
-    expect(getHolidayContext("2026-09-20")).toEqual({ emoji: "🤍", label: "ערב יום כיפור" });
-    expect(getHolidayContext("2026-09-21")).toEqual({ emoji: "🤍", label: "יום כיפור" });
+    expect(getHolidayContext("2026-09-20")).toEqual({
+      emoji: "🤍",
+      label: "ערב יום כיפור",
+      kind: "erev",
+      shortLabel: "ערב חג",
+    });
+    expect(getHolidayContext("2026-09-21")).toEqual({
+      emoji: "🤍",
+      label: "יום כיפור",
+      kind: "holiday",
+      shortLabel: "חג",
+    });
   });
 
-  it("maps Sukkot", () => {
-    expect(getHolidayContext("2026-09-26")).toEqual({ emoji: "🌿", label: "סוכות" });
+  it("maps Sukkot's first day as a plain holiday", () => {
+    expect(getHolidayContext("2026-09-26")).toEqual({
+      emoji: "🌿",
+      label: "סוכות",
+      kind: "holiday",
+      shortLabel: "חג",
+    });
+  });
+
+  it("marks Sukkot's intermediate days as Chol HaMoed, not a plain holiday", () => {
+    expect(getHolidayContext("2026-09-27")).toEqual({
+      emoji: "🌿",
+      label: "חול המועד סוכות",
+      kind: "cholHamoed",
+      shortLabel: "חוה״מ",
+    });
+  });
+
+  it("marks Pesach's intermediate days as Chol HaMoed", () => {
+    expect(getHolidayContext("2026-04-03")).toEqual({
+      emoji: "🍷",
+      label: "חול המועד פסח",
+      kind: "cholHamoed",
+      shortLabel: "חוה״מ",
+    });
   });
 
   it("maps the Israel-combined Shmini Atzeret/Simchat Torah day", () => {
-    expect(getHolidayContext("2026-10-03")).toEqual({ emoji: "📜", label: "שמחת תורה" });
+    expect(getHolidayContext("2026-10-03")).toEqual({
+      emoji: "📜",
+      label: "שמחת תורה",
+      kind: "holiday",
+      shortLabel: "חג",
+    });
   });
 
   it("maps every day of Chanukah", () => {
-    expect(getHolidayContext("2026-12-08")).toEqual({ emoji: "🕎", label: "חנוכה" });
+    expect(getHolidayContext("2026-12-08")).toEqual({
+      emoji: "🕎",
+      label: "חנוכה",
+      kind: "holiday",
+      shortLabel: "חג",
+    });
   });
 
   it("maps Purim (a leap-year Adar II date)", () => {
-    expect(getHolidayContext("2027-03-23")).toEqual({ emoji: "🎭", label: "פורים" });
+    expect(getHolidayContext("2027-03-23")).toEqual({
+      emoji: "🎭",
+      label: "פורים",
+      kind: "holiday",
+      shortLabel: "חג",
+    });
   });
 
   it("maps Pesach", () => {
-    expect(getHolidayContext("2027-04-22")).toEqual({ emoji: "🍷", label: "פסח" });
+    expect(getHolidayContext("2027-04-22")).toEqual({
+      emoji: "🍷",
+      label: "פסח",
+      kind: "holiday",
+      shortLabel: "חג",
+    });
   });
 
   it("maps Shavuot", () => {
-    expect(getHolidayContext("2027-06-11")).toEqual({ emoji: "🌾", label: "שבועות" });
+    expect(getHolidayContext("2027-06-11")).toEqual({
+      emoji: "🌾",
+      label: "שבועות",
+      kind: "holiday",
+      shortLabel: "חג",
+    });
   });
 
   it("maps Yom HaAtzma'ut", () => {
-    expect(getHolidayContext("2026-04-22")).toEqual({ emoji: "🇮🇱", label: "יום העצמאות" });
+    expect(getHolidayContext("2026-04-22")).toEqual({
+      emoji: "🇮🇱",
+      label: "יום העצמאות",
+      kind: "holiday",
+      shortLabel: "חג",
+    });
   });
 
   it("never shows Rosh Chodesh as a holiday", () => {
@@ -83,7 +156,12 @@ describe("getHolidayContext", () => {
   it("never shows a minor fast like Yom Kippur Katan or Ta'anit Esther as a holiday", () => {
     // Yom Kippur Katan Elul falls the day before this ordinary-weekday check above already covers,
     // but Ta'anit Esther (the day before Purim, distinct from Erev Purim itself) must also stay hidden.
-    expect(getHolidayContext("2027-03-22")).toEqual({ emoji: "🎭", label: "ערב פורים" });
+    expect(getHolidayContext("2027-03-22")).toEqual({
+      emoji: "🎭",
+      label: "ערב פורים",
+      kind: "erev",
+      shortLabel: "ערב חג",
+    });
   });
 
   it("returns null for an unparseable date, never throws", () => {
