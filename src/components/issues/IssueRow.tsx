@@ -1,15 +1,39 @@
 import { ISSUE_SEVERITY_BG_CLASS, ISSUE_SEVERITY_TEXT_CLASS, IssueSeverityBadge } from "@/components/ui/IssueSeverityBadge";
+import type { IssueRecommendationView } from "@/lib/presentation/issueRecommendation";
 import type { IssueRowView } from "./types";
 
 interface IssueRowProps {
   view: IssueRowView;
 }
 
-function RecommendationDisclosure({ text }: { text: string }) {
+/**
+ * "פעולה מומלצת" -- collapsed by default, always secondary to the problem
+ * above it. Purely presentational: every string here already arrived
+ * fully-built from `buildIssueRecommendationView` (PR #37) -- this
+ * component never decides eligibility/wording itself. The last-resort
+ * fallback (only ever present when the missing role is a technician and
+ * every regular technician was exhausted) is a SECOND, NESTED `<details>`
+ * inside the first -- closed by default independently, so opening the
+ * outer disclosure alone never reveals it. No alarming styling anywhere:
+ * same quiet muted-text language as the rest of this row.
+ */
+function RecommendationDisclosure({ view }: { view: IssueRecommendationView }) {
   return (
     <details className="mt-1 text-xs">
       <summary className="cursor-pointer font-medium text-muted-2">פעולה מומלצת</summary>
-      <p className="mt-1 text-muted">{text}</p>
+      <div className="mt-1 space-y-1 text-muted">
+        <p>{view.primaryText}</p>
+        {view.disclaimer ? <p className="text-muted-2">{view.disclaimer}</p> : null}
+        {view.lastResort ? (
+          <details className="mt-1">
+            <summary className="cursor-pointer font-medium text-muted-2">{view.lastResort.triggerLabel}</summary>
+            <div className="mt-1 space-y-1">
+              <p>{view.lastResort.text}</p>
+              <p className="text-muted-2">{view.lastResort.disclaimer}</p>
+            </div>
+          </details>
+        ) : null}
+      </div>
     </details>
   );
 }
@@ -66,7 +90,7 @@ export function IssueRow({ view }: IssueRowProps) {
 
           {view.explanation ? <p className="text-xs text-muted">{view.explanation}</p> : null}
           <p className="text-xs text-muted-2">{view.guidance}</p>
-          {view.recommendation ? <RecommendationDisclosure text={view.recommendation} /> : null}
+          {view.recommendation ? <RecommendationDisclosure view={view.recommendation} /> : null}
         </div>
       </li>
     );
@@ -97,7 +121,7 @@ export function IssueRow({ view }: IssueRowProps) {
 
         {view.explanation ? <p className="mt-1 text-xs text-muted">{view.explanation}</p> : null}
         <p className="mt-1 text-xs text-muted-2">{view.guidance}</p>
-        {view.recommendation ? <RecommendationDisclosure text={view.recommendation} /> : null}
+        {view.recommendation ? <RecommendationDisclosure view={view.recommendation} /> : null}
       </div>
     </li>
   );

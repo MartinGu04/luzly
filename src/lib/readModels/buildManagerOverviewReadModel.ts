@@ -12,15 +12,18 @@ import {
   type ManagerRequirementReconciliation,
 } from "@/lib/domain/potentialReconciliation";
 import { scopeManagerPotentialAllocation } from "@/lib/domain/potentialSourceOwnership";
+import { buildShiftCoverageRecommendation } from "@/lib/domain/shiftCoverageRecommendation";
 import type { ShiftSchedule } from "@/lib/domain/shiftSchedule";
 import type { Person } from "@/lib/domain/types";
 import { buildPersonalScheduleReadModel } from "./buildPersonalScheduleReadModel";
 import { buildManagerAbsenceEntries, buildManagerDutyEntries, buildShiftStaffingOverview } from "./managerEventProjections";
 import type {
   ManagerIssue,
+  ManagerIssueRecommendation,
   ManagerOverviewReadModel,
   ManagerPersonSummary,
   ManagerPotentialRequirementView,
+  ManagerRecommendationCandidate,
 } from "./managerTypes";
 import type { PersonalIssueTargetSummary } from "./types";
 
@@ -83,7 +86,7 @@ export function buildManagerOverviewReadModel(
   const issues = detectOperationalIssues(events, people, shiftSchedule)
     .filter((issue) => rangeDates.has(issue.date))
     .sort(compareManagerIssues)
-    .map((issue) => toManagerIssue(issue, peopleById));
+    .map((issue) => toManagerIssue(issue, peopleById, people, events, shiftSchedule));
 
   const coverageOverview = buildShiftStaffingOverview(events, shiftSchedule, rangeDates);
 
@@ -189,7 +192,13 @@ function toIssueTargetSummary(event: Event): PersonalIssueTargetSummary {
   return { date: event.date, category: event.category, title: event.title, role: event.role, period: event.period };
 }
 
-function toManagerIssue(issue: OperationalIssue, peopleById: ReadonlyMap<string, Person>): ManagerIssue {
+function toManagerIssue(
+  issue: OperationalIssue,
+  peopleById: ReadonlyMap<string, Person>,
+  people: readonly Person[],
+  events: readonly Event[],
+  shiftSchedule: ShiftSchedule,
+): ManagerIssue {
   return {
     personId: issue.personId,
     personName: peopleById.get(issue.personId)?.name ?? "",
@@ -199,6 +208,37 @@ function toManagerIssue(issue: OperationalIssue, peopleById: ReadonlyMap<string,
     missingIntervals: issue.missingIntervals,
     metadata: issue.metadata,
     targetEvent: issue.targetEvent ? toIssueTargetSummary(issue.targetEvent) : null,
+    recommendation: toManagerIssueRecommendation(issue, people, events, shiftSchedule, peopleById),
+  };
+}
+
+/**
+ * PR #37 -- only ever attempted for `shift_coverage_missing`/
+ * `shift_coverage_partial` (`buildShiftCoverageRecommendation` itself
+ * returns `null` for every other reason, and whenever no eligible
+ * candidate can be safely established). Resolves candidate ids to safe
+ * `{personId, personName}` pairs here -- the domain layer only ever deals
+ * in ids, never names/raw `Person`.
+ */
+function toManagerIssueRecommendation(
+  issue: OperationalIssue,
+  people: readonly Person[],
+  events: readonly Event[],
+  shiftSchedule: ShiftSchedule,
+  peopleById: ReadonlyMap<string, Person>,
+): ManagerIssueRecommendation | null {
+  const recommendation = buildShiftCoverageRecommendation(issue, people, events, shiftSchedule);
+  if (!recommendation) return null;
+
+  const toCandidate = (personId: string): ManagerRecommendationCandidate => ({
+    personId,
+    personName: peopleById.get(personId)?.name ?? "",
+  });
+
+  return {
+    missingRole: recommendation.missingRole,
+    primaryCandidates: recommendation.primaryCandidateIds.map(toCandidate),
+    fallbackCandidates: recommendation.fallbackCandidateIds.map(toCandidate),
   };
 }
 

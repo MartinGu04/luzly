@@ -3,6 +3,7 @@ import type { LocalNow } from "@/lib/domain/localNow";
 import type { IssueReason, IssueSeverity, RoleCapabilityMismatchMetadata } from "@/lib/domain/operationalIssues";
 import type { ManagerRangeKey } from "@/lib/domain/dateRange";
 import type { ManagerRequirementStatus, ManagerSourceConflict } from "@/lib/domain/potentialReconciliation";
+import type { MissingCoverageRole } from "@/lib/domain/shiftCoverageRecommendation";
 import type { CoverageStatus } from "@/lib/domain/shiftCoverage";
 import type { MinuteInterval } from "@/lib/domain/shiftSchedule";
 import type { PersonalIssueTargetSummary, PersonalScheduleReadModel } from "./types";
@@ -35,6 +36,29 @@ export interface ManagerRangeView {
   month: { year: number; month: number } | null;
 }
 
+/** One safe, name-resolved candidate suggestion (PR #37) -- never a raw `Person`/`Event`. */
+export interface ManagerRecommendationCandidate {
+  personId: string;
+  personName: string;
+}
+
+/**
+ * A safe projection of `ShiftCoverageRecommendation` (PR #37) -- the
+ * manager-only "who might be worth checking with?" candidate search for a
+ * `shift_coverage_missing`/`shift_coverage_partial` issue. Only ever set
+ * for those two reasons, and only once the domain layer could safely
+ * establish at least one eligible candidate -- see
+ * `lib/domain/shiftCoverageRecommendation.ts` for the full eligibility
+ * rules this is built from. `fallbackCandidates` is only ever non-empty
+ * for `missingRole === "technician"`, and only once `primaryCandidates`
+ * is empty (see that module's own docstring for why).
+ */
+export interface ManagerIssueRecommendation {
+  missingRole: MissingCoverageRole;
+  primaryCandidates: ManagerRecommendationCandidate[];
+  fallbackCandidates: ManagerRecommendationCandidate[];
+}
+
 /**
  * A safe projection of an `OperationalIssue`, scoped to the WHOLE unit
  * (unlike `PersonalIssue`, which is filtered to one person) -- built from
@@ -52,6 +76,8 @@ export interface ManagerIssue {
   missingIntervals: MinuteInterval[] | null;
   metadata: RoleCapabilityMismatchMetadata | null;
   targetEvent: PersonalIssueTargetSummary | null;
+  /** Only ever set for the manager's everyone-wide view -- see PR #37's `buildManagerOverviewReadModel.ts`. `PersonalIssue`/selected-person drill-down issues never carry this. */
+  recommendation: ManagerIssueRecommendation | null;
 }
 
 /** One person's presence within a `ManagerShiftOverviewEntry` group. */

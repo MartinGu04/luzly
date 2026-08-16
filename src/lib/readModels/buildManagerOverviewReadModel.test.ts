@@ -156,6 +156,66 @@ describe("buildManagerOverviewReadModel — global issues", () => {
   });
 });
 
+describe("buildManagerOverviewReadModel — coverage recommendation (PR #37)", () => {
+  it("a missing-technician issue carries a recommendation with the eligible technician's resolved name", () => {
+    const events: Event[] = [
+      event({ personId: EITAN.id, personName: EITAN.name, date: "2026-08-13", category: "shift", role: "supervisor", period: "day" }),
+    ];
+    // NOA (technician, no conflicting Events) is the only other technician in scope.
+    const model = buildModel({ events, people: [MANAGER, EITAN, NOA] });
+    const issue = model.issues.find((i) => i.reason === "shift_coverage_missing")!;
+    expect(issue).toBeDefined();
+    expect(issue.recommendation).not.toBeNull();
+    expect(issue.recommendation?.missingRole).toBe("technician");
+    expect(issue.recommendation?.primaryCandidates).toEqual([{ personId: NOA.id, personName: NOA.name }]);
+    expect(issue.recommendation?.fallbackCandidates).toEqual([]);
+  });
+
+  it("a non-coverage issue (blocking absence) never carries a recommendation", () => {
+    const events: Event[] = [
+      event({ personId: EITAN.id, personName: EITAN.name, date: "2026-08-13", category: "absence", role: null, period: "unspecified", absenceKind: "vacation", rawValue: "חופש", title: "חופש" }),
+      event({ personId: EITAN.id, personName: EITAN.name, date: "2026-08-13", category: "shift", role: "supervisor", sourceCell: nextCell() }),
+    ];
+    const model = buildModel({ events });
+    const issue = model.issues.find((i) => i.reason === "blocking_absence_with_assignment")!;
+    expect(issue).toBeDefined();
+    expect(issue.recommendation).toBeNull();
+  });
+
+  it("zero eligible candidates -> recommendation is null, never a fabricated empty list", () => {
+    const events: Event[] = [
+      event({ personId: EITAN.id, personName: EITAN.name, date: "2026-08-13", category: "shift", role: "supervisor", period: "day" }),
+      // The only other technician (NOA) is on a blocking absence the same date.
+      event({
+        personId: NOA.id,
+        personName: NOA.name,
+        date: "2026-08-13",
+        category: "absence",
+        role: null,
+        period: "unspecified",
+        absenceKind: "vacation",
+        rawValue: "חופש",
+        title: "חופש",
+        sourceCell: nextCell(),
+      }),
+    ];
+    const model = buildModel({ events, people: [MANAGER, EITAN, NOA] });
+    const issue = model.issues.find((i) => i.reason === "shift_coverage_missing")!;
+    expect(issue).toBeDefined();
+    expect(issue.recommendation).toBeNull();
+  });
+
+  it("recommendation candidates are a safe {personId, personName} projection only", () => {
+    const events: Event[] = [
+      event({ personId: EITAN.id, personName: EITAN.name, date: "2026-08-13", category: "shift", role: "supervisor", period: "day" }),
+    ];
+    const model = buildModel({ events });
+    const issue = model.issues.find((i) => i.reason === "shift_coverage_missing")!;
+    const [candidate] = issue.recommendation?.primaryCandidates ?? [];
+    expect(candidate && Object.keys(candidate).sort()).toEqual(["personId", "personName"]);
+  });
+});
+
 describe("buildManagerOverviewReadModel — coverage overview", () => {
   it("preserves multiple people in the same date+period group, never collapsed", () => {
     const events: Event[] = [

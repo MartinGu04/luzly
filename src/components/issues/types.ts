@@ -1,4 +1,5 @@
 import type { IssueSeverity } from "@/lib/domain/operationalIssues";
+import type { IssueRecommendationView } from "@/lib/presentation/issueRecommendation";
 
 /**
  * Presentation-ready view of one operational issue -- the single shared
@@ -8,12 +9,14 @@ import type { IssueSeverity } from "@/lib/domain/operationalIssues";
  * Replaces the former separate `ConflictIssueView`/`ManagerIssueRowView`
  * types, which differed only in that one field.
  *
- * `recommendation` is optional and, today, always unset -- no
- * recommendation engine exists yet. The field (and `IssueRow`'s collapsed
- * "פעולה מומלצת" disclosure) exist so a future PR can attach one simple,
- * human-reviewed hint per issue without another type/UI migration. The
- * problem itself always renders first; a recommendation, when present,
- * never decides or changes anything on its own.
+ * `recommendation` (PR #37) is only ever set on the manager's everyone-wide
+ * `shift_coverage_missing`/`shift_coverage_partial` rows -- see
+ * `lib/domain/shiftCoverageRecommendation.ts`/`lib/presentation/issueRecommendation.ts`.
+ * It never appears on a person's own issues or the manager's selected-person
+ * drill-down (those are built from `PersonalIssue`, which carries no such
+ * field). The problem itself always renders first; a recommendation, when
+ * present, stays a collapsed, secondary disclosure that never decides or
+ * changes anything on its own.
  */
 export interface IssueRowView {
   key: string;
@@ -26,5 +29,5 @@ export interface IssueRowView {
   missingIntervalLabels: string[] | null;
   explanation: string | null;
   guidance: string;
-  recommendation?: string | null;
+  recommendation?: IssueRecommendationView | null;
 }

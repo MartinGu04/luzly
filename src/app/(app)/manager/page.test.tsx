@@ -46,6 +46,7 @@ function issue(overrides: Partial<ManagerIssue> = {}): ManagerIssue {
     missingIntervals: null,
     metadata: null,
     targetEvent: null,
+    recommendation: null,
     ...overrides,
   };
 }
@@ -359,6 +360,110 @@ describe("ManagerPage — everyone view", () => {
     await renderPage();
     const link = screen.getAllByRole("link", { name: /מרטין בדיקה/ })[0];
     expect(link).toHaveAttribute("href", "/manager?person=p_martin");
+  });
+});
+
+describe("ManagerPage — PR #37 recommendation wiring", () => {
+  it("41. an everyone-wide coverage issue with a recommendation shows the collapsed 'פעולה מומלצת' disclosure", async () => {
+    getRequestManagerOverview.mockResolvedValue(
+      okResult(
+        model({
+          issues: [
+            issue({
+              recommendation: {
+                missingRole: "technician",
+                primaryCandidates: [{ personId: "p_extra", personName: "איתי אוליר" }],
+                fallbackCandidates: [],
+              },
+            }),
+          ],
+        }),
+      ),
+    );
+    await renderPage();
+    const summary = screen.getByText("פעולה מומלצת");
+    expect(summary.closest("details")).not.toHaveAttribute("open");
+    expect(screen.getByText("לפי הסידור הקיים, אפשר לבדוק עם איתי אוליר לגבי הכיסוי.")).toBeInTheDocument();
+    expect(screen.getByText("ייתכנו אילוצים אישיים שלא מופיעים במערכת.")).toBeInTheDocument();
+  });
+
+  it("an everyone-wide issue with no recommendation shows no disclosure at all", async () => {
+    getRequestManagerOverview.mockResolvedValue(okResult(model({ issues: [issue({ recommendation: null })] })));
+    await renderPage();
+    expect(screen.queryByText("פעולה מומלצת")).toBeNull();
+  });
+
+  it("41. the technician last-resort nested disclosure renders through the real page wiring", async () => {
+    getRequestManagerOverview.mockResolvedValue(
+      okResult(
+        model({
+          issues: [
+            issue({
+              recommendation: {
+                missingRole: "technician",
+                primaryCandidates: [],
+                fallbackCandidates: [{ personId: "p_dual", personName: "טוביה כהן" }],
+              },
+            }),
+          ],
+        }),
+      ),
+    );
+    await renderPage();
+    expect(screen.getByText("לא נמצאו טכנאים מתאימים לפי המידע הקיים.")).toBeInTheDocument();
+    expect(screen.getByText("מוצא אחרון · הצג אפשרויות נוספות")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "לא נמצאו טכנאים רגילים מתאימים. לפי הסידור הקיים, אפשר לבדוק גם עם טוביה כהן, שמסומן גם כבעל יכולת טכנית.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("42. the everyone-wide 'דורש טיפול' structure (severity grouping, empty state) remains intact regardless of recommendations", async () => {
+    getRequestManagerOverview.mockResolvedValue(
+      okResult(
+        model({
+          issues: [
+            issue({
+              severity: "critical",
+              recommendation: {
+                missingRole: "technician",
+                primaryCandidates: [{ personId: "p_extra", personName: "איתי אוליר" }],
+                fallbackCandidates: [],
+              },
+            }),
+          ],
+        }),
+      ),
+    );
+    await renderPage();
+    expect(screen.getByText("דורש טיפול")).toBeInTheDocument();
+    expect(screen.getByText("דחוף", { exact: false })).toBeInTheDocument();
+  });
+
+  it("41. the selected-person drill-down (PersonalIssue-based) never shows a manager recommendation, even for the same coverage reason", async () => {
+    getRequestManagerOverview.mockResolvedValue(
+      okResult(
+        model({
+          selectedPersonId: "p_martin",
+          selectedPerson: personalModel({
+            issues: [
+              {
+                reason: "shift_coverage_missing",
+                severity: "critical",
+                date: "2026-08-13",
+                missingIntervals: null,
+                metadata: null,
+                targetEvent: { date: "2026-08-13", category: "shift", title: "טכנאי יום", role: "technician", period: "day" },
+              },
+            ],
+          }),
+        }),
+      ),
+    );
+    await renderPage({ person: "p_martin" });
+    expect(screen.queryByText("פעולה מומלצת")).toBeNull();
+    expect(screen.queryByText(/לפי הסידור הקיים/)).toBeNull();
   });
 });
 
