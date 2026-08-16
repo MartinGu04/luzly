@@ -47,7 +47,13 @@ export function ScheduleManagerSelector({
 
     const query = params.toString();
     startTransition(() => {
-      router.push(query ? `/schedule?${query}` : "/schedule");
+      // `scroll: false` (PR #38 shell-unification round): switching
+      // perspective is an IN-PLACE content change, same principle as
+      // `MonthNav`'s `scroll={false}` -- the calendar shell stays anchored,
+      // never resetting the viewport to the top. `router.push` scrolls to
+      // the top of the page by default on every successful navigation,
+      // same as a plain `<Link>` would, unless told not to.
+      router.push(query ? `/schedule?${query}` : "/schedule", { scroll: false });
     });
   }
 

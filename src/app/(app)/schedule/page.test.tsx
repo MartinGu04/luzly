@@ -82,28 +82,28 @@ describe("SchedulePage — month resolution", () => {
     getRequestPersonalSchedule.mockResolvedValue(okResult(model()));
     const element = await SchedulePage({ searchParams: searchParams() });
     render(element);
-    expect(screen.getByText("אוגוסט 2026")).toBeInTheDocument();
+    expect(screen.getAllByText("אוגוסט 2026").length).toBeGreaterThan(0);
   });
 
   it("uses a valid explicit month param", async () => {
     getRequestPersonalSchedule.mockResolvedValue(okResult(model()));
     const element = await SchedulePage({ searchParams: searchParams("2026-12") });
     render(element);
-    expect(screen.getByText("דצמבר 2026")).toBeInTheDocument();
+    expect(screen.getAllByText("דצמבר 2026").length).toBeGreaterThan(0);
   });
 
   it("falls back safely to the current month for an invalid month param, never crashes", async () => {
     getRequestPersonalSchedule.mockResolvedValue(okResult(model()));
     const element = await SchedulePage({ searchParams: searchParams("not-a-month") });
     render(element);
-    expect(screen.getByText("אוגוסט 2026")).toBeInTheDocument();
+    expect(screen.getAllByText("אוגוסט 2026").length).toBeGreaterThan(0);
   });
 
   it("falls back safely for an out-of-range month param", async () => {
     getRequestPersonalSchedule.mockResolvedValue(okResult(model()));
     const element = await SchedulePage({ searchParams: searchParams("2026-13") });
     render(element);
-    expect(screen.getByText("אוגוסט 2026")).toBeInTheDocument();
+    expect(screen.getAllByText("אוגוסט 2026").length).toBeGreaterThan(0);
   });
 });
 
@@ -184,7 +184,7 @@ describe("SchedulePage — ?date= deep link (global search navigation, PR #35)",
     getRequestPersonalSchedule.mockResolvedValue(okResult(model()));
     const element = await SchedulePage({ searchParams: Promise.resolve({ month: "2026-12", date: "2026-12-05" }) });
     render(element);
-    expect(screen.getByText("דצמבר 2026")).toBeInTheDocument();
+    expect(screen.getAllByText("דצמבר 2026").length).toBeGreaterThan(0);
   });
 
   it("never crashes on a garbage ?date= value, including a prototype-pollution-style key", async () => {
@@ -211,7 +211,7 @@ describe("SchedulePage — ?date= deep link (global search navigation, PR #35)",
     const element = await SchedulePage({ searchParams: Promise.resolve({ date: "2026-09-01" }) });
     render(element);
 
-    expect(screen.getByText("ספטמבר 2026")).toBeInTheDocument();
+    expect(screen.getAllByText("ספטמבר 2026").length).toBeGreaterThan(0);
     expect(selectedDayPanel().getByText("משמרת ספטמבר")).toBeInTheDocument();
   });
 
@@ -227,7 +227,7 @@ describe("SchedulePage — ?date= deep link (global search navigation, PR #35)",
     const element = await SchedulePage({ searchParams: Promise.resolve({ date: "2027-01-05" }) });
     render(element);
 
-    expect(screen.getByText("ינואר 2027")).toBeInTheDocument();
+    expect(screen.getAllByText("ינואר 2027").length).toBeGreaterThan(0);
     expect(selectedDayPanel().getByText("משמרת ינואר")).toBeInTheDocument();
   });
 
@@ -245,7 +245,7 @@ describe("SchedulePage — ?date= deep link (global search navigation, PR #35)",
     const element = await SchedulePage({ searchParams: Promise.resolve({ date: "2026-09-22" }) });
     render(element);
 
-    expect(screen.getByText("ספטמבר 2026")).toBeInTheDocument();
+    expect(screen.getAllByText("ספטמבר 2026").length).toBeGreaterThan(0);
     expect(selectedDayPanel().getByText("משמרת משותפת")).toBeInTheDocument();
   });
 
@@ -261,7 +261,7 @@ describe("SchedulePage — ?date= deep link (global search navigation, PR #35)",
     const element = await SchedulePage({ searchParams: Promise.resolve({ date: "not-a-date" }) });
     expect(() => render(element)).not.toThrow();
 
-    expect(screen.getByText("אוגוסט 2026")).toBeInTheDocument();
+    expect(screen.getAllByText("אוגוסט 2026").length).toBeGreaterThan(0);
     expect(selectedDayPanel().getByText("משמרת ברירת מחדל")).toBeInTheDocument();
   });
 
@@ -278,7 +278,7 @@ describe("SchedulePage — ?date= deep link (global search navigation, PR #35)",
     });
     render(element);
 
-    expect(screen.getByText("אוגוסט 2026")).toBeInTheDocument();
+    expect(screen.getAllByText("אוגוסט 2026").length).toBeGreaterThan(0);
   });
 });
 

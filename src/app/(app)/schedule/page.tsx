@@ -13,6 +13,7 @@ import {
   formatMonthParam,
   parseMonthParam,
   shiftCalendarMonth,
+  type CalendarGridCell,
   type CalendarMonthKey,
 } from "@/lib/domain/calendarMonth";
 import { parseCalendarDate } from "@/lib/domain/dutyBlocks";
@@ -123,7 +124,7 @@ export default async function SchedulePage({ searchParams }: SchedulePageProps) 
   const monthParam = formatMonthParam(displayMonthKey);
 
   const grid = buildMonthGrid(displayMonthKey.year, displayMonthKey.month);
-  const inMonthDates = grid.filter((cell): cell is string => cell !== null);
+  const inMonthDates = grid.filter((cell) => cell.inMonth).map((cell) => cell.date);
 
   const days: Record<string, DayMeta> = {};
   for (const date of inMonthDates) {
@@ -147,30 +148,44 @@ export default async function SchedulePage({ searchParams }: SchedulePageProps) 
   const requestedDate = rawDate && Object.hasOwn(days, rawDate) ? rawDate : null;
   const defaultSelectedDate = requestedDate ?? (days[model.localNow.date] ? model.localNow.date : (inMonthDates[0] ?? null));
 
+  // `displayMonthKey.month` always comes from a validated CalendarMonthKey
+  // (1-12, via `parseMonthParam`/`calendarMonthOfLocalNow`), so this never
+  // actually falls back in practice -- the `?? ""` only satisfies
+  // `formatHebrewMonthYear`'s defensive `string | null` return type.
+  const monthLabel = formatHebrewMonthYear(displayMonthKey.year, displayMonthKey.month) ?? "";
+
   return (
     <div className="flex flex-col gap-4 sm:gap-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <ScheduleHeader
-          monthLabel={formatHebrewMonthYear(displayMonthKey.year, displayMonthKey.month)}
+          monthLabel={monthLabel}
           monthRangeSubtitle={formatHebrewMonthRange(displayMonthKey.year, displayMonthKey.month)}
         />
-        <MonthNav prevHref={prevHref} nextHref={nextHref} todayHref={todayHref} isOnCurrentMonth={isOnCurrentMonth} />
+        <MonthNav
+          prevHref={prevHref}
+          nextHref={nextHref}
+          todayHref={todayHref}
+          isOnCurrentMonth={isOnCurrentMonth}
+          monthLabel={monthLabel}
+        />
       </div>
 
       {model.manager ? (
-        <ScheduleManagerSelector
-          managerName={model.manager.name}
-          people={model.roster}
-          perspective={model.perspective}
-          selectedPersonId={model.selectedPersonId}
-        />
-      ) : null}
-
-      <DataFreshnessStatus fetchedAt={model.fetchedAt} />
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <ScheduleManagerSelector
+            managerName={model.manager.name}
+            people={model.roster}
+            perspective={model.perspective}
+            selectedPersonId={model.selectedPersonId}
+          />
+          <DataFreshnessStatus fetchedAt={model.fetchedAt} className="sm:w-auto" />
+        </div>
+      ) : (
+        <DataFreshnessStatus fetchedAt={model.fetchedAt} />
+      )}
 
       {model.perspective === "all" && model.everyone ? (
         <ScheduleEveryoneCalendar
-          key={monthParam}
           grid={grid}
           days={days}
           dayViews={buildScheduleEveryoneDayViews(
@@ -183,7 +198,6 @@ export default async function SchedulePage({ searchParams }: SchedulePageProps) 
         />
       ) : model.personal ? (
         <PersonalPerspective
-          monthParam={monthParam}
           grid={grid}
           days={days}
           defaultSelectedDate={defaultSelectedDate}
@@ -199,8 +213,7 @@ export default async function SchedulePage({ searchParams }: SchedulePageProps) 
 }
 
 interface PersonalPerspectiveProps {
-  monthParam: string;
-  grid: (string | null)[];
+  grid: CalendarGridCell[];
   days: Record<string, DayMeta>;
   defaultSelectedDate: string | null;
   monthEvents: PersonalEventView[];
@@ -217,7 +230,6 @@ interface PersonalPerspectiveProps {
  * selected colleague has no shifts this month at all.
  */
 function PersonalPerspective({
-  monthParam,
   grid,
   days,
   defaultSelectedDate,
@@ -235,7 +247,6 @@ function PersonalPerspective({
         </Panel>
       ) : null}
       <ScheduleCalendar
-        key={monthParam}
         grid={grid}
         days={days}
         monthEvents={monthEvents}

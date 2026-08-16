@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { act, cleanup, render, screen, within } from "@testing-library/react";
+import type { CalendarGridCell } from "@/lib/domain/calendarMonth";
 import type { PersonalEventView } from "@/lib/readModels/types";
 import { ScheduleCalendar } from "./ScheduleCalendar";
 import type { DayMeta } from "./types";
@@ -8,7 +9,7 @@ afterEach(() => {
   cleanup();
 });
 
-const WEEK_GRID = [
+const WEEK_DATES = [
   "2026-08-09",
   "2026-08-10",
   "2026-08-11",
@@ -17,6 +18,8 @@ const WEEK_GRID = [
   "2026-08-14",
   "2026-08-15",
 ];
+
+const WEEK_GRID: CalendarGridCell[] = WEEK_DATES.map((date) => ({ date, inMonth: true }));
 
 function dayMeta(date: string, overrides: Partial<DayMeta> = {}): DayMeta {
   const day = Number(date.slice(8, 10));
@@ -33,7 +36,7 @@ function dayMeta(date: string, overrides: Partial<DayMeta> = {}): DayMeta {
 
 function weekDays(overrides: Record<string, Partial<DayMeta>> = {}): Record<string, DayMeta> {
   const days: Record<string, DayMeta> = {};
-  for (const date of WEEK_GRID) days[date] = dayMeta(date, overrides[date]);
+  for (const date of WEEK_DATES) days[date] = dayMeta(date, overrides[date]);
   return days;
 }
 

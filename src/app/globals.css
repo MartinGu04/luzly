@@ -41,6 +41,15 @@
 
   --grid-line: rgba(15, 23, 42, 0.035);
 
+  /* A dedicated, deliberately-tuned wash for weekend calendar columns/cells
+     -- its own token (not a reuse of --overlay-faint, which serves many
+     unrelated hover/wash purposes elsewhere) so it can be tuned
+     independently per theme without touching anything else. Calm and
+     tasteful: a faint brand-tinted wash, never a loud block of color, and
+     never strong enough to compete with the "today" accent (which lives on
+     a separate layer -- the day-number badge -- and always wins). */
+  --weekend-tint: rgba(124, 58, 237, 0.05);
+
   --card: var(--surface-1);
   --card-foreground: var(--foreground);
 
@@ -90,6 +99,12 @@
 
     --grid-line: rgba(255, 255, 255, 0.025);
 
+    /* Deliberately tuned for dark surfaces, not inherited from light: a
+       higher opacity + the dark theme's own lighter primary tone, since the
+       same low-opacity value that reads clearly on a light surface all but
+       disappears on a dark one. */
+    --weekend-tint: rgba(139, 123, 245, 0.1);
+
     --sidebar: #10162a;
     --sidebar-foreground: #e7e9f2;
     --sidebar-muted: #8b93ac;
@@ -135,6 +150,8 @@
   --overlay-strong: rgba(255, 255, 255, 0.1);
 
   --grid-line: rgba(255, 255, 255, 0.025);
+
+  --weekend-tint: rgba(139, 123, 245, 0.1);
 
   --sidebar: #10162a;
   --sidebar-foreground: #e7e9f2;
@@ -213,6 +230,7 @@
   --color-overlay-faint: var(--overlay-faint);
   --color-overlay-soft: var(--overlay-soft);
   --color-overlay-strong: var(--overlay-strong);
+  --color-weekend-tint: var(--weekend-tint);
 
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);

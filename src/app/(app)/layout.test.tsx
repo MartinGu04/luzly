@@ -250,6 +250,30 @@ describe("(app) layout — server-side auth gating", () => {
   });
 });
 
+describe("(app) layout — concurrent data loading (PR #38 navigation performance)", () => {
+  it("starts getRequestPersonalSchedule and getRequestSearchReadModel CONCURRENTLY, not one after the other", async () => {
+    // Both mocks stay pending until released below -- if the layout awaited
+    // them sequentially, getRequestSearchReadModel would not even be
+    // CALLED until getRequestPersonalSchedule's promise had already
+    // resolved. Asserting the call happens before that resolution proves
+    // the two loaders were started together (Promise.all), not chained.
+    let resolvePersonal!: (value: unknown) => void;
+    getRequestPersonalSchedule.mockReturnValue(new Promise((resolve) => (resolvePersonal = resolve)));
+    getRequestSearchReadModel.mockResolvedValue({ status: "configuration_error" });
+
+    const pending = ProtectedLayout({ children: <div>x</div> });
+
+    // Let already-queued microtasks run without resolving getRequestPersonalSchedule.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(getRequestSearchReadModel).toHaveBeenCalledTimes(1);
+
+    resolvePersonal(okResult(profile()));
+    await pending;
+  });
+});
+
 describe("(app) layout — avatarUrl (presentation-only Google account photo)", () => {
   it("passes the read model's avatarUrl straight through to AppShell's person prop for an 'ok' result", async () => {
     getRequestPersonalSchedule.mockResolvedValue(okResult(profile(), "https://lh3.googleusercontent.com/a/photo.jpg"));

@@ -2,6 +2,7 @@ import { Badge } from "@/components/ui/Badge";
 import { CoverageBadge } from "@/components/ui/CoverageBadge";
 import { Panel } from "@/components/ui/Panel";
 import type { ScheduleEveryoneDayView, ScheduleRoleStaffingView } from "@/lib/presentation/scheduleEveryone";
+import { SELECTED_DAY_PANEL_MIN_HEIGHT_CLASS } from "./CalendarSurface";
 import type { DayMeta } from "./types";
 
 interface EveryoneSelectedDayPanelProps {
@@ -94,7 +95,7 @@ export function EveryoneSelectedDayPanel({ dayMeta, dayView }: EveryoneSelectedD
 
   return (
     <section aria-label="פרטי היום הנבחר">
-      <Panel variant="panel" className="flex flex-col gap-4">
+      <Panel variant="panel" className={`flex flex-col gap-4 ${SELECTED_DAY_PANEL_MIN_HEIGHT_CLASS}`}>
         <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
           <p className="text-base font-bold text-foreground sm:text-lg">{dayMeta.dateLabel}</p>
           {dayMeta.holiday ? (

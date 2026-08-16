@@ -89,21 +89,51 @@ function formatDate(year: number, month: number, day: number): string {
   return `${String(year).padStart(4, "0")}-${pad2(month)}-${pad2(day)}`;
 }
 
+/** One calendar-grid cell: a real date, always -- `inMonth` distinguishes `month`/`year`'s own days from the leading/trailing adjacent-month days used to pad the grid to a stable shape. */
+export interface CalendarGridCell {
+  date: string;
+  inMonth: boolean;
+}
+
+/** Every month grid is exactly 6 Sunday-Saturday weeks -- see `buildMonthGrid`. */
+export const CALENDAR_GRID_WEEKS = 6;
+const CALENDAR_GRID_CELLS = CALENDAR_GRID_WEEKS * 7;
+
 /**
- * A Sunday-first month grid for `month`/`year`: an array of "YYYY-MM-DD"
- * strings, padded with `null` before the 1st and after the last day so the
- * result is always a whole number of complete Sunday-Saturday weeks (35 or
- * 42 cells) -- exactly what a 7-column calendar grid needs to render,
- * without inventing any adjacent-month date.
+ * A Sunday-first month grid for `month`/`year`: always exactly 42 cells (6
+ * complete weeks), REGARDLESS of how many days `month` has or which weekday
+ * it starts on. Leading/trailing padding is filled with the real adjacent
+ * month's own dates (`inMonth: false`), never `null` -- so a calendar UI can
+ * show a genuine (dimmed) date in every cell instead of an empty "ghost"
+ * one, and the grid's rendered geometry (row/cell count) never changes
+ * between one month and the next. This fixed shape is a deliberate product
+ * requirement (PR #38): switching months must never change the calendar's
+ * physical height.
  */
-export function buildMonthGrid(year: number, month: number): (string | null)[] {
+export function buildMonthGrid(year: number, month: number): CalendarGridCell[] {
   const leadingBlanks = firstWeekdayOfCalendarMonth(year, month);
   const totalDays = daysInMonth(year, month);
 
-  const cells: (string | null)[] = [];
-  for (let i = 0; i < leadingBlanks; i++) cells.push(null);
-  for (let day = 1; day <= totalDays; day++) cells.push(formatDate(year, month, day));
-  while (cells.length % 7 !== 0) cells.push(null);
+  const cells: CalendarGridCell[] = [];
+
+  if (leadingBlanks > 0) {
+    const prev = shiftCalendarMonth({ year, month }, -1);
+    const prevMonthDays = daysInMonth(prev.year, prev.month);
+    for (let i = leadingBlanks; i > 0; i--) {
+      cells.push({ date: formatDate(prev.year, prev.month, prevMonthDays - i + 1), inMonth: false });
+    }
+  }
+
+  for (let day = 1; day <= totalDays; day++) {
+    cells.push({ date: formatDate(year, month, day), inMonth: true });
+  }
+
+  const next = shiftCalendarMonth({ year, month }, 1);
+  let nextDay = 1;
+  while (cells.length < CALENDAR_GRID_CELLS) {
+    cells.push({ date: formatDate(next.year, next.month, nextDay), inMonth: false });
+    nextDay++;
+  }
 
   return cells;
 }

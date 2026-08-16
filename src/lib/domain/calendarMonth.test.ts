@@ -94,41 +94,73 @@ describe("firstWeekdayOfCalendarMonth", () => {
 });
 
 describe("buildMonthGrid", () => {
-  it("is Sunday-first: the correct number of leading blanks before day 1", () => {
-    // 2026-08-01 is a Saturday (weekday 6) -- 6 leading blanks before "2026-08-01".
+  it("is Sunday-first: the correct number of leading (out-of-month) cells before day 1", () => {
+    // 2026-08-01 is a Saturday (weekday 6) -- 6 leading cells before "2026-08-01".
     const grid = buildMonthGrid(2026, 8);
-    expect(grid.slice(0, 6)).toEqual([null, null, null, null, null, null]);
-    expect(grid[6]).toBe("2026-08-01");
+    expect(grid.slice(0, 6).every((cell) => cell.inMonth === false)).toBe(true);
+    expect(grid[6]).toEqual({ date: "2026-08-01", inMonth: true });
   });
 
-  it("always has a length that is a whole number of 7-day weeks", () => {
-    for (const [year, month] of [[2026, 8], [2026, 2], [2024, 2], [2027, 2], [2026, 11]] as const) {
+  it("is ALWAYS exactly 42 cells (6 complete weeks), regardless of month length/weekday alignment", () => {
+    for (const [year, month] of [[2026, 8], [2026, 2], [2024, 2], [2027, 2], [2026, 11], [2026, 9]] as const) {
       const grid = buildMonthGrid(year, month);
-      expect(grid.length % 7).toBe(0);
+      expect(grid.length).toBe(42);
     }
   });
 
-  it("contains every day of the month exactly once, in order", () => {
+  it("contains every day of the month exactly once, in order, marked inMonth: true", () => {
     const grid = buildMonthGrid(2026, 8);
-    const dates = grid.filter((cell): cell is string => cell !== null);
+    const dates = grid.filter((cell) => cell.inMonth).map((cell) => cell.date);
     expect(dates).toHaveLength(31);
     expect(dates[0]).toBe("2026-08-01");
     expect(dates[dates.length - 1]).toBe("2026-08-31");
     expect(dates).toEqual([...dates].sort());
   });
 
-  it("pads trailing blanks so the last week is complete", () => {
+  it("pads leading/trailing cells with the REAL adjacent month's dates, never null/blank", () => {
     const grid = buildMonthGrid(2026, 8);
-    expect(grid[grid.length - 1] === null || grid[grid.length - 1] === "2026-08-31").toBe(true);
-    // 31 days + 6 leading blanks = 37; padded up to 42 (6 full weeks).
+    for (const cell of grid) {
+      expect(cell.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    }
+    // 31 days + 6 leading = 37; padded up to exactly 42 with real September dates.
     expect(grid.length).toBe(42);
+    expect(grid[grid.length - 1]).toEqual({ date: "2026-09-05", inMonth: false });
+  });
+
+  it("leading padding uses the correct real PREVIOUS month dates (July 2026, ending 31st)", () => {
+    const grid = buildMonthGrid(2026, 8);
+    expect(grid.slice(0, 6)).toEqual([
+      { date: "2026-07-26", inMonth: false },
+      { date: "2026-07-27", inMonth: false },
+      { date: "2026-07-28", inMonth: false },
+      { date: "2026-07-29", inMonth: false },
+      { date: "2026-07-30", inMonth: false },
+      { date: "2026-07-31", inMonth: false },
+    ]);
   });
 
   it("handles a leap-year February with the correct day count", () => {
     const grid = buildMonthGrid(2024, 2);
-    const dates = grid.filter((cell): cell is string => cell !== null);
+    const dates = grid.filter((cell) => cell.inMonth).map((cell) => cell.date);
     expect(dates).toHaveLength(29);
     expect(dates[dates.length - 1]).toBe("2024-02-29");
+    expect(grid.length).toBe(42);
+  });
+
+  it("a month requiring no leading padding at all (starts on Sunday) still pads to 42 with real next-month dates", () => {
+    // 2026-11-01 is a Sunday.
+    const grid = buildMonthGrid(2026, 11);
+    expect(grid[0]).toEqual({ date: "2026-11-01", inMonth: true });
+    expect(grid.length).toBe(42);
+    expect(grid[grid.length - 1].inMonth).toBe(false);
+  });
+
+  it("December's next-month padding correctly rolls the year over to January", () => {
+    const grid = buildMonthGrid(2026, 12);
+    const trailing = grid.filter((cell) => !cell.inMonth && cell.date > "2026-12-31");
+    for (const cell of trailing) {
+      expect(cell.date.startsWith("2027-01")).toBe(true);
+    }
   });
 });
 
