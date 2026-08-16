@@ -231,3 +231,106 @@ describe("Command palette — keyboard navigation and results", () => {
     expect(screen.queryByText("לא מצאנו משהו שמתאים.")).toBeNull();
   });
 });
+
+describe("Command palette — non-actionable results never misleadingly act", () => {
+  // רוני has no shiftEvents in the fixture model at all, so the resolved
+  // person result has neither a next shift nor a shared shift -- href: null.
+  it("Enter on a hrefless person result neither closes the palette nor navigates", () => {
+    renderPalette();
+    fireEvent.click(screen.getByRole("button", { name: "חיפוש" }));
+    fireEvent.change(searchInput(), { target: { value: "רוני" } });
+    expect(screen.getByRole("option")).toBeInTheDocument();
+
+    fireEvent.keyDown(searchInput(), { key: "Enter" });
+
+    expect(push).not.toHaveBeenCalled();
+    expect(dialog()).toBeInTheDocument();
+  });
+
+  it("clicking a hrefless person result neither closes the palette nor navigates", () => {
+    renderPalette();
+    fireEvent.click(screen.getByRole("button", { name: "חיפוש" }));
+    fireEvent.change(searchInput(), { target: { value: "רוני" } });
+
+    fireEvent.click(screen.getByRole("option"));
+
+    expect(push).not.toHaveBeenCalled();
+    expect(dialog()).toBeInTheDocument();
+  });
+});
+
+describe("Command palette — keyboard focus trap", () => {
+  function closeButton() {
+    return screen.getByRole("button", { name: "סגירת חיפוש" });
+  }
+
+  it("Tab wraps from the LAST focusable control (an idle-state example button) back to the search input", () => {
+    renderPalette();
+    fireEvent.click(screen.getByRole("button", { name: "חיפוש" }));
+
+    const exampleButtons = screen.getAllByRole("button", { name: /^(עילאי|מי איתי בשבת|19\.8|מתי אני ועילאי יחד)$/ });
+    const lastExample = exampleButtons[exampleButtons.length - 1];
+    lastExample.focus();
+    expect(document.activeElement).toBe(lastExample);
+
+    fireEvent.keyDown(lastExample, { key: "Tab" });
+
+    expect(document.activeElement).toBe(searchInput());
+  });
+
+  it("Shift+Tab wraps from the FIRST focusable control (the search input) back to the last one", () => {
+    renderPalette();
+    fireEvent.click(screen.getByRole("button", { name: "חיפוש" }));
+    expect(document.activeElement).toBe(searchInput());
+
+    const exampleButtons = screen.getAllByRole("button", { name: /^(עילאי|מי איתי בשבת|19\.8|מתי אני ועילאי יחד)$/ });
+    const lastExample = exampleButtons[exampleButtons.length - 1];
+
+    fireEvent.keyDown(searchInput(), { key: "Tab", shiftKey: true });
+
+    expect(document.activeElement).toBe(lastExample);
+  });
+
+  it("the close button is a real, reachable focusable control -- Tab while focused there does not forcibly yank focus back to the input", () => {
+    renderPalette();
+    fireEvent.click(screen.getByRole("button", { name: "חיפוש" }));
+
+    const close = closeButton();
+    close.focus();
+    expect(document.activeElement).toBe(close);
+
+    // The close button is neither the first nor the last focusable control
+    // while idle (input, close, then 4 example buttons) -- Tab here is a
+    // normal mid-sequence move the browser handles natively, so the trap
+    // must NOT intervene (the old bug forcibly refocused the input on
+    // every single Tab press, making the close button unreachable).
+    fireEvent.keyDown(close, { key: "Tab" });
+
+    expect(document.activeElement).toBe(close);
+  });
+
+  it("wraps correctly with only [input, close button] focusable once results replace the idle example buttons", () => {
+    renderPalette();
+    fireEvent.click(screen.getByRole("button", { name: "חיפוש" }));
+    fireEvent.change(searchInput(), { target: { value: "19.8" } });
+
+    const close = closeButton();
+    close.focus();
+    fireEvent.keyDown(close, { key: "Tab" });
+
+    // With no idle example buttons rendered, the close button is now the
+    // LAST focusable control -- Tab from there wraps back to the input.
+    expect(document.activeElement).toBe(searchInput());
+  });
+
+  it("ArrowUp/ArrowDown/Enter on the input still work for navigating and activating search results, unaffected by the focus trap", () => {
+    renderPalette();
+    fireEvent.click(screen.getByRole("button", { name: "חיפוש" }));
+    fireEvent.change(searchInput(), { target: { value: "19.8" } });
+
+    fireEvent.keyDown(searchInput(), { key: "ArrowDown" });
+    fireEvent.keyDown(searchInput(), { key: "Enter" });
+
+    expect(push).toHaveBeenCalledWith("/schedule?date=2026-08-19");
+  });
+});

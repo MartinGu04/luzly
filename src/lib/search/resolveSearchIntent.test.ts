@@ -92,6 +92,18 @@ describe("resolveSearchIntent — person results", () => {
     if (result.kind === "person") expect(result.nextShift).toEqual({ date: "2026-08-20", period: "day" });
   });
 
+  it("a person's own next shift (no shared shift) is shown informationally but is NEVER the navigation target -- /schedule is the VIEWER's own calendar, not this person's", () => {
+    const withNextButNoShared = model({
+      shiftEvents: [shiftEvent({ date: "2026-08-20", period: "day", temporalState: "upcoming" })],
+    });
+    const [result] = resolveSearchIntent({ kind: "person", query: "עילאי" }, withNextButNoShared).results;
+    expect(result.kind).toBe("person");
+    if (result.kind === "person") {
+      expect(result.nextShift).toEqual({ date: "2026-08-20", period: "day" });
+      expect(result.href).toBeNull();
+    }
+  });
+
   it("14. shows the next SHARED shift with me when one exists", () => {
     const withShared = model({
       shiftEvents: [
@@ -104,10 +116,32 @@ describe("resolveSearchIntent — person results", () => {
     if (result.kind === "person") expect(result.nextSharedShift).toEqual({ date: "2026-08-22", period: "night" });
   });
 
+  it("a shared shift IS a valid navigation target -- that date exists on the viewer's own calendar", () => {
+    const withShared = model({
+      shiftEvents: [
+        shiftEvent({ personId: COLLEAGUE_ID, date: "2026-08-20", period: "day", temporalState: "upcoming" }), // own next shift, unshared
+        shiftEvent({ personId: COLLEAGUE_ID, date: "2026-08-22", period: "night", temporalState: "upcoming" }),
+        shiftEvent({ personId: ME_ID, date: "2026-08-22", period: "night", temporalState: "upcoming" }),
+      ],
+    });
+    const [result] = resolveSearchIntent({ kind: "person", query: "עילאי" }, withShared).results;
+    expect(result.kind).toBe("person");
+    if (result.kind === "person") {
+      // href follows the SHARED date, never the person's own earlier, unshared next-shift date.
+      expect(result.href).toBe("/schedule?date=2026-08-22");
+    }
+  });
+
   it("15. omits the shared-shift row entirely (never an empty placeholder) when none exists", () => {
     const [result] = resolveSearchIntent({ kind: "person", query: "עילאי" }, model()).results;
     expect(result.kind).toBe("person");
     if (result.kind === "person") expect(result.nextSharedShift).toBeNull();
+  });
+
+  it("a person result with neither a next shift nor a shared shift has no href at all", () => {
+    const [result] = resolveSearchIntent({ kind: "person", query: "עילאי" }, model()).results;
+    expect(result.kind).toBe("person");
+    if (result.kind === "person") expect(result.href).toBeNull();
   });
 
   it("never computes a shared shift against yourself", () => {

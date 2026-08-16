@@ -15,6 +15,7 @@ import {
   shiftCalendarMonth,
   type CalendarMonthKey,
 } from "@/lib/domain/calendarMonth";
+import { parseCalendarDate } from "@/lib/domain/dutyBlocks";
 import { formatHebrewCalendarDate, formatHebrewMonthRange, getHolidayContext } from "@/lib/presentation/hebrewCalendar";
 import { formatHebrewMonthYear, formatHebrewWeekdayAndDate } from "@/lib/presentation/hebrewDate";
 import { buildScheduleEveryoneDayViews } from "@/lib/presentation/scheduleEveryone";
@@ -96,7 +97,21 @@ export default async function SchedulePage({ searchParams }: SchedulePageProps) 
   const rawPerson = firstParam(params.person) ?? null;
   const rawDate = firstParam(params.date) ?? null;
 
-  const result = await getRequestSchedule(rawMonth, rawPerson);
+  // `?date=` is self-sufficient: when a valid date is supplied and no
+  // explicit `?month=` overrides it, the displayed/requested month is
+  // derived from the date itself -- otherwise a cross-month/year search
+  // result (e.g. `?date=2026-09-01` while August is the resolved default)
+  // would silently open the WRONG month and the date would never be found
+  // in that month's grid. An explicit `?month=` (valid or not) always wins
+  // -- its own existing fallback-to-current-month behavior for an invalid
+  // value is unchanged.
+  const requestedDateMonth = rawMonth === null && rawDate ? parseCalendarDate(rawDate) : null;
+  const dateMonthOverride = requestedDateMonth
+    ? formatMonthParam({ year: requestedDateMonth.year, month: requestedDateMonth.month })
+    : null;
+  const effectiveRawMonth = dateMonthOverride ?? rawMonth;
+
+  const result = await getRequestSchedule(effectiveRawMonth, rawPerson);
   if (result.status !== "ok") {
     return <ConfigurationErrorState />;
   }
@@ -104,7 +119,7 @@ export default async function SchedulePage({ searchParams }: SchedulePageProps) 
   const { model } = result;
 
   const currentMonthKey = calendarMonthOfLocalNow(model.localNow);
-  const displayMonthKey = parseMonthParam(rawMonth) ?? currentMonthKey;
+  const displayMonthKey = parseMonthParam(effectiveRawMonth) ?? currentMonthKey;
   const monthParam = formatMonthParam(displayMonthKey);
 
   const grid = buildMonthGrid(displayMonthKey.year, displayMonthKey.month);

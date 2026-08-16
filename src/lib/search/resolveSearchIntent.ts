@@ -120,7 +120,15 @@ function toPersonResult(model: SearchReadModel, person: SearchRosterPerson): Per
   const nextShared =
     person.id === model.meId ? null : (findNextSharedShifts(model.shiftEvents, model.meId, person.id, 1)[0] ?? null);
 
-  const href = next ? scheduleHref(next.date) : nextShared ? scheduleHref(nextShared.date) : null;
+  // Only a shared shift is a genuinely navigable destination: that date
+  // exists on the VIEWER's own calendar. `/schedule` for a normal
+  // authenticated user is always the viewer's self-only calendar, so
+  // sending them to this person's own (unshared) next-shift date would
+  // silently open the viewer's own unrelated day, misrepresenting what the
+  // result actually means. A person result with no shared shift stays
+  // purely informational (`href: null`) -- `nextShift` is still shown, just
+  // never as a navigation target.
+  const href = nextShared ? scheduleHref(nextShared.date) : null;
 
   return {
     kind: "person",

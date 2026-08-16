@@ -28,6 +28,13 @@ function resultHref(result: GlobalSearchResult): string | null {
   return result.href;
 }
 
+/** Every real (non-disabled) focusable element the dialog can contain -- the search input, the close button, and (idle state only) the example-query buttons. `role="option"` result rows are deliberately excluded: they're navigated via `aria-activedescendant`, never real tab stops. */
+const FOCUSABLE_SELECTOR = 'input:not([disabled]), button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
+
+function getFocusableElements(container: HTMLElement): HTMLElement[] {
+  return Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
+}
+
 /**
  * The global command palette (PR #35) -- a system-level search surface
  * mounted once via `SearchPaletteProvider`. Query parsing/resolution is
@@ -36,12 +43,15 @@ function resultHref(result: GlobalSearchResult): string | null {
  * keystroke, no debounce needed.
  *
  * Keyboard/ARIA follows the exact combobox+listbox pattern already
- * established by `PersonPicker`: the search input is the ONLY real tab
- * stop while open; results are `role="option"` rows highlighted via
- * `aria-activedescendant`, never separately focusable. Tab is intercepted
- * to keep focus on the input (the simplest correct trap when there is
- * exactly one real focusable element inside the dialog); Escape closes and
- * restores focus to whatever triggered the palette.
+ * established by `PersonPicker`: results are `role="option"` rows
+ * highlighted via `aria-activedescendant` on the search input, never
+ * separately focusable -- ArrowUp/ArrowDown/Enter on the input move
+ * between and activate them. A real Tab/Shift+Tab focus trap cycles
+ * through the dialog's actual focusable controls (the input, the close
+ * button, and the idle-state example buttons when shown) instead of
+ * pinning focus to the input, so every real control stays keyboard-
+ * reachable. Escape closes from anywhere in the dialog and restores focus
+ * to whatever triggered the palette.
  */
 export function CommandPalette({ open, onClose, model }: CommandPaletteProps) {
   const router = useRouter();
@@ -93,12 +103,30 @@ export function CommandPalette({ open, onClose, model }: CommandPaletteProps) {
         onClose();
         return;
       }
-      if (event.key === "Tab") {
-        // The search input is the only real tab stop while the palette is
-        // open -- keep focus there rather than letting Tab escape to
-        // whatever is behind the backdrop.
+      if (event.key !== "Tab") return;
+
+      const dialogNode = dialogRef.current;
+      if (!dialogNode) return;
+
+      const focusable = getFocusableElements(dialogNode);
+      if (focusable.length === 0) return;
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+
+      // Wrap at the edges (or reclaim focus if it somehow left the dialog
+      // entirely) -- everything in between is normal browser Tab order,
+      // so the close button and (while idle) every example-query button
+      // stay reachable, unlike pinning focus to the input unconditionally.
+      if (event.shiftKey) {
+        if (active === first || !dialogNode.contains(active)) {
+          event.preventDefault();
+          last.focus();
+        }
+      } else if (active === last || !dialogNode.contains(active)) {
         event.preventDefault();
-        inputRef.current?.focus();
+        first.focus();
       }
     }
 
@@ -116,10 +144,12 @@ export function CommandPalette({ open, onClose, model }: CommandPaletteProps) {
   const clampedIndex = Math.min(highlightedIndex, Math.max(results.length - 1, 0));
   const highlightedResult = results[clampedIndex];
 
+  /** A result with no `href` (e.g. a person with no shared shift) is purely informational -- activating it must never close the palette or navigate, which would misleadingly read as an action having happened. */
   function activate(result: GlobalSearchResult) {
     const href = resultHref(result);
+    if (!href) return;
     onClose();
-    if (href) router.push(href);
+    router.push(href);
   }
 
   function handleInputKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {

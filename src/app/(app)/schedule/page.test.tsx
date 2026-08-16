@@ -197,6 +197,89 @@ describe("SchedulePage — ?date= deep link (global search navigation, PR #35)",
     expect(() => render(element)).not.toThrow();
     expect(selectedDayPanel().getByText("משמרת ברירת מחדל")).toBeInTheDocument();
   });
+
+  it("August -> September: a ?date= in a later month with NO explicit ?month= opens that month, not the current one", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(
+      okResult(
+        model({
+          localNow: { date: "2026-08-12", minuteOfDay: 600 }, // "today" is August
+          calendarEvents: [shiftEvent({ date: "2026-09-01", title: "משמרת ספטמבר" })],
+        }),
+      ),
+    );
+    // No `month` param at all -- only `date`, in a different month than today.
+    const element = await SchedulePage({ searchParams: Promise.resolve({ date: "2026-09-01" }) });
+    render(element);
+
+    expect(screen.getByText("ספטמבר 2026")).toBeInTheDocument();
+    expect(selectedDayPanel().getByText("משמרת ספטמבר")).toBeInTheDocument();
+  });
+
+  it("December -> January: a ?date= crossing a YEAR boundary with no explicit ?month= opens the right year too", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(
+      okResult(
+        model({
+          localNow: { date: "2026-12-15", minuteOfDay: 600 }, // "today" is December 2026
+          calendarEvents: [shiftEvent({ date: "2027-01-05", title: "משמרת ינואר" })],
+        }),
+      ),
+    );
+    const element = await SchedulePage({ searchParams: Promise.resolve({ date: "2027-01-05" }) });
+    render(element);
+
+    expect(screen.getByText("ינואר 2027")).toBeInTheDocument();
+    expect(selectedDayPanel().getByText("משמרת ינואר")).toBeInTheDocument();
+  });
+
+  it("a shared-shift-style deep link (bare ?date=, no ?month=) across a month boundary opens that month/date, exactly like a plain date result", async () => {
+    // Mirrors the exact URL shape resolveSearchIntent's shared_shift/person
+    // results produce: /schedule?date=YYYY-MM-DD, no month param at all.
+    getRequestPersonalSchedule.mockResolvedValue(
+      okResult(
+        model({
+          localNow: { date: "2026-08-05", minuteOfDay: 600 },
+          calendarEvents: [shiftEvent({ date: "2026-09-22", title: "משמרת משותפת", period: "night" })],
+        }),
+      ),
+    );
+    const element = await SchedulePage({ searchParams: Promise.resolve({ date: "2026-09-22" }) });
+    render(element);
+
+    expect(screen.getByText("ספטמבר 2026")).toBeInTheDocument();
+    expect(selectedDayPanel().getByText("משמרת משותפת")).toBeInTheDocument();
+  });
+
+  it("an invalid ?date= with NO explicit ?month= falls back safely to the current month, never crashes", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(
+      okResult(
+        model({
+          localNow: { date: "2026-08-12", minuteOfDay: 600 },
+          calendarEvents: [shiftEvent({ date: "2026-08-12", title: "משמרת ברירת מחדל" })],
+        }),
+      ),
+    );
+    const element = await SchedulePage({ searchParams: Promise.resolve({ date: "not-a-date" }) });
+    expect(() => render(element)).not.toThrow();
+
+    expect(screen.getByText("אוגוסט 2026")).toBeInTheDocument();
+    expect(selectedDayPanel().getByText("משמרת ברירת מחדל")).toBeInTheDocument();
+  });
+
+  it("an explicit ?month= still wins over a ?date= implying a different month", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(
+      okResult(
+        model({
+          calendarEvents: [shiftEvent({ date: "2026-09-01", title: "משמרת ספטמבר" })],
+        }),
+      ),
+    );
+    const element = await SchedulePage({
+      searchParams: Promise.resolve({ month: "2026-08", date: "2026-09-01" }),
+    });
+    render(element);
+
+    expect(screen.getByText("אוגוסט 2026")).toBeInTheDocument();
+  });
 });
 
 describe("SchedulePage — active shift accent is event-date-aware, not tied to civil today", () => {
