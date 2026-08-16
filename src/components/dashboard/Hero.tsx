@@ -1,15 +1,18 @@
 import { CalendarClock } from "lucide-react";
 import type {
+  PersonalAdjacentShiftContext,
   PersonalAssignmentView,
   PersonalEventView,
   PersonalNextAssignmentGroup,
   PersonalShiftContext,
 } from "@/lib/readModels/types";
+import type { EventPeriod, EventRole } from "@/lib/domain/event";
 import { relativeDayLabel, formatHebrewWeekdayAndDate } from "@/lib/presentation/hebrewDate";
 import { assignmentEmoji } from "@/lib/presentation/emoji";
 import { periodLabel, roleLabel } from "@/lib/presentation/labels";
 import { Badge } from "@/components/ui/Badge";
 import { Panel } from "@/components/ui/Panel";
+import { AdjacentShiftContextRow } from "./AdjacentShiftContext";
 import { CounterpartPanel } from "./CounterpartPanel";
 import { PulseIndicator } from "./PulseIndicator";
 import { ShiftProgress } from "./ShiftProgress";
@@ -21,6 +24,8 @@ interface HeroProps {
   /** Every current-shift counterpart context the read model computed -- Hero picks the one that actually matches its lead shift, never index 0 blindly. */
   currentShiftContexts: PersonalShiftContext[];
   nextShiftContexts: PersonalShiftContext[];
+  /** מי לפניי / מי אחריי context for the current shift -- same matching rule as `currentShiftContexts`, never rendered for `nextShiftContexts` (upcoming shifts are out of scope for adjacency). */
+  currentAdjacentShiftContexts: PersonalAdjacentShiftContext[];
   /** A known blocking absence (vacation/abroad/medical/day_off) dated today, only when there is no current shift/duty already active. */
   vacationEvent: PersonalEventView | null;
   /** Today's other Events besides `vacationEvent` -- preserved so a vacation day is never falsely reported as fully empty. */
@@ -43,6 +48,7 @@ export function Hero({
   nextAssignmentGroup,
   currentShiftContexts,
   nextShiftContexts,
+  currentAdjacentShiftContexts,
   vacationEvent,
   otherTodayEvents,
   fetchedAt,
@@ -50,7 +56,12 @@ export function Hero({
 }: HeroProps) {
   if (currentAssignments.length > 0) {
     return (
-      <CurrentHero assignments={currentAssignments} shiftContexts={currentShiftContexts} fetchedAt={fetchedAt} />
+      <CurrentHero
+        assignments={currentAssignments}
+        shiftContexts={currentShiftContexts}
+        adjacentShiftContexts={currentAdjacentShiftContexts}
+        fetchedAt={fetchedAt}
+      />
     );
   }
 
@@ -73,18 +84,20 @@ export function Hero({
 }
 
 /**
- * A counterpart context may only be embedded when it actually corresponds
- * to the shift being displayed as the hero's lead -- matched on the safe
- * date/role/period fields already on both sides, never by array index.
- * `nextShiftContexts` in particular is computed independently of
- * `nextAssignmentGroup` (it's the earliest upcoming SHIFT specifically,
- * which can land on a later date than a duty-only next group), so index 0
- * can silently belong to a different, later shift than the one shown.
+ * A counterpart (or adjacent-shift) context may only be embedded when it
+ * actually corresponds to the shift being displayed as the hero's lead --
+ * matched on the safe date/role/period fields already on both sides, never
+ * by array index. `nextShiftContexts` in particular is computed
+ * independently of `nextAssignmentGroup` (it's the earliest upcoming SHIFT
+ * specifically, which can land on a later date than a duty-only next
+ * group), so index 0 can silently belong to a different, later shift than
+ * the one shown. Generic over both `PersonalShiftContext` and
+ * `PersonalAdjacentShiftContext`, which share this exact matching shape.
  */
-function findMatchingShiftContext(
+function findMatchingShiftContext<T extends { date: string; role: EventRole; period: EventPeriod }>(
   lead: PersonalAssignmentView,
-  contexts: readonly PersonalShiftContext[],
-): PersonalShiftContext | null {
+  contexts: readonly T[],
+): T | null {
   if (lead.category !== "shift") return null;
   return (
     contexts.find(
@@ -106,16 +119,19 @@ function EmojiAnchor({ emoji }: { emoji: string | null }) {
 function CurrentHero({
   assignments,
   shiftContexts,
+  adjacentShiftContexts,
   fetchedAt,
 }: {
   assignments: PersonalAssignmentView[];
   shiftContexts: PersonalShiftContext[];
+  adjacentShiftContexts: PersonalAdjacentShiftContext[];
   fetchedAt: string;
 }) {
   const lead = assignments.find((a) => a.category === "shift") ?? assignments[0];
   const secondary = assignments.filter((a) => a !== lead);
   const meta = describeAssignment(lead);
   const shiftContext = findMatchingShiftContext(lead, shiftContexts);
+  const adjacentContext = findMatchingShiftContext(lead, adjacentShiftContexts);
   const emoji = assignmentEmoji(lead);
 
   return (
@@ -170,6 +186,7 @@ function CurrentHero({
       {shiftContext ? (
         <div className="relative mt-6 border-t border-border pt-5">
           <CounterpartPanel context={shiftContext} compact />
+          <AdjacentShiftContextRow context={adjacentContext} />
         </div>
       ) : null}
     </Panel>

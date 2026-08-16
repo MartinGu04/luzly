@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import type {
+  PersonalAdjacentShiftContext,
   PersonalAssignmentView,
   PersonalEventView,
   PersonalNextAssignmentGroup,
@@ -87,11 +88,23 @@ function shiftContext(overrides: Partial<PersonalShiftContext> = {}): PersonalSh
   };
 }
 
+function adjacentShiftContext(overrides: Partial<PersonalAdjacentShiftContext> = {}): PersonalAdjacentShiftContext {
+  return {
+    date: "2026-08-12",
+    period: "day",
+    role: "technician",
+    previous: null,
+    next: null,
+    ...overrides,
+  };
+}
+
 const defaultProps = {
   currentAssignments: [] as PersonalAssignmentView[],
   nextAssignmentGroup: null as PersonalNextAssignmentGroup | null,
   currentShiftContexts: [] as PersonalShiftContext[],
   nextShiftContexts: [] as PersonalShiftContext[],
+  currentAdjacentShiftContexts: [] as PersonalAdjacentShiftContext[],
   vacationEvent: null as PersonalEventView | null,
   otherTodayEvents: [] as PersonalEventView[],
   fetchedAt: "2026-08-12T08:00:00.000Z",
@@ -334,5 +347,148 @@ describe("Hero — counterpart context embedding", () => {
       <Hero {...defaultProps} currentAssignments={[lead]} currentShiftContexts={[wrongContext, rightContext]} />,
     );
     expect(screen.getByText("משה כהן")).toBeInTheDocument();
+  });
+});
+
+describe("Hero — מי לפניי / מי אחריי", () => {
+  const lead = baseAssignment({ date: "2026-08-12", period: "day", role: "technician" });
+  const context = shiftContext({ date: "2026-08-12", period: "day", role: "technician" });
+
+  it("shows previous shift staffing when resolved", () => {
+    const adjacent = adjacentShiftContext({
+      date: "2026-08-12",
+      period: "day",
+      role: "technician",
+      previous: {
+        date: "2026-08-11",
+        period: "night",
+        people: [
+          {
+            personId: "p_2",
+            personName: "עילאי לילי",
+            role: "technician",
+            certainty: "confirmed",
+            shadow: false,
+            period: "night",
+            startTimeOverride: null,
+            endTimeOverride: null,
+          },
+        ],
+      },
+    });
+    render(
+      <Hero
+        {...defaultProps}
+        currentAssignments={[lead]}
+        currentShiftContexts={[context]}
+        currentAdjacentShiftContexts={[adjacent]}
+      />,
+    );
+    expect(screen.getByText("מי לפניי")).toBeInTheDocument();
+    expect(screen.getByText("עילאי לילי")).toBeInTheDocument();
+    expect(screen.queryByText("מי אחריי")).toBeNull();
+  });
+
+  it("shows next shift staffing when resolved, across a calendar-date boundary", () => {
+    const adjacent = adjacentShiftContext({
+      date: "2026-08-12",
+      period: "night",
+      role: "technician",
+      next: {
+        date: "2026-08-13",
+        period: "day",
+        people: [
+          {
+            personId: "p_3",
+            personName: "רוני שדה",
+            role: "technician",
+            certainty: "confirmed",
+            shadow: false,
+            period: "day",
+            startTimeOverride: null,
+            endTimeOverride: null,
+          },
+        ],
+      },
+    });
+    const nightLead = baseAssignment({ date: "2026-08-12", period: "night", role: "technician" });
+    const nightContext = shiftContext({ date: "2026-08-12", period: "night", role: "technician" });
+    render(
+      <Hero
+        {...defaultProps}
+        currentAssignments={[nightLead]}
+        currentShiftContexts={[nightContext]}
+        currentAdjacentShiftContexts={[adjacent]}
+      />,
+    );
+    expect(screen.getByText("מי אחריי")).toBeInTheDocument();
+    expect(screen.getByText("רוני שדה")).toBeInTheDocument();
+  });
+
+  it("renders nothing for missing adjacent staffing -- no empty 'מי לפניי — אין מידע' block", () => {
+    const adjacent = adjacentShiftContext({ date: "2026-08-12", period: "day", role: "technician" });
+    render(
+      <Hero
+        {...defaultProps}
+        currentAssignments={[lead]}
+        currentShiftContexts={[context]}
+        currentAdjacentShiftContexts={[adjacent]}
+      />,
+    );
+    expect(screen.queryByText("מי לפניי")).toBeNull();
+    expect(screen.queryByText("מי אחריי")).toBeNull();
+  });
+
+  it("never renders when there is no matching adjacent context at all", () => {
+    render(
+      <Hero {...defaultProps} currentAssignments={[lead]} currentShiftContexts={[context]} currentAdjacentShiftContexts={[]} />,
+    );
+    expect(screen.queryByText("מי לפניי")).toBeNull();
+    expect(screen.queryByText("מי אחריי")).toBeNull();
+  });
+
+  it("never renders for the upcoming (NextHero) state -- adjacency is current-shift only", () => {
+    const shiftEvent = baseAssignment({
+      date: "2026-08-15",
+      period: "day",
+      role: "technician",
+      temporalState: "upcoming",
+      timing: {
+        status: "resolved",
+        startLocalTime: "07:30",
+        endLocalTime: "19:30",
+        durationMinutes: 720,
+        elapsedMinutesAtLoad: 0,
+        remainingMinutesAtLoad: 720,
+        progressPercentAtLoad: 0,
+        minutesUntilStartAtLoad: 0,
+      },
+    });
+    const group = nextGroup([shiftEvent]);
+    const matchingContext = shiftContext({ date: "2026-08-15", period: "day", role: "technician" });
+    render(
+      <Hero
+        {...defaultProps}
+        nextAssignmentGroup={group}
+        nextShiftContexts={[matchingContext]}
+        localNowDate="2026-08-12"
+      />,
+    );
+    expect(screen.getByText("מי איתי?")).toBeInTheDocument();
+    expect(screen.queryByText("מי לפניי")).toBeNull();
+    expect(screen.queryByText("מי אחריי")).toBeNull();
+  });
+
+  it("existing מי איתי rendering is unaffected by the new adjacent-context prop", () => {
+    render(
+      <Hero
+        {...defaultProps}
+        currentAssignments={[lead]}
+        currentShiftContexts={[context]}
+        currentAdjacentShiftContexts={[]}
+      />,
+    );
+    expect(screen.getByText("מי איתי?")).toBeInTheDocument();
+    expect(screen.getByText("אין מידע על אנשים נוספים במשמרת זו.")).toBeInTheDocument();
   });
 });

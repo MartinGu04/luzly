@@ -60,6 +60,33 @@ export function addCalendarDays(date: CalendarDate, n: number): CalendarDate {
   return { year, month, day };
 }
 
+/**
+ * `date` minus `n` civil days (n >= 0), correctly rolling month/year
+ * boundaries backward -- the missing counterpart to `addCalendarDays`
+ * above, which only ever supports n >= 0 forward (see its own docstring).
+ */
+export function subtractCalendarDays(date: CalendarDate, n: number): CalendarDate {
+  let { year, month, day } = date;
+  let remaining = n;
+
+  while (remaining > 0) {
+    if (remaining < day) {
+      day -= remaining;
+      remaining = 0;
+    } else {
+      remaining -= day;
+      month -= 1;
+      if (month < 1) {
+        month = 12;
+        year -= 1;
+      }
+      day = daysInCalendarMonth(year, month);
+    }
+  }
+
+  return { year, month, day };
+}
+
 export interface ManagerDateRange {
   key: ManagerRangeKey;
   startDate: string;

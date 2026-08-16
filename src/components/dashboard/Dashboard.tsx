@@ -65,6 +65,7 @@ export function Dashboard({ model }: DashboardProps) {
             nextAssignmentGroup={model.nextAssignmentGroup}
             currentShiftContexts={model.currentShiftContexts}
             nextShiftContexts={model.nextShiftContexts}
+            currentAdjacentShiftContexts={model.currentAdjacentShiftContexts}
             vacationEvent={vacationEvent}
             otherTodayEvents={otherTodayEvents}
             fetchedAt={model.fetchedAt}

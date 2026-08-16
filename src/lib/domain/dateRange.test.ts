@@ -5,6 +5,7 @@ import {
   formatCalendarDate,
   parseManagerRangeParam,
   resolveManagerDateRange,
+  subtractCalendarDays,
 } from "./dateRange";
 
 function localNow(date: string): LocalNow {
@@ -60,6 +61,38 @@ describe("addCalendarDays", () => {
 
   it("n=0 is a no-op", () => {
     expect(addCalendarDays({ year: 2026, month: 8, day: 13 }, 0)).toEqual({ year: 2026, month: 8, day: 13 });
+  });
+});
+
+describe("subtractCalendarDays", () => {
+  it("stays within the same month", () => {
+    expect(subtractCalendarDays({ year: 2026, month: 8, day: 13 }, 3)).toEqual({ year: 2026, month: 8, day: 10 });
+  });
+
+  it("rolls backward over a month boundary", () => {
+    expect(subtractCalendarDays({ year: 2026, month: 2, day: 1 }, 1)).toEqual({ year: 2026, month: 1, day: 31 });
+  });
+
+  it("rolls backward over a year boundary", () => {
+    expect(subtractCalendarDays({ year: 2027, month: 1, day: 1 }, 1)).toEqual({ year: 2026, month: 12, day: 31 });
+  });
+
+  it("handles leap-year February correctly", () => {
+    expect(subtractCalendarDays({ year: 2028, month: 3, day: 1 }, 1)).toEqual({ year: 2028, month: 2, day: 29 });
+  });
+
+  it("handles a non-leap year February correctly", () => {
+    expect(subtractCalendarDays({ year: 2026, month: 3, day: 1 }, 1)).toEqual({ year: 2026, month: 2, day: 28 });
+  });
+
+  it("n=0 is a no-op", () => {
+    expect(subtractCalendarDays({ year: 2026, month: 8, day: 13 }, 0)).toEqual({ year: 2026, month: 8, day: 13 });
+  });
+
+  it("is the exact inverse of addCalendarDays over a jump spanning several months", () => {
+    const start = { year: 2026, month: 1, day: 20 };
+    const forward = addCalendarDays(start, 29);
+    expect(subtractCalendarDays(forward, 29)).toEqual(start);
   });
 });
 

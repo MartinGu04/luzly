@@ -217,6 +217,20 @@ export function buildShiftRoster(target: Event, events: readonly Event[]): Shift
   };
 }
 
+/**
+ * Every shift Event for an arbitrary `(date, period)` group -- no target
+ * person required, unlike `buildShiftRoster`. This is the primitive for
+ * "who's on shift X" when there is no "me" to exclude (e.g. resolving the
+ * staffing of an adjacent shift for מי לפניי / מי אחריי). Mirrors the same
+ * grouping `managerEventProjections.ts`'s `buildShiftStaffingOverview`
+ * already uses (`category === "shift" && date === date && period === period`),
+ * kept here alongside `buildShiftRoster` since both answer "who's on this
+ * shift" -- just with vs. without a target to exclude.
+ */
+export function findShiftGroupEvents(events: readonly Event[], date: string, period: EventPeriod): Event[] {
+  return events.filter((event) => event.category === "shift" && event.date === date && event.period === period);
+}
+
 function oppositeRole(role: EventRole): EventRole {
   if (role === "supervisor") return "technician";
   if (role === "technician") return "supervisor";

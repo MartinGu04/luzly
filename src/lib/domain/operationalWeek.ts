@@ -1,38 +1,7 @@
 import type { CalendarDate } from "./dutyBlocks";
 import { dayOfWeek, parseCalendarDate } from "./dutyBlocks";
-import { addCalendarDays, formatCalendarDate } from "./dateRange";
-import { daysInCalendarMonth } from "./calendarMonth";
+import { addCalendarDays, formatCalendarDate, subtractCalendarDays } from "./dateRange";
 import type { LocalNow } from "./localNow";
-
-/**
- * `date` minus `n` civil days (n >= 0), correctly rolling month/year
- * boundaries backward -- the missing counterpart to `dateRange.ts`'s
- * `addCalendarDays`, which only ever supports n >= 0 forward (see its
- * own docstring). Kept local to this file since finding "the most
- * recent Sunday on or before today" is the only place in the codebase
- * that needs backward calendar arithmetic.
- */
-function subtractCalendarDays(date: CalendarDate, n: number): CalendarDate {
-  let { year, month, day } = date;
-  let remaining = n;
-
-  while (remaining > 0) {
-    if (remaining < day) {
-      day -= remaining;
-      remaining = 0;
-    } else {
-      remaining -= day;
-      month -= 1;
-      if (month < 1) {
-        month = 12;
-        year -= 1;
-      }
-      day = daysInCalendarMonth(year, month);
-    }
-  }
-
-  return { year, month, day };
-}
 
 /**
  * The operational week: Sunday-based, seven calendar dates, ascending.

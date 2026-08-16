@@ -92,6 +92,7 @@ function model(overrides: Partial<PersonalScheduleReadModel> = {}): PersonalSche
     nextAssignmentGroup: null,
     currentShiftContexts: [],
     nextShiftContexts: [],
+    currentAdjacentShiftContexts: [],
     issues: [],
     dutyBlocks: [],
     dutyActions: [],

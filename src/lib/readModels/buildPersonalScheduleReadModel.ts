@@ -13,10 +13,17 @@ import {
   type IssueSeverity,
   type OperationalIssue,
 } from "@/lib/domain/operationalIssues";
-import { analyzeShiftCounterparts, buildShiftRoster } from "@/lib/domain/shiftCoverage";
-import { resolveEventShiftInterval, type ShiftSchedule } from "@/lib/domain/shiftSchedule";
+import { analyzeShiftCounterparts, buildShiftRoster, findShiftGroupEvents } from "@/lib/domain/shiftCoverage";
+import {
+  nextShiftPeriod,
+  previousShiftPeriod,
+  resolveEventShiftInterval,
+  type ShiftSchedule,
+} from "@/lib/domain/shiftSchedule";
 import type { Person } from "@/lib/domain/types";
 import type {
+  PersonalAdjacentShift,
+  PersonalAdjacentShiftContext,
   PersonalAssignmentView,
   PersonalCounterpart,
   PersonalDutyAction,
@@ -103,6 +110,9 @@ export function buildPersonalScheduleReadModel(
 
   const currentShiftContexts = currentShiftEvents.map((event) => buildShiftContext(event, events, shiftSchedule));
   const nextShiftContexts = nextShiftEvents.map((event) => buildShiftContext(event, events, shiftSchedule));
+  const currentAdjacentShiftContexts = currentShiftEvents.map((event) =>
+    buildAdjacentShiftContext(event, events, shiftSchedule),
+  );
 
   const allIssues = detectOperationalIssues(events, people, shiftSchedule);
   const issues = allIssues
@@ -125,6 +135,7 @@ export function buildPersonalScheduleReadModel(
     nextAssignmentGroup,
     currentShiftContexts,
     nextShiftContexts,
+    currentAdjacentShiftContexts,
     issues,
     dutyBlocks: dutyBlocks.map(toDutyBlockView),
     dutyActions: dutyActions.map(toDutyActionView),
@@ -358,6 +369,47 @@ function buildShiftContext(
     missingIntervals: coverage.missingIntervals,
     primaryCounterparts: sortAndDedupeRoster(roster.primaryRoster, schedule).map(toCounterpart),
     shadowCounterparts: sortAndDedupeRoster(roster.shadowRoster, schedule).map(toCounterpart),
+  };
+}
+
+/**
+ * מי לפניי / מי אחריי -- the staffing of `target`'s immediately preceding
+ * and following shift on the canonical day/night timeline, resolved via
+ * `previousShiftPeriod`/`nextShiftPeriod` (never a hardcoded day→night→day
+ * assumption) and `findShiftGroupEvents` (no target-person concept needed,
+ * unlike `buildShiftRoster`). Quiet by construction: `previous`/`next` is
+ * `null` whenever the period has no canonical adjacency (morning/
+ * unspecified) or nobody is staffed on the adjacent shift -- never an
+ * empty-but-present block.
+ */
+function buildAdjacentShiftContext(
+  target: Event,
+  allEvents: readonly Event[],
+  schedule: ShiftSchedule,
+): PersonalAdjacentShiftContext {
+  return {
+    date: target.date,
+    period: target.period,
+    role: target.role,
+    previous: resolveAdjacentShift(previousShiftPeriod(target.date, target.period), allEvents, schedule),
+    next: resolveAdjacentShift(nextShiftPeriod(target.date, target.period), allEvents, schedule),
+  };
+}
+
+function resolveAdjacentShift(
+  adjacent: { date: string; period: "day" | "night" } | null,
+  allEvents: readonly Event[],
+  schedule: ShiftSchedule,
+): PersonalAdjacentShift | null {
+  if (!adjacent) return null;
+
+  const groupEvents = findShiftGroupEvents(allEvents, adjacent.date, adjacent.period);
+  if (groupEvents.length === 0) return null;
+
+  return {
+    date: adjacent.date,
+    period: adjacent.period,
+    people: sortAndDedupeRoster(groupEvents, schedule).map(toCounterpart),
   };
 }
 

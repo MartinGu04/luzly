@@ -69,7 +69,12 @@ export function ShiftProgress({ timing, fetchedAt, mode }: ShiftProgressProps) {
 
   return (
     <div>
-      <p className="text-sm font-medium text-foreground">{formatRemaining(remaining)}</p>
+      <p className="flex items-baseline gap-2 text-sm font-medium text-foreground">
+        {formatRemaining(remaining)}
+        <span aria-hidden="true" className="text-xs font-normal text-muted-2">
+          {progressPercent}%
+        </span>
+      </p>
       <div
         role="progressbar"
         aria-label="התקדמות המשמרת"
