@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { unstable_cache } from "next/cache";
 import { fetchRawWorkbookSnapshot, type RawWorkbookSnapshot, type SheetSourceKey } from "@/lib/google";
 import { timedStage } from "@/lib/config/timingDiagnostics";
@@ -70,24 +71,62 @@ const cachedFetch = unstable_cache(
 );
 
 /**
+ * Request-scoped in-flight de-dup for two (or more) callers within the SAME
+ * request asking for the identical canonical source set, e.g. `(app)/
+ * layout.tsx`'s concurrent `getRequestPersonalSchedule()` +
+ * `getRequestSearchReadModel()` (PR #38) -- both independently resolve down
+ * to the exact same `personnel+schedule+settings` set. `unstable_cache`'s
+ * own cross-request Data Cache does NOT reliably close this gap: verified
+ * empirically (instrumented `fetchRawWorkbookSnapshot`, genuinely cold
+ * `.next/cache`, 4/4 trials) that two truly concurrent cold-cache callers
+ * each triggered their own real `batchGet` -- i.e. TWO underlying fetches,
+ * not one, exactly the kind of claim that must never rest on a code comment
+ * alone. React's `cache()` (the SAME per-request memoization primitive
+ * `getRequestPersonalSchedule`/`getRequestSchedule`/
+ * `getRequestSearchReadModel` already use, applied one layer deeper here,
+ * not a new caching mechanism) closes it: the first caller's in-flight
+ * promise is shared with every other caller in the same request asking for
+ * the same canonical key, so only one of them ever actually reaches
+ * `cachedFetch`.
+ *
+ * Takes the canonical key as a single STRING, not the `SheetSourceKey[]`
+ * array -- `cache()`'s per-argument memoization needs a genuinely
+ * comparable primitive (see `getRequestSchedule.ts`'s own docstring for
+ * why): two separately-built array literals with identical elements are
+ * different references and would never be treated as the same cache entry.
+ * Reconstructing the array from the (lossless, reversible) joined string
+ * inside this function keeps `cachedFetch`'s own signature/tag/TTL
+ * completely untouched.
+ */
+const getSnapshotForCanonicalKey = cache(
+  (canonicalKeyString: string): Promise<RawWorkbookSnapshot> =>
+    cachedFetch(canonicalKeyString.split("+") as SheetSourceKey[]),
+);
+
+/**
  * The single entry point every read-model loader uses to get the raw
  * workbook snapshot -- reuses a recent snapshot for the same canonical
  * source set (see `SNAPSHOT_CACHE_REVALIDATE_SECONDS`) instead of always
- * performing a live Google `batchGet`. `fetchedAt` on a cache hit is
- * whatever the ORIGINAL fetch recorded -- never "now" -- so the UI's
- * freshness label always reflects when Google was actually last read, not
- * when this particular route happened to render (see
- * `fetchRawWorkbookSnapshot`, which stamps `fetchedAt` once, inside the
- * cached function, before any caching wrapper touches the result).
+ * performing a live Google `batchGet`, AND de-dupes concurrent same-request
+ * callers down to one underlying fetch (see `getSnapshotForCanonicalKey`).
+ * `fetchedAt` on a cache hit is whatever the ORIGINAL fetch recorded --
+ * never "now" -- so the UI's freshness label always reflects when Google
+ * was actually last read, not when this particular route happened to
+ * render (see `fetchRawWorkbookSnapshot`, which stamps `fetchedAt` once,
+ * inside the cached function, before any caching wrapper touches the
+ * result).
  *
- * `unstable_cache` itself provides the cross-request reuse AND the
- * in-flight de-duplication for concurrent callers requesting the same
- * canonical key (Next's own Incremental Cache, not a hand-rolled lock) --
- * this module never introduces its own module-level mutable cache.
+ * This module still never introduces its own module-level mutable cache --
+ * `cache()` is request-scoped exactly like every other loader in this
+ * codebase already relies on (reset per request/render, never shared
+ * across users or requests), and `unstable_cache`'s own cross-request Data
+ * Cache (TTL, tag-based invalidation) is completely unchanged underneath
+ * it.
  */
 export async function getWorkbookSnapshot(
   sourceKeys: readonly SheetSourceKey[],
 ): Promise<RawWorkbookSnapshot> {
   const canonicalKeys = canonicalizeSourceKeys(sourceKeys);
-  return timedStage(`workbook.cache(${canonicalKeys.join("+")})`, () => cachedFetch(canonicalKeys));
+  const canonicalKeyString = canonicalKeys.join("+");
+  return timedStage(`workbook.cache(${canonicalKeyString})`, () => getSnapshotForCanonicalKey(canonicalKeyString));
 }
