@@ -17,6 +17,18 @@ function fireVisibilityChange() {
   document.dispatchEvent(new Event("visibilitychange"));
 }
 
+/** A genuine BFCache-restore pageshow -- `event.persisted === true`. */
+function firePersistedPageShow() {
+  const event = new Event("pageshow");
+  Object.defineProperty(event, "persisted", { value: true, configurable: true });
+  window.dispatchEvent(event);
+}
+
+/** An ordinary (non-BFCache) pageshow, as fires on every normal navigation/first paint. */
+function fireOrdinaryPageShow() {
+  window.dispatchEvent(new Event("pageshow"));
+}
+
 beforeEach(() => {
   refresh.mockReset();
   setVisibility("visible");
@@ -67,6 +79,26 @@ describe("AppRevalidator — return from background", () => {
   });
 });
 
+describe("AppRevalidator — pageshow: BFCache only, never a generic resume signal", () => {
+  it("an initial/non-persisted pageshow never triggers a refresh", () => {
+    render(<AppRevalidator />);
+    act(() => fireOrdinaryPageShow());
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("a persisted (genuine BFCache restore) pageshow does trigger a refresh", () => {
+    render(<AppRevalidator />);
+    act(() => firePersistedPageShow());
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("ordinary window focus never triggers a refresh -- visibilitychange is the primary resume signal", () => {
+    render(<AppRevalidator />);
+    act(() => window.dispatchEvent(new Event("focus")));
+    expect(refresh).not.toHaveBeenCalled();
+  });
+});
+
 describe("AppRevalidator — periodic refresh while visible", () => {
   it("4. refreshes after the configured visible interval elapses", async () => {
     render(<AppRevalidator />);
@@ -85,7 +117,7 @@ describe("AppRevalidator — periodic refresh while visible", () => {
     expect(refresh).not.toHaveBeenCalled();
   });
 
-  it("resumes periodic refreshing once visible again after a hidden interval tick", async () => {
+  it("resumes periodic refreshing once a real visibilitychange to visible fires after a hidden interval tick", async () => {
     setVisibility("hidden");
     render(<AppRevalidator />);
     await act(async () => {
@@ -93,21 +125,59 @@ describe("AppRevalidator — periodic refresh while visible", () => {
     });
     expect(refresh).not.toHaveBeenCalled();
 
+    // A real resume always fires the event -- this is what re-arms the
+    // periodic schedule (see AppRevalidator's own docstring).
     setVisibility("visible");
+    act(() => fireVisibilityChange());
+    expect(refresh).toHaveBeenCalledTimes(1);
+
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5 * 60_000);
     });
+    expect(refresh).toHaveBeenCalledTimes(2);
+  });
+
+  it("resume at 4m50s does not cause another periodic refresh 10s later (at the old mount-anchored 5m00s mark)", async () => {
+    render(<AppRevalidator />);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4 * 60_000 + 50_000); // 4:50
+    });
+    act(() => fireVisibilityChange());
     expect(refresh).toHaveBeenCalledTimes(1);
+
+    // 10 more seconds lands exactly on the OLD mount-anchored 5:00 mark --
+    // must not fire again there.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("periodic refresh eventually occurs ~5 minutes after the last automatic revalidation, not 5 minutes after mount", async () => {
+    render(<AppRevalidator />);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4 * 60_000 + 50_000); // 4:50
+    });
+    act(() => fireVisibilityChange());
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    // Advance the remaining ~5 minutes from THIS trigger (i.e. past the
+    // rescheduled 9:50 mark), not just past the original 5:00 mount mark.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+    });
+    expect(refresh).toHaveBeenCalledTimes(2);
   });
 });
 
 describe("AppRevalidator — deduplication / cooldown", () => {
-  it("6. visibilitychange + focus + pageshow firing together cause exactly one refresh", () => {
+  it("6. visibilitychange + a persisted pageshow firing together cause exactly one refresh", () => {
     render(<AppRevalidator />);
     act(() => {
       fireVisibilityChange();
-      window.dispatchEvent(new Event("focus"));
-      window.dispatchEvent(new Event("pageshow"));
+      firePersistedPageShow();
     });
     expect(refresh).toHaveBeenCalledTimes(1);
   });
@@ -121,7 +191,7 @@ describe("AppRevalidator — deduplication / cooldown", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1_000);
     });
-    act(() => window.dispatchEvent(new Event("focus")));
+    act(() => fireVisibilityChange());
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
@@ -133,16 +203,15 @@ describe("AppRevalidator — deduplication / cooldown", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5_001);
     });
-    act(() => window.dispatchEvent(new Event("focus")));
+    act(() => fireVisibilityChange());
     expect(refresh).toHaveBeenCalledTimes(2);
   });
 
-  it("the periodic interval does not overlap a refresh that just fired on resume", async () => {
+  it("the periodic timer does not overlap a refresh that just fired on resume right after mount", async () => {
     render(<AppRevalidator />);
     act(() => fireVisibilityChange());
     expect(refresh).toHaveBeenCalledTimes(1);
 
-    // The 5-minute interval elapses well outside the cooldown window, so it fires normally.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5 * 60_000);
     });
@@ -151,7 +220,7 @@ describe("AppRevalidator — deduplication / cooldown", () => {
 });
 
 describe("AppRevalidator — cleanup", () => {
-  it("8. removes its event listeners and clears its interval on unmount", async () => {
+  it("8. removes its event listeners and clears its periodic timer on unmount", async () => {
     const addSpy = vi.spyOn(document, "addEventListener");
     const removeSpy = vi.spyOn(document, "removeEventListener");
     const { unmount } = render(<AppRevalidator />);
