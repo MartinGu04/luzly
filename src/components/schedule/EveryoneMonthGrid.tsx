@@ -1,5 +1,6 @@
 import type { CoverageStatus } from "@/lib/domain/shiftCoverage";
 import type { CalendarGridCell } from "@/lib/domain/calendarMonth";
+import { coverageStatusLabel } from "@/lib/presentation/labels";
 import type { ScheduleEveryoneDayView, SchedulePeriodStaffingView } from "@/lib/presentation/scheduleEveryone";
 import {
   CalendarDayCell,
@@ -64,42 +65,79 @@ function summarizePeriod(view: SchedulePeriodStaffingView | null): PeriodSummary
   return { text: names.length > 0 ? names.join(", ") : "—", toneClassName: "text-muted" };
 }
 
+/** The Hebrew accessible name for a period's coverage status, e.g. "יום: חסר" -- never color-only. `null` (no staffing data at all for that period) reads the same "אין נתונים" text `summarizePeriod` already shows visually. */
+function statusAccessibleLabel(periodLabel: string, status: CoverageStatus | null): string {
+  return `${periodLabel}: ${status === null ? "אין נתונים" : coverageStatusLabel(status)}`;
+}
+
+/** One coverage-status dot with a screen-reader-only label -- color alone never carries the status. */
+function StatusDot({ label, colorClassName }: { label: string; colorClassName: string }) {
+  return (
+    <span className="inline-flex shrink-0 items-center">
+      <span aria-hidden="true" className={`h-1.5 w-1.5 shrink-0 rounded-full ${colorClassName}`} />
+      <span className="sr-only">{label}</span>
+    </span>
+  );
+}
+
 /**
- * The day/night staffing summary content for one in-month cell -- exactly
- * two `IndicatorChip`s (day, night), the SAME shared component and 2-line
- * budget `CalendarGrid` uses for its own personal-event indicators, plus a
- * duties/absences "+N" overflow when there's anything beyond that (PR #38
- * shell-unification round, §15/§16 of the brief: date, day status, night
- * status, then an overflow -- never a taller cell). This is what lets
- * Everyone's greater information density fit the exact same cell height as
- * Personal: the geometry is shared by construction, not by coincidence.
+ * Mobile-only (below `sm:`) compact summary: BOTH day and night coverage
+ * status, each its own labeled dot, on one line, plus an optional "+N"
+ * duties/absences overflow -- never just the day status. A narrower cell
+ * has room for two small dots but not two full text lines, so this is a
+ * deliberately different mobile presentation from the `sm:`+ two-line one
+ * below, not a truncated version of it: hiding the ENTIRE night line below
+ * `sm:` (as a bare `hidden sm:flex` on a second `IndicatorChip` would) was
+ * the bug this fixes -- a fully-staffed day sitting beside a missing night
+ * shift used to read as an all-clear green dot on a narrow screen, with the
+ * real problem invisible until the viewport widened or the day was opened.
+ */
+function MobileStaffingSummary({
+  dayStatus,
+  nightStatus,
+  extraCount,
+}: {
+  dayStatus: CoverageStatus | null;
+  nightStatus: CoverageStatus | null;
+  extraCount: number;
+}) {
+  return (
+    <div className="flex shrink-0 items-center gap-1.5 sm:hidden" role="group" aria-label="מצב איוש יום ולילה">
+      <StatusDot label={statusAccessibleLabel("יום", dayStatus)} colorClassName={statusDotClass(dayStatus)} />
+      <StatusDot label={statusAccessibleLabel("לילה", nightStatus)} colorClassName={statusDotClass(nightStatus)} />
+      {extraCount > 0 ? <OverflowChip count={extraCount} /> : null}
+    </div>
+  );
+}
+
+/**
+ * The day/night staffing summary content for one in-month cell. On `sm:`+,
+ * exactly two `IndicatorChip`s (day, night) -- the SAME shared component
+ * and 2-line budget `CalendarGrid` uses for its own personal-event
+ * indicators -- plus a duties/absences "+N" overflow when there's anything
+ * beyond that (PR #38 shell-unification round, §15/§16 of the brief: date,
+ * day status, night status, then an overflow -- never a taller cell). Below
+ * `sm:`, `MobileStaffingSummary` replaces both text lines with one compact
+ * labeled-dot row so day AND night coverage both stay visible at every
+ * width -- see its own doc comment for why a bare `hidden sm:flex` on the
+ * night line was wrong. Either way, this is what lets Everyone's greater
+ * information density fit the exact same cell height as Personal: the
+ * geometry is shared by construction, not by coincidence.
  */
 function StaffingIndicators({ dayView }: { dayView: ScheduleEveryoneDayView | undefined }) {
   const day = summarizePeriod(dayView?.day ?? null);
   const night = summarizePeriod(dayView?.night ?? null);
+  const dayStatus = dayView?.day?.coverageStatus ?? null;
+  const nightStatus = dayView?.night?.coverageStatus ?? null;
   const extraCount = (dayView?.duties.length ?? 0) + (dayView?.absences.length ?? 0);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-hidden">
-      <IndicatorChip
-        emoji="☀️"
-        label={day.text}
-        toneClassName={day.toneClassName}
-        statusDotClassName={statusDotClass(dayView?.day?.coverageStatus ?? null)}
-      />
-      <IndicatorChip
-        emoji="🌙"
-        label={night.text}
-        toneClassName={night.toneClassName}
-        className="hidden sm:flex"
-        statusDotClassName={statusDotClass(dayView?.night?.coverageStatus ?? null)}
-      />
-      {extraCount > 0 ? (
-        <>
-          <OverflowChip count={extraCount} className="sm:hidden" />
-          <OverflowChip count={extraCount} className="hidden sm:block" />
-        </>
-      ) : null}
+      <MobileStaffingSummary dayStatus={dayStatus} nightStatus={nightStatus} extraCount={extraCount} />
+
+      <IndicatorChip emoji="☀️" label={day.text} toneClassName={day.toneClassName} className="hidden sm:flex" />
+      <IndicatorChip emoji="🌙" label={night.text} toneClassName={night.toneClassName} className="hidden sm:flex" />
+      {extraCount > 0 ? <OverflowChip count={extraCount} className="hidden sm:block" /> : null}
     </div>
   );
 }
@@ -110,10 +148,11 @@ function StaffingIndicators({ dayView }: { dayView: ScheduleEveryoneDayView | un
  * date cell answers "who staffs day/night, and is anything missing?" at a
  * glance, via the exact same compact `IndicatorChip` language `CalendarGrid`
  * uses for personal events -- day status on one line, night status on the
- * next, then a duties/absences "+N" overflow. Below `sm:`, each period's
- * chip collapses to its own coverage-colored dot (full/partial/missing/no-
- * data) instead of an emoji, so the mobile view keeps its semantic-color
- * read without needing truncated text. Tapping/selecting a date is the same
+ * next, then a duties/absences "+N" overflow. Below `sm:`, `MobileStaffingSummary`
+ * shows BOTH day and night as their own labeled, coverage-colored dot on
+ * one line -- never just one period's status -- so a narrow viewport can
+ * never hide a real missing/partial night (or day) behind the other
+ * period's healthier state. Tapping/selecting a date is the same
  * interaction pattern as the personal calendar's `CalendarGrid`; the FULL
  * picture lives in the selected-day panel next to/below this grid, never
  * crammed into the cell itself.

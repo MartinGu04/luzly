@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import type { CalendarGridCell } from "@/lib/domain/calendarMonth";
+import type { CoverageStatus } from "@/lib/domain/shiftCoverage";
+import { CALENDAR_CELL_HEIGHT_CLASSES } from "./CalendarSurface";
 import type { ScheduleEveryoneDayView } from "@/lib/presentation/scheduleEveryone";
 import { EveryoneMonthGrid } from "./EveryoneMonthGrid";
 import type { DayMeta } from "./types";
@@ -321,6 +323,145 @@ describe("EveryoneMonthGrid", () => {
       );
       const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
       expect(cell.textContent).toContain("אין נתונים");
+    });
+  });
+
+  describe("mobile day/night coverage visibility (correctness fix: night status must never disappear below sm:)", () => {
+    function periodView(period: "day" | "night", coverageStatus: CoverageStatus): NonNullable<ScheduleEveryoneDayView["day"]> {
+      return {
+        period,
+        label: period === "day" ? "יום" : "לילה",
+        emoji: period === "day" ? "☀️" : "🌙",
+        technicians:
+          coverageStatus === "missing"
+            ? { people: [], status: "missing", message: "חסר טכנאי" }
+            : { people: [{ key: "p1", name: "איש כלשהו", tentative: false }], status: "full", message: null },
+        supervisors: { people: [], status: "not_evaluable", message: null },
+        shadowTechnicianNames: [],
+        shadowSupervisorNames: [],
+        coverageStatus,
+      };
+    }
+
+    function dayView(overrides: Partial<ScheduleEveryoneDayView> = {}): ScheduleEveryoneDayView {
+      return { date: "2026-08-12", day: null, night: null, duties: [], absences: [], ...overrides };
+    }
+
+    /** The mobile-only labeled-dot group (`role="group"`) for a rendered cell, scoped so assertions never accidentally match the sm:+ text lines. */
+    function mobileSummary(cell: HTMLElement) {
+      const group = cell.querySelector('[role="group"]');
+      if (!group) throw new Error("mobile staffing summary group not found");
+      return group as HTMLElement;
+    }
+
+    it("1. exposes both day and night coverage states in the mobile-only summary, each with its own accessible label", () => {
+      render(
+        <EveryoneMonthGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          dayViews={{ "2026-08-12": dayView({ day: periodView("day", "full"), night: periodView("night", "partial") }) }}
+          selectedDate={null}
+          onSelectDate={noop}
+        />,
+      );
+      const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+      const summary = mobileSummary(cell);
+      expect(summary.className).toMatch(/sm:hidden/);
+      const labels = [...summary.querySelectorAll(".sr-only")].map((el) => el.textContent);
+      expect(labels.some((label) => label?.startsWith("יום:"))).toBe(true);
+      expect(labels.some((label) => label?.startsWith("לילה:"))).toBe(true);
+      expect(summary.querySelector(".bg-success")).not.toBeNull();
+      expect(summary.querySelector(".bg-warning")).not.toBeNull();
+    });
+
+    it("2. day full + night missing does NOT present as only a full/green state -- the critical night dot is still there", () => {
+      render(
+        <EveryoneMonthGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          dayViews={{ "2026-08-12": dayView({ day: periodView("day", "full"), night: periodView("night", "missing") }) }}
+          selectedDate={null}
+          onSelectDate={noop}
+        />,
+      );
+      const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+      const summary = mobileSummary(cell);
+      expect(summary.querySelector(".bg-success")).not.toBeNull();
+      expect(summary.querySelector(".bg-critical")).not.toBeNull();
+      const nightLabel = [...summary.querySelectorAll(".sr-only")].find((el) => el.textContent?.startsWith("לילה:"));
+      expect(nightLabel?.textContent).toContain("אין כיסוי");
+    });
+
+    it("3. day missing + night full works symmetrically -- the critical day dot is still there", () => {
+      render(
+        <EveryoneMonthGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          dayViews={{ "2026-08-12": dayView({ day: periodView("day", "missing"), night: periodView("night", "full") }) }}
+          selectedDate={null}
+          onSelectDate={noop}
+        />,
+      );
+      const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+      const summary = mobileSummary(cell);
+      expect(summary.querySelector(".bg-critical")).not.toBeNull();
+      expect(summary.querySelector(".bg-success")).not.toBeNull();
+      const dayLabel = [...summary.querySelectorAll(".sr-only")].find((el) => el.textContent?.startsWith("יום:"));
+      expect(dayLabel?.textContent).toContain("אין כיסוי");
+    });
+
+    it("4. an extra duty/absence count still fits in the mobile summary without changing the cell's shared height budget", () => {
+      render(
+        <EveryoneMonthGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          dayViews={{
+            "2026-08-12": dayView({
+              day: periodView("day", "full"),
+              night: periodView("night", "full"),
+              duties: [{ key: "d1", personName: "איתן דוגמה", title: "שומר", emoji: "🛡️" }],
+              absences: [{ key: "a1", personName: "מאיה לוי", label: "חופש", emoji: "🏖️" }],
+            }),
+          }}
+          selectedDate={null}
+          onSelectDate={noop}
+        />,
+      );
+      const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+      const summary = mobileSummary(cell);
+      expect(summary.textContent).toContain("+2");
+      // The cell itself still carries exactly the shared height budget --
+      // fitting the overflow chip into the existing mobile row never adds
+      // a taller/extra height class.
+      for (const token of CALENDAR_CELL_HEIGHT_CLASSES.split(" ")) {
+        expect(cell.className).toContain(token);
+      }
+    });
+
+    it("5. desktop (sm:+) presentation is unchanged -- two full text lines, day then night, still present", () => {
+      render(
+        <EveryoneMonthGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          dayViews={{ "2026-08-12": dayView({ day: periodView("day", "full"), night: periodView("night", "missing") }) }}
+          selectedDate={null}
+          onSelectDate={noop}
+        />,
+      );
+      const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+      // The label text sits in its OWN inner span (`hidden truncate sm:inline`)
+      // -- the chip's `hidden sm:flex` visibility class lives one level up,
+      // on its immediate parent.
+      const dayLine = screen.getByText("איש כלשהו").parentElement;
+      const nightLine = screen.getByText("חסר טכנאי").parentElement;
+      expect(dayLine?.className).toMatch(/hidden/);
+      expect(dayLine?.className).toMatch(/sm:flex/);
+      expect(nightLine?.className).toMatch(/hidden/);
+      expect(nightLine?.className).toMatch(/sm:flex/);
+      // The desktop lines are a separate DOM subtree from the mobile-only
+      // summary -- both exist, neither replaces the other in markup, only
+      // Tailwind's responsive classes decide which one paints.
+      expect(cell.querySelector('[role="group"]')).not.toBeNull();
     });
   });
 });
