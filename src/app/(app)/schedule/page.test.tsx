@@ -146,6 +146,59 @@ describe("SchedulePage — selected day resets on month change (regression)", ()
   });
 });
 
+describe("SchedulePage — ?date= deep link (global search navigation, PR #35)", () => {
+  it("23. selects the requested date when it falls within the displayed month", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(
+      okResult(
+        model({
+          calendarEvents: [
+            shiftEvent({ date: "2026-08-12", title: "משמרת ברירת מחדל" }),
+            shiftEvent({ date: "2026-08-22", title: "משמרת מבוקשת" }),
+          ],
+        }),
+      ),
+    );
+    const element = await SchedulePage({ searchParams: Promise.resolve({ month: "2026-08", date: "2026-08-22" }) });
+    render(element);
+
+    expect(selectedDayPanel().getByText("משמרת מבוקשת")).toBeInTheDocument();
+    expect(selectedDayPanel().queryByText("משמרת ברירת מחדל")).toBeNull();
+  });
+
+  it("ignores a ?date= outside the displayed month, falling back to the existing today-or-first default", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(
+      okResult(
+        model({
+          calendarEvents: [shiftEvent({ date: "2026-08-12", title: "משמרת ברירת מחדל" })],
+        }),
+      ),
+    );
+    // The requested date belongs to September, but the displayed month is August.
+    const element = await SchedulePage({ searchParams: Promise.resolve({ month: "2026-08", date: "2026-09-05" }) });
+    render(element);
+
+    expect(selectedDayPanel().getByText("משמרת ברירת מחדל")).toBeInTheDocument();
+  });
+
+  it("25. preserves the existing month/person params alongside ?date=, never resetting an unrelated filter", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(okResult(model()));
+    const element = await SchedulePage({ searchParams: Promise.resolve({ month: "2026-12", date: "2026-12-05" }) });
+    render(element);
+    expect(screen.getByText("דצמבר 2026")).toBeInTheDocument();
+  });
+
+  it("never crashes on a garbage ?date= value, including a prototype-pollution-style key", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(
+      okResult(model({ calendarEvents: [shiftEvent({ date: "2026-08-12", title: "משמרת ברירת מחדל" })] })),
+    );
+    const element = await SchedulePage({
+      searchParams: Promise.resolve({ month: "2026-08", date: "__proto__" }),
+    });
+    expect(() => render(element)).not.toThrow();
+    expect(selectedDayPanel().getByText("משמרת ברירת מחדל")).toBeInTheDocument();
+  });
+});
+
 describe("SchedulePage — active shift accent is event-date-aware, not tied to civil today", () => {
   it("a current same-day day shift: its own date gets the active accent", async () => {
     getRequestPersonalSchedule.mockResolvedValue(

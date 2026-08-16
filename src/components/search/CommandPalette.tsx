@@ -1,0 +1,363 @@
+"use client";
+
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { useRouter } from "next/navigation";
+import { CalendarDays, Search, UserRound, Users, X } from "lucide-react";
+import { assignmentEmoji } from "@/lib/presentation/emoji";
+import { formatHebrewWeekdayAndDate } from "@/lib/presentation/hebrewDate";
+import { periodLabel } from "@/lib/presentation/labels";
+import type { SearchReadModel } from "@/lib/readModels/searchTypes";
+import { parseSearchIntent } from "@/lib/search/parseSearchIntent";
+import { resolveSearchIntent } from "@/lib/search/resolveSearchIntent";
+import type { GlobalSearchResult, SearchShiftPeriod } from "@/lib/search/types";
+
+interface CommandPaletteProps {
+  open: boolean;
+  onClose: () => void;
+  model: SearchReadModel;
+}
+
+const EXAMPLE_QUERIES = ["עילאי", "מי איתי בשבת", "19.8", "מתי אני ועילאי יחד"];
+
+function periodEmoji(period: SearchShiftPeriod): string {
+  return assignmentEmoji({ category: "shift", period, dutyFamily: null, absenceKind: null }) ?? "";
+}
+
+function resultHref(result: GlobalSearchResult): string | null {
+  return result.href;
+}
+
+/**
+ * The global command palette (PR #35) -- a system-level search surface
+ * mounted once via `SearchPaletteProvider`. Query parsing/resolution is
+ * pure and entirely local (`parseSearchIntent`/`resolveSearchIntent` over
+ * the already-loaded, safe `SearchReadModel`) -- no network request per
+ * keystroke, no debounce needed.
+ *
+ * Keyboard/ARIA follows the exact combobox+listbox pattern already
+ * established by `PersonPicker`: the search input is the ONLY real tab
+ * stop while open; results are `role="option"` rows highlighted via
+ * `aria-activedescendant`, never separately focusable. Tab is intercepted
+ * to keep focus on the input (the simplest correct trap when there is
+ * exactly one real focusable element inside the dialog); Escape closes and
+ * restores focus to whatever triggered the palette.
+ */
+export function CommandPalette({ open, onClose, model }: CommandPaletteProps) {
+  const router = useRouter();
+  const [query, setQuery] = useState("");
+  const [highlightedIndex, setHighlightedIndex] = useState(0);
+  const [syncedOpen, setSyncedOpen] = useState(open);
+
+  const inputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+  const listboxId = useId();
+
+  // Resets the query/highlight the moment `open` flips true -- React's own
+  // "adjusting state when a prop changes" pattern (a setState call during
+  // render, guarded by comparing against a tracked previous value) rather
+  // than an effect, so there's no extra render pass and no stale query
+  // flash before the reset lands. `open` is always false on every render
+  // that could still be running server-side (it only ever becomes true
+  // from a client interaction after mount), so this never risks a
+  // hydration mismatch either.
+  if (open !== syncedOpen) {
+    setSyncedOpen(open);
+    if (open) {
+      setQuery("");
+      setHighlightedIndex(0);
+    }
+  }
+
+  // Real DOM side effects (focus management) -- these belong in an effect;
+  // neither one calls React state, so nothing here can cascade renders.
+  useEffect(() => {
+    if (!open) return;
+    previousFocusRef.current = document.activeElement as HTMLElement | null;
+    inputRef.current?.focus();
+  }, [open]);
+
+  useEffect(() => {
+    if (open) return;
+    previousFocusRef.current?.focus();
+    previousFocusRef.current = null;
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key === "Tab") {
+        // The search input is the only real tab stop while the palette is
+        // open -- keep focus there rather than letting Tab escape to
+        // whatever is behind the backdrop.
+        event.preventDefault();
+        inputRef.current?.focus();
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [open, onClose]);
+
+  const resolution = useMemo(() => {
+    if (!open) return null;
+    const intent = parseSearchIntent(query);
+    return resolveSearchIntent(intent, model);
+  }, [open, query, model]);
+
+  const results = resolution?.results ?? [];
+  const clampedIndex = Math.min(highlightedIndex, Math.max(results.length - 1, 0));
+  const highlightedResult = results[clampedIndex];
+
+  function activate(result: GlobalSearchResult) {
+    const href = resultHref(result);
+    onClose();
+    if (href) router.push(href);
+  }
+
+  function handleInputKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setHighlightedIndex((index) => Math.min(index + 1, Math.max(results.length - 1, 0)));
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setHighlightedIndex((index) => Math.max(index - 1, 0));
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      if (highlightedResult) activate(highlightedResult);
+    }
+  }
+
+  if (!open) return null;
+
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-start justify-center sm:pt-[10vh]">
+      <div role="presentation" aria-hidden="true" className="absolute inset-0 bg-black/40" onClick={onClose} />
+
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="חיפוש"
+        className="relative flex h-dvh w-full flex-col bg-surface-1 sm:h-auto sm:max-h-[70vh] sm:max-w-xl sm:rounded-2xl sm:shadow-[var(--shadow-hero)] sm:ring-1 sm:ring-border-strong"
+      >
+        <div className="flex items-center gap-2 border-b border-border px-4 py-3">
+          <Search className="h-4 w-4 shrink-0 text-muted" aria-hidden="true" strokeWidth={1.75} />
+          <input
+            ref={inputRef}
+            type="text"
+            role="combobox"
+            aria-expanded={results.length > 0}
+            aria-controls={listboxId}
+            aria-activedescendant={highlightedResult ? `${listboxId}-option-${highlightedResult.key}` : undefined}
+            aria-label="חיפוש אנשים, תאריכים ומשמרות"
+            autoComplete="off"
+            placeholder="חפשו איש/אשת צוות, תאריך או משמרת..."
+            value={query}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setHighlightedIndex(0);
+            }}
+            onKeyDown={handleInputKeyDown}
+            className="min-w-0 flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-2 focus:outline-none"
+          />
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="סגירת חיפוש"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-muted transition-colors duration-150 hover:bg-overlay-soft hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+          >
+            <X className="h-4 w-4" aria-hidden="true" strokeWidth={1.75} />
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto p-2">
+          {query.trim() === "" ? (
+            <IdlePane onPick={setQuery} />
+          ) : results.length === 0 ? (
+            <EmptyPane message={resolution?.emptyMessage ?? null} />
+          ) : (
+            <ul id={listboxId} role="listbox" aria-label="תוצאות חיפוש" className="flex flex-col gap-1">
+              {results.map((result, index) => (
+                <ResultRow
+                  key={result.key}
+                  result={result}
+                  optionId={`${listboxId}-option-${result.key}`}
+                  highlighted={index === clampedIndex}
+                  onHighlight={() => setHighlightedIndex(index)}
+                  onActivate={() => activate(result)}
+                />
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+function IdlePane({ onPick }: { onPick: (query: string) => void }) {
+  return (
+    <div className="px-3 py-4">
+      <p className="px-1 text-xs font-medium text-muted-2">לדוגמה</p>
+      <ul className="mt-1.5 flex flex-col gap-0.5">
+        {EXAMPLE_QUERIES.map((example) => (
+          <li key={example}>
+            <button
+              type="button"
+              onClick={() => onPick(example)}
+              className="w-full rounded-xl px-3 py-2 text-start text-sm text-foreground transition-colors duration-150 hover:bg-overlay-soft"
+            >
+              {example}
+            </button>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-3 px-1 text-xs text-muted-2">↑↓ לניווט · Enter לבחירה · Esc לסגירה</p>
+    </div>
+  );
+}
+
+function EmptyPane({ message }: { message: string | null }) {
+  return (
+    <div className="px-4 py-8 text-center">
+      <p className="text-sm text-foreground">{message ?? "לא מצאנו משהו שמתאים."}</p>
+      {!message ? <p className="mt-1 text-xs text-muted">נסו שם, תאריך (19.8) או יום בשבוע (חמישי).</p> : null}
+    </div>
+  );
+}
+
+interface ResultRowProps {
+  result: GlobalSearchResult;
+  optionId: string;
+  highlighted: boolean;
+  onHighlight: () => void;
+  onActivate: () => void;
+}
+
+function ResultRow({ result, optionId, highlighted, onHighlight, onActivate }: ResultRowProps) {
+  return (
+    <li
+      id={optionId}
+      role="option"
+      aria-selected={highlighted}
+      onMouseEnter={onHighlight}
+      onClick={onActivate}
+      className={`flex cursor-pointer items-start gap-3 rounded-xl px-3 py-2.5 transition-colors duration-150 ${
+        highlighted ? "bg-overlay-strong" : ""
+      }`}
+    >
+      <ResultIcon result={result} />
+      <ResultContent result={result} />
+    </li>
+  );
+}
+
+function ResultIcon({ result }: { result: GlobalSearchResult }) {
+  const iconClassName = "h-4 w-4 text-muted";
+  const wrapperClassName = "flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-overlay-soft";
+
+  switch (result.kind) {
+    case "person":
+      return (
+        <span className={wrapperClassName}>
+          <UserRound className={iconClassName} aria-hidden="true" strokeWidth={1.75} />
+        </span>
+      );
+    case "date":
+      return (
+        <span className={wrapperClassName}>
+          <CalendarDays className={iconClassName} aria-hidden="true" strokeWidth={1.75} />
+        </span>
+      );
+    case "shift":
+      return (
+        <span aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center text-lg">
+          {periodEmoji(result.period)}
+        </span>
+      );
+    case "shared_shift":
+    case "with_me":
+      return (
+        <span className={wrapperClassName}>
+          <Users className={iconClassName} aria-hidden="true" strokeWidth={1.75} />
+        </span>
+      );
+  }
+}
+
+function ResultContent({ result }: { result: GlobalSearchResult }) {
+  switch (result.kind) {
+    case "person":
+      return (
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-foreground">{result.name}</p>
+          <p className="truncate text-xs text-muted">
+            {[result.roleLabel, result.personnelTypeLabel].filter(Boolean).join(" · ")}
+          </p>
+          {result.currentShift ? (
+            <p className="mt-0.5 truncate text-xs font-medium text-primary">
+              {periodEmoji(result.currentShift.period)} כרגע במשמרת {periodLabel(result.currentShift.period)}
+            </p>
+          ) : null}
+          {result.nextShift ? (
+            <p className="mt-0.5 truncate text-xs text-muted">
+              המשמרת הבאה: {formatHebrewWeekdayAndDate(result.nextShift.date)} · {periodLabel(result.nextShift.period)}
+            </p>
+          ) : null}
+          {result.nextSharedShift ? (
+            <p className="mt-0.5 truncate text-xs text-muted-2">
+              ביחד איתך: {formatHebrewWeekdayAndDate(result.nextSharedShift.date)} · {periodLabel(result.nextSharedShift.period)}
+            </p>
+          ) : null}
+        </div>
+      );
+    case "date":
+      return (
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-foreground">{result.label}</p>
+        </div>
+      );
+    case "shift":
+      return (
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-foreground">{result.label}</p>
+          <p className="truncate text-xs text-muted">
+            {result.people.length > 0
+              ? result.people.map((person) => person.name).join(" · ")
+              : "אין מידע על אנשים במשמרת זו."}
+          </p>
+        </div>
+      );
+    case "shared_shift":
+      return (
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-foreground">ביחד עם {result.personName}</p>
+          <p className="truncate text-xs text-muted">
+            {result.shifts
+              .map((shift) => `${formatHebrewWeekdayAndDate(shift.date)} · ${periodLabel(shift.period)}`)
+              .join("  ·  ")}
+          </p>
+        </div>
+      );
+    case "with_me":
+      return (
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-foreground">
+            {formatHebrewWeekdayAndDate(result.date)} · {periodLabel(result.period)}
+          </p>
+          <p className="truncate text-xs text-muted">
+            {result.people.length > 0 ? result.people.map((person) => person.name).join(" · ") : "אין מידע על אנשים נוספים במשמרת זו."}
+          </p>
+        </div>
+      );
+  }
+}

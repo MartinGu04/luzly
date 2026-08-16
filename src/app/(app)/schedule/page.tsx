@@ -41,7 +41,7 @@ function buildDayMeta(date: string, todayDate: string): DayMeta {
 type SearchParamValue = string | string[] | undefined;
 
 interface SchedulePageProps {
-  searchParams: Promise<{ month?: SearchParamValue; person?: SearchParamValue }>;
+  searchParams: Promise<{ month?: SearchParamValue; person?: SearchParamValue; date?: SearchParamValue }>;
 }
 
 function firstParam(value: SearchParamValue): string | undefined {
@@ -94,6 +94,7 @@ export default async function SchedulePage({ searchParams }: SchedulePageProps) 
   const params = await searchParams;
   const rawMonth = firstParam(params.month) ?? null;
   const rawPerson = firstParam(params.person) ?? null;
+  const rawDate = firstParam(params.date) ?? null;
 
   const result = await getRequestSchedule(rawMonth, rawPerson);
   if (result.status !== "ok") {
@@ -122,7 +123,14 @@ export default async function SchedulePage({ searchParams }: SchedulePageProps) 
   const nextHref = scheduleHref(nextMonthKey, model.perspective, model.selectedPersonId);
   const todayHref = scheduleHref(null, model.perspective, model.selectedPersonId);
 
-  const defaultSelectedDate = days[model.localNow.date] ? model.localNow.date : (inMonthDates[0] ?? null);
+  // A deep-linked `?date=` (e.g. from global search) selects that day, but
+  // only when it's actually a real, in-grid date -- `Object.hasOwn` (never
+  // plain `days[rawDate]`) so an adversarial param can't reach up the
+  // prototype chain. An out-of-month or garbage `?date=` is silently
+  // ignored, falling back to the existing today-or-first-of-month default,
+  // never a crash and never a fabricated selection.
+  const requestedDate = rawDate && Object.hasOwn(days, rawDate) ? rawDate : null;
+  const defaultSelectedDate = requestedDate ?? (days[model.localNow.date] ? model.localNow.date : (inMonthDates[0] ?? null));
 
   return (
     <div className="flex flex-col gap-4 sm:gap-6">

@@ -9,11 +9,13 @@ function renderWithTheme(ui: ReactElement) {
 }
 
 const getRequestPersonalSchedule = vi.fn();
+const getRequestSearchReadModel = vi.fn();
 const redirect = vi.fn((path: string) => {
   throw new Error(`REDIRECT:${path}`);
 });
 
 vi.mock("@/lib/readModels/getRequestPersonalSchedule", () => ({ getRequestPersonalSchedule }));
+vi.mock("@/lib/readModels/getRequestSearchReadModel", () => ({ getRequestSearchReadModel }));
 vi.mock("next/navigation", () => ({
   redirect,
   usePathname: () => "/",
@@ -24,18 +26,28 @@ const { default: ProtectedLayout } = await import("./layout");
 const { AppShell } = await import("@/components/layout/AppShell");
 
 /**
- * `ProtectedLayout` returns a Fragment wrapping AppRevalidator and AppShell
- * (PR #34), not AppShell directly -- the same sibling-mount shape the root
- * layout already uses for ServiceWorkerManager. Tests that need to inspect
- * the resolved AppShell element's own type/props dig it out of the
- * Fragment's children instead of assuming it's the root.
+ * `ProtectedLayout` returns a Fragment wrapping AppRevalidator and
+ * AppShell (PR #34), with AppShell itself now nested inside
+ * SearchPaletteProvider (PR #35) -- not AppShell directly, and not even a
+ * direct child. Tests that need to inspect the resolved AppShell element's
+ * own type/props dig it out by walking the returned element tree instead
+ * of assuming any particular nesting depth.
  */
 function findAppShellElement(element: ReactElement): ReactElement<ComponentProps<typeof AppShell>> {
-  const children = (element.props as { children: ReactElement | ReactElement[] }).children;
-  const childArray = Array.isArray(children) ? children : [children];
-  const appShellElement = childArray.find((child) => child.type === AppShell);
-  if (!appShellElement) throw new Error("AppShell element not found in ProtectedLayout's output");
-  return appShellElement as ReactElement<ComponentProps<typeof AppShell>>;
+  if (element.type === AppShell) return element as ReactElement<ComponentProps<typeof AppShell>>;
+
+  const children = (element.props as { children?: ReactElement | ReactElement[] }).children;
+  const childArray = Array.isArray(children) ? children : children ? [children] : [];
+  for (const child of childArray) {
+    if (!child || typeof child !== "object" || !("type" in child)) continue;
+    try {
+      return findAppShellElement(child);
+    } catch {
+      // Not found in this branch -- keep searching siblings.
+    }
+  }
+
+  throw new Error("AppShell element not found in ProtectedLayout's output");
 }
 
 function profile(overrides: Partial<PersonalProfile> = {}): PersonalProfile {
@@ -75,6 +87,10 @@ function okResult(person: PersonalProfile, avatarUrl: string | null = null) {
 beforeEach(() => {
   redirect.mockClear();
   getRequestPersonalSchedule.mockReset();
+  getRequestSearchReadModel.mockReset();
+  // Most tests here don't exercise search at all -- default to "unavailable"
+  // (no search trigger renders) so they don't each need a full SearchReadModel fixture.
+  getRequestSearchReadModel.mockResolvedValue({ status: "configuration_error" });
 });
 
 afterEach(() => {

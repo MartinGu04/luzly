@@ -10,6 +10,9 @@ const WEEKDAY_LABELS = [
   "יום שבת",
 ];
 
+/** The bare weekday name, without a leading "יום" -- e.g. "חמישי", "שבת". Sunday-first, matching `dayOfWeek`. */
+const BARE_WEEKDAY_LABELS = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
+
 /**
  * Standard Hebrew single-letter weekday abbreviations, Sunday-first (index
  * 0 = Sunday, matching `dayOfWeek`/every Sunday-first calendar grid in this
@@ -108,6 +111,21 @@ export function formatDateRange(startDate: string, endDate: string): string | nu
     return `${start.day}–${end.day} ב${MONTH_LABELS[start.month - 1]}`;
   }
   return `${start.day} ב${MONTH_LABELS[start.month - 1]} – ${end.day} ב${MONTH_LABELS[end.month - 1]}`;
+}
+
+/**
+ * The reverse of `formatHebrewWeekday`/`BARE_WEEKDAY_LABELS`: "יום חמישי"
+ * or bare "חמישי" -> 4 (Sunday-first, matching `dayOfWeek`). Trims/collapses
+ * whitespace and accepts either form; anything else (including a full
+ * `WEEKDAY_LABELS` string with different spacing) returns null rather than
+ * guessing. Never matches a substring -- "יום חמישי בבוקר" is not a bare
+ * weekday query.
+ */
+export function parseHebrewWeekdayName(raw: string): number | null {
+  const normalized = raw.replace(/\s+/g, " ").trim();
+  const bare = normalized.startsWith("יום ") ? normalized.slice("יום ".length) : normalized;
+  const index = BARE_WEEKDAY_LABELS.indexOf(bare);
+  return index === -1 ? null : index;
 }
 
 export type RelativeDayLabel = "today" | "tomorrow" | "other";

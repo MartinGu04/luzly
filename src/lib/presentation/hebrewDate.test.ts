@@ -8,6 +8,7 @@ import {
   formatHebrewWeekday,
   formatHebrewWeekdayAndDate,
   formatShortWeekday,
+  parseHebrewWeekdayName,
   relativeDayLabel,
   SHORT_WEEKDAY_LABELS,
 } from "./hebrewDate";
@@ -132,5 +133,34 @@ describe("relativeDayLabel", () => {
   it("everything else is other", () => {
     expect(relativeDayLabel("2026-08-20", "2026-08-12")).toBe("other");
     expect(relativeDayLabel("2026-08-11", "2026-08-12")).toBe("other");
+  });
+});
+
+describe("parseHebrewWeekdayName", () => {
+  it("parses every bare weekday name, Sunday-first", () => {
+    expect(parseHebrewWeekdayName("ראשון")).toBe(0);
+    expect(parseHebrewWeekdayName("שני")).toBe(1);
+    expect(parseHebrewWeekdayName("שלישי")).toBe(2);
+    expect(parseHebrewWeekdayName("רביעי")).toBe(3);
+    expect(parseHebrewWeekdayName("חמישי")).toBe(4);
+    expect(parseHebrewWeekdayName("שישי")).toBe(5);
+    expect(parseHebrewWeekdayName("שבת")).toBe(6);
+  });
+
+  it("parses the 'יום X' compound form", () => {
+    expect(parseHebrewWeekdayName("יום חמישי")).toBe(4);
+    expect(parseHebrewWeekdayName("יום שבת")).toBe(6);
+  });
+
+  it("trims and collapses surrounding whitespace", () => {
+    expect(parseHebrewWeekdayName("  חמישי  ")).toBe(4);
+    expect(parseHebrewWeekdayName("יום   חמישי")).toBe(4);
+  });
+
+  it("returns null for anything that isn't a bare weekday name -- never matches a substring", () => {
+    expect(parseHebrewWeekdayName("יום חמישי בבוקר")).toBeNull();
+    expect(parseHebrewWeekdayName("עילאי")).toBeNull();
+    expect(parseHebrewWeekdayName("")).toBeNull();
+    expect(parseHebrewWeekdayName("19.8")).toBeNull();
   });
 });
