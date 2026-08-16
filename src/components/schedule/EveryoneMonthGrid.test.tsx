@@ -1,0 +1,264 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
+import type { CalendarGridCell } from "@/lib/domain/calendarMonth";
+import type { ScheduleEveryoneDayView } from "@/lib/presentation/scheduleEveryone";
+import { EveryoneMonthGrid } from "./EveryoneMonthGrid";
+import type { DayMeta } from "./types";
+
+afterEach(() => {
+  cleanup();
+});
+
+function dayMeta(date: string, overrides: Partial<DayMeta> = {}): DayMeta {
+  const day = Number(date.slice(8, 10));
+  return {
+    date,
+    dayNumber: day,
+    isToday: false,
+    isPast: false,
+    dateLabel: `יום · ${day} באוגוסט`,
+    holiday: null,
+    ...overrides,
+  };
+}
+
+// A minimal one-week grid: 2026-08-09 (Sun) .. 2026-08-15 (Sat), all "in month".
+const WEEK_DATES = [
+  "2026-08-09",
+  "2026-08-10",
+  "2026-08-11",
+  "2026-08-12",
+  "2026-08-13",
+  "2026-08-14",
+  "2026-08-15",
+];
+
+const WEEK_GRID: CalendarGridCell[] = WEEK_DATES.map((date) => ({ date, inMonth: true }));
+
+function weekDays(overrides: Record<string, Partial<DayMeta>> = {}): Record<string, DayMeta> {
+  const days: Record<string, DayMeta> = {};
+  for (const date of WEEK_DATES) {
+    days[date] = dayMeta(date, overrides[date]);
+  }
+  return days;
+}
+
+const noop = () => {};
+
+describe("EveryoneMonthGrid", () => {
+  it("renders a leading out-of-month cell as a non-interactive, dimmed date -- never a button, never blank", () => {
+    const grid: CalendarGridCell[] = [{ date: "2026-08-08", inMonth: false }, ...WEEK_GRID];
+    render(<EveryoneMonthGrid grid={grid} days={weekDays()} dayViews={{}} selectedDate={null} onSelectDate={noop} />);
+    expect(screen.getAllByRole("button")).toHaveLength(7);
+    expect(screen.queryByRole("button", { name: /8/ })).toBeNull();
+    const outsideCell = screen.getByText("8", { selector: "span" });
+    expect(outsideCell.className).toMatch(/opacity-40/);
+    expect(outsideCell.closest("div[aria-hidden='true']")?.className).not.toMatch(/opacity-40/);
+  });
+
+  it("calls onSelectDate with the clicked day's date", () => {
+    const onSelectDate = vi.fn();
+    render(
+      <EveryoneMonthGrid grid={WEEK_GRID} days={weekDays()} dayViews={{}} selectedDate={null} onSelectDate={onSelectDate} />,
+    );
+    screen.getByRole("button", { name: /12 באוגוסט/ }).click();
+    expect(onSelectDate).toHaveBeenCalledWith("2026-08-12");
+  });
+
+  it("marks the selected day as pressed", () => {
+    render(
+      <EveryoneMonthGrid grid={WEEK_GRID} days={weekDays()} dayViews={{}} selectedDate="2026-08-12" onSelectDate={noop} />,
+    );
+    expect(screen.getByRole("button", { name: /12 באוגוסט/ })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("marks today distinctly from other days", () => {
+    render(
+      <EveryoneMonthGrid
+        grid={WEEK_GRID}
+        days={weekDays({ "2026-08-12": { isToday: true } })}
+        dayViews={{}}
+        selectedDate={null}
+        onSelectDate={noop}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /12 באוגוסט/ }).innerHTML).toMatch(/ring-primary/);
+  });
+
+  describe("weekend distinction (past/future structural parity)", () => {
+    it("gives an unselected weekend day cell the same background wash a weekday cell doesn't get", () => {
+      render(<EveryoneMonthGrid grid={WEEK_GRID} days={weekDays()} dayViews={{}} selectedDate={null} onSelectDate={noop} />);
+      // 2026-08-14 is a Friday (weekend); 2026-08-12 is a Wednesday (weekday).
+      const weekendCell = screen.getByRole("button", { name: /14 באוגוסט/ });
+      const weekdayCell = screen.getByRole("button", { name: /12 באוגוסט/ });
+      expect(weekendCell.className).toMatch(/bg-weekend-tint/);
+      expect(weekdayCell.className).not.toMatch(/bg-weekend-tint/);
+    });
+
+    it("a selected weekend day uses the normal selection background, not the weekend wash", () => {
+      render(
+        <EveryoneMonthGrid grid={WEEK_GRID} days={weekDays()} dayViews={{}} selectedDate="2026-08-14" onSelectDate={noop} />,
+      );
+      const cell = screen.getByRole("button", { name: /14 באוגוסט/ });
+      expect(cell.className).toMatch(/bg-overlay-strong/);
+      expect(cell.className).not.toMatch(/bg-weekend-tint/);
+    });
+
+    it("a PAST weekend cell keeps the exact same structural weekend-tint class as a FUTURE weekend cell", () => {
+      render(
+        <EveryoneMonthGrid
+          grid={WEEK_GRID}
+          days={weekDays({ "2026-08-14": { isPast: true } })}
+          dayViews={{}}
+          selectedDate={null}
+          onSelectDate={noop}
+        />,
+      );
+      const pastWeekendCell = screen.getByRole("button", { name: /14 באוגוסט/ });
+      const futureWeekendCell = screen.getByRole("button", { name: /15 באוגוסט/ });
+      expect(pastWeekendCell.className).toMatch(/bg-weekend-tint/);
+      expect(futureWeekendCell.className).toMatch(/bg-weekend-tint/);
+      expect(pastWeekendCell.className).not.toMatch(/opacity-60/);
+      const pastContentWrapper = pastWeekendCell.firstElementChild as HTMLElement;
+      expect(pastContentWrapper.className).toMatch(/opacity-60/);
+    });
+
+    it("visually quiets a past day's CONTENT, never the cell's own background/border", () => {
+      render(
+        <EveryoneMonthGrid
+          grid={WEEK_GRID}
+          days={weekDays({ "2026-08-09": { isPast: true } })}
+          dayViews={{}}
+          selectedDate={null}
+          onSelectDate={noop}
+        />,
+      );
+      const cell = screen.getByRole("button", { name: /9 באוגוסט/ });
+      expect(cell.className).not.toMatch(/opacity-60/);
+      const contentWrapper = cell.firstElementChild as HTMLElement;
+      expect(contentWrapper.className).toMatch(/opacity-60/);
+    });
+
+    it("does not quiet a future day's content at all", () => {
+      render(<EveryoneMonthGrid grid={WEEK_GRID} days={weekDays()} dayViews={{}} selectedDate={null} onSelectDate={noop} />);
+      const cell = screen.getByRole("button", { name: /15 באוגוסט/ });
+      const contentWrapper = cell.firstElementChild as HTMLElement;
+      expect(contentWrapper.className).not.toMatch(/opacity-60/);
+    });
+
+    it("a selected PAST weekend cell overrides both the weekend wash and the past de-emphasis", () => {
+      render(
+        <EveryoneMonthGrid
+          grid={WEEK_GRID}
+          days={weekDays({ "2026-08-14": { isPast: true } })}
+          dayViews={{}}
+          selectedDate="2026-08-14"
+          onSelectDate={noop}
+        />,
+      );
+      const cell = screen.getByRole("button", { name: /14 באוגוסט/ });
+      expect(cell.className).toMatch(/bg-overlay-strong/);
+      expect(cell.className).not.toMatch(/bg-weekend-tint/);
+      const contentWrapper = cell.firstElementChild as HTMLElement;
+      expect(contentWrapper.className).not.toMatch(/opacity-60/);
+    });
+  });
+
+  describe("stable grid geometry across months (PR #38 calendar stability)", () => {
+    function daysForGrid(grid: CalendarGridCell[]): Record<string, DayMeta> {
+      const days: Record<string, DayMeta> = {};
+      for (const cell of grid) {
+        if (cell.inMonth) days[cell.date] = dayMeta(cell.date);
+      }
+      return days;
+    }
+
+    it("always renders exactly 6 week rows (42 cells) regardless of month shape", async () => {
+      const { buildMonthGrid } = await import("@/lib/domain/calendarMonth");
+      for (const [year, month] of [[2026, 9], [2026, 8], [2026, 11]] as const) {
+        cleanup();
+        const grid = buildMonthGrid(year, month);
+        const { container } = render(
+          <EveryoneMonthGrid grid={grid} days={daysForGrid(grid)} dayViews={{}} selectedDate={null} onSelectDate={noop} />,
+        );
+        const weekLabels = container.querySelectorAll('[aria-label^="שבוע "]');
+        expect(weekLabels).toHaveLength(6);
+        const buttons = container.querySelectorAll("button");
+        const outsideCells = container.querySelectorAll('div[aria-hidden="true"]');
+        expect(buttons.length + outsideCells.length).toBe(42);
+      }
+    });
+
+    it("out-of-month cells are never interactive buttons", async () => {
+      const { buildMonthGrid } = await import("@/lib/domain/calendarMonth");
+      const grid = buildMonthGrid(2026, 9);
+      const { container } = render(
+        <EveryoneMonthGrid grid={grid} days={daysForGrid(grid)} dayViews={{}} selectedDate={null} onSelectDate={noop} />,
+      );
+      const outsideCells = container.querySelectorAll('div[aria-hidden="true"]');
+      expect(outsideCells.length).toBeGreaterThan(0);
+      for (const cell of outsideCells) {
+        expect(cell.tagName).not.toBe("BUTTON");
+        expect(cell.textContent?.trim()).toMatch(/^\d{1,2}$/);
+      }
+    });
+  });
+
+  describe("staffing content is preserved (event/staffing semantics unchanged by the structural redesign)", () => {
+    function dayView(overrides: Partial<ScheduleEveryoneDayView> = {}): ScheduleEveryoneDayView {
+      return {
+        date: "2026-08-12",
+        day: null,
+        night: null,
+        duties: [],
+        absences: [],
+        ...overrides,
+      };
+    }
+
+    it("shows the day-period staffing summary text inside the cell", () => {
+      render(
+        <EveryoneMonthGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          dayViews={{
+            "2026-08-12": dayView({
+              day: {
+                period: "day",
+                label: "יום",
+                emoji: "☀️",
+                technicians: { people: [{ key: "p1", name: "דניאל כהן", tentative: false }], status: "full", message: null },
+                supervisors: { people: [], status: "not_evaluable", message: null },
+                shadowTechnicianNames: [],
+                shadowSupervisorNames: [],
+                coverageStatus: "full",
+              },
+            }),
+          }}
+          selectedDate={null}
+          onSelectDate={noop}
+        />,
+      );
+      const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+      expect(cell.textContent).toContain("דניאל כהן");
+    });
+
+    it("shows an extra-activity '+N' chip when duties/absences exist for a date", () => {
+      render(
+        <EveryoneMonthGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          dayViews={{
+            "2026-08-12": dayView({
+              duties: [{ key: "d1", personName: "איתן דוגמה", title: "שומר", emoji: "🛡️" }],
+            }),
+          }}
+          selectedDate={null}
+          onSelectDate={noop}
+        />,
+      );
+      const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+      expect(cell.textContent).toContain("+1");
+    });
+  });
+});

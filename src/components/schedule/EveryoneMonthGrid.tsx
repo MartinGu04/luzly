@@ -28,6 +28,12 @@ function weekRowNumber(week: CalendarGridCell[]): number | null {
   return parsed ? weekOfYear(parsed) : null;
 }
 
+function cellBorderClasses(columnIndex: number, isFirstRow: boolean): string {
+  const start = columnIndex === 0 ? "border-s" : "";
+  const top = isFirstRow ? "border-t" : "";
+  return `border-b border-e border-border ${start} ${top}`.trim();
+}
+
 /** The plain day-of-month number from a "YYYY-MM-DD" string -- used for outside-month cells, which have no `DayMeta` (that's only built for the displayed month's own dates). */
 function dayNumberFromDate(date: string): number {
   return Number(date.slice(8, 10));
@@ -126,12 +132,13 @@ export function EveryoneMonthGrid({ grid, days, dayViews, selectedDate, onSelect
         </div>
       </div>
 
-      <div className="flex flex-col gap-1 pt-2 sm:gap-1.5">
+      <div className="flex flex-col pt-2">
         {weeks.map((week, weekIndex) => {
           const weekNumber = weekRowNumber(week);
+          const isFirstRow = weekIndex === 0;
 
           return (
-            <div key={weekIndex} className="flex items-stretch gap-1 sm:gap-1.5">
+            <div key={weekIndex} className="flex items-stretch">
               <div
                 className="flex w-5 shrink-0 items-center justify-center text-[10px] font-medium text-muted-2 sm:w-6"
                 aria-label={weekNumber !== null ? `שבוע ${weekNumber}` : undefined}
@@ -139,31 +146,39 @@ export function EveryoneMonthGrid({ grid, days, dayViews, selectedDate, onSelect
                 <span aria-hidden="true">{weekNumber ?? ""}</span>
               </div>
 
-              <div className="grid flex-1 grid-cols-7 gap-1 sm:gap-1.5">
+              <div
+                className={`grid flex-1 grid-cols-7 overflow-hidden ${isFirstRow ? "rounded-t-xl" : ""} ${
+                  weekIndex === weeks.length - 1 ? "rounded-b-xl" : ""
+                }`}
+              >
                 {week.map((cell, index) => {
                   const isWeekend = isWeekendColumn(index);
+                  const borderClasses = cellBorderClasses(index, isFirstRow);
 
                   if (!cell.inMonth) {
                     return (
                       <div
                         key={cell.date}
                         aria-hidden="true"
-                        className={`flex h-[76px] items-start justify-start rounded-lg p-1 text-[11px] font-medium text-muted-2 opacity-40 sm:h-[104px] sm:rounded-xl sm:p-1.5 sm:text-xs lg:h-[124px] ${
+                        className={`flex h-[76px] items-start justify-start p-1 sm:h-[104px] sm:p-1.5 lg:h-[124px] ${borderClasses} ${
                           isWeekend ? "bg-weekend-tint" : ""
                         }`}
                       >
-                        {dayNumberFromDate(cell.date)}
+                        <span className="text-[11px] font-medium text-muted-2 opacity-40 sm:text-xs">
+                          {dayNumberFromDate(cell.date)}
+                        </span>
                       </div>
                     );
                   }
 
                   const date = cell.date;
                   const meta = days[date];
-                  if (!meta) return <div key={date} aria-hidden="true" />;
+                  if (!meta) return <div key={date} aria-hidden="true" className={borderClasses} />;
 
                   const dayView = dayViews[date];
                   const isSelected = date === selectedDate;
                   const extraCount = (dayView?.duties.length ?? 0) + (dayView?.absences.length ?? 0);
+                  const isPast = meta.isPast && !isSelected;
 
                   return (
                     <button
@@ -172,55 +187,57 @@ export function EveryoneMonthGrid({ grid, days, dayViews, selectedDate, onSelect
                       onClick={() => onSelectDate(date)}
                       aria-pressed={isSelected}
                       aria-label={meta.dateLabel}
-                      className={`flex h-[76px] flex-col items-stretch gap-1 rounded-lg p-1 text-start transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary sm:h-[104px] sm:rounded-xl sm:p-1.5 lg:h-[124px] ${
+                      className={`flex h-[76px] flex-col items-stretch p-1 text-start transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:-outline-offset-2 focus-visible:outline-primary sm:h-[104px] sm:p-1.5 lg:h-[124px] ${borderClasses} ${
                         isSelected
-                          ? "bg-overlay-strong ring-1 ring-border-strong"
+                          ? "bg-overlay-strong ring-2 ring-inset ring-primary/40"
                           : isWeekend
                             ? "bg-weekend-tint hover:bg-overlay-soft"
                             : "hover:bg-overlay-soft"
-                      } ${meta.isPast && !isSelected ? "opacity-60" : ""}`}
+                      }`}
                     >
-                      <div className="flex shrink-0 items-center justify-between">
-                        <span
-                          className={`flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-medium sm:h-6 sm:w-6 sm:text-xs ${
-                            meta.isToday ? "text-primary ring-1 ring-primary" : "text-foreground"
-                          }`}
-                        >
-                          {meta.dayNumber}
-                        </span>
-                        {meta.holiday ? (
-                          <span aria-hidden="true" className="text-[10px] sm:text-xs">
-                            {meta.holiday.emoji}
+                      <div className={`flex h-full flex-col gap-1 ${isPast ? "opacity-60" : ""}`}>
+                        <div className="flex shrink-0 items-center justify-between">
+                          <span
+                            className={`flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-medium sm:h-6 sm:w-6 sm:text-xs ${
+                              meta.isToday ? "text-primary ring-1 ring-primary" : "text-foreground"
+                            }`}
+                          >
+                            {meta.dayNumber}
+                          </span>
+                          {meta.holiday ? (
+                            <span aria-hidden="true" className="text-[10px] sm:text-xs">
+                              {meta.holiday.emoji}
+                            </span>
+                          ) : null}
+                        </div>
+
+                        {/* Mobile: compact coverage dots only -- no names, no horizontal overflow risk. */}
+                        <div className="flex items-center gap-1 sm:hidden">
+                          <span
+                            aria-hidden="true"
+                            className={`h-1.5 w-1.5 rounded-full ${statusDotClass(dayView?.day?.coverageStatus ?? null)}`}
+                          />
+                          <span
+                            aria-hidden="true"
+                            className={`h-1.5 w-1.5 rounded-full ${statusDotClass(dayView?.night?.coverageStatus ?? null)}`}
+                          />
+                          {extraCount > 0 ? (
+                            <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-primary" />
+                          ) : null}
+                        </div>
+
+                        {/* sm+: compact day/night text summary. */}
+                        <div className="hidden min-h-0 flex-1 flex-col justify-center gap-1 overflow-hidden sm:flex">
+                          <PeriodStrip view={dayView?.day ?? null} icon="☀️" />
+                          <PeriodStrip view={dayView?.night ?? null} icon="🌙" />
+                        </div>
+
+                        {extraCount > 0 ? (
+                          <span dir="ltr" className="hidden text-[9px] font-medium text-muted-2 sm:block">
+                            +{extraCount}
                           </span>
                         ) : null}
                       </div>
-
-                      {/* Mobile: compact coverage dots only -- no names, no horizontal overflow risk. */}
-                      <div className="flex items-center gap-1 sm:hidden">
-                        <span
-                          aria-hidden="true"
-                          className={`h-1.5 w-1.5 rounded-full ${statusDotClass(dayView?.day?.coverageStatus ?? null)}`}
-                        />
-                        <span
-                          aria-hidden="true"
-                          className={`h-1.5 w-1.5 rounded-full ${statusDotClass(dayView?.night?.coverageStatus ?? null)}`}
-                        />
-                        {extraCount > 0 ? (
-                          <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-primary" />
-                        ) : null}
-                      </div>
-
-                      {/* sm+: compact day/night text summary. */}
-                      <div className="hidden min-h-0 flex-1 flex-col justify-center gap-1 overflow-hidden sm:flex">
-                        <PeriodStrip view={dayView?.day ?? null} icon="☀️" />
-                        <PeriodStrip view={dayView?.night ?? null} icon="🌙" />
-                      </div>
-
-                      {extraCount > 0 ? (
-                        <span dir="ltr" className="hidden text-[9px] font-medium text-muted-2 sm:block">
-                          +{extraCount}
-                        </span>
-                      ) : null}
                     </button>
                   );
                 })}

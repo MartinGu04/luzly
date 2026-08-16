@@ -25,4 +25,23 @@ describe("ScheduleHeader", () => {
     const heading = screen.getByRole("heading", { name: "הלוח שלי" });
     expect(heading.tagName).toBe("H1");
   });
+
+  it("always renders the subtitle line's own paragraph, even with no range -- never a collapsed height (PR #38 follow-up: calendar-jump fix)", () => {
+    const { container } = render(<ScheduleHeader monthLabel="ספטמבר 2026" monthRangeSubtitle={null} />);
+    // The subtitle <p> (month label's next sibling) still exists in the DOM
+    // and still has visible whitespace content -- an empty/collapsed <p>
+    // (or a conditionally-omitted one) is exactly what shifted every
+    // element below it, including the calendar, month to month.
+    const subtitle = container.querySelector("h1 + p + p");
+    expect(subtitle).not.toBeNull();
+    expect(subtitle?.textContent).toMatch(/^\s+$/);
+    expect(subtitle?.textContent?.trim()).toBe("");
+    expect(subtitle).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("marks the subtitle as NOT aria-hidden when it has real content", () => {
+    const { container } = render(<ScheduleHeader monthLabel="אוגוסט 2026" monthRangeSubtitle="אב–אלול תשפ״ו" />);
+    const subtitle = container.querySelector("h1 + p + p");
+    expect(subtitle).not.toHaveAttribute("aria-hidden");
+  });
 });

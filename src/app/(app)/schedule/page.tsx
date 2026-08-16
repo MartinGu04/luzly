@@ -159,15 +159,18 @@ export default async function SchedulePage({ searchParams }: SchedulePageProps) 
       </div>
 
       {model.manager ? (
-        <ScheduleManagerSelector
-          managerName={model.manager.name}
-          people={model.roster}
-          perspective={model.perspective}
-          selectedPersonId={model.selectedPersonId}
-        />
-      ) : null}
-
-      <DataFreshnessStatus fetchedAt={model.fetchedAt} />
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <ScheduleManagerSelector
+            managerName={model.manager.name}
+            people={model.roster}
+            perspective={model.perspective}
+            selectedPersonId={model.selectedPersonId}
+          />
+          <DataFreshnessStatus fetchedAt={model.fetchedAt} className="sm:w-auto" />
+        </div>
+      ) : (
+        <DataFreshnessStatus fetchedAt={model.fetchedAt} />
+      )}
 
       {model.perspective === "all" && model.everyone ? (
         <ScheduleEveryoneCalendar

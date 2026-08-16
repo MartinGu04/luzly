@@ -113,8 +113,12 @@ describe("CalendarGrid", () => {
     expect(screen.getAllByRole("button")).toHaveLength(7);
     // The out-of-month cell still shows a real day number, just not as a button.
     expect(screen.queryByRole("button", { name: /8/ })).toBeNull();
-    const outsideCell = screen.getByText("8", { selector: "div[aria-hidden='true']" });
+    // The day-number text itself is de-emphasized (content layer), but the
+    // cell's own surface (the aria-hidden div) is never faded -- only its
+    // content is (PR #38 follow-up: structure vs. content opacity split).
+    const outsideCell = screen.getByText("8", { selector: "span" });
     expect(outsideCell.className).toMatch(/opacity-40/);
+    expect(outsideCell.closest("div[aria-hidden='true']")?.className).not.toMatch(/opacity-40/);
   });
 
   it("shows a day-shift emoji indicator", () => {
@@ -260,7 +264,7 @@ describe("CalendarGrid", () => {
     });
   });
 
-  it("visually quiets a past day", () => {
+  it("visually quiets a past day's CONTENT, never the cell's own background/border", () => {
     render(
       <CalendarGrid
         grid={WEEK_GRID}
@@ -271,10 +275,15 @@ describe("CalendarGrid", () => {
         activeShiftDates={[]}
       />,
     );
-    expect(screen.getByRole("button", { name: /9 באוגוסט/ }).className).toMatch(/opacity-60/);
+    const cell = screen.getByRole("button", { name: /9 באוגוסט/ });
+    // The cell/button element itself (background, border, hover state) is
+    // never faded -- only an inner content wrapper is (PR #38 follow-up).
+    expect(cell.className).not.toMatch(/opacity-60/);
+    const contentWrapper = cell.firstElementChild as HTMLElement;
+    expect(contentWrapper.className).toMatch(/opacity-60/);
   });
 
-  it("does not quiet a future day", () => {
+  it("does not quiet a future day's content at all", () => {
     render(
       <CalendarGrid
         grid={WEEK_GRID}
@@ -285,7 +294,26 @@ describe("CalendarGrid", () => {
         activeShiftDates={[]}
       />,
     );
-    expect(screen.getByRole("button", { name: /15 באוגוסט/ }).className).not.toMatch(/opacity-60/);
+    const cell = screen.getByRole("button", { name: /15 באוגוסט/ });
+    expect(cell.className).not.toMatch(/opacity-60/);
+    const contentWrapper = cell.firstElementChild as HTMLElement;
+    expect(contentWrapper.className).not.toMatch(/opacity-60/);
+  });
+
+  it("a SELECTED past day is never quieted -- selection always overrides past de-emphasis", () => {
+    render(
+      <CalendarGrid
+        grid={WEEK_GRID}
+        days={weekDays({ "2026-08-09": { isPast: true } })}
+        eventsByDate={{}}
+        selectedDate="2026-08-09"
+        onSelectDate={noop}
+        activeShiftDates={[]}
+      />,
+    );
+    const cell = screen.getByRole("button", { name: /9 באוגוסט/ });
+    const contentWrapper = cell.firstElementChild as HTMLElement;
+    expect(contentWrapper.className).not.toMatch(/opacity-60/);
   });
 
   it("renders an empty day (no events) with no emoji indicator", () => {
@@ -741,6 +769,84 @@ describe("CalendarGrid", () => {
       expect(cell.className).toMatch(/bg-overlay-strong/);
       expect(cell.className).not.toMatch(/bg-weekend-tint/);
     });
+
+    it("a PAST weekend cell keeps the exact same structural weekend-tint class as a FUTURE weekend cell -- past/future never changes the structural treatment", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays({ "2026-08-14": { isPast: true } })}
+          eventsByDate={{}}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      // 2026-08-14 (past Friday) and 2026-08-15 (future Saturday) are both weekend cells.
+      const pastWeekendCell = screen.getByRole("button", { name: /14 באוגוסט/ });
+      const futureWeekendCell = screen.getByRole("button", { name: /15 באוגוסט/ });
+      expect(pastWeekendCell.className).toMatch(/bg-weekend-tint/);
+      expect(futureWeekendCell.className).toMatch(/bg-weekend-tint/);
+      // Only the inner content wrapper differs (past de-emphasis), never the
+      // cell's own background/border classes.
+      expect(pastWeekendCell.className).not.toMatch(/opacity-60/);
+      const pastContentWrapper = pastWeekendCell.firstElementChild as HTMLElement;
+      expect(pastContentWrapper.className).toMatch(/opacity-60/);
+    });
+
+    it("today on a weekend keeps its today emphasis (ring) while still sitting on the weekend wash", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays({ "2026-08-14": { isToday: true } })}
+          eventsByDate={{}}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const cell = screen.getByRole("button", { name: /14 באוגוסט/ });
+      expect(cell.className).toMatch(/bg-weekend-tint/);
+      expect(cell.innerHTML).toMatch(/ring-primary/);
+    });
+
+    it("a selected PAST weekend cell overrides both the weekend wash and the past de-emphasis", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays({ "2026-08-14": { isPast: true } })}
+          eventsByDate={{}}
+          selectedDate="2026-08-14"
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const cell = screen.getByRole("button", { name: /14 באוגוסט/ });
+      expect(cell.className).toMatch(/bg-overlay-strong/);
+      expect(cell.className).not.toMatch(/bg-weekend-tint/);
+      const contentWrapper = cell.firstElementChild as HTMLElement;
+      expect(contentWrapper.className).not.toMatch(/opacity-60/);
+    });
+
+    it("an outside-month weekend cell keeps its structural weekend tint regardless of past/future -- only the day number fades", () => {
+      // 2026-08-15 (Saturday, column index 6 -- the weekend column) marked
+      // out-of-month, so its cell lands in a genuinely weekend COLUMN
+      // position (unlike prepending a padding date, which would land in
+      // column 0 -- Sunday -- regardless of what weekday the date itself is).
+      const grid: CalendarGridCell[] = WEEK_DATES.map((date, index) => ({ date, inMonth: index !== 6 }));
+      render(
+        <CalendarGrid
+          grid={grid}
+          days={weekDays()}
+          eventsByDate={{}}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const outsideCell = screen.getByText("15", { selector: "span" }).closest("div[aria-hidden='true']");
+      expect(outsideCell?.className).toMatch(/bg-weekend-tint/);
+      expect(outsideCell?.className).not.toMatch(/opacity-40/);
+    });
   });
 
   describe("week numbers (Design Pass PR #20, Sunday-first convention)", () => {
@@ -824,7 +930,7 @@ describe("CalendarGrid", () => {
         expect(weekLabels).toHaveLength(6);
         // Total cells (buttons + non-interactive out-of-month divs) is always 42.
         const buttons = container.querySelectorAll("button");
-        const outsideCells = container.querySelectorAll('div[aria-hidden="true"].opacity-40');
+        const outsideCells = container.querySelectorAll('div[aria-hidden="true"]');
         expect(buttons.length + outsideCells.length).toBe(42);
       }
     });
@@ -842,11 +948,15 @@ describe("CalendarGrid", () => {
           activeShiftDates={[]}
         />,
       );
-      const outsideCells = container.querySelectorAll('div[aria-hidden="true"].opacity-40');
+      const outsideCells = container.querySelectorAll('div[aria-hidden="true"]');
       expect(outsideCells.length).toBeGreaterThan(0);
       for (const cell of outsideCells) {
         expect(cell.tagName).not.toBe("BUTTON");
         expect(cell.textContent?.trim()).toMatch(/^\d{1,2}$/);
+        // The date number itself is de-emphasized, but the cell's own
+        // background/border is not -- only content is faded.
+        expect(cell.className).not.toMatch(/opacity-40/);
+        expect(cell.querySelector("span")?.className).toMatch(/opacity-40/);
       }
     });
   });
