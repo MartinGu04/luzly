@@ -110,40 +110,57 @@ function hasBlockingAbsence(candidateEvents: readonly Event[], touchedDates: Rea
   );
 }
 
-/** The one shift period a constraint can PROVABLY never overlap -- day and night are disjoint, non-overlapping canonical windows everywhere else in this domain, so a constraint recorded against the opposite period is genuinely safe to ignore. */
-function provablySafeConstraintPeriod(targetPeriod: "day" | "night"): "day" | "night" {
-  return targetPeriod === "day" ? "night" : "day";
-}
-
 /**
  * A parsed `constraint` Event (e.g. "אילוץ לילה") carries a genuinely
  * STRUCTURED `period` -- day/night/morning/unspecified -- set by the
- * parser from the constraint token itself, not guessed here. Checked
- * against every calendar date the missing interval touches
- * (`datesTouchedByMissingIntervals`), same as `hasBlockingAbsence`.
+ * parser from the constraint token itself, not guessed here.
  *
- * The product rule is conservative by construction: a candidate is
- * excluded UNLESS their constraint can be PROVEN safe. The only provable-
- * safe case is a constraint whose period is exactly the affected shift's
- * disjoint opposite (`provablySafeConstraintPeriod`) -- day never
- * overlaps night anywhere else in this domain either. Everything else
- * excludes: an exact-period match, `"unspecified"` (the whole day), and a
- * `"morning"` constraint too -- morning has no defined canonical window in
- * this domain, so its relationship to a day/night shift can never be
- * proven safe. Mi-Ma-Mo would rather omit a potentially-valid candidate
- * than suggest someone while already holding an unresolved constraint
- * signal against them -- uncertainty must never be read as a positive
- * availability claim.
+ * `"day"`/`"night"` constraints have the exact same canonical minute
+ * window as a shift of that period (`schedule.dayStartMinute`/`dayEndMinute`
+ * etc.), placed onto the issue's own timeline via `dayOffsetMinutes` --
+ * the same placement rule `hasConflictingOrUnresolvedShift` already uses
+ * for the candidate's own nearby shifts. A candidate is excluded only
+ * when that canonical constraint interval actually OVERLAPS a missing
+ * interval: a "אילוץ לילה" dated the day AFTER an overnight shift refers
+ * to the FOLLOWING night, not the early-morning tail of the missing
+ * shift, and correctly does not exclude the candidate.
+ *
+ * `"unspecified"` (the whole day) and `"morning"` have no provable
+ * canonical window, so they keep the original conservative rule: any
+ * occurrence on a calendar date the missing interval touches
+ * (`datesTouchedByMissingIntervals`) excludes the candidate -- Mi-Ma-Mo
+ * would rather omit a potentially-valid candidate than suggest someone
+ * while already holding an unresolved constraint signal against them;
+ * uncertainty must never be read as a positive availability claim.
  */
 function hasStructuralConstraintConflict(
   candidateEvents: readonly Event[],
   touchedDates: ReadonlySet<string>,
-  targetPeriod: "day" | "night",
+  issueDate: string,
+  missingIntervals: readonly MinuteInterval[],
+  schedule: ShiftSchedule,
 ): boolean {
-  const safePeriod = provablySafeConstraintPeriod(targetPeriod);
-  return candidateEvents.some(
-    (event) => event.category === "constraint" && touchedDates.has(event.date) && event.period !== safePeriod,
-  );
+  for (const event of candidateEvents) {
+    if (event.category !== "constraint") continue;
+
+    if (event.period === "day" || event.period === "night") {
+      const offset = dayOffsetMinutes(issueDate, event.date);
+      if (offset === null) continue;
+
+      const canonicalStart = event.period === "day" ? schedule.dayStartMinute : schedule.nightStartMinute;
+      const canonicalEnd = event.period === "day" ? schedule.dayEndMinute : schedule.nightEndMinute;
+      const constraintInterval: MinuteInterval = {
+        startMinute: canonicalStart + offset,
+        endMinute: canonicalEnd + offset,
+      };
+
+      if (missingIntervals.some((missing) => intervalsOverlap(constraintInterval, missing))) return true;
+      continue;
+    }
+
+    if (touchedDates.has(event.date)) return true;
+  }
+  return false;
 }
 
 /**
@@ -215,7 +232,6 @@ function hasConflictingOrUnresolvedShift(
 function isEligibleCandidate(
   candidate: Person,
   issueDate: string,
-  targetPeriod: "day" | "night",
   missingIntervals: readonly MinuteInterval[],
   allEvents: readonly Event[],
   schedule: ShiftSchedule,
@@ -224,7 +240,7 @@ function isEligibleCandidate(
   const touchedDates = datesTouchedByMissingIntervals(issueDate, missingIntervals);
 
   if (hasBlockingAbsence(candidateEvents, touchedDates)) return false;
-  if (hasStructuralConstraintConflict(candidateEvents, touchedDates, targetPeriod)) return false;
+  if (hasStructuralConstraintConflict(candidateEvents, touchedDates, issueDate, missingIntervals, schedule)) return false;
   if (hasConflictingOrUnresolvedShift(candidateEvents, issueDate, missingIntervals, schedule)) return false;
   return true;
 }
@@ -265,7 +281,7 @@ export function buildShiftCoverageRecommendation(
   const eligiblePool = (pool: readonly Person[]): Person[] =>
     pool
       .filter((person) => !alreadyOnShift.has(person.id))
-      .filter((person) => isEligibleCandidate(person, issue.date, targetPeriod, missingIntervals, events, schedule));
+      .filter((person) => isEligibleCandidate(person, issue.date, missingIntervals, events, schedule));
 
   if (missingRole === "supervisor") {
     const eligible = eligiblePool(people.filter((person) => person.isSupervisor));

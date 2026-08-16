@@ -486,14 +486,58 @@ describe("buildShiftCoverageRecommendation — overnight-aware blocking absence 
     expect(buildShiftCoverageRecommendation(issue, people, withConstraint, schedule)).toBeNull();
   });
 
-  it("a structurally matching ('night') constraint on the NEXT calendar day still excludes the candidate", () => {
+  it("a 'night' constraint dated the day AFTER the overnight gap refers to the FOLLOWING night and does not exclude the candidate", () => {
     const { TECH_A, events, people } = overnightPartialGapFixture();
     const withConstraint = [
       ...events,
+      // Refers to the night starting 19:30 on NEXT_DATE -- never overlaps
+      // the missing 05:30-07:30 tail of the PREVIOUS night's shift.
       constraintEvent({ personId: TECH_A.id, date: NEXT_DATE, period: "night" }),
     ];
     const issue = findCoverageIssue(withConstraint, people);
+    const recommendation = buildShiftCoverageRecommendation(issue, people, withConstraint, schedule);
+    expect(recommendation?.primaryCandidateIds).toEqual([TECH_A.id]);
+  });
+
+  it("a 'night' constraint on the SAME date as the overnight shift's start excludes the candidate (its canonical window contains the missing tail)", () => {
+    const { TECH_A, events, people } = overnightPartialGapFixture();
+    const withConstraint = [
+      ...events,
+      // Refers to the night starting 19:30 on DATE (1170-1890) -- the same
+      // night whose tail (1770-1890) is missing.
+      constraintEvent({ personId: TECH_A.id, date: DATE, period: "night" }),
+    ];
+    const issue = findCoverageIssue(withConstraint, people);
     expect(buildShiftCoverageRecommendation(issue, people, withConstraint, schedule)).toBeNull();
+  });
+
+  it("a 'day' constraint on the SAME date as a whole-day missing gap excludes the candidate", () => {
+    const TECH_A = person({ id: "p_tech_a", name: "איתי טכנאי", isTechnician: true });
+    const events = [
+      shiftEvent({ personId: SUP.id, role: "supervisor", period: "day" }),
+      constraintEvent({ personId: TECH_A.id, date: DATE, period: "day" }),
+    ];
+    const people = [SUP, TECH_A];
+    const issue = findCoverageIssue(events, people);
+    expect(issue.missingIntervals).toEqual([{ startMinute: 450, endMinute: 1170 }]); // whole day window
+    expect(buildShiftCoverageRecommendation(issue, people, events, schedule)).toBeNull();
+  });
+
+  it("a 'day' constraint whose canonical window only PARTIALLY overlaps the actual (partial) missing interval still excludes the candidate", () => {
+    const TECH_A = person({ id: "p_tech_a", name: "איתי טכנאי", isTechnician: true });
+    const TECH_PARTIAL = person({ id: "p_tech_partial", name: "נועה חלקי", isTechnician: true });
+    const events = [
+      shiftEvent({ personId: SUP.id, role: "supervisor", period: "day" }),
+      // Covers 07:30-09:30, leaving 09:30-19:30 missing (570-1170) -- a
+      // strict subset of the constraint's full canonical day window
+      // (450-1170), not an exact match.
+      shiftEvent({ personId: TECH_PARTIAL.id, role: "technician", period: "day", endTimeOverride: "09:30" }),
+      constraintEvent({ personId: TECH_A.id, date: DATE, period: "day" }),
+    ];
+    const people = [SUP, TECH_A, TECH_PARTIAL];
+    const issue = findCoverageIssue(events, people);
+    expect(issue.missingIntervals).toEqual([{ startMinute: 570, endMinute: 1170 }]);
+    expect(buildShiftCoverageRecommendation(issue, people, events, schedule)).toBeNull();
   });
 
   it("an unspecified next-day constraint still excludes the candidate", () => {
@@ -506,10 +550,12 @@ describe("buildShiftCoverageRecommendation — overnight-aware blocking absence 
     expect(buildShiftCoverageRecommendation(issue, people, withConstraint, schedule)).toBeNull();
   });
 
-  it("a provably-safe ('day') constraint on the NEXT calendar day does not exclude the candidate", () => {
+  it("a 'day' constraint on the NEXT calendar day does not exclude the candidate when its window starts exactly where the missing gap ends", () => {
     const { TECH_A, events, people } = overnightPartialGapFixture();
     const withConstraint = [
       ...events,
+      // Day window on NEXT_DATE is 1890-2610; the missing gap is 1770-1890
+      // -- they touch at 1890 but never overlap.
       constraintEvent({ personId: TECH_A.id, date: NEXT_DATE, period: "day" }),
     ];
     const issue = findCoverageIssue(withConstraint, people);
