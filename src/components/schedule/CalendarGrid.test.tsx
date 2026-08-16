@@ -391,22 +391,6 @@ describe("CalendarGrid", () => {
       expect(cell.textContent).toContain("חופש");
     });
 
-    it("shows a compact holiday indicator ('חג'), never the specific holiday name, inside the cell", () => {
-      render(
-        <CalendarGrid
-          grid={WEEK_GRID}
-          days={weekDays({ "2026-08-12": { holiday: HOLIDAY } })}
-          eventsByDate={{}}
-          selectedDate={null}
-          onSelectDate={noop}
-          activeShiftDates={[]}
-        />,
-      );
-      const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
-      expect(cell.textContent).toContain("חג");
-      expect(cell.textContent).not.toContain("ראש השנה");
-    });
-
     it("on wide layouts, shows up to 2 indicators plus a '+N' overflow chip marked visible only from sm: up", () => {
       render(
         <CalendarGrid
@@ -453,11 +437,11 @@ describe("CalendarGrid", () => {
           activeShiftDates={[]}
         />,
       );
-      // The second indicator is present in the DOM (so a real sm:+ viewport
-      // can show it) but marked hidden below sm:.
-      const secondIndicator = screen.getByText("לילה");
-      expect(secondIndicator.className).toMatch(/hidden/);
-      expect(secondIndicator.className).toMatch(/sm:block/);
+      // The second indicator's OUTER chip wrapper is present in the DOM (so
+      // a real sm:+ viewport can show it) but marked hidden below sm:.
+      const secondIndicatorChip = screen.getByText("לילה").parentElement;
+      expect(secondIndicatorChip?.className).toMatch(/hidden/);
+      expect(secondIndicatorChip?.className).toMatch(/sm:flex/);
 
       // Mobile overflow ("+2", counting past only the 1 indicator meant to
       // show on a narrow layout) is present and marked mobile-only.
@@ -518,7 +502,44 @@ describe("CalendarGrid", () => {
       expect(cell.textContent?.trim()).toBe("11");
     });
 
-    it("the holiday indicator counts toward the same 1-2-plus-overflow budget as events, never bypassing it", () => {
+  });
+
+  describe("holiday is calendar context, never a personal-event indicator (polish pass)", () => {
+    it("shows the holiday emoji beside the day number, not as a chip in the personal-event stack", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays({ "2026-08-12": { holiday: HOLIDAY } })}
+          eventsByDate={{}}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+      expect(cell.textContent).toContain("🍎");
+      // Never the generic "חג" short label, nor the specific holiday name --
+      // just the emoji, matching the "כולם" calendar's own holiday placement.
+      expect(cell.textContent).not.toContain("חג");
+      expect(cell.textContent).not.toContain("ראש השנה");
+    });
+
+    it("a holiday alone (no personal events) never renders an overflow chip", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays({ "2026-08-12": { holiday: HOLIDAY } })}
+          eventsByDate={{}}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+      expect(cell.textContent).not.toMatch(/\+\d/);
+    });
+
+    it("does not consume one of the 2 wide-layout personal-event slots -- both shifts still show, no wide overflow", () => {
       render(
         <CalendarGrid
           grid={WEEK_GRID}
@@ -535,11 +556,125 @@ describe("CalendarGrid", () => {
         />,
       );
       const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
-      // Holiday (חג) leads, then the first shift (יום) -- the second shift
-      // (לילה) is pushed past the wide-visible budget of 2.
-      expect(cell.textContent).toContain("חג");
+      expect(cell.textContent).toContain("🍎");
       expect(cell.textContent).toContain("יום");
-      expect(screen.getByText("+1")).toBeInTheDocument();
+      expect(cell.textContent).toContain("לילה");
+      // Both personal events fit the wide budget of 2 -- the holiday didn't
+      // take a slot, so there's no wide-layout ("hidden sm:block") overflow
+      // chip at all. The mobile-only "+1" (from showing just 1 of 2 events
+      // below sm:) is a separate, expected thing and is not what's asserted
+      // here -- see the "mobile indicators" describe block below for that.
+      const wideOverflow = [...cell.querySelectorAll("span")].find(
+        (el) => el.textContent === "+1" && /hidden/.test(el.className) && /sm:block/.test(el.className),
+      );
+      expect(wideOverflow).toBeUndefined();
+    });
+
+    it("does not contribute to the personal-event overflow count", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays({ "2026-08-12": { holiday: HOLIDAY } })}
+          eventsByDate={{
+            "2026-08-12": [
+              shiftEvent({ date: "2026-08-12", period: "day" }),
+              shiftEvent({ date: "2026-08-12", period: "night" }),
+              dutyEvent({ date: "2026-08-12" }),
+            ],
+          }}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+      expect(cell.textContent).toContain("🍎");
+      // 3 personal events, 2 visible on wide -- the wide overflow chip is
+      // "+1" (the 3rd event only), never "+2" -- the holiday never inflates it.
+      const wideOverflow = [...cell.querySelectorAll("span")].find(
+        (el) => /hidden/.test(el.className) && /sm:block/.test(el.className) && el.getAttribute("dir") === "ltr",
+      );
+      expect(wideOverflow?.textContent).toBe("+1");
+    });
+
+    it("holiday and personal events both stay visible together -- neither hides the other", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays({ "2026-08-12": { holiday: HOLIDAY } })}
+          eventsByDate={{ "2026-08-12": [shiftEvent({ date: "2026-08-12", period: "night" })] }}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+      expect(cell.textContent).toContain("🍎");
+      expect(cell.textContent).toContain("🌙");
+      expect(cell.textContent).toContain("לילה");
+    });
+  });
+
+  describe("mobile indicators never rely on truncated text (polish pass)", () => {
+    it("an indicator with a semantic emoji shows the emoji at every width, with its text label hidden below sm:", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          eventsByDate={{ "2026-08-12": [shiftEvent({ date: "2026-08-12", period: "night" })] }}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const label = screen.getByText("לילה");
+      // The label text itself is never visible below sm: -- only from sm: up.
+      expect(label.className).toMatch(/hidden/);
+      expect(label.className).toMatch(/sm:inline/);
+      // Nothing here ever truncates with an ellipsis-style class combined
+      // with hidden text -- the emoji (not the label) is what mobile shows.
+      const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+      expect(cell.textContent).toContain("🌙");
+    });
+
+    it("an indicator with no semantic emoji (e.g. an 'אפטר' absence) shows a small non-truncated fallback dot instead of clipped text", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          eventsByDate={{ "2026-08-12": [absenceEvent({ date: "2026-08-12", absenceKind: "after", title: "אפטר" })] }}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+      // The label text is present in the DOM (for sm:+) but hidden below sm:.
+      const label = screen.getByText("אפטר");
+      expect(label.className).toMatch(/hidden/);
+      expect(label.className).toMatch(/sm:inline/);
+      // A small fallback dot exists for the mobile-only, non-text representation.
+      const fallbackDot = cell.querySelector(".rounded-full.bg-border-strong");
+      expect(fallbackDot).not.toBeNull();
+      expect(fallbackDot?.className).toMatch(/sm:hidden/);
+    });
+
+    it("never applies a truncating ellipsis class to anything visible below sm: -- truncate only ever wraps the sm:-only label", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          eventsByDate={{ "2026-08-12": [dutyEvent({ date: "2026-08-12" })] }}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const label = screen.getByText("תורנות");
+      expect(label.className).toMatch(/truncate/);
+      // The truncate class lives on the label span itself, which is hidden
+      // below sm: -- it never applies to the always-visible emoji/fallback.
+      expect(label.className).toMatch(/hidden/);
     });
   });
 

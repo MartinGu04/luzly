@@ -1,5 +1,4 @@
 import type { PersonalEventView } from "@/lib/readModels/types";
-import type { HolidayContext } from "./hebrewCalendar";
 import { assignmentEmoji } from "./emoji";
 import { absenceKindLabel, periodLabel } from "./labels";
 
@@ -8,9 +7,15 @@ import { absenceKindLabel, periodLabel } from "./labels";
  * never the full event title (that belongs only in the selected-day
  * detail). A short, generic word per category: the shift's period ("יום"/
  * "לילה"/"בוקר"), the generic "תורנות" for any duty (never the specific
- * family -- that level of detail belongs in the day panel), the absence's
- * own kind label ("חופש"/"אפטר"/...), or the holiday's already-short
- * `shortLabel` ("חג"/"ערב חג"/"חוה״מ").
+ * family -- that level of detail belongs in the day panel), or the
+ * absence's own kind label ("חופש"/"אפטר"/...).
+ *
+ * A day's holiday is deliberately NOT one of these -- it's calendar
+ * context about the date itself, not something the person is doing, so it
+ * never competes with these for the limited indicator slots or the "+N"
+ * overflow count. `CalendarGrid` renders it separately, next to the day
+ * number (see `EveryoneMonthGrid`'s own holiday-emoji placement, which
+ * this mirrors).
  */
 export interface CalendarDayIndicator {
   key: string;
@@ -40,24 +45,14 @@ export function eventIndicator(event: PersonalEventView, key: string): CalendarD
   };
 }
 
-/** A day's holiday context as a compact grid indicator -- always the generic `shortLabel`, never the specific holiday name (that belongs in the selected-day detail). */
-export function holidayIndicator(holiday: HolidayContext): CalendarDayIndicator {
-  return { key: "holiday", emoji: holiday.emoji, label: holiday.shortLabel, tentative: false };
-}
-
 /**
- * Every indicator for one day, holiday first (calendar context) then the
- * day's own events in their existing deterministic order -- callers slice
- * this down to however many indicators actually fit (see `CalendarGrid`'s
- * responsive 1-2-visible-plus-overflow rule); this function itself never
- * truncates, so the true total count stays available for an accurate "+N".
+ * Every personal-event indicator for one day, in the events' own existing
+ * deterministic order -- callers slice this down to however many
+ * indicators actually fit (see `CalendarGrid`'s responsive visible-plus-
+ * overflow rule); this function itself never truncates, so the true total
+ * count stays available for an accurate "+N". Holiday context is
+ * deliberately NOT included here -- see the module doc comment.
  */
-export function buildDayIndicators(
-  events: readonly PersonalEventView[],
-  holiday: HolidayContext | null,
-): CalendarDayIndicator[] {
-  const indicators: CalendarDayIndicator[] = [];
-  if (holiday) indicators.push(holidayIndicator(holiday));
-  events.forEach((event, index) => indicators.push(eventIndicator(event, `event-${index}`)));
-  return indicators;
+export function buildDayIndicators(events: readonly PersonalEventView[]): CalendarDayIndicator[] {
+  return events.map((event, index) => eventIndicator(event, `event-${index}`));
 }

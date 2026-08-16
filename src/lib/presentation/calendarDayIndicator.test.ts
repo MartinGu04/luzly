@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PersonalEventView } from "@/lib/readModels/types";
-import type { HolidayContext } from "./hebrewCalendar";
-import { buildDayIndicators, eventIndicator, holidayIndicator } from "./calendarDayIndicator";
+import { buildDayIndicators, eventIndicator } from "./calendarDayIndicator";
 
 function baseEvent(overrides: Partial<PersonalEventView> = {}): PersonalEventView {
   return {
@@ -22,10 +21,6 @@ function baseEvent(overrides: Partial<PersonalEventView> = {}): PersonalEventVie
     timing: { status: "not_evaluable" },
     ...overrides,
   };
-}
-
-function holiday(overrides: Partial<HolidayContext> = {}): HolidayContext {
-  return { emoji: "🍎", label: "ראש השנה", kind: "holiday", shortLabel: "חג", ...overrides };
 }
 
 describe("eventIndicator", () => {
@@ -82,38 +77,19 @@ describe("eventIndicator", () => {
   });
 });
 
-describe("holidayIndicator", () => {
-  it("uses the holiday's generic shortLabel, never the specific holiday name", () => {
-    const indicator = holidayIndicator(holiday({ label: "חול המועד סוכות", shortLabel: "חוה״מ", kind: "cholHamoed" }));
-    expect(indicator.label).toBe("חוה״מ");
-    expect(indicator.label).not.toContain("סוכות");
-  });
-
-  it("carries the holiday's own emoji through unchanged", () => {
-    const indicator = holidayIndicator(holiday({ emoji: "🌿" }));
-    expect(indicator.emoji).toBe("🌿");
-  });
-});
-
 describe("buildDayIndicators", () => {
   it("returns an empty list for an ordinary day with no events", () => {
-    expect(buildDayIndicators([], null)).toEqual([]);
-  });
-
-  it("puts the holiday indicator first, ahead of the day's own events", () => {
-    const indicators = buildDayIndicators([baseEvent()], holiday());
-    expect(indicators[0].label).toBe("חג");
-    expect(indicators[1].label).toBe("יום");
+    expect(buildDayIndicators([])).toEqual([]);
   });
 
   it("never truncates -- returns every indicator, leaving slicing to the caller", () => {
     const events = [baseEvent({ period: "day" }), baseEvent({ period: "night" }), baseEvent({ category: "duty" })];
-    const indicators = buildDayIndicators(events, holiday());
-    expect(indicators).toHaveLength(4);
+    const indicators = buildDayIndicators(events);
+    expect(indicators).toHaveLength(3);
   });
 
-  it("omits the holiday indicator entirely when there is no holiday", () => {
-    const indicators = buildDayIndicators([baseEvent()], null);
+  it("never builds a holiday indicator -- holiday is calendar context, rendered separately by the caller", () => {
+    const indicators = buildDayIndicators([baseEvent()]);
     expect(indicators.some((indicator) => indicator.key === "holiday")).toBe(false);
   });
 });

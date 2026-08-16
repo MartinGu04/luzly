@@ -183,9 +183,9 @@ describe("SelectedDayPanel", () => {
   });
 
   describe("absences are shown in full detail", () => {
-    it("shows the absence's title and its kind label as a subtitle", () => {
-      render(<SelectedDayPanel dayMeta={meta()} events={[absenceEvent({ absenceKind: "vacation" })]} />);
-      expect(screen.getAllByText("חופש").length).toBeGreaterThan(0);
+    it("shows the absence's kind label, but only once -- title and subtitle read the same word here", () => {
+      render(<SelectedDayPanel dayMeta={meta()} events={[absenceEvent({ absenceKind: "vacation", title: "חופש" })]} />);
+      expect(screen.getAllByText("חופש")).toHaveLength(1);
     });
 
     it("distinguishes an 'after' absence from vacation", () => {
@@ -197,6 +197,51 @@ describe("SelectedDayPanel", () => {
     it("never shows a time row for an absence", () => {
       render(<SelectedDayPanel dayMeta={meta()} events={[absenceEvent()]} />);
       expect(screen.queryByText("השעה טרם מוגדרת")).toBeNull();
+    });
+  });
+
+  describe("redundant title/subtitle text is never rendered twice (polish pass)", () => {
+    it("renders 'חופש' exactly once when the absence title and its derived kind label are identical", () => {
+      render(<SelectedDayPanel dayMeta={meta()} events={[absenceEvent({ absenceKind: "vacation", title: "חופש" })]} />);
+      expect(screen.getAllByText("חופש")).toHaveLength(1);
+    });
+
+    it("renders 'אפטר' exactly once when the absence title and its derived kind label are identical", () => {
+      render(<SelectedDayPanel dayMeta={meta()} events={[absenceEvent({ absenceKind: "after", title: "אפטר" })]} />);
+      expect(screen.getAllByText("אפטר")).toHaveLength(1);
+    });
+
+    it("still shows a genuinely different subtitle -- shift role/period is never suppressed", () => {
+      render(<SelectedDayPanel dayMeta={meta()} events={[shiftEvent({ title: "טכנאי יום", role: "technician", period: "day" })]} />);
+      expect(screen.getByText("טכנאי יום")).toBeInTheDocument();
+      expect(screen.getByText("טכנאי · יום")).toBeInTheDocument();
+    });
+
+    it("still shows a genuinely different subtitle -- duty family/slot is never suppressed", () => {
+      render(<SelectedDayPanel dayMeta={meta()} events={[dutyEvent({ title: "שומר 1", dutyFamily: "guard", slot: 1 })]} />);
+      expect(screen.getByText("שומר 1")).toBeInTheDocument();
+      expect(screen.getByText("שמירה 1")).toBeInTheDocument();
+    });
+
+    it("still shows the tentative/shadow badges and change note even when the subtitle itself is suppressed", () => {
+      render(
+        <SelectedDayPanel
+          dayMeta={meta()}
+          events={[
+            absenceEvent({
+              absenceKind: "vacation",
+              title: "חופש",
+              certainty: "tentative",
+              shadow: true,
+              changeNote: "עודכן אתמול",
+            }),
+          ]}
+        />,
+      );
+      expect(screen.getAllByText("חופש")).toHaveLength(1);
+      expect(screen.getByText("משוער")).toBeInTheDocument();
+      expect(screen.getByText("חפיפה / צל")).toBeInTheDocument();
+      expect(screen.getByText("עודכן אתמול")).toBeInTheDocument();
     });
   });
 

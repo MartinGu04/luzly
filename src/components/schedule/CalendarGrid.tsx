@@ -23,7 +23,13 @@ interface CalendarGridProps {
   activeShiftDates: string[];
 }
 
-/** At most this many compact indicators show inside one day cell (on wide-enough layouts) before the rest collapse into a "+N" indicator. Narrower layouts show one fewer -- see the mobile/wide overflow split below. */
+/**
+ * At most this many compact PERSONAL-EVENT indicators (shift/duty/absence)
+ * show inside one day cell before the rest collapse into a "+N" overflow.
+ * A day's holiday is rendered separately, next to the day number -- it's
+ * calendar context about the date, not something the person is doing, so
+ * it never consumes one of these slots or counts toward the overflow.
+ */
 const MAX_INDICATORS_PER_DAY = 2;
 
 /** A Sunday-first 7-cell slice of `grid` -- one calendar row. */
@@ -41,13 +47,26 @@ function weekRowNumber(week: (string | null)[]): number | null {
   return parsed ? weekOfYear(parsed) : null;
 }
 
+/**
+ * One personal-event indicator. Below `sm:` this NEVER renders truncated
+ * text -- only the event's own semantic emoji, or (when a category has no
+ * fitting emoji, e.g. an "אפטר"/medical/day_off absence) a small neutral
+ * dot, so a narrow cell never shows a clipped "…" fragment. The short word
+ * label itself only appears from `sm:` up, where the cell has room for it.
+ */
 function IndicatorChip({ indicator, className = "" }: { indicator: CalendarDayIndicator; className?: string }) {
   return (
     <span
-      className={`truncate rounded bg-overlay-soft px-1 text-[9px] leading-[13px] text-foreground sm:text-[10px] sm:leading-4 ${className}`}
+      className={`flex min-w-0 items-center gap-1 rounded bg-overlay-soft px-1 text-[9px] leading-[13px] text-foreground sm:text-[10px] sm:leading-4 ${className}`}
     >
-      {indicator.emoji ? <span aria-hidden="true">{indicator.emoji} </span> : null}
-      {indicator.label}
+      {indicator.emoji ? (
+        <span aria-hidden="true" className="shrink-0">
+          {indicator.emoji}
+        </span>
+      ) : (
+        <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-border-strong sm:hidden" />
+      )}
+      <span className="hidden truncate sm:inline">{indicator.label}</span>
     </span>
   );
 }
@@ -65,18 +84,23 @@ function OverflowChip({ count, className = "" }: { count: number; className?: st
 
 /**
  * The Sunday-first month grid for "הלוח שלי" -- optimized for scanning, not
- * reading. Every day cell shows the day number plus, at most, two compact
- * indicators (one below the `sm:` breakpoint, to keep narrow layouts from
- * feeling cramped) covering shifts/duties/absences/holidays, then a "+N"
- * overflow rather than an ever-growing list. The FULL breakdown for a day
- * lives only in `SelectedDayPanel`, next to/below this grid -- this
- * component never tries to say everything about a day, only enough to
- * recognize it at a glance. Purely presentational -- selection state lives
- * in the client parent (`ScheduleCalendar`) so this component has no state
- * of its own and is trivial to render/test in isolation. Indicator labels
- * come from the shared `buildDayIndicators` helper (never invented here),
- * so a day cell and the selected-day detail always agree on what a given
- * event actually is.
+ * reading. Every day cell shows the day number, its holiday emoji right
+ * beside it when the date has one (calendar context, same idea as
+ * `EveryoneMonthGrid`'s own holiday placement -- never competing with the
+ * person's own events for space), plus at most two compact PERSONAL-EVENT
+ * indicators covering shifts/duties/absences, then a "+N" overflow rather
+ * than an ever-growing list. Below `sm:`, an indicator shows only its
+ * emoji (or a small neutral dot when it has none) -- never truncated text
+ * -- so a narrow cell never looks like content was squeezed in by force;
+ * the short word label itself only appears from `sm:` up. The FULL
+ * breakdown for a day lives only in `SelectedDayPanel`, next to/below this
+ * grid -- this component never tries to say everything about a day, only
+ * enough to recognize it at a glance. Purely presentational -- selection
+ * state lives in the client parent (`ScheduleCalendar`) so this component
+ * has no state of its own and is trivial to render/test in isolation.
+ * Indicator labels come from the shared `buildDayIndicators` helper (never
+ * invented here), so a day cell and the selected-day detail always agree
+ * on what a given event actually is.
  *
  * Thursday-Saturday columns (the Israeli weekend, see
  * `isWeekendColumn`) get a subtle background wash -- both header and
@@ -127,7 +151,7 @@ export function CalendarGrid({
                   if (!meta) return <div key={date} aria-hidden="true" />;
 
                   const dayEvents = eventsByDate[date] ?? [];
-                  const indicators = buildDayIndicators(dayEvents, meta.holiday);
+                  const indicators = buildDayIndicators(dayEvents);
                   const visibleIndicators = indicators.slice(0, MAX_INDICATORS_PER_DAY);
                   const mobileOverflow = Math.max(indicators.length - 1, 0);
                   const wideOverflow = Math.max(indicators.length - MAX_INDICATORS_PER_DAY, 0);
@@ -163,16 +187,23 @@ export function CalendarGrid({
                         >
                           {meta.dayNumber}
                         </span>
-                        {hasTentative ? (
-                          <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning" />
-                        ) : null}
+                        <div className="flex shrink-0 items-center gap-1">
+                          {meta.holiday ? (
+                            <span aria-hidden="true" className="text-[10px] sm:text-xs">
+                              {meta.holiday.emoji}
+                            </span>
+                          ) : null}
+                          {hasTentative ? (
+                            <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning" />
+                          ) : null}
+                        </div>
                       </div>
 
                       {visibleIndicators.length > 0 ? (
                         <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-hidden">
                           {visibleIndicators[0] ? <IndicatorChip indicator={visibleIndicators[0]} /> : null}
                           {visibleIndicators[1] ? (
-                            <IndicatorChip indicator={visibleIndicators[1]} className="hidden sm:block" />
+                            <IndicatorChip indicator={visibleIndicators[1]} className="hidden sm:flex" />
                           ) : null}
                           {mobileOverflow > 0 ? <OverflowChip count={mobileOverflow} className="sm:hidden" /> : null}
                           {wideOverflow > 0 ? (

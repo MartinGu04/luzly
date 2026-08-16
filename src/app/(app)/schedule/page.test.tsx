@@ -306,13 +306,15 @@ describe("SchedulePage — הלוח שלי represents more than shifts alone", (
     expect(selectedDayPanel().getAllByText("חופש").length).toBeGreaterThan(0);
   });
 
-  it("shows the day's holiday context end-to-end, compactly in the grid and in full in the selected-day panel", async () => {
+  it("shows the day's holiday context end-to-end, compactly (emoji beside the day number) in the grid and in full in the selected-day panel", async () => {
     // 2026-09-12 is Rosh Hashana (see hebrewCalendar.test.ts).
     getRequestPersonalSchedule.mockResolvedValue(okResult(model({ localNow: { date: "2026-09-12", minuteOfDay: 600 } })));
     const element = await SchedulePage({ searchParams: searchParams("2026-09") });
     render(element);
     const cell = screen.getByRole("button", { name: /12 בספטמבר/ });
-    expect(cell.textContent).toContain("חג");
+    // Holiday is calendar context, not a personal-event indicator -- shown
+    // as just the emoji beside the day number, never the specific name.
+    expect(cell.textContent).toContain("🍎");
     expect(cell.textContent).not.toContain("ראש השנה");
     expect(selectedDayPanel().getByText("ראש השנה")).toBeInTheDocument();
   });

@@ -70,7 +70,12 @@ export function SelectedDayPanel({ dayMeta, events }: SelectedDayPanelProps) {
           <ul className="mt-3 space-y-2.5">
             {events.map((event, index) => {
               const emoji = assignmentEmoji(event);
-              const subtitle = eventSubtitle(event);
+              // A subtitle identical to the title (e.g. an "אפטר"/"חופש"
+              // absence, where both the title and the kind label read the
+              // same) says nothing the title above it doesn't already --
+              // never render it twice.
+              const rawSubtitle = eventSubtitle(event);
+              const subtitle = rawSubtitle && rawSubtitle !== event.title ? rawSubtitle : null;
 
               return (
                 <li key={index} className="rounded-xl bg-overlay-faint p-3 ring-1 ring-border">
