@@ -361,7 +361,7 @@ describe("buildShiftCoverageRecommendation — eligibility exclusions", () => {
     expect(buildShiftCoverageRecommendation(issue, people, events, schedule)).toBeNull();
   });
 
-  it("19. an ambiguous ('morning') constraint is never fabricated into an exclusion", () => {
+  it("19. an ambiguous ('morning') constraint excludes the candidate conservatively -- uncertainty is never read as a positive availability claim", () => {
     const TECH_A = person({ id: "p_tech_a", name: "איתי טכנאי", isTechnician: true });
     const events = [
       shiftEvent({ personId: SUP.id, role: "supervisor" }),
@@ -369,7 +369,151 @@ describe("buildShiftCoverageRecommendation — eligibility exclusions", () => {
     ];
     const people = [SUP, TECH_A];
     const issue = findCoverageIssue(events, people);
+    expect(buildShiftCoverageRecommendation(issue, people, events, schedule)).toBeNull();
+  });
+
+  it("a constraint on the PROVABLY disjoint opposite period (night constraint against a day issue) remains eligible", () => {
+    const TECH_A = person({ id: "p_tech_a", name: "איתי טכנאי", isTechnician: true });
+    const events = [
+      shiftEvent({ personId: SUP.id, role: "supervisor", period: "day" }),
+      constraintEvent({ personId: TECH_A.id, period: "night" }),
+    ];
+    const people = [SUP, TECH_A];
+    const issue = findCoverageIssue(events, people);
     const recommendation = buildShiftCoverageRecommendation(issue, people, events, schedule);
+    expect(recommendation?.primaryCandidateIds).toEqual([TECH_A.id]);
+  });
+});
+
+describe("buildShiftCoverageRecommendation — overnight-aware blocking absence / constraint checks (review round)", () => {
+  // A night shift dated DATE, missing coverage only for the tail 05:30–07:30
+  // on NEXT_DATE (the following calendar day) -- the SAME shape as a
+  // reported real-world gap: nearly the whole night is covered, but the
+  // handover-adjacent early morning isn't.
+  function overnightPartialGapFixture() {
+    const TECH_A = person({ id: "p_tech_a", name: "איתי טכנאי", isTechnician: true });
+    const events = [
+      shiftEvent({ personId: SUP.id, role: "supervisor", period: "night" }),
+      // Covers 19:30–05:30, leaving 05:30–07:30 (NEXT_DATE) missing.
+      shiftEvent({ personId: "p_tech_partial", role: "technician", period: "night", endTimeOverride: "05:30" }),
+    ];
+    const people = [
+      SUP,
+      TECH_A,
+      person({ id: "p_tech_partial", name: "נועה חלקי", isTechnician: true }),
+    ];
+    return { TECH_A, events, people };
+  }
+
+  it("the overnight gap is anchored on the correct next-day hours", () => {
+    const { events, people } = overnightPartialGapFixture();
+    const issue = findCoverageIssue(events, people);
+    expect(issue.reason).toBe("shift_coverage_partial");
+    expect(issue.missingIntervals).toEqual([{ startMinute: 1770, endMinute: 1890 }]); // 05:30–07:30, day offset +1
+  });
+
+  it("a blocking vacation absence on the NEXT calendar day (touched by the overnight gap) excludes the candidate", () => {
+    const { TECH_A, events, people } = overnightPartialGapFixture();
+    const withAbsence = [
+      ...events,
+      absenceEvent({ personId: TECH_A.id, date: NEXT_DATE, absenceKind: "vacation" }),
+    ];
+    const issue = findCoverageIssue(withAbsence, people);
+    expect(buildShiftCoverageRecommendation(issue, people, withAbsence, schedule)).toBeNull();
+  });
+
+  it("a next-day medical absence excludes the candidate", () => {
+    const { TECH_A, events, people } = overnightPartialGapFixture();
+    const withAbsence = [
+      ...events,
+      absenceEvent({ personId: TECH_A.id, date: NEXT_DATE, absenceKind: "medical" }),
+    ];
+    const issue = findCoverageIssue(withAbsence, people);
+    expect(buildShiftCoverageRecommendation(issue, people, withAbsence, schedule)).toBeNull();
+  });
+
+  it("a next-day abroad absence excludes the candidate", () => {
+    const { TECH_A, events, people } = overnightPartialGapFixture();
+    const withAbsence = [
+      ...events,
+      absenceEvent({ personId: TECH_A.id, date: NEXT_DATE, absenceKind: "abroad" }),
+    ];
+    const issue = findCoverageIssue(withAbsence, people);
+    expect(buildShiftCoverageRecommendation(issue, people, withAbsence, schedule)).toBeNull();
+  });
+
+  it("a next-day day_off absence excludes the candidate", () => {
+    const { TECH_A, events, people } = overnightPartialGapFixture();
+    const withAbsence = [
+      ...events,
+      absenceEvent({ personId: TECH_A.id, date: NEXT_DATE, absenceKind: "day_off" }),
+    ];
+    const issue = findCoverageIssue(withAbsence, people);
+    expect(buildShiftCoverageRecommendation(issue, people, withAbsence, schedule)).toBeNull();
+  });
+
+  it("a next-day 'after' absence is NOT automatically blocking, even when it touches the overnight gap", () => {
+    const { TECH_A, events, people } = overnightPartialGapFixture();
+    const withAbsence = [
+      ...events,
+      absenceEvent({ personId: TECH_A.id, date: NEXT_DATE, absenceKind: "after" }),
+    ];
+    const issue = findCoverageIssue(withAbsence, people);
+    const recommendation = buildShiftCoverageRecommendation(issue, people, withAbsence, schedule);
+    expect(recommendation?.primaryCandidateIds).toEqual([TECH_A.id]);
+  });
+
+  it("a next-day absence does NOT falsely exclude a candidate for a plain DAYTIME issue that never touches the next date", () => {
+    const TECH_A = person({ id: "p_tech_a", name: "איתי טכנאי", isTechnician: true });
+    const events = [
+      shiftEvent({ personId: SUP.id, role: "supervisor", period: "day" }),
+      absenceEvent({ personId: TECH_A.id, date: NEXT_DATE, absenceKind: "vacation" }),
+    ];
+    const people = [SUP, TECH_A];
+    const issue = findCoverageIssue(events, people);
+    expect(issue.missingIntervals).toEqual([{ startMinute: 450, endMinute: 1170 }]); // whole day window, DATE only
+    const recommendation = buildShiftCoverageRecommendation(issue, people, events, schedule);
+    expect(recommendation?.primaryCandidateIds).toEqual([TECH_A.id]);
+  });
+
+  it("an ambiguous ('morning') constraint on the NEXT calendar day (touched by the overnight gap) also excludes the candidate", () => {
+    const { TECH_A, events, people } = overnightPartialGapFixture();
+    const withConstraint = [
+      ...events,
+      constraintEvent({ personId: TECH_A.id, date: NEXT_DATE, period: "morning" }),
+    ];
+    const issue = findCoverageIssue(withConstraint, people);
+    expect(buildShiftCoverageRecommendation(issue, people, withConstraint, schedule)).toBeNull();
+  });
+
+  it("a structurally matching ('night') constraint on the NEXT calendar day still excludes the candidate", () => {
+    const { TECH_A, events, people } = overnightPartialGapFixture();
+    const withConstraint = [
+      ...events,
+      constraintEvent({ personId: TECH_A.id, date: NEXT_DATE, period: "night" }),
+    ];
+    const issue = findCoverageIssue(withConstraint, people);
+    expect(buildShiftCoverageRecommendation(issue, people, withConstraint, schedule)).toBeNull();
+  });
+
+  it("an unspecified next-day constraint still excludes the candidate", () => {
+    const { TECH_A, events, people } = overnightPartialGapFixture();
+    const withConstraint = [
+      ...events,
+      constraintEvent({ personId: TECH_A.id, date: NEXT_DATE, period: "unspecified" }),
+    ];
+    const issue = findCoverageIssue(withConstraint, people);
+    expect(buildShiftCoverageRecommendation(issue, people, withConstraint, schedule)).toBeNull();
+  });
+
+  it("a provably-safe ('day') constraint on the NEXT calendar day does not exclude the candidate", () => {
+    const { TECH_A, events, people } = overnightPartialGapFixture();
+    const withConstraint = [
+      ...events,
+      constraintEvent({ personId: TECH_A.id, date: NEXT_DATE, period: "day" }),
+    ];
+    const issue = findCoverageIssue(withConstraint, people);
+    const recommendation = buildShiftCoverageRecommendation(issue, people, withConstraint, schedule);
     expect(recommendation?.primaryCandidateIds).toEqual([TECH_A.id]);
   });
 });

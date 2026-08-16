@@ -1,4 +1,5 @@
-import { isNextCalendarDay } from "./dutyBlocks";
+import { addCalendarDays, formatCalendarDate, subtractCalendarDays } from "./dateRange";
+import { isNextCalendarDay, parseCalendarDate } from "./dutyBlocks";
 import type { Event, EventRole } from "./event";
 import { BLOCKING_ABSENCE_KINDS, type OperationalIssue } from "./operationalIssues";
 import { findShiftGroupEvents } from "./shiftCoverage";
@@ -62,48 +63,86 @@ function orderAndLimit(candidates: readonly Person[]): string[] {
 // either availability or conflict.
 // ---------------------------------------------------------------------------
 
+/** `date` shifted by `dayOffset` civil days (may be negative) -- the missing counterpart `addCalendarDays`/`subtractCalendarDays` need to be combined for, since neither alone accepts a signed offset. Falls back to `date` unchanged for a structurally invalid date, which should never occur with real domain data. */
+function shiftCalendarDate(date: string, dayOffset: number): string {
+  const parsed = parseCalendarDate(date);
+  if (!parsed) return date;
+  const shifted = dayOffset >= 0 ? addCalendarDays(parsed, dayOffset) : subtractCalendarDays(parsed, -dayOffset);
+  return formatCalendarDate(shifted);
+}
+
+/**
+ * Every calendar date the missing coverage interval(s) actually touch --
+ * always at least the issue's own date, plus one more for every extra
+ * midnight a `MinuteInterval` (anchored to the issue's date, values past
+ * 1439 meaning "the following day") crosses. An overnight night-shift gap
+ * that reaches into the early morning of the NEXT date genuinely touches
+ * that date too -- a known-absence/constraint safety check that only ever
+ * looked at the issue's own date would silently miss it.
+ */
+function datesTouchedByMissingIntervals(issueDate: string, missingIntervals: readonly MinuteInterval[]): Set<string> {
+  const dayOffsets = new Set<number>([0]);
+  for (const interval of missingIntervals) {
+    const startDay = Math.floor(interval.startMinute / MINUTES_PER_DAY);
+    const endDay = Math.floor((interval.endMinute - 1) / MINUTES_PER_DAY);
+    for (let day = startDay; day <= endDay; day++) dayOffsets.add(day);
+  }
+  return new Set([...dayOffsets].map((offset) => shiftCalendarDate(issueDate, offset)));
+}
+
 /**
  * Blocking absence: reuses `BLOCKING_ABSENCE_KINDS` outright -- never a
  * second definition of "blocking" (`after` stays deliberately excluded,
- * exactly like every other blocking-absence check in this domain).
- * Absences carry no sub-day granularity anywhere in this domain, so --
- * matching `detectBlockingAbsenceIssues`'s own same-date-only convention
- * -- this only ever checks the issue's own date, never reaching across a
- * midnight boundary for an overnight shift.
+ * exactly like every other blocking-absence check in this domain). Checked
+ * against EVERY calendar date the missing interval actually touches
+ * (`datesTouchedByMissingIntervals`), not merely the issue's own date --
+ * Mi-Ma-Mo already knows about a blocking absence the day after an
+ * overnight shift starts, and must not suggest that person just because
+ * the absence Event's own `date` differs from the issue's.
  */
-function hasBlockingAbsence(candidateEvents: readonly Event[], issueDate: string): boolean {
+function hasBlockingAbsence(candidateEvents: readonly Event[], touchedDates: ReadonlySet<string>): boolean {
   return candidateEvents.some(
     (event) =>
       event.category === "absence" &&
-      event.date === issueDate &&
+      touchedDates.has(event.date) &&
       event.absenceKind !== null &&
       BLOCKING_ABSENCE_KINDS.has(event.absenceKind),
   );
 }
 
+/** The one shift period a constraint can PROVABLY never overlap -- day and night are disjoint, non-overlapping canonical windows everywhere else in this domain, so a constraint recorded against the opposite period is genuinely safe to ignore. */
+function provablySafeConstraintPeriod(targetPeriod: "day" | "night"): "day" | "night" {
+  return targetPeriod === "day" ? "night" : "day";
+}
+
 /**
  * A parsed `constraint` Event (e.g. "אילוץ לילה") carries a genuinely
  * STRUCTURED `period` -- day/night/morning/unspecified -- set by the
- * parser from the constraint token itself, not guessed here. Only a
- * constraint whose period unambiguously covers the affected shift (an
- * exact match, or "unspecified" meaning the whole day) safely proves a
- * conflict. A "morning" constraint against a "day"/"night" shift is
- * genuinely ambiguous (morning has no defined relationship to either
- * canonical shift window in this domain) and is deliberately NEVER
- * treated as proof either way -- it simply doesn't participate in this
- * decision, matching the product rule that an ambiguous/non-structural
- * signal must never be converted into a fabricated availability claim.
+ * parser from the constraint token itself, not guessed here. Checked
+ * against every calendar date the missing interval touches
+ * (`datesTouchedByMissingIntervals`), same as `hasBlockingAbsence`.
+ *
+ * The product rule is conservative by construction: a candidate is
+ * excluded UNLESS their constraint can be PROVEN safe. The only provable-
+ * safe case is a constraint whose period is exactly the affected shift's
+ * disjoint opposite (`provablySafeConstraintPeriod`) -- day never
+ * overlaps night anywhere else in this domain either. Everything else
+ * excludes: an exact-period match, `"unspecified"` (the whole day), and a
+ * `"morning"` constraint too -- morning has no defined canonical window in
+ * this domain, so its relationship to a day/night shift can never be
+ * proven safe. Mi-Ma-Mo would rather omit a potentially-valid candidate
+ * than suggest someone while already holding an unresolved constraint
+ * signal against them -- uncertainty must never be read as a positive
+ * availability claim.
  */
 function hasStructuralConstraintConflict(
   candidateEvents: readonly Event[],
-  issueDate: string,
+  touchedDates: ReadonlySet<string>,
   targetPeriod: "day" | "night",
 ): boolean {
+  const safePeriod = provablySafeConstraintPeriod(targetPeriod);
   return candidateEvents.some(
-    (event) =>
-      event.category === "constraint" &&
-      event.date === issueDate &&
-      (event.period === targetPeriod || event.period === "unspecified"),
+    (event) => event.category === "constraint" && touchedDates.has(event.date) && event.period !== safePeriod,
   );
 }
 
@@ -182,9 +221,10 @@ function isEligibleCandidate(
   schedule: ShiftSchedule,
 ): boolean {
   const candidateEvents = allEvents.filter((event) => event.personId === candidate.id);
+  const touchedDates = datesTouchedByMissingIntervals(issueDate, missingIntervals);
 
-  if (hasBlockingAbsence(candidateEvents, issueDate)) return false;
-  if (hasStructuralConstraintConflict(candidateEvents, issueDate, targetPeriod)) return false;
+  if (hasBlockingAbsence(candidateEvents, touchedDates)) return false;
+  if (hasStructuralConstraintConflict(candidateEvents, touchedDates, targetPeriod)) return false;
   if (hasConflictingOrUnresolvedShift(candidateEvents, issueDate, missingIntervals, schedule)) return false;
   return true;
 }
