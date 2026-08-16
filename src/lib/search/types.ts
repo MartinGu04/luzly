@@ -36,13 +36,15 @@ export interface PersonSearchResult {
   name: string;
   roleLabel: string | null;
   personnelTypeLabel: string;
+  /** True when this result is the searching user's own roster entry -- "shared shift with you" has no meaning against yourself, so the UI never shows a shared-shift line (positive or "none found") for it. */
+  isSelf: boolean;
   /** Set only while the person is actually mid-shift right now. */
   currentShift: { period: SearchShiftPeriod } | null;
-  /** The person's own next upcoming shift, if any is within the search data window. */
+  /** The person's own next upcoming shift, if any is within the search data window. Rendered as THEIR shift, never the viewer's -- easy to misread as "next shift together" if not labeled distinctly (see `CommandPalette`). */
   nextShift: { date: string; period: SearchShiftPeriod } | null;
-  /** The next shift where the searching user and this person are BOTH staffed -- omitted (never an empty row) when none exists. */
+  /** The next shift where the searching user and this person are BOTH staffed. Never set for `isSelf`. */
   nextSharedShift: { date: string; period: SearchShiftPeriod } | null;
-  /** Navigable when there's a next shift or next shared shift to jump to; null for a purely informational card otherwise. */
+  /** Navigable only when a next shared shift exists to jump to (that date is on the VIEWER's own calendar); null for a purely informational card otherwise -- never the person's own unshared next shift. */
   href: string | null;
 }
 

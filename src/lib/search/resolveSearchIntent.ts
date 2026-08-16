@@ -115,10 +115,10 @@ function resolvePersonIntent(model: SearchReadModel, query: string): GlobalSearc
 }
 
 function toPersonResult(model: SearchReadModel, person: SearchRosterPerson): PersonSearchResult {
+  const isSelf = person.id === model.meId;
   const current = currentShiftFor(model.shiftEvents, person.id);
   const next = nextShiftFor(model.shiftEvents, person.id);
-  const nextShared =
-    person.id === model.meId ? null : (findNextSharedShifts(model.shiftEvents, model.meId, person.id, 1)[0] ?? null);
+  const nextShared = isSelf ? null : (findNextSharedShifts(model.shiftEvents, model.meId, person.id, 1)[0] ?? null);
 
   // Only a shared shift is a genuinely navigable destination: that date
   // exists on the VIEWER's own calendar. `/schedule` for a normal
@@ -137,6 +137,7 @@ function toPersonResult(model: SearchReadModel, person: SearchRosterPerson): Per
     name: person.name,
     roleLabel: roleLabel(roleFor(person)),
     personnelTypeLabel: personnelTypeGroupLabel(classifyPersonnelType(person.personnelType)),
+    isSelf,
     currentShift: current ? { period: current.period } : null,
     nextShift: next ? { date: next.date, period: next.period } : null,
     nextSharedShift: nextShared,

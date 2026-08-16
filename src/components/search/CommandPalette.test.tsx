@@ -116,6 +116,17 @@ describe("Command palette — focus and dialog semantics", () => {
     expect(dialog()).toHaveAttribute("aria-modal", "true");
   });
 
+  it("the search input renders at >=16px on mobile (text-base) so iOS Safari never auto-zooms on focus", () => {
+    renderPalette();
+    fireEvent.click(screen.getByRole("button", { name: "חיפוש" }));
+    // Tailwind's mobile-first default applies unprefixed classes below the
+    // `sm` breakpoint -- `text-base` (16px) must be the unprefixed class,
+    // with any smaller size (`text-sm`) only ever applied via `sm:`.
+    expect(searchInput().className).toMatch(/(?:^|\s)text-base(?:\s|$)/);
+    expect(searchInput().className).not.toMatch(/(?:^|\s)text-sm(?:\s|$)/);
+    expect(searchInput().className).toMatch(/(?:^|\s)sm:text-sm(?:\s|$)/);
+  });
+
   it("32. closing returns focus to the trigger that opened it", () => {
     renderPalette();
     const trigger = screen.getByRole("button", { name: "חיפוש" });
@@ -229,6 +240,63 @@ describe("Command palette — keyboard navigation and results", () => {
     fireEvent.change(searchInput(), { target: { value: "מתי אני ועילאי יחד" } });
     expect(screen.getByText(/עילאי/)).toBeInTheDocument();
     expect(screen.queryByText("לא מצאנו משהו שמתאים.")).toBeNull();
+  });
+});
+
+describe("Command palette — person result wording disambiguation", () => {
+  it("labels a colleague's own next shift with their name, never the plain ambiguous 'המשמרת הבאה:'", () => {
+    renderPalette(
+      fixtureModel({
+        shiftEvents: [
+          { personId: COLLEAGUE_ID, date: "2026-08-19", period: "night", role: "supervisor", certainty: "confirmed", shadow: false, temporalState: "upcoming" },
+        ],
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "חיפוש" }));
+    fireEvent.change(searchInput(), { target: { value: "עילאי" } });
+
+    expect(screen.getByText(/המשמרת הבאה של עילאי כהן:/)).toBeInTheDocument();
+    expect(screen.queryByText(/^המשמרת הבאה:/)).toBeNull();
+  });
+
+  it("shows an explicit muted 'no shared shift' note instead of quietly omitting the shared-shift row", () => {
+    renderPalette(
+      fixtureModel({
+        shiftEvents: [
+          { personId: COLLEAGUE_ID, date: "2026-08-19", period: "night", role: "supervisor", certainty: "confirmed", shadow: false, temporalState: "upcoming" },
+        ],
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "חיפוש" }));
+    fireEvent.change(searchInput(), { target: { value: "עילאי" } });
+
+    expect(screen.getByText("אין משמרת משותפת קרובה")).toBeInTheDocument();
+    expect(screen.queryByText(/^ביחד איתך:/)).toBeNull();
+  });
+
+  it("shows the clearly-labeled 'ביחד איתך:' shared-shift line, and never the 'no shared shift' note, when a shared shift exists", () => {
+    renderPalette(
+      fixtureModel({
+        shiftEvents: [
+          { personId: COLLEAGUE_ID, date: "2026-08-22", period: "night", role: "supervisor", certainty: "confirmed", shadow: false, temporalState: "upcoming" },
+          { personId: ME_ID, date: "2026-08-22", period: "night", role: "technician", certainty: "confirmed", shadow: false, temporalState: "upcoming" },
+        ],
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "חיפוש" }));
+    fireEvent.change(searchInput(), { target: { value: "עילאי" } });
+
+    expect(screen.getByText(/^ביחד איתך:/)).toBeInTheDocument();
+    expect(screen.queryByText("אין משמרת משותפת קרובה")).toBeNull();
+  });
+
+  it("never shows the 'no shared shift' note on the searching user's own self-match result", () => {
+    renderPalette(fixtureModel());
+    fireEvent.click(screen.getByRole("button", { name: "חיפוש" }));
+    fireEvent.change(searchInput(), { target: { value: "דני" } });
+
+    expect(screen.getByRole("option")).toBeInTheDocument();
+    expect(screen.queryByText("אין משמרת משותפת קרובה")).toBeNull();
   });
 });
 

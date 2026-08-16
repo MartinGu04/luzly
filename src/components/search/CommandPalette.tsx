@@ -196,7 +196,7 @@ export function CommandPalette({ open, onClose, model }: CommandPaletteProps) {
               setHighlightedIndex(0);
             }}
             onKeyDown={handleInputKeyDown}
-            className="min-w-0 flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-2 focus:outline-none"
+            className="min-w-0 flex-1 bg-transparent text-base text-foreground placeholder:text-muted-2 focus:outline-none sm:text-sm"
           />
           <button
             type="button"
@@ -340,14 +340,17 @@ function ResultContent({ result }: { result: GlobalSearchResult }) {
           ) : null}
           {result.nextShift ? (
             <p className="mt-0.5 truncate text-xs text-muted">
-              המשמרת הבאה: {formatHebrewWeekdayAndDate(result.nextShift.date)} · {periodLabel(result.nextShift.period)}
+              המשמרת הבאה של {result.name}: {formatHebrewWeekdayAndDate(result.nextShift.date)} ·{" "}
+              {periodLabel(result.nextShift.period)}
             </p>
           ) : null}
           {result.nextSharedShift ? (
-            <p className="mt-0.5 truncate text-xs text-muted-2">
+            <p className="mt-0.5 truncate text-xs font-medium text-primary">
               ביחד איתך: {formatHebrewWeekdayAndDate(result.nextSharedShift.date)} · {periodLabel(result.nextSharedShift.period)}
             </p>
-          ) : null}
+          ) : result.isSelf ? null : (
+            <p className="mt-0.5 truncate text-xs text-muted-2">אין משמרת משותפת קרובה</p>
+          )}
         </div>
       );
     case "date":

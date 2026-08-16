@@ -65,6 +65,12 @@ describe("resolveSearchIntent — person results", () => {
     }
   });
 
+  it("isSelf is false for a colleague result", () => {
+    const [result] = resolveSearchIntent({ kind: "person", query: "עילאי" }, model()).results;
+    expect(result.kind).toBe("person");
+    if (result.kind === "person") expect(result.isSelf).toBe(false);
+  });
+
   it("12. shows currently-on-shift state only while actually current", () => {
     const withCurrent = model({
       shiftEvents: [shiftEvent({ date: "2026-08-12", period: "night", temporalState: "current" })],
@@ -144,13 +150,16 @@ describe("resolveSearchIntent — person results", () => {
     if (result.kind === "person") expect(result.href).toBeNull();
   });
 
-  it("never computes a shared shift against yourself", () => {
+  it("never computes a shared shift against yourself, and flags the result as isSelf", () => {
     const withSelfShift = model({
       shiftEvents: [shiftEvent({ personId: ME_ID, date: "2026-08-12", period: "day", temporalState: "current" })],
     });
     const [result] = resolveSearchIntent({ kind: "person", query: "דני" }, withSelfShift).results;
     expect(result.kind).toBe("person");
-    if (result.kind === "person") expect(result.nextSharedShift).toBeNull();
+    if (result.kind === "person") {
+      expect(result.nextSharedShift).toBeNull();
+      expect(result.isSelf).toBe(true);
+    }
   });
 
   it("returns multiple person results, ranked exact > prefix > substring, never silently picking one", () => {
