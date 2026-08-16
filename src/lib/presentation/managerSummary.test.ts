@@ -49,9 +49,9 @@ describe("managerSummaryLabel", () => {
     const model = {
       ...emptyModel(),
       issues: [
-        { personId: "a", personName: "a", reason: "shift_coverage_missing" as const, severity: "critical" as const, date: "2026-08-13", missingIntervals: null, metadata: null, targetEvent: null },
-        { personId: "b", personName: "b", reason: "invalid_shift_time" as const, severity: "review" as const, date: "2026-08-13", missingIntervals: null, metadata: null, targetEvent: null },
-        { personId: "c", personName: "c", reason: "invalid_shift_time" as const, severity: "review" as const, date: "2026-08-13", missingIntervals: null, metadata: null, targetEvent: null },
+        { personId: "a", personName: "a", reason: "shift_coverage_missing" as const, severity: "critical" as const, date: "2026-08-13", missingIntervals: null, metadata: null, targetEvent: null, recommendation: null },
+        { personId: "b", personName: "b", reason: "invalid_shift_time" as const, severity: "review" as const, date: "2026-08-13", missingIntervals: null, metadata: null, targetEvent: null, recommendation: null },
+        { personId: "c", personName: "c", reason: "invalid_shift_time" as const, severity: "review" as const, date: "2026-08-13", missingIntervals: null, metadata: null, targetEvent: null, recommendation: null },
       ],
     };
     expect(managerSummaryLabel(model)).toBe("1 דחופים · 2 לבדיקה");
@@ -100,7 +100,7 @@ describe("managerSummaryLabel", () => {
       duties: [{ personId: "a", personName: "a", date: "2026-08-13", dutyFamily: "guard" as const, slot: null, certainty: "confirmed" as const }],
       absences: [],
       issues: [
-        { personId: "a", personName: "a", reason: "shift_coverage_missing" as const, severity: "critical" as const, date: "2026-08-13", missingIntervals: null, metadata: null, targetEvent: null },
+        { personId: "a", personName: "a", reason: "shift_coverage_missing" as const, severity: "critical" as const, date: "2026-08-13", missingIntervals: null, metadata: null, targetEvent: null, recommendation: null },
       ],
       potentialRequirements: [],
     };

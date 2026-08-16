@@ -1,7 +1,17 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
+import type { IssueRecommendationView } from "@/lib/presentation/issueRecommendation";
 import type { IssueRowView } from "./types";
 import { IssueRow } from "./IssueRow";
+
+function recommendationView(overrides: Partial<IssueRecommendationView> = {}): IssueRecommendationView {
+  return {
+    primaryText: "לפי הסידור הקיים, אפשר לבדוק עם איתי לגבי הכיסוי.",
+    disclaimer: "ייתכנו אילוצים אישיים שלא מופיעים במערכת.",
+    lastResort: null,
+    ...overrides,
+  };
+}
 
 afterEach(() => {
   cleanup();
@@ -85,16 +95,83 @@ describe("IssueRow — manager everyone view (personName set)", () => {
   });
 });
 
-describe("IssueRow — recommendation (secondary, collapsed)", () => {
-  it("renders nothing recommendation-related when unset", () => {
+describe("IssueRow — recommendation (secondary, collapsed) [PR #37]", () => {
+  it("35. renders nothing recommendation-related when unset", () => {
     render(<IssueRow view={view()} />);
     expect(screen.queryByText("פעולה מומלצת")).toBeNull();
   });
 
-  it("shows a collapsed disclosure only when a recommendation is present, never expanded by default", () => {
-    render(<IssueRow view={view({ recommendation: "שקול לשבץ מישהו נוסף למשמרת." })} />);
+  it("35. shows a collapsed disclosure only when a recommendation is present, never expanded by default", () => {
+    render(<IssueRow view={view({ recommendation: recommendationView() })} />);
     const summary = screen.getByText("פעולה מומלצת");
     expect(summary.closest("details")).not.toHaveAttribute("open");
-    expect(screen.getByText("שקול לשבץ מישהו נוסף למשמרת.")).toBeInTheDocument();
+    expect(screen.getByText("לפי הסידור הקיים, אפשר לבדוק עם איתי לגבי הכיסוי.")).toBeInTheDocument();
+  });
+
+  it("36. renders the primary recommendation text verbatim", () => {
+    render(
+      <IssueRow
+        view={view({
+          recommendation: recommendationView({
+            primaryText: "לפי הסידור הקיים, אפשר לבדוק עם איתי אוליר או עילאי שפירא לגבי הכיסוי.",
+          }),
+        })}
+      />,
+    );
+    expect(screen.getByText("לפי הסידור הקיים, אפשר לבדוק עם איתי אוליר או עילאי שפירא לגבי הכיסוי.")).toBeInTheDocument();
+  });
+
+  it("37. renders the disclaimer sentence when present", () => {
+    render(<IssueRow view={view({ recommendation: recommendationView() })} />);
+    expect(screen.getByText("ייתכנו אילוצים אישיים שלא מופיעים במערכת.")).toBeInTheDocument();
+  });
+
+  it("renders no disclaimer paragraph when disclaimer is null (the technician-exhausted case)", () => {
+    render(
+      <IssueRow
+        view={view({
+          recommendation: recommendationView({ primaryText: "לא נמצאו טכנאים מתאימים לפי המידע הקיים.", disclaimer: null }),
+        })}
+      />,
+    );
+    expect(screen.queryByText("ייתכנו אילוצים אישיים שלא מופיעים במערכת.")).toBeNull();
+  });
+
+  it("38/39. the last-resort disclosure is nested/secondary, collapsed independently, and absent when there's a normal recommendation", () => {
+    render(<IssueRow view={view({ recommendation: recommendationView() })} />);
+    expect(screen.queryByText("מוצא אחרון · הצג אפשרויות נוספות")).toBeNull();
+  });
+
+  it("38. exposes a NESTED collapsed last-resort disclosure, closed independently of the outer one", () => {
+    render(
+      <IssueRow
+        view={view({
+          recommendation: recommendationView({
+            primaryText: "לא נמצאו טכנאים מתאימים לפי המידע הקיים.",
+            disclaimer: null,
+            lastResort: {
+              triggerLabel: "מוצא אחרון · הצג אפשרויות נוספות",
+              text: "לא נמצאו טכנאים רגילים מתאימים. לפי הסידור הקיים, אפשר לבדוק גם עם טוביה כהן, שמסומן גם כבעל יכולת טכנית.",
+              disclaimer: "האפשרויות האלו מוצגות כמוצא אחרון בלבד, וייתכנו אילוצים אישיים שלא מופיעים במערכת.",
+            },
+          }),
+        })}
+      />,
+    );
+
+    const outerSummary = screen.getByText("פעולה מומלצת");
+    const lastResortSummary = screen.getByText("מוצא אחרון · הצג אפשרויות נוספות");
+    expect(outerSummary.closest("details")).not.toHaveAttribute("open");
+    expect(lastResortSummary.closest("details")).not.toHaveAttribute("open");
+    // The nested <details> lives INSIDE the outer one, not a sibling.
+    expect(outerSummary.closest("details")?.contains(lastResortSummary)).toBe(true);
+    expect(
+      screen.getByText(
+        "לא נמצאו טכנאים רגילים מתאימים. לפי הסידור הקיים, אפשר לבדוק גם עם טוביה כהן, שמסומן גם כבעל יכולת טכנית.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("האפשרויות האלו מוצגות כמוצא אחרון בלבד, וייתכנו אילוצים אישיים שלא מופיעים במערכת."),
+    ).toBeInTheDocument();
   });
 });

@@ -33,6 +33,7 @@ import {
   issueTargetTitle,
   personalIssueReasonLabel,
 } from "@/lib/presentation/issue";
+import { buildIssueRecommendationView } from "@/lib/presentation/issueRecommendation";
 import {
   absenceKindLabel,
   managerIssueReasonLabel,
@@ -116,6 +117,11 @@ function buildManagerIssueRowView(
         : null,
     explanation: issueExplanation(issue),
     guidance: issueGuidanceLabel(issue.reason),
+    // PR #37 -- manager-only everyone-wide recommendation. `PersonalIssue`
+    // (the selected-person drill-down's own source, see
+    // `buildSelectedPersonIssueView` below) carries no such field at all,
+    // so this can never leak into that view.
+    recommendation: buildIssueRecommendationView(issue.recommendation, issue.reason, issue.missingIntervals),
   };
 }
 
