@@ -3,6 +3,8 @@ import type { Event } from "./event";
 import {
   ShiftConfigurationError,
   buildShiftSchedule,
+  nextShiftPeriod,
+  previousShiftPeriod,
   resolveEventShiftInterval,
   type ShiftSchedule,
 } from "./shiftSchedule";
@@ -170,5 +172,50 @@ describe("resolveEventShiftInterval", () => {
     const event = Object.freeze(shiftEvent({ period: "day", endTimeOverride: "12:00" }));
     expect(() => resolveEventShiftInterval(event, schedule)).not.toThrow();
     expect(event.endTimeOverride).toBe("12:00");
+  });
+});
+
+describe("previousShiftPeriod / nextShiftPeriod", () => {
+  it("a night shift's previous is the same date's day shift", () => {
+    expect(previousShiftPeriod("2026-08-12", "night")).toEqual({ date: "2026-08-12", period: "day" });
+  });
+
+  it("a day shift's previous is the PREVIOUS date's night shift -- crosses the calendar-date boundary", () => {
+    expect(previousShiftPeriod("2026-08-12", "day")).toEqual({ date: "2026-08-11", period: "night" });
+  });
+
+  it("a day shift's next is the same date's night shift", () => {
+    expect(nextShiftPeriod("2026-08-12", "day")).toEqual({ date: "2026-08-12", period: "night" });
+  });
+
+  it("a night shift's next is the FOLLOWING date's day shift -- crosses the calendar-date boundary", () => {
+    expect(nextShiftPeriod("2026-08-12", "night")).toEqual({ date: "2026-08-13", period: "day" });
+  });
+
+  it("crosses a month boundary correctly", () => {
+    expect(previousShiftPeriod("2026-09-01", "day")).toEqual({ date: "2026-08-31", period: "night" });
+    expect(nextShiftPeriod("2026-08-31", "night")).toEqual({ date: "2026-09-01", period: "day" });
+  });
+
+  it("crosses a year boundary correctly", () => {
+    expect(previousShiftPeriod("2027-01-01", "day")).toEqual({ date: "2026-12-31", period: "night" });
+  });
+
+  it("morning has no canonical adjacency -- never guessed", () => {
+    expect(previousShiftPeriod("2026-08-12", "morning")).toBeNull();
+    expect(nextShiftPeriod("2026-08-12", "morning")).toBeNull();
+  });
+
+  it("unspecified has no canonical adjacency -- never guessed", () => {
+    expect(previousShiftPeriod("2026-08-12", "unspecified")).toBeNull();
+    expect(nextShiftPeriod("2026-08-12", "unspecified")).toBeNull();
+  });
+
+  it("previousShiftPeriod and nextShiftPeriod are exact inverses of one another", () => {
+    const next = nextShiftPeriod("2026-08-12", "day");
+    expect(next).not.toBeNull();
+    if (next) {
+      expect(previousShiftPeriod(next.date, next.period)).toEqual({ date: "2026-08-12", period: "day" });
+    }
   });
 });

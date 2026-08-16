@@ -163,6 +163,36 @@ export interface PersonalDutyAction {
 }
 
 /**
+ * The staffing of a shift immediately adjacent (on the canonical day/night
+ * timeline -- see `previousShiftPeriod`/`nextShiftPeriod`) to one of the
+ * authenticated person's own current shifts. Reuses `PersonalCounterpart`
+ * for `people` since it's the same "who's on this shift" shape already
+ * used for מי איתי, just resolved for a shift the person isn't on.
+ */
+export interface PersonalAdjacentShift {
+  date: string;
+  period: "day" | "night";
+  people: PersonalCounterpart[];
+}
+
+/**
+ * מי לפניי / מי אחריי context for one of the authenticated person's own
+ * current shifts. `date`/`period`/`role` identify which current shift this
+ * belongs to (matched the same way as `PersonalShiftContext` — by
+ * date+role+period, never array index). `previous`/`next` are `null`
+ * whenever the adjacent shift can't be confidently resolved (no canonical
+ * adjacency for this period, or nobody is staffed on it) — the UI omits
+ * that half quietly rather than rendering an empty state.
+ */
+export interface PersonalAdjacentShiftContext {
+  date: string;
+  period: EventPeriod;
+  role: EventRole;
+  previous: PersonalAdjacentShift | null;
+  next: PersonalAdjacentShift | null;
+}
+
+/**
  * The full server-computed, per-person, already-filtered view of the
  * schedule. Explicitly safe to serialize to the authenticated person's own
  * browser session — never carries other people's Events, raw workbook
@@ -192,6 +222,8 @@ export interface PersonalScheduleReadModel {
 
   currentShiftContexts: PersonalShiftContext[];
   nextShiftContexts: PersonalShiftContext[];
+  /** מי לפניי / מי אחריי context, one entry per `currentShiftContexts` entry (same match key). */
+  currentAdjacentShiftContexts: PersonalAdjacentShiftContext[];
 
   issues: PersonalIssue[];
 

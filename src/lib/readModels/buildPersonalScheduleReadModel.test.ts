@@ -789,6 +789,137 @@ describe("currentShiftContexts / nextShiftContexts — colleague privacy", () =>
 });
 
 // ---------------------------------------------------------------------------
+// currentAdjacentShiftContexts (מי לפניי / מי אחריי)
+// ---------------------------------------------------------------------------
+
+describe("currentAdjacentShiftContexts", () => {
+  it("resolves the previous shift's staffing for a current day shift (previous = yesterday's night shift)", () => {
+    const events = [
+      myShift({ date: "2026-08-12", period: "day", role: "technician" }), // current
+      colleagueShift({ date: "2026-08-11", period: "night", role: "supervisor" }), // previous shift's staffing
+    ];
+    const model = build({ events, people: [me(), colleague()] });
+    expect(model.currentAdjacentShiftContexts).toHaveLength(1);
+    const [adjacent] = model.currentAdjacentShiftContexts;
+    expect(adjacent.date).toBe("2026-08-12");
+    expect(adjacent.period).toBe("day");
+    expect(adjacent.previous).toEqual({
+      date: "2026-08-11",
+      period: "night",
+      people: [
+        {
+          personId: COLLEAGUE_ID,
+          personName: "נועה דוגמה",
+          role: "supervisor",
+          certainty: "confirmed",
+          shadow: false,
+          period: "night",
+          startTimeOverride: null,
+          endTimeOverride: null,
+        },
+      ],
+    });
+  });
+
+  it("resolves the next shift's staffing for a current day shift (next = today's night shift)", () => {
+    const events = [
+      myShift({ date: "2026-08-12", period: "day", role: "technician" }), // current
+      colleagueShift({ date: "2026-08-12", period: "night", role: "supervisor" }), // next shift's staffing
+    ];
+    const model = build({ events, people: [me(), colleague()] });
+    const [adjacent] = model.currentAdjacentShiftContexts;
+    expect(adjacent.next).toEqual({
+      date: "2026-08-12",
+      period: "night",
+      people: [
+        {
+          personId: COLLEAGUE_ID,
+          personName: "נועה דוגמה",
+          role: "supervisor",
+          certainty: "confirmed",
+          shadow: false,
+          period: "night",
+          startTimeOverride: null,
+          endTimeOverride: null,
+        },
+      ],
+    });
+  });
+
+  it("crosses the calendar-date boundary: a current night shift's next is tomorrow's day shift", () => {
+    const events = [
+      myShift({ date: "2026-08-11", period: "night", role: "technician" }), // current, still active after midnight
+      colleagueShift({ date: "2026-08-12", period: "day", role: "supervisor" }), // next shift's staffing, next date
+    ];
+    const now = localNow({ date: "2026-08-12", minuteOfDay: 2 * 60 }); // 02:00, still inside the overnight shift
+    const model = build({ events, people: [me(), colleague()], now });
+    expect(model.currentAdjacentShiftContexts).toHaveLength(1);
+    const [adjacent] = model.currentAdjacentShiftContexts;
+    expect(adjacent.date).toBe("2026-08-11");
+    expect(adjacent.next).toEqual(
+      expect.objectContaining({ date: "2026-08-12", period: "day" }),
+    );
+  });
+
+  it("crosses the calendar-date boundary: a current night shift's previous is the same date's day shift", () => {
+    const events = [
+      myShift({ date: "2026-08-11", period: "night", role: "technician" }),
+      colleagueShift({ date: "2026-08-11", period: "day", role: "supervisor" }),
+    ];
+    const now = localNow({ date: "2026-08-12", minuteOfDay: 2 * 60 });
+    const model = build({ events, people: [me(), colleague()], now });
+    const [adjacent] = model.currentAdjacentShiftContexts;
+    expect(adjacent.previous).toEqual(expect.objectContaining({ date: "2026-08-11", period: "day" }));
+  });
+
+  it("omits (never fabricates) the previous/next half when nobody is staffed on that adjacent shift", () => {
+    const events = [myShift({ date: "2026-08-12", period: "day", role: "technician" })];
+    const model = build({ events });
+    const [adjacent] = model.currentAdjacentShiftContexts;
+    expect(adjacent.previous).toBeNull();
+    expect(adjacent.next).toBeNull();
+  });
+
+  it("is empty when there is no current shift at all", () => {
+    const model = build({ events: [myDuty({ date: "2026-08-12" })] });
+    expect(model.currentAdjacentShiftContexts).toEqual([]);
+  });
+
+  it("never exposes email or forbidden identity fields on adjacent staffing", () => {
+    const events = [
+      myShift({ date: "2026-08-12", period: "day", role: "technician" }),
+      colleagueShift({ date: "2026-08-11", period: "night", role: "supervisor" }),
+    ];
+    const model = build({ events, people: [me(), colleague()] });
+    expect(JSON.stringify(model.currentAdjacentShiftContexts)).not.toContain("noa@example.invalid");
+  });
+
+  it("existing currentShiftContexts (מי איתי) output is unaffected by the new adjacent-context computation", () => {
+    const events = [
+      myShift({ date: "2026-08-12", period: "day", role: "technician" }),
+      colleagueShift({ date: "2026-08-12", period: "day", role: "supervisor" }),
+    ];
+    const model = build({ events, people: [me(), colleague()] });
+    expect(model.currentShiftContexts).toHaveLength(1);
+    expect(model.currentShiftContexts[0].coverageStatus).toBe("full");
+    expect(model.currentShiftContexts[0].primaryCounterparts[0].personId).toBe(COLLEAGUE_ID);
+  });
+
+  it("is deterministic regardless of input Event order", () => {
+    const events = [
+      myShift({ date: "2026-08-12", period: "day", role: "technician" }),
+      colleagueShift({ date: "2026-08-11", period: "night", role: "supervisor" }),
+      colleagueShift({ date: "2026-08-12", period: "night", role: "supervisor" }),
+    ];
+    const forward = build({ events, people: [me(), colleague()] });
+    const reversed = build({ events: [...events].reverse(), people: [me(), colleague()] });
+    expect(JSON.stringify(forward.currentAdjacentShiftContexts)).toBe(
+      JSON.stringify(reversed.currentAdjacentShiftContexts),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
 // operational issues
 // ---------------------------------------------------------------------------
 

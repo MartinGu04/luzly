@@ -42,6 +42,7 @@ function personalModel(overrides: Partial<PersonalScheduleReadModel> = {}): Pers
     nextAssignmentGroup: null,
     currentShiftContexts: [],
     nextShiftContexts: [],
+    currentAdjacentShiftContexts: [],
     issues: [],
     dutyBlocks: [],
     dutyActions: [],

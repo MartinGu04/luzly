@@ -1,4 +1,6 @@
-import type { Event } from "./event";
+import type { Event, EventPeriod } from "./event";
+import { addCalendarDays, formatCalendarDate, subtractCalendarDays } from "./dateRange";
+import { parseCalendarDate } from "./dutyBlocks";
 
 /**
  * מי-מה-מו currently models every shift as exactly 12 hours. Documented here
@@ -167,4 +169,40 @@ function parseValidClockMinute(clock: string): number | null {
   if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
 
   return hour * 60 + minute;
+}
+
+// ---------------------------------------------------------------------------
+// Adjacent shift on the canonical day/night timeline (מי לפניי / מי אחריי)
+// ---------------------------------------------------------------------------
+
+export interface AdjacentShiftPeriod {
+  date: string;
+  period: "day" | "night";
+}
+
+/**
+ * The shift immediately preceding `(date, period)` on the canonical
+ * day → night → day → ... timeline: a night shift is always preceded by
+ * that same date's day shift; a day shift is always preceded by the
+ * PREVIOUS date's night shift (crossing the calendar-date boundary). Only
+ * day/night have a canonical position on this timeline — morning/
+ * unspecified return null, never a guessed adjacency.
+ */
+export function previousShiftPeriod(date: string, period: EventPeriod): AdjacentShiftPeriod | null {
+  if (period !== "day" && period !== "night") return null;
+  if (period === "night") return { date, period: "day" };
+
+  const parsed = parseCalendarDate(date);
+  if (!parsed) return null;
+  return { date: formatCalendarDate(subtractCalendarDays(parsed, 1)), period: "night" };
+}
+
+/** The shift immediately following `(date, period)` on the same timeline — see `previousShiftPeriod`. */
+export function nextShiftPeriod(date: string, period: EventPeriod): AdjacentShiftPeriod | null {
+  if (period !== "day" && period !== "night") return null;
+  if (period === "day") return { date, period: "night" };
+
+  const parsed = parseCalendarDate(date);
+  if (!parsed) return null;
+  return { date: formatCalendarDate(addCalendarDays(parsed, 1)), period: "day" };
 }

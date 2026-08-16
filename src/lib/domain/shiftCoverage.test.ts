@@ -7,6 +7,7 @@ import {
   buildShiftRoster,
   clipInterval,
   computeMissingIntervals,
+  findShiftGroupEvents,
   hasMultiSupervisorStaffing,
   mergeIntervals,
 } from "./shiftCoverage";
@@ -799,5 +800,40 @@ describe("buildShiftRoster — מי איתי roster context, separate from cover
     const absenceEvent = supervisorDay({ category: "absence", role: null });
     const roster = buildShiftRoster(target, [target, dutyEvent, absenceEvent]);
     expect(roster.primaryRoster).toEqual([]);
+  });
+});
+
+describe("findShiftGroupEvents", () => {
+  it("returns every shift Event for the given date+period, any role, no target person needed", () => {
+    const tech = technicianDay({ date: "2026-08-12" });
+    const supervisor = supervisorDay({ date: "2026-08-12" });
+    const events = findShiftGroupEvents([tech, supervisor], "2026-08-12", "day");
+    expect(events).toEqual(expect.arrayContaining([tech, supervisor]));
+    expect(events).toHaveLength(2);
+  });
+
+  it("excludes shift Events on a different date", () => {
+    const sameDate = technicianDay({ date: "2026-08-12" });
+    const otherDate = technicianDay({ date: "2026-08-13" });
+    const events = findShiftGroupEvents([sameDate, otherDate], "2026-08-12", "day");
+    expect(events).toEqual([sameDate]);
+  });
+
+  it("excludes shift Events with a different period on the same date", () => {
+    const day = technicianDay({ date: "2026-08-12", period: "day" });
+    const night = technicianDay({ date: "2026-08-12", period: "night" });
+    const events = findShiftGroupEvents([day, night], "2026-08-12", "day");
+    expect(events).toEqual([day]);
+  });
+
+  it("excludes non-shift categories (duty/absence) even on a matching date+period", () => {
+    const shift = technicianDay({ date: "2026-08-12", period: "day" });
+    const duty = technicianDay({ date: "2026-08-12", period: "day", category: "duty", role: null, dutyFamily: "guard", slot: 1 });
+    const events = findShiftGroupEvents([shift, duty], "2026-08-12", "day");
+    expect(events).toEqual([shift]);
+  });
+
+  it("returns an empty array when nobody is staffed on that shift", () => {
+    expect(findShiftGroupEvents([], "2026-08-12", "day")).toEqual([]);
   });
 });
