@@ -32,6 +32,21 @@ describe("Sidebar", () => {
     expect(screen.getByRole("link", { name: /לוח בקרה/ })).toHaveAttribute("href", "/");
   });
 
+  it("renders the standalone Fairness destination for a viewer with no person prop (not manager-only)", () => {
+    renderWithTheme(<Sidebar />);
+    expect(screen.getByRole("link", { name: /טבלת צדק/ })).toHaveAttribute("href", "/fairness");
+  });
+
+  it("renders the standalone Fairness destination for a non-manager", () => {
+    renderWithTheme(<Sidebar person={{ name: "דני עובד", isManager: false, avatarUrl: null }} />);
+    expect(screen.getByRole("link", { name: /טבלת צדק/ })).toHaveAttribute("href", "/fairness");
+  });
+
+  it("renders the standalone Fairness destination for a manager too", () => {
+    renderWithTheme(<Sidebar person={{ name: "דני מנהל", isManager: true, avatarUrl: null }} />);
+    expect(screen.getByRole("link", { name: /טבלת צדק/ })).toHaveAttribute("href", "/fairness");
+  });
+
   it("no longer renders מי איתי or התנגשויות as standalone destinations (nav/people-selector consolidation pass)", () => {
     renderWithTheme(<Sidebar />);
     expect(screen.queryByRole("link", { name: /מי איתי/ })).toBeNull();

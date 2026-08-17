@@ -22,13 +22,12 @@ import type { Person } from "./types";
  * (`isSupervisor`/`isTechnician`) -- a person's actual rotation-participation
  * capability -- never by `personnelType` (קבע/חובה/מילואים is a SERVICE
  * category, orthogonal to which rotation someone works) and never by a
- * free-text role label. This is a genuinely SEPARATE concept from the
- * existing duty-fairness grouping
- * (`lib/presentation/managerFairnessGrouping.ts`'s
- * `resolveFairnessAllocationRole`, which classifies the Potential sheet's
+ * free-text role label. This is a genuinely SEPARATE concept from Duty
+ * Fairness's own grouping (`resolveFairnessAllocationRole`,
+ * `lib/domain/fairnessAnalysis.ts`, which classifies the Potential sheet's
  * own "הקצאה" TEXT for the h1/h2 duty table) -- that one stays exactly as
  * it is (PR #15's duty scoring is preserved, not replaced); this one is the
- * general foundation a future combined/shift Fairness page builds on.
+ * general foundation the shift Fairness engine (PR #2) builds on.
  *
  * A reservist אחמ״ש (or a person whose organizational title is ר״צ but who
  * actually works the אחמ״ש rotation, i.e. `isSupervisor === true`) lands in

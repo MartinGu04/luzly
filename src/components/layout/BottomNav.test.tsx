@@ -62,9 +62,23 @@ describe("BottomNav", () => {
     expect(screen.queryByText("מנהל")).toBeNull();
   });
 
-  it("renders exactly three bottom-nav items", () => {
+  it("renders exactly four bottom-nav items (PR #4 adds טבלת צדק)", () => {
     const { container } = render(<BottomNav />);
-    expect(container.querySelectorAll("li").length).toBe(3);
+    expect(container.querySelectorAll("li").length).toBe(4);
+  });
+
+  it("the standalone Fairness route is a real link with its compact label", () => {
+    render(<BottomNav />);
+    const fairnessLink = screen.getByRole("link", { name: "צדק" });
+    expect(fairnessLink).toHaveAttribute("href", "/fairness");
+    expect(fairnessLink).not.toHaveAttribute("aria-current");
+  });
+
+  it("marks /fairness as the current page when that's the active pathname", () => {
+    usePathname.mockReturnValue("/fairness");
+    render(<BottomNav />);
+    const current = screen.getByRole("link", { current: "page" });
+    expect(current).toHaveAttribute("href", "/fairness");
   });
 
   it("marks /duties as the current page when that's the active pathname", () => {

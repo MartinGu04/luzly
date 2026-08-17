@@ -154,10 +154,8 @@ function resolveDutyFairnessGroupKey(allocationLabel: string): DutyFairnessGroup
 /**
  * Buckets the ALREADY-sorted rows by `resolveDutyFairnessGroupKey` -- never
  * re-sorts within a bucket, so each group preserves the exact relative
- * order established by `compareDutyFairnessRows` (same convention as
- * `lib/presentation/managerFairnessGrouping.ts`'s own grouping of an
- * already-sorted read model). A group with zero rows is omitted entirely,
- * never rendered as an empty bucket.
+ * order established by `compareDutyFairnessRows`. A group with zero rows
+ * is omitted entirely, never rendered as an empty bucket.
  */
 function buildGroups(sortedRows: readonly DutyFairnessPersonRowView[]): DutyFairnessGroupView[] {
   const byGroup = new Map<DutyFairnessGroupKey, DutyFairnessPersonRowView[]>();

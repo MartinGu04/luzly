@@ -1,12 +1,12 @@
 /**
- * Shared title for both manager screens (`/manager` and
- * `/manager/fairness`) -- "אזור מנהל", a restrained manager marker, never a
- * full admin-dashboard stereotype (Design Pass PR #21 §3). The old inline
- * "טבלת צדק" shortcut and "מנהל" chip are gone -- `ManagerSubNav` is the
- * real navigation between the two screens now, and the manager scope is
- * already established once here, not repeated as a badge. Presentation
- * text only: server-side authorization (`getRequestManagerOverview` /
- * `getRequestManagerFairness`) is untouched and remains the sole gate.
+ * "/manager" page title -- "אזור מנהל", a restrained manager marker, never
+ * a full admin-dashboard stereotype (Design Pass PR #21 §3). The old
+ * inline "טבלת צדק" shortcut and "מנהל" chip are gone. `/manager` is now
+ * the ONE manager screen (PR #4 removed `/manager/fairness` -- see the
+ * standalone `/fairness` route, no longer manager-only -- and with it
+ * `ManagerSubNav`, which had nothing left to switch between). Presentation
+ * text only: server-side authorization (`getRequestManagerOverview`) is
+ * untouched and remains the sole gate.
  */
 export function ManagerHeader() {
   return (

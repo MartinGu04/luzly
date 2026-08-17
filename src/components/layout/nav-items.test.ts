@@ -28,11 +28,34 @@ describe("visibleNavItems", () => {
     expect(manager?.inBottomNav).toBe(false);
   });
 
-  it("the bottom-nav set stays at exactly three items regardless of manager status", () => {
+  it("the bottom-nav set stays at exactly four items regardless of manager status (PR #4 adds טבלת צדק)", () => {
     for (const isManager of [true, false]) {
       const bottomNavCount = visibleNavItems(isManager).filter((item) => item.inBottomNav).length;
-      expect(bottomNavCount).toBe(3);
+      expect(bottomNavCount).toBe(4);
     }
+  });
+});
+
+describe("navItems — standalone Fairness experience (PR #4)", () => {
+  it('"טבלת צדק" is a real, enabled, non-manager-only nav item pointing at /fairness', () => {
+    const fairness = navItems.find((item) => item.href === "/fairness");
+    expect(fairness).toBeDefined();
+    expect(fairness?.enabled).toBe(true);
+    expect(fairness?.managerOnly).toBeUndefined();
+    expect(fairness?.inBottomNav).toBe(true);
+    expect(fairness?.label).toBe("טבלת צדק");
+    expect(fairness?.shortLabel).toBe("צדק");
+  });
+
+  it("a non-manager sees /fairness (unlike /manager, which stays hidden)", () => {
+    const hrefs = visibleNavItems(false).map((item) => item.href);
+    expect(hrefs).toContain("/fairness");
+    expect(hrefs).not.toContain("/manager");
+  });
+
+  it("a manager also sees /fairness", () => {
+    const hrefs = visibleNavItems(true).map((item) => item.href);
+    expect(hrefs).toContain("/fairness");
   });
 });
 
@@ -45,9 +68,9 @@ describe("navItems — obsolete sync placeholder removed (PR #18)", () => {
     expect(navItems.some((item) => item.href === "/sync")).toBe(false);
   });
 
-  it("every other enabled route is unchanged", () => {
+  it("every other enabled route is unchanged (PR #4 adds /fairness before /manager)", () => {
     const enabledHrefs = navItems.filter((item) => item.enabled).map((item) => item.href);
-    expect(enabledHrefs).toEqual(["/", "/schedule", "/duties", "/manager"]);
+    expect(enabledHrefs).toEqual(["/", "/schedule", "/duties", "/fairness", "/manager"]);
   });
 
   it("manager visibility rules are unchanged", () => {

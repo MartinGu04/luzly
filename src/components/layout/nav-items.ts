@@ -1,4 +1,4 @@
-import { CalendarDays, LayoutDashboard, ShieldCheck, UserCog, type LucideIcon } from "lucide-react";
+import { CalendarDays, LayoutDashboard, Scale, ShieldCheck, UserCog, type LucideIcon } from "lucide-react";
 
 export interface NavItem {
   label: string;
@@ -34,10 +34,17 @@ export interface NavItem {
 // surfaces through the manager's unified "דורש טיפול" section
 // (`ManagerAttentionSection`) instead of a separate technical page -- the
 // underlying detection logic (`detectOperationalIssues`) is untouched.
+// PR #4 -- "טבלת צדק" (`/fairness`) joins as a real main-navigation
+// destination, NOT manager-only: every mapped user, manager or not, can
+// see and use it (unlike "/manager", whose `managerOnly` flag stays
+// unchanged). It replaces the old manager-only `/manager/fairness`
+// sub-screen entirely -- see `ManagerSubNav` and `/manager/fairness`'s own
+// redirect for the cleanup.
 export const navItems: NavItem[] = [
   { label: "לוח בקרה", shortLabel: "היום שלי", href: "/", enabled: true, icon: LayoutDashboard, inBottomNav: true },
   { label: "הלוח שלי", shortLabel: "הלוח שלי", href: "/schedule", enabled: true, icon: CalendarDays, inBottomNav: true },
   { label: "תורנויות", shortLabel: "תורנויות", href: "/duties", enabled: true, icon: ShieldCheck, inBottomNav: true },
+  { label: "טבלת צדק", shortLabel: "צדק", href: "/fairness", enabled: true, icon: Scale, inBottomNav: true },
   { label: "אזור מנהל", shortLabel: "מנהל", href: "/manager", enabled: true, icon: UserCog, inBottomNav: false, managerOnly: true },
 ];
 

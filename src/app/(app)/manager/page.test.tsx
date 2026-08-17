@@ -200,13 +200,13 @@ describe("ManagerPage — everyone view", () => {
     expect(screen.getByText("אין כרגע דברים שדורשים טיפול בטווח שנבחר")).toBeInTheDocument();
   });
 
-  it("shows the אזור מנהל title (no מנהל chip) and the subnav with סקירה active", async () => {
+  it("shows the אזור מנהל title (no מנהל chip) and no leftover subnav (PR #4 -- ManagerSubNav removed, Fairness moved to /fairness)", async () => {
     getRequestManagerOverview.mockResolvedValue(okResult(model()));
     await renderPage();
     expect(screen.getByRole("heading", { name: "אזור מנהל", level: 1 })).toBeInTheDocument();
     expect(screen.queryByText("מנהל")).toBeNull();
-    expect(screen.getByRole("link", { name: "סקירה" })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("link", { name: "טבלת צדק" })).toHaveAttribute("href", "/manager/fairness");
+    expect(screen.queryByRole("link", { name: "סקירה" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "טבלת צדק" })).toBeNull();
   });
 
   it("shows the strong outlined הצג רק בעיות action when problems are not filtered", async () => {
@@ -837,13 +837,12 @@ describe("ManagerPage — selected person view", () => {
     expect(screen.queryByRole("link", { name: "מציג רק בעיות" })).toBeNull();
   });
 
-  it("still shows the shared אזור מנהל header and subnav on the selected-person view", async () => {
+  it("still shows the shared אזור מנהל header on the selected-person view", async () => {
     getRequestManagerOverview.mockResolvedValue(
       okResult(model({ selectedPersonId: "p_martin", selectedPerson: personalModel() })),
     );
     await renderPage({ person: "p_martin" });
     expect(screen.getByRole("heading", { name: "אזור מנהל", level: 1 })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "סקירה" })).toHaveAttribute("aria-current", "page");
   });
 
   it("selecting a person never renders a sign-out affordance or changes identity chrome", async () => {
