@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeAssignmentTiming } from "./assignmentTiming";
+import { computeAssignmentTiming, computeIntervalTiming } from "./assignmentTiming";
 import type { Event } from "./event";
 import type { LocalNow } from "./localNow";
 import { buildShiftSchedule } from "./shiftSchedule";
@@ -164,6 +164,47 @@ describe("computeAssignmentTiming — never invents timing", () => {
     if (timing.status === "resolved") {
       expect(timing.elapsedMinutesAtLoad).toBe(timing.durationMinutes);
       expect(timing.remainingMinutesAtLoad).toBe(0);
+    }
+  });
+});
+
+describe("computeIntervalTiming", () => {
+  it("produces identical output to computeAssignmentTiming for the same resolved interval/date/now", () => {
+    const event = baseEvent({ date: "2026-08-12", period: "day" }); // 07:30-19:30
+    const now = localNow({ date: "2026-08-12", minuteOfDay: 8 * 60 });
+    const viaEvent = computeAssignmentTiming(event, schedule, now);
+    const viaInterval = computeIntervalTiming({ startMinute: 450, endMinute: 1170 }, "2026-08-12", now);
+    expect(viaInterval).toEqual(viaEvent);
+  });
+
+  it("computes live elapsed/remaining/percent for a canonical interval with no Event at all", () => {
+    const timing = computeIntervalTiming(
+      { startMinute: 450, endMinute: 1170 },
+      "2026-08-12",
+      localNow({ date: "2026-08-12", minuteOfDay: 8 * 60 }),
+    );
+    expect(timing).toEqual({
+      status: "resolved",
+      startLocalTime: "07:30",
+      endLocalTime: "19:30",
+      durationMinutes: 720,
+      elapsedMinutesAtLoad: 30,
+      remainingMinutesAtLoad: 690,
+      progressPercentAtLoad: 4,
+      minutesUntilStartAtLoad: 0,
+    });
+  });
+
+  it("handles an overnight interval crossing midnight the same way computeAssignmentTiming does", () => {
+    const timing = computeIntervalTiming(
+      { startMinute: 1170, endMinute: 1890 }, // 19:30 -> 07:30(+1)
+      "2026-08-11",
+      localNow({ date: "2026-08-12", minuteOfDay: 2 * 60 }), // 02:00, mid-shift
+    );
+    expect(timing.status).toBe("resolved");
+    if (timing.status === "resolved") {
+      expect(timing.elapsedMinutesAtLoad).toBe(390);
+      expect(timing.remainingMinutesAtLoad).toBe(330);
     }
   });
 });

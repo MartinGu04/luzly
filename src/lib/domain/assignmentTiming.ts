@@ -1,7 +1,7 @@
 import { resolveNowMinuteOnEventTimeline } from "./assignmentTemporalState";
 import type { Event } from "./event";
 import type { LocalNow } from "./localNow";
-import { MINUTES_PER_DAY, resolveEventShiftInterval, type ShiftSchedule } from "./shiftSchedule";
+import { MINUTES_PER_DAY, resolveEventShiftInterval, type MinuteInterval, type ShiftSchedule } from "./shiftSchedule";
 
 /**
  * A safe, presentation-ready projection of a shift Event's resolved timing,
@@ -52,10 +52,23 @@ export function computeAssignmentTiming(
   const resolution = resolveEventShiftInterval(event, schedule);
   if (resolution.status !== "resolved") return { status: "not_evaluable" };
 
-  const { startMinute, endMinute } = resolution.interval;
+  return computeIntervalTiming(resolution.interval, event.date, now);
+}
+
+/**
+ * The same timing math `computeAssignmentTiming` uses, extracted so a
+ * caller with an already-resolved canonical interval but no real `Event` to
+ * anchor on (e.g. the department's current shift, which must report live
+ * progress even when nobody is staffed on it) can reuse it directly rather
+ * than duplicating the elapsed/remaining/percent computation. `date` plays
+ * the same role `event.date` does above -- the interval's own timeline
+ * anchor (minute 0 = that date's midnight).
+ */
+export function computeIntervalTiming(interval: MinuteInterval, date: string, now: LocalNow): AssignmentTiming {
+  const { startMinute, endMinute } = interval;
   const durationMinutes = endMinute - startMinute;
 
-  const nowMinute = resolveNowMinuteOnEventTimeline(event.date, now);
+  const nowMinute = resolveNowMinuteOnEventTimeline(date, now);
 
   let elapsedMinutesAtLoad: number;
   let minutesUntilStartAtLoad: number;
@@ -64,7 +77,7 @@ export function computeAssignmentTiming(
     // More than a calendar day away in either direction: unambiguously
     // hasn't started (future) or is fully over (past), but too far out for
     // a meaningful minute-level countdown without inventing precision.
-    const isFuture = now.date < event.date;
+    const isFuture = now.date < date;
     elapsedMinutesAtLoad = isFuture ? 0 : durationMinutes;
     minutesUntilStartAtLoad = 0;
   } else {
