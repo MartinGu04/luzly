@@ -334,3 +334,95 @@ conventions (`getRequestX` + `unstable_cache`-backed `lib/sync`) remain the
 pattern a future shift/combined Fairness read-model should follow — this
 PR does not need to wire that up yet, and nothing here makes it harder to
 do so later.
+
+## Shift Fairness engine (PR #2)
+
+`fairnessShiftEngine.ts` — the shift Fairness calculation, built entirely
+on the foundation above (`buildFairnessPersonContext` is reused outright
+for participation + eligibility, never re-derived). Answers, per person in
+one `fairnessGroups.ts` comparison group: how much did they actually work
+compared with how much it was reasonable to expect, given their
+participation, eligibility, and known availability? Never a team average
+and never a 0–100 score.
+
+- **Opportunity-based target.** For every calendar date in the period, this
+  treats every (day, night) as ONE canonical shift slot per role (the same
+  structural model `lib/domain/shiftCoverage.ts`'s unit-wide coverage
+  already assumes — a date always has exactly one day slot and one night
+  slot per role, independent of who ends up assigned). A person gets a
+  genuine opportunity for slot (date, period) only when ALL THREE hold:
+  they're currently eligible for the role's rotation this period
+  (`resolveFairnessRoleEligibility`, reused, never re-derived — permanent/
+  reserve/unclassified all evidence-gated, exactly like PR #48's own
+  eligibility rule); the date falls within their own participation window
+  (`resolveFairnessParticipationWindow`, reused — a reservist's bounded
+  evidence window genuinely narrows their opportunities, never the full
+  period); and `resolveFairnessShiftOpportunity` resolves to `"available"`
+  for that exact slot (never `"unmodeled_constraint"` — an unmodeled
+  `"morning"` constraint is excluded from opportunities AND never silently
+  asserted blocked, only flagged via `dataCompleteness`). A person's
+  personal target is their SHARE of the group's total genuine
+  opportunities, applied to the group's total ACTUAL shift count:
+  `target = totalActual * (personOpportunities / totalOpportunities)` — so
+  someone with fewer real opportunities (a shorter participation window,
+  more constraints, a role they only recently became eligible for) is
+  expected to have done proportionally LESS, never an equal split. "Actual
+  shifts performed" is always counted independently of eligibility/
+  opportunity (a real confirmed shift is never discarded just because
+  today's eligibility evidence doesn't currently prove it) — CONFIRMED only
+  (never tentative) and never a shadow ("- צל") assignment, reusing
+  `shiftCoverage.ts`'s own "shadow shifts never count as primary coverage"
+  convention.
+- **Weekend fairness stays separate.** The exact same opportunity-share
+  method is computed a SECOND time, restricted to weekend dates only
+  (`isFairnessWeekendDate`, reused from `fairnessFoundation.ts`) — no
+  arbitrary weekend weighting (e.g. "weekend shift = 1.7 normal shifts"),
+  and no formula that mixes weekend and general workload together. This is
+  what makes "weekend imbalance despite a balanced general total" a real,
+  distinct, testable signal instead of being averaged away.
+- **Balanced tolerance.** `SHIFT_FAIRNESS_BALANCED_TOLERANCE_SHIFTS = 0.5`
+  — half of one shift. Shifts are discrete (nobody works a fractional
+  shift) while a proportional target is generally fractional, so a real
+  distribution can never land closer to its target than the nearest whole
+  shift; being off by less than half a shift is the unavoidable rounding
+  gap between a fractional fair share and an integer outcome, not a
+  meaningful deviation. This is the smallest tolerance defensible from the
+  data itself, not an arbitrary smoothing constant — `resolveFairnessShiftStatus`
+  applies it inclusively (`±0.5` itself is `"balanced"`).
+- **Time behavior.** `resolveShiftFairnessPeriodDates` caps the current
+  month at `now.date` (never projecting into the future portion of the
+  month); a past month is returned in full; a wholly future month returns
+  an empty date list, which `computeShiftFairnessForGroup` handles safely
+  (every member: zero actual/target/opportunity, `"balanced"`, and the new
+  `"shift_target_no_group_opportunities"` completeness reason — see
+  `fairnessFoundation.ts`). `resolveShiftFairnessPeriodStatus` separately
+  reports `"current"`/`"closed"` from the month's own real end date (never
+  from the today-capped date list), so a future month still correctly
+  reads `"current"`.
+- **Period-shape-agnostic by construction.** `computeShiftFairnessForGroup`
+  takes a plain `periodDates: readonly string[]` — the exact same function
+  serves a calendar month OR a single week with zero engine changes, only a
+  different `periodDates` array. This is what "support the future
+  weekly/monthly UI cleanly" means in practice here.
+- `lib/readModels/shiftFairnessTypes.ts` / `buildShiftFairnessReadModel.ts`
+  — the SEPARATE, parallel shift Fairness read model (safe types, no
+  `sourceSheet`/`sourceCell`, personName resolved from `Person`), following
+  `buildManagerFairnessReadModel.ts`'s own pure/no-network convention. No
+  Google-fetch/auth/caching orchestration layer (`loadXReadModel`,
+  `getRequestX`) is added yet — there is no page to serve one, and PR #48's
+  existing `loadManagerWorkbookContext`/`getWorkbookSnapshot` conventions
+  are what a future page's loader should reuse when it's built.
+
+**Verified limitation carried forward from PR #48, unchanged by this PR:**
+no stored join/leave/service-window date exists for any person. This PR's
+engine reflects it exactly the way PR #48 already does — a permanent/
+regular person's participation window is `"full_period"`, an ASSUMPTION
+(`dataCompleteness: "participation_assumed_full_period"`), and a reserve/
+unclassified person's window is bounded only by heuristic Event evidence
+(`"participation_inferred"`) or unknown entirely (`"participation_unknown"`).
+The shift engine does not — and cannot — close this gap; it only ever
+reports it honestly through `dataCompleteness`, never silently.
+
+No standalone Fairness page, person cards, duty Fairness integration,
+historical snapshot persistence, analytics, or combined shift+duty scoring
+are added in this PR.

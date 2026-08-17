@@ -70,6 +70,15 @@ export function resolveFairnessPeriodStatus(periodEndDate: string, now: LocalNow
  * - `fairness_group_unassigned` -- a person is neither supervisor- nor
  *   technician-capable, so no comparison group they belong to has been
  *   PROVEN comparable by today's data -- see `fairnessGroups.ts`.
+ * - `shift_target_no_group_opportunities` -- PR #2's shift Fairness engine
+ *   (`fairnessShiftEngine.ts`) could not establish ANY valid opportunity
+ *   across the whole comparison group for the period (or the weekend
+ *   subset of it) -- every member's personal target defaults to 0 rather
+ *   than a real proportional share, since there is nothing to distribute a
+ *   share OF. This is a group-level fact, not a per-person one -- it is
+ *   attached to every member's own `dataCompleteness` so a per-person view
+ *   never looks confidently "balanced" while the underlying target was
+ *   never really computable.
  */
 export type FairnessDataCompletenessReason =
   | "participation_assumed_full_period"
@@ -77,7 +86,8 @@ export type FairnessDataCompletenessReason =
   | "participation_unknown"
   | "eligibility_undated"
   | "constraint_period_unmodeled"
-  | "fairness_group_unassigned";
+  | "fairness_group_unassigned"
+  | "shift_target_no_group_opportunities";
 
 export interface FairnessDataCompleteness {
   status: "complete" | "partial";
