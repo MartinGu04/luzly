@@ -70,6 +70,52 @@ export function resolveFairnessPeriodStatus(periodEndDate: string, now: LocalNow
  * - `fairness_group_unassigned` -- a person is neither supervisor- nor
  *   technician-capable, so no comparison group they belong to has been
  *   PROVEN comparable by today's data -- see `fairnessGroups.ts`.
+ * - `shift_target_no_group_opportunities` -- PR #2's shift Fairness engine
+ *   (`fairnessShiftEngine.ts`) found real, evidenced workload from the
+ *   group's MODELABLE members (people whose CURRENT capability flag
+ *   actually matches the role -- see `shift_target_unmodelable_evidence_only`
+ *   below for the separate, non-modelable case) that it could not
+ *   attribute to ANY valid opportunity among that same modelable pool --
+ *   workload actually happened, but nothing in today's data explains who
+ *   among the people who COULD be modeled was genuinely positioned to do
+ *   it, so every MODELABLE member's personal target computes to a real 0
+ *   (via the share formula's own divide-by-zero guard) instead of a real
+ *   proportional share -- an evidence-only member's target stays `null`
+ *   regardless, per its own reason above. This is deliberately NOT raised
+ *   merely because
+ *   both the modelable workload and the modelable opportunity count are
+ *   zero (an idle group/subset, or an empty period, with nothing to
+ *   distribute) -- that is a normal, complete outcome, not a gap. This is
+ *   a group-level fact, not a per-person one -- it is attached to every
+ *   member's own `dataCompleteness` so a per-person view never looks
+ *   confidently "balanced" while the underlying target was never really
+ *   computable.
+ * - `shift_target_unmodelable_evidence_only` -- for a CURRENT period: this
+ *   person is a comparison-group member ONLY because of real confirmed
+ *   shift evidence, not because `role` is their PRIMARY rotation (see
+ *   `fairnessShiftEngine.ts`'s `isRoleComparisonMember`) -- either their
+ *   CURRENT capability doesn't include `role` at all, or `role` is merely
+ *   their secondary capability (a dual-capable person's normal rotation is
+ *   their primary one only). Their real `actualShifts` stays visible, but
+ *   their personal `target`/`deviation`/`status` are `null` (never
+ *   computed, never a guessed `0`), and -- critically -- their workload is
+ *   EXCLUDED from the group total redistributed onto other members'
+ *   targets: not being able to model this person's own opportunities is
+ *   never treated as license to silently hand their workload to someone
+ *   else's fair-share calculation.
+ * - `shift_target_unmodelable_historical` -- for a CLOSED historical
+ *   period ONLY: current capability/primary-rotation status is NOT treated
+ *   as proof of historical qualification timing (final PR #2 audit --
+ *   `isTechnician`/`isSupervisor` are undated, so "this is their rotation
+ *   today" does not establish "this was their rotation throughout that
+ *   past period"). A closed period's `target`/`deviation`/`status` are
+ *   only ever real numbers when genuinely period-DATED evidence exists
+ *   (the Fairness sheet's own allocation for THAT specific historical
+ *   period, reused via `reserveParticipation` -- never invented, never a
+ *   new qualification-date or inference rule); everyone else's real
+ *   `actualShifts` stays visible, but `null` otherwise -- one confirmed
+ *   historical shift is real evidence of THAT shift, never proof of a
+ *   whole period's worth of opportunities.
  */
 export type FairnessDataCompletenessReason =
   | "participation_assumed_full_period"
@@ -77,7 +123,10 @@ export type FairnessDataCompletenessReason =
   | "participation_unknown"
   | "eligibility_undated"
   | "constraint_period_unmodeled"
-  | "fairness_group_unassigned";
+  | "fairness_group_unassigned"
+  | "shift_target_unmodelable_evidence_only"
+  | "shift_target_unmodelable_historical"
+  | "shift_target_no_group_opportunities";
 
 export interface FairnessDataCompleteness {
   status: "complete" | "partial";

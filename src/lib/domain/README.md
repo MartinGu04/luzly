@@ -334,3 +334,210 @@ conventions (`getRequestX` + `unstable_cache`-backed `lib/sync`) remain the
 pattern a future shift/combined Fairness read-model should follow — this
 PR does not need to wire that up yet, and nothing here makes it harder to
 do so later.
+
+## Shift Fairness engine (PR #2)
+
+`fairnessShiftEngine.ts` — the shift Fairness calculation, built entirely
+on the foundation above (`buildFairnessPersonContext` is reused outright
+for participation + eligibility, never re-derived). Answers, per person in
+one `fairnessGroups.ts` comparison group: how much did they actually work
+compared with how much it was reasonable to expect, given their
+participation, eligibility, and known availability? Never a team average
+and never a 0–100 score.
+
+- **Opportunity-based target.** For every calendar date in the period, this
+  treats every (day, night) as ONE canonical shift slot per role (the same
+  structural model `lib/domain/shiftCoverage.ts`'s unit-wide coverage
+  already assumes — a date always has exactly one day slot and one night
+  slot per role, independent of who ends up assigned). A person gets a
+  genuine opportunity for slot (date, period) only when ALL THREE hold:
+  they're currently eligible for the role's rotation this period
+  (`resolveFairnessRoleEligibility`, reused, never re-derived — permanent/
+  reserve/unclassified all evidence-gated, exactly like PR #48's own
+  eligibility rule); the date falls within their own participation window
+  (`resolveFairnessParticipationWindow`, reused — a reservist's bounded
+  evidence window genuinely narrows their opportunities, never the full
+  period); and `resolveFairnessShiftOpportunity` resolves to `"available"`
+  for that exact slot (never `"unmodeled_constraint"` — an unmodeled
+  `"morning"` constraint is excluded from opportunities AND never silently
+  asserted blocked, only flagged via `dataCompleteness`). A person's
+  personal target is their SHARE of the group's total genuine
+  opportunities, applied to the group's total ACTUAL shift count:
+  `target = totalActual * (personOpportunities / totalOpportunities)` — so
+  someone with fewer real opportunities this period (a shorter
+  participation window, more constraints) is expected to have done
+  proportionally LESS, never an equal split. This describes the CURRENT
+  period only — a closed historical period's modelability follows a
+  separate, more conservative rule (see the historical qualification audit
+  below). "Actual
+  shifts performed" is always counted independently of eligibility/
+  opportunity (a real confirmed shift is never discarded just because
+  today's eligibility evidence doesn't currently prove it) — CONFIRMED only
+  (never tentative) and never a shadow ("- צל") assignment, reusing
+  `shiftCoverage.ts`'s own "shadow shifts never count as primary coverage"
+  convention.
+- **Group membership preserves evidence past a changed capability flag
+  (follow-up fix).** Comparison-group membership is `resolveFairnessComparisonGroupKey(person)
+  === role` (current PRIMARY capability, "MODELABLE") **OR** the person has
+  a real confirmed, non-shadow shift for `role` within the period
+  (`isRoleComparisonMember`, "evidence-only"). Capability is undated
+  (`"eligibility_undated"`) — if it changes, a real shift someone actually
+  worked as that role must never simply vanish from the results because
+  `people.filter(...)` silently dropped their row. An evidence-only
+  member's `opportunityCount` stays `0` — `computePersonShiftFacts` gates
+  its opportunity loop on `role` being the person's PRIMARY comparison
+  group, NOT merely `resolveFairnessRoleEligibility`'s own capability check
+  (which is deliberately role-symmetric and would otherwise happily grant
+  real opportunities for either role of a dual-capable person — see the
+  dual-capability bullet below for why that distinction matters) — a fix
+  for VISIBILITY only, not a reopening of eligibility.
+- **Dual-capability rotation precedence is intentional, not a bug (audited
+  and clarified).** A dual-capable person (`isSupervisor && isTechnician`)
+  has exactly ONE normal rotation — supervisor, the same
+  supervisor-over-technician precedence `resolveFairnessComparisonGroupKey`
+  already applies everywhere else in the foundation. This was deliberately
+  investigated as a possible bug (an early version of this fix tried
+  replacing the exclusive classifier with a per-role capability check,
+  `hasFairnessRoleCapability`, so a dual-capable person would count as a
+  full modelable member of BOTH groups at once) and REJECTED: in normal
+  operations someone designated supervisor works supervisor shifts, and an
+  occasional technician shift from a supervisor-qualified person is an
+  exceptional/emergency case, not evidence they belong to the normal
+  technician rotation — treating it as normal would silently grant them
+  (and inflate the technician pool's totals with) opportunities nothing in
+  the data actually supports. `hasFairnessRoleCapability` (added to
+  `fairnessParticipation.ts`, reused inside
+  `resolveFairnessRoleEligibility` itself, which was ALREADY correctly
+  per-role-independent) stays as a small shared capability-check helper,
+  but comparison-group MEMBERSHIP/MODELABILITY in this engine deliberately
+  keeps using the EXCLUSIVE `resolveFairnessComparisonGroupKey`. A
+  dual-capable person's exceptional cross-role shift is handled by the
+  SAME evidence-only mechanism as a changed-capability-flag person above:
+  visible `actualShifts`, `null` target/deviation/status, never
+  redistributed onto the normal rotation's members.
+- **An evidence-only member's real workload is never redistributed onto
+  someone else's target (SECOND follow-up fix).** The first version of the
+  fix above let an evidence-only member's real `actualShifts` flow into the
+  group's shared `totalActual`, which the opportunity-share formula then
+  redistributed onto whichever MODELABLE members held real opportunities —
+  manufacturing an inflated target for people whose own availability never
+  changed, since their historical opportunities can't honestly be
+  reconstructed once capability isn't historically dated. `totalActual`/
+  `totalOpportunity` (general AND weekend) are now summed over MODELABLE
+  members ONLY, and are flagged with the new
+  `"shift_target_unmodelable_evidence_only"` completeness reason — distinct
+  from the group-level `"shift_target_no_group_opportunities"`, which now
+  only ever reflects a genuine anomaly within the MODELABLE pool itself
+  (e.g. a data inconsistency: a confirmed shift recorded alongside a
+  conflicting absence/constraint the same date, for someone whose current
+  capability DOES match the role).
+- **An unmodelable target is `null`, never a guessed `0` (THIRD follow-up
+  fix).** The second fix above initially still represented an evidence-only
+  member's `target`/`weekendTarget` as `0` -- a real, computed target of
+  `0` is a DIFFERENT fact from "this target cannot be modeled at all", and
+  `deviation = actualShifts - 0` produced a misleading `"above"` status for
+  anyone with real evidenced work. `target`/`deviation`/`status` (and their
+  weekend counterparts) on `ShiftFairnessPersonResult` are now `number |
+  null`/`FairnessShiftStatus | null` — `null` ONLY for an evidence-only
+  member, never for a modelable member (whose target of `0` stays a real,
+  meaningful `0`, e.g. someone currently capable with zero genuine
+  opportunities this period). Same convention `lib/domain/fairnessAnalysis.ts`
+  already established for the duty Fairness table's own score delta/gap
+  ("a missing previous score is NEVER treated as zero") — reused here, not
+  reinvented. `lib/readModels/shiftFairnessTypes.ts`'s
+  `ShiftFairnessPersonRowView` mirrors the same nullability.
+- **Historical qualification: closed periods model more conservatively than
+  the current one (final, corrected conclusion).** PR #48 established that
+  `isTechnician`/`isSupervisor` are a CURRENT snapshot only — כ"א carries no
+  effective-from date. The current/open period may still use today's
+  capability as its modelability basis (unchanged, still approved) — there
+  is no "was it true back then" question for a period that hasn't finished
+  yet. A CLOSED historical period is different: current capability is NOT
+  treated as proof of what a person's rotation actually was during a period
+  that's already over — "this is their rotation TODAY" does not establish
+  "this WAS their rotation throughout that PAST period", and a single
+  confirmed historical shift is real evidence of THAT shift, never proof of
+  a whole period's worth of opportunities. `isRoleModelable`
+  (`fairnessShiftEngine.ts`) is therefore period-status-aware: for a closed
+  period, `target`/`deviation`/`status` (and their weekend counterparts) are
+  real numbers ONLY where genuinely period-DATED evidence exists — the
+  Fairness sheet's own allocation for THAT specific historical period,
+  reused via `reserveParticipation` exactly as PR #48 already established
+  it (never a new inference rule, never an invented qualification-effective
+  date). Everyone else's real `actualShifts` stays visible regardless, but
+  `target`/`deviation`/`status` are `null`, flagged
+  `"shift_target_unmodelable_historical"` — distinct from the current
+  period's `"shift_target_unmodelable_evidence_only"`, so a future UI can
+  explain the two differently. `computeShiftFairnessForGroup`'s
+  `periodStatus` parameter defaults to `"current"` (the pre-audit,
+  still-approved behavior) so an existing caller that hasn't been updated
+  to pass it keeps working unchanged; `buildShiftFairnessReadModel.ts`
+  passes its already-resolved `resolveShiftFairnessPeriodStatus` result
+  through explicitly.
+- **Weekend fairness stays separate.** The exact same opportunity-share
+  method is computed a SECOND time, restricted to weekend dates only
+  (`isFairnessWeekendDate`, reused from `fairnessFoundation.ts`) — no
+  arbitrary weekend weighting (e.g. "weekend shift = 1.7 normal shifts"),
+  and no formula that mixes weekend and general workload together. This is
+  what makes "weekend imbalance despite a balanced general total" a real,
+  distinct, testable signal instead of being averaged away.
+- **Balanced tolerance.** `SHIFT_FAIRNESS_BALANCED_TOLERANCE_SHIFTS = 0.5`
+  — half of one shift. Shifts are discrete (nobody works a fractional
+  shift) while a proportional target is generally fractional, so a real
+  distribution can never land closer to its target than the nearest whole
+  shift; being off by less than half a shift is the unavoidable rounding
+  gap between a fractional fair share and an integer outcome, not a
+  meaningful deviation. This is the smallest tolerance defensible from the
+  data itself, not an arbitrary smoothing constant — `resolveFairnessShiftStatus`
+  applies it inclusively (`±0.5` itself is `"balanced"`).
+- **Time behavior.** `resolveShiftFairnessPeriodDates` caps the current
+  month at `now.date` (never projecting into the future portion of the
+  month); a past month is returned in full; a wholly future month returns
+  an empty date list, which `computeShiftFairnessForGroup` handles safely
+  (every member: zero actual/target/opportunity, `"balanced"`, and —
+  follow-up fix — `dataCompleteness: complete`, not `"shift_target_no_group_opportunities"`;
+  see the completeness bullet below for why an empty/idle period is never
+  flagged as incomplete). `resolveShiftFairnessPeriodStatus` separately
+  reports `"current"`/`"closed"` from the month's own real end date (never
+  from the today-capped date list), so a future month still correctly
+  reads `"current"`.
+- **`"shift_target_no_group_opportunities"` means unallocatable, not
+  merely empty (follow-up fix).** This completeness reason (see
+  `fairnessFoundation.ts`) is attached ONLY when the MODELABLE pool (or its
+  weekend subset) has real actual workload (`totalActual > 0`, computed
+  from modelable members only — see the second follow-up fix above) that
+  zero MODELABLE opportunities failed to explain — a genuine data anomaly
+  even among people whose current capability matches the role (e.g. a
+  confirmed shift recorded alongside a conflicting absence/constraint the
+  same date). Zero opportunities WITH zero actual work (an idle group/
+  subset, or an empty period) is simply nothing to distribute, and is
+  never flagged incomplete. An evidence-only member's own unmodelable
+  workload is a SEPARATE, per-person fact
+  (`"shift_target_unmodelable_evidence_only"`), never this group-level one.
+- **Period-shape-agnostic by construction.** `computeShiftFairnessForGroup`
+  takes a plain `periodDates: readonly string[]` — the exact same function
+  serves a calendar month OR a single week with zero engine changes, only a
+  different `periodDates` array. This is what "support the future
+  weekly/monthly UI cleanly" means in practice here.
+- `lib/readModels/shiftFairnessTypes.ts` / `buildShiftFairnessReadModel.ts`
+  — the SEPARATE, parallel shift Fairness read model (safe types, no
+  `sourceSheet`/`sourceCell`, personName resolved from `Person`), following
+  `buildManagerFairnessReadModel.ts`'s own pure/no-network convention. No
+  Google-fetch/auth/caching orchestration layer (`loadXReadModel`,
+  `getRequestX`) is added yet — there is no page to serve one, and PR #48's
+  existing `loadManagerWorkbookContext`/`getWorkbookSnapshot` conventions
+  are what a future page's loader should reuse when it's built.
+
+**Verified limitation carried forward from PR #48, unchanged by this PR:**
+no stored join/leave/service-window date exists for any person. This PR's
+engine reflects it exactly the way PR #48 already does — a permanent/
+regular person's participation window is `"full_period"`, an ASSUMPTION
+(`dataCompleteness: "participation_assumed_full_period"`), and a reserve/
+unclassified person's window is bounded only by heuristic Event evidence
+(`"participation_inferred"`) or unknown entirely (`"participation_unknown"`).
+The shift engine does not — and cannot — close this gap; it only ever
+reports it honestly through `dataCompleteness`, never silently.
+
+No standalone Fairness page, person cards, duty Fairness integration,
+historical snapshot persistence, analytics, or combined shift+duty scoring
+are added in this PR.
