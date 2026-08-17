@@ -37,8 +37,27 @@ export function buildShiftFairnessReadModel(
   const periodDates = resolveShiftFairnessPeriodDates(month, now);
   const periodStatus = resolveShiftFairnessPeriodStatus(month, now);
 
-  const supervisorGroup = computeShiftFairnessForGroup("supervisor", people, events, periodDates, reserveParticipation);
-  const technicianGroup = computeShiftFairnessForGroup("technician", people, events, periodDates, reserveParticipation);
+  // periodStatus is threaded through explicitly -- a closed historical
+  // month is modeled more conservatively than the current/open period (see
+  // fairnessShiftEngine.ts's own docs for the current-vs-closed rule);
+  // omitting this would silently fall back to "current" behavior for every
+  // past month too.
+  const supervisorGroup = computeShiftFairnessForGroup(
+    "supervisor",
+    people,
+    events,
+    periodDates,
+    reserveParticipation,
+    periodStatus,
+  );
+  const technicianGroup = computeShiftFairnessForGroup(
+    "technician",
+    people,
+    events,
+    periodDates,
+    reserveParticipation,
+    periodStatus,
+  );
 
   return {
     fetchedAt,

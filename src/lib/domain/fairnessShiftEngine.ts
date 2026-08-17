@@ -46,6 +46,17 @@ import type { Person } from "./types";
  * SAME function serves a calendar month or a single week without knowing
  * either shape -- a future weekly view needs no engine changes, only a
  * different `periodDates` array. No `Date`/UTC, no score, no snapshot.
+ *
+ * CLOSED historical periods (`periodStatus: "closed"`) are modeled more
+ * conservatively than the current/open period: current capability
+ * (`isTechnician`/`isSupervisor`) is undated, so it is NEVER treated as
+ * proof of what a person's rotation actually was during a period that's
+ * already over. A closed period's target/deviation/status are real numbers
+ * only where genuinely period-dated evidence exists (the Fairness sheet's
+ * own allocation for THAT period, via `reserveParticipation`); otherwise
+ * they're `null` -- see `isRoleModelable`'s own docstring for the full
+ * current-vs-closed rule. Actual, confirmed historical work stays visible
+ * either way.
  */
 
 // ---------------------------------------------------------------------------
@@ -123,16 +134,20 @@ const SHIFT_PERIODS = ["day", "night"] as const;
 
 /**
  * `target`/`deviation`/`status` (and their weekend counterparts) are `null`
- * ONLY for an evidence-only member (see `isRoleComparisonMember`) -- their
- * target genuinely cannot be modeled from today's data (capability isn't
- * historically dated, so their historical opportunities can't honestly be
- * reconstructed), which is a DIFFERENT fact from a real, computed target of
+ * whenever `role` is not MODELABLE for this person this period (see
+ * `isRoleModelable`) -- their target genuinely cannot be modeled from
+ * today's data, which is a DIFFERENT fact from a real, computed target of
  * `0` (a modelable member who simply had no genuine opportunity). Never
  * guess a `0` in place of `null` here -- same convention
  * `lib/domain/fairnessAnalysis.ts`'s `computeScoreDelta`/`computeGapToTarget`
  * already established for the duty Fairness table ("a missing previous
- * score is NEVER treated as zero"). `null` here always pairs with the
- * `"shift_target_unmodelable_evidence_only"` reason in `dataCompleteness`.
+ * score is NEVER treated as zero"). `null` here always pairs with ONE of
+ * two `dataCompleteness` reasons, distinguishing WHY: `"shift_target_unmodelable_evidence_only"`
+ * for a current period (capability-based -- not their primary rotation, or
+ * no current capability for `role` at all) or `"shift_target_unmodelable_historical"`
+ * for a closed period (current capability is never proof of historical
+ * qualification timing, regardless of primary-rotation status -- see
+ * `isRoleModelable`'s own docstring).
  */
 export interface ShiftFairnessPersonResult {
   personId: string;
@@ -250,6 +265,51 @@ function isRoleComparisonMember(
   );
 }
 
+/**
+ * Whether `role` can be MODELED (a real target computed) for `person` --
+ * final PR #2 audit: THIS is the one place "current" and "closed" periods
+ * genuinely diverge, and it's the only correctness-driven exception to
+ * "current-period behavior is unchanged".
+ *
+ * - `"current"` (the open, still-in-progress period): unchanged from the
+ *   already-approved rule -- `role` must be this person's PRIMARY
+ *   comparison group (`resolveFairnessComparisonGroupKey`,
+ *   supervisor-over-technician precedence). Today's capability flag is a
+ *   reasonable basis for an ONGOING period precisely because it's still
+ *   ongoing -- there's no "was it true back then" question for a period
+ *   that hasn't finished yet.
+ * - `"closed"` (a finished historical period): current capability is NOT
+ *   proof of historical qualification timing -- `isTechnician`/
+ *   `isSupervisor` carry no effective-from date (`"eligibility_undated"`),
+ *   so treating "this is their rotation TODAY" as "this WAS their rotation
+ *   throughout that PAST period" would manufacture a possibly-misleading
+ *   verdict. Modelability instead requires genuinely period-DATED evidence
+ *   -- the Fairness sheet's own allocation for THAT specific historical
+ *   period (`reserveParticipation`, reused exactly as PR #48 already
+ *   established it, never a new inference rule) -- independent of primary-
+ *   group precedence entirely (a technically-secondary role with real
+ *   period-dated evidence is just as modelable as a primary one; a
+ *   technically-primary role with NO period-dated evidence is not
+ *   modelable at all). One confirmed historical shift on its own is real
+ *   evidence of THAT shift (see `isRoleComparisonMember` -- it still keeps
+ *   the person's row visible), never proof of a whole period's worth of
+ *   opportunities, so a lone Event is deliberately NOT treated as
+ *   sufficient here.
+ */
+function isRoleModelable(
+  person: Person,
+  role: FairnessComparisonGroupKey,
+  periodStatus: FairnessPeriodStatus,
+  reserveParticipation: ReserveRoleParticipation,
+): boolean {
+  if (periodStatus === "closed") {
+    const fairnessEvidence =
+      role === "technician" ? reserveParticipation.technicianPersonIds : reserveParticipation.supervisorPersonIds;
+    return fairnessEvidence.has(person.id);
+  }
+  return resolveFairnessComparisonGroupKey(person) === role;
+}
+
 function computePersonShiftFacts(
   person: Person,
   role: FairnessComparisonGroupKey,
@@ -257,6 +317,7 @@ function computePersonShiftFacts(
   sortedDates: readonly string[],
   periodStartDate: string | null,
   periodEndDate: string | null,
+  periodStatus: FairnessPeriodStatus,
   reserveParticipation: ReserveRoleParticipation,
 ): PersonShiftFacts {
   const personEvents = events.filter((event) => event.personId === person.id);
@@ -287,27 +348,26 @@ function computePersonShiftFacts(
   let opportunityCount = 0;
   let weekendOpportunityCount = 0;
 
-  // `role` must be this person's PRIMARY comparison group
-  // (`resolveFairnessComparisonGroupKey`, supervisor-over-technician
-  // precedence) to accrue any opportunity -- NOT merely eligible per
-  // `resolveFairnessRoleEligibility`'s own capability check. Those are
-  // different questions: eligibility asks "is this person capable of role
-  // R at all" (true for BOTH roles of a dual-capable person, by design --
-  // PR #48's eligibility is deliberately role-symmetric); this asks "is
-  // role R this person's NORMAL rotation" (true for exactly one role,
-  // supervisor for a dual-capable person). A dual-capable person's
-  // NON-primary role must never accrue real opportunities merely because
-  // their capability flag for it happens to be true -- that would treat an
-  // exceptional/emergency cross-role assignment as if it were their normal
-  // rotation. This gate is intentionally checked BEFORE the per-slot loop,
-  // not per-slot, since "which is this person's normal rotation" is a
-  // whole-period fact, exactly like eligibility itself.
-  const isPrimaryGroup = resolveFairnessComparisonGroupKey(person) === role;
+  // `isRoleModelable` decides whether `role` can be modeled for `person` at
+  // all THIS period -- see its own docstring for the current/closed
+  // divergence. For a CURRENT period this is "role is their primary
+  // rotation" (unaffected by this audit); a modelable current-period
+  // person must ALSO still be eligible per `resolveFairnessRoleEligibility`
+  // (unchanged existing gate). For a CLOSED period, `isRoleModelable`
+  // itself IS the complete gate -- it's built entirely from period-DATED
+  // evidence, independent of (and not additionally gated by) the CURRENT
+  // capability check `resolveFairnessRoleEligibility` performs first,
+  // since requiring that too would wrongly re-introduce "current capability
+  // as historical proof" through the back door (e.g. someone whose
+  // capability flag no longer matches today, but whom the period's OWN
+  // Fairness sheet genuinely proves was doing this role at the time).
+  //
+  // This gate is intentionally checked BEFORE the per-slot loop, not
+  // per-slot, since modelability is a whole-period fact.
+  const modelable = isRoleModelable(person, role, periodStatus, reserveParticipation);
+  const shouldAccrueOpportunities = periodStatus === "closed" ? modelable : modelable && (eligibility?.eligible ?? false);
 
-  // Not their primary rotation, or not eligible for it at all this period
-  // -> zero opportunities, full stop -- neither case earns a forward
-  // opportunity share.
-  if (isPrimaryGroup && eligibility?.eligible) {
+  if (shouldAccrueOpportunities) {
     for (const date of sortedDates) {
       if (!withinParticipationWindow(date, context.participation)) continue;
       const eventsForDate = personEvents.filter((event) => event.date === date);
@@ -344,43 +404,45 @@ function computeShare(personOpportunities: number, totalOpportunities: number, t
 }
 
 /**
- * Computes shift Fairness for every member of comparison group `role` --
- * `resolveFairnessComparisonGroupKey(person) === role` (from
- * `fairnessGroups.ts`, never a separate/duplicated group definition;
- * called "MODELABLE" members below) OR, per an earlier follow-up fix, a
- * person for whom `role` is NOT their primary rotation -- either their
- * CURRENT capability no longer includes `role` at all, or (clarified
- * business rule) `role` is merely their SECONDARY capability (a
- * dual-capable person's normal rotation is supervisor; an occasional
- * technician shift is exceptional, not proof of normal technician-rotation
- * membership) -- who nonetheless has real confirmed evidence of having
- * worked it this period (`isRoleComparisonMember`; called "evidence-only"
- * members below). Their evidenced work stays visible even though it can
- * never earn them a forward opportunity share -- see
- * `computePersonShiftFacts`'s own primary-group gate, which is what keeps
- * `opportunityCount` at `0` for these members (never merely
- * `resolveFairnessRoleEligibility`'s capability check alone, which is
- * deliberately role-symmetric and would otherwise happily grant a
- * dual-capable person full technician opportunities too).
+ * Computes shift Fairness for every member of comparison group `role`.
+ * Group MEMBERSHIP (whose row appears at all) is always
+ * `resolveFairnessComparisonGroupKey(person) === role` (primary rotation)
+ * OR real confirmed evidence of having worked `role` this period
+ * (`isRoleComparisonMember`) -- unaffected by `periodStatus`, since real
+ * evidenced work must stay visible regardless of whether the period is
+ * still open or already closed.
  *
- * SECOND follow-up fix: an evidence-only member's real `actualShifts` is
- * NEVER folded into the totals the opportunity-share formula redistributes
- * onto other people's targets. Not being able to model their historical
- * opportunities (their current capability flag says they shouldn't have
- * any, or `role` is merely their secondary capability) is not license to
- * silently hand their real workload to whichever modelable members
- * currently hold opportunities -- that would manufacture an inflated
- * target for people whose own availability never changed.
- * `totalActual`/`totalOpportunity` (general and weekend) are therefore
- * summed over MODELABLE members ONLY; an evidence-only member's own
- * `target`/`weekendTarget` (and `deviation`/`status`) is `null` -- NEVER a
- * guessed `0` standing in for "no meaningful target exists" (a real,
- * computed `0` is a DIFFERENT fact -- a modelable member who simply had no
- * genuine opportunity), never computed from the share formula, never
- * inventing a historical eligibility this codebase doesn't have -- and
- * flagged with `"shift_target_unmodelable_evidence_only"` -- distinct from
- * the group-level `"shift_target_no_group_opportunities"`, which now only
- * ever reflects an anomaly within the MODELABLE pool itself.
+ * Whether a member's target can actually be MODELED (a real number, versus
+ * `null`) is decided by `isRoleModelable`, and is the ONE place
+ * `periodStatus` changes this engine's behavior (final PR #2 audit):
+ *
+ * - `"current"`: unchanged from the already-approved rule -- modelable
+ *   only when `role` is the person's PRIMARY rotation AND they're eligible
+ *   per `resolveFairnessRoleEligibility`. A dual-capable person's
+ *   SECONDARY role, or anyone whose current capability doesn't include
+ *   `role` at all, is "evidence-only": real `actualShifts` stays visible,
+ *   but `target`/`deviation`/`status` (and weekend equivalents) are
+ *   `null`, flagged `"shift_target_unmodelable_evidence_only"`, and never
+ *   folded into the totals redistributed onto modelable members.
+ * - `"closed"`: current capability/primary-rotation status is NOT treated
+ *   as proof of historical qualification timing -- modelable ONLY when
+ *   genuinely period-dated evidence exists (`reserveParticipation`, the
+ *   Fairness sheet's own allocation for THAT historical period). Everyone
+ *   else -- including a person whose CURRENT capability matches `role`, or
+ *   who has a real confirmed historical shift or two -- keeps their
+ *   `actualShifts` visible but gets `null` target/deviation/status,
+ *   flagged `"shift_target_unmodelable_historical"`. One confirmed
+ *   historical shift is never treated as proof of a whole period's worth
+ *   of opportunities.
+ *
+ * Either way, `totalActual`/`totalOpportunity` (general and weekend) are
+ * summed over MODELABLE members ONLY -- an unmodelable member's real
+ * workload is NEVER folded into the totals the opportunity-share formula
+ * redistributes onto other people's targets. Not being able to model
+ * someone's own opportunities is not license to silently hand their real
+ * workload to whichever modelable members currently hold opportunities --
+ * that would manufacture an inflated target for people whose own
+ * availability never changed.
  *
  * `people`/`events` may be the full roster/period Event set -- this filters
  * to the group and to each person's own Events itself. `periodDates` is
@@ -388,9 +450,13 @@ function computeShare(personOpportunities: number, totalOpportunities: number, t
  * `resolveShiftFairnessPeriodDates`'s today-capped current-month dates, or
  * a full historical month/week) -- an EMPTY array is handled safely: every
  * member gets `actualShifts: 0`, `target: 0`, `status: "balanced"`.
- *
- * `reserveParticipation` defaults to empty, the safe direction (see
- * `fairnessParticipation.ts`).
+ * `periodStatus` (typically `resolveShiftFairnessPeriodStatus`'s result)
+ * defaults to `"current"`, the pre-audit behavior, so an existing caller
+ * that hasn't been updated to pass it explicitly keeps its current
+ * behavior unchanged. `reserveParticipation` defaults to empty, the safe
+ * direction (see `fairnessParticipation.ts`) -- for a closed period this
+ * also means "no dated evidence supplied", the safe/conservative default
+ * that can only ever make MORE people unmodelable, never fewer.
  */
 export function computeShiftFairnessForGroup(
   role: FairnessComparisonGroupKey,
@@ -398,6 +464,7 @@ export function computeShiftFairnessForGroup(
   events: readonly Event[],
   periodDates: readonly string[],
   reserveParticipation: ReserveRoleParticipation = EMPTY_RESERVE_ROLE_PARTICIPATION,
+  periodStatus: FairnessPeriodStatus = "current",
 ): ShiftFairnessGroupResult {
   const sortedDates = [...periodDates].sort();
   const periodStartDate = sortedDates[0] ?? null;
@@ -408,17 +475,25 @@ export function computeShiftFairnessForGroup(
   );
 
   const facts = groupMembers.map((person) =>
-    computePersonShiftFacts(person, role, events, sortedDates, periodStartDate, periodEndDate, reserveParticipation),
+    computePersonShiftFacts(
+      person,
+      role,
+      events,
+      sortedDates,
+      periodStartDate,
+      periodEndDate,
+      periodStatus,
+      reserveParticipation,
+    ),
   );
 
-  // Only members for whom `role` IS their PRIMARY rotation (the same
-  // exclusive, supervisor-over-technician classifier `fairnessGroups.ts`
-  // uses everywhere else) count toward the totals the share formula
-  // redistributes -- see this function's own docstring for why an
-  // evidence-only member's workload (including a dual-capable person's
-  // exceptional shift in their SECONDARY role) must never inflate someone
-  // else's target.
-  const modelableFacts = facts.filter((fact) => resolveFairnessComparisonGroupKey(fact.person) === role);
+  // Only members for whom `role` is actually MODELABLE this period (see
+  // `isRoleModelable` -- primary rotation for a current period, genuinely
+  // period-dated evidence for a closed one) count toward the totals the
+  // share formula redistributes -- see this function's own docstring for
+  // why an unmodelable member's workload must never inflate someone else's
+  // target.
+  const modelableFacts = facts.filter((fact) => isRoleModelable(fact.person, role, periodStatus, reserveParticipation));
 
   const totalActual = modelableFacts.reduce((sum, fact) => sum + fact.actualShifts, 0);
   const totalOpportunity = modelableFacts.reduce((sum, fact) => sum + fact.opportunityCount, 0);
@@ -441,9 +516,9 @@ export function computeShiftFairnessForGroup(
       : COMPLETE_FAIRNESS_DATA;
 
   const personResults: ShiftFairnessPersonResult[] = facts.map((fact) => {
-    const isModelable = resolveFairnessComparisonGroupKey(fact.person) === role;
+    const isModelable = isRoleModelable(fact.person, role, periodStatus, reserveParticipation);
 
-    // An evidence-only member's target is NOT modelable -- never a guessed
+    // An unmodelable member's target is NOT modelable -- never a guessed
     // `0` standing in for "no meaningful target exists" (that would produce
     // a misleading "above" status from `actualShifts - 0`). `null`
     // propagates through deviation/status too, so a per-person view can
@@ -456,9 +531,17 @@ export function computeShiftFairnessForGroup(
     const deviation = target === null ? null : fact.actualShifts - target;
     const weekendDeviation = weekendTarget === null ? null : fact.weekendActualShifts - weekendTarget;
 
+    // Two DIFFERENT reasons for the SAME null-target shape, distinguished
+    // so a future UI can explain WHY: `"...evidence_only"` for a current
+    // period (capability-based: not their primary rotation, or capability
+    // doesn't match at all); `"...historical"` for a closed period
+    // (current capability is never proof of historical qualification
+    // timing, regardless of primary-rotation status).
     const unmodelableReason = isModelable
       ? COMPLETE_FAIRNESS_DATA
-      : fairnessDataCompleteness(["shift_target_unmodelable_evidence_only"]);
+      : periodStatus === "closed"
+        ? fairnessDataCompleteness(["shift_target_unmodelable_historical"])
+        : fairnessDataCompleteness(["shift_target_unmodelable_evidence_only"]);
 
     return {
       personId: fact.person.id,

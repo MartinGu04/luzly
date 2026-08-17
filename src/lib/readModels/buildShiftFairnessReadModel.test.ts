@@ -85,4 +85,24 @@ describe("buildShiftFairnessReadModel", () => {
     expect(technicianGroup?.rows).toHaveLength(1);
     expect(technicianGroup?.rows[0].actualShifts).toBe(0);
   });
+
+  it("a closed historical month reports periodStatus: closed and produces null historical targets without dated evidence -- periodStatus is genuinely threaded into the engine, not silently dropped", () => {
+    const tech = person({ id: "p_tech", isTechnician: true });
+    const now: LocalNow = { date: "2026-08-15", minuteOfDay: 600 };
+
+    const events: Event[] = [shiftEvent({ personId: tech.id, date: "2026-06-05", role: "technician" })];
+
+    const model = buildShiftFairnessReadModel([tech], events, { year: 2026, month: 6 }, now, "2026-08-15T10:00:00.000Z");
+
+    expect(model.periodStatus).toBe("closed");
+    const technicianGroup = model.groups.find((group) => group.role === "technician");
+    const row = technicianGroup?.rows[0];
+    expect(row?.actualShifts).toBe(1);
+    // Current capability alone must not fabricate a historical target once
+    // this reaches the read-model layer either -- see
+    // fairnessShiftEngine.ts's historical qualification audit.
+    expect(row?.target).toBeNull();
+    expect(row?.status).toBeNull();
+    expect(row?.dataCompleteness.reasons).toContain("shift_target_unmodelable_historical");
+  });
 });

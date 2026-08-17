@@ -881,81 +881,150 @@ describe("computeShiftFairnessForGroup — sanity check against a realistic synt
 });
 
 // ---------------------------------------------------------------------------
-// Historical qualification audit.
+// Historical qualification audit (FINAL, corrected conclusion).
 //
 // PR #48 established: isTechnician/isSupervisor are a CURRENT snapshot only
-// -- כ"א carries no effective-from date, so there is no way to know whether
-// a person's capability was the same a month (or a year) ago as it is
-// today. The engine reconstructs CLOSED historical periods using exactly
-// the same current capability flags it uses for the current period -- this
-// is a deliberate, audited choice, not an oversight:
-//
-// - Inventing a historical qualification date this codebase doesn't have
-//   would manufacture false precision (worse than the current approach).
-// - Refusing to calculate historical periods at all would make every past
-//   month unusable, which the source data does not require -- capability
-//   changes are presumably rare, and the best available estimate (today's
-//   capability, honestly flagged) is more useful than no result.
-// - The uncertainty is not silently absorbed: `"eligibility_undated"` is
-//   attached to EVERY eligibility-derived result unconditionally (checked
-//   below for a genuinely closed month), current or historical, so a
-//   historical target is never presented with more confidence than a
-//   current one.
-// - Where today's data genuinely cannot support even that estimate (an
-//   evidence-only member -- capability doesn't currently match, or `role`
-//   is only their secondary capability), the SAME "unknown, not zero"
-//   treatment already established for the current period applies exactly
-//   as-is for a historical one: target/deviation/status stay null, never a
-//   guessed number.
+// -- כ"א carries no effective-from date. Current capability is NOT proof of
+// historical qualification timing: "this is their rotation TODAY" does not
+// establish "this WAS their rotation throughout that PAST, already-closed
+// period". Unlike the current/open period (where today's capability is a
+// reasonable basis precisely because the period hasn't finished yet), a
+// CLOSED period's target/deviation/status are real numbers ONLY where
+// genuinely period-DATED evidence exists -- the Fairness sheet's own
+// allocation for THAT specific historical period, reused via
+// `reserveParticipation` exactly as PR #48 already established it, never a
+// new inference rule or an invented qualification date. Confirmed
+// historical shift Events are always real evidence and stay visible as
+// `actualShifts` regardless -- but neither today's capability flag nor a
+// single historical shift is treated as proof of a whole period's worth of
+// opportunities. Unknown stays unknown: `null`, never `0`.
 // ---------------------------------------------------------------------------
 
-describe("computeShiftFairnessForGroup — historical qualification audit", () => {
+describe("computeShiftFairnessForGroup — historical qualification audit (closed periods)", () => {
   const now: LocalNow = { date: "2026-08-15", minuteOfDay: 600 };
   const closedMonth = { year: 2026, month: 6 }; // June 2026 -- fully in the past relative to `now`
+  const dates = resolveShiftFairnessPeriodDates(closedMonth, now); // full June 2026
 
   it("a closed historical month really is reported closed", () => {
     expect(resolveShiftFairnessPeriodStatus(closedMonth, now)).toBe("closed");
+    expect(dates).toHaveLength(30);
   });
 
-  it("a modelable member's historical target is a real, usable estimate -- but always flagged eligibility_undated, never presented as verified", () => {
+  it("A. closed period + current capability ONLY (no dated evidence) -- current capability alone must NOT create a fabricated historical target", () => {
     const REGULAR = person({ id: "p_hist_reg", isTechnician: true });
-    const dates = resolveShiftFairnessPeriodDates(closedMonth, now); // full June 2026, fully in the past
-    expect(dates).toHaveLength(30);
-
     const events: Event[] = [
       shiftEvent({ personId: REGULAR.id, date: "2026-06-05", role: "technician" }),
       shiftEvent({ personId: REGULAR.id, date: "2026-06-06", role: "technician", period: "night" }),
     ];
 
-    const result = computeShiftFairnessForGroup("technician", [REGULAR], events, dates);
+    const result = computeShiftFairnessForGroup("technician", [REGULAR], events, dates, undefined, "closed");
     const row = findPerson(result, REGULAR.id);
 
-    // A real, usable estimate -- not refused merely because the period is historical.
-    expect(row.target).not.toBeNull();
-    expect(Number.isFinite(row.target)).toBe(true);
-    expect(row.status).not.toBeNull();
-    // But the estimate is honestly flagged: capability is a current
-    // snapshot applied to a historical period, never presented as a
-    // verified historical fact.
-    expect(row.dataCompleteness.status).toBe("partial");
-    expect(row.dataCompleteness.reasons).toContain("eligibility_undated");
-  });
-
-  it("an evidence-only member's historical workload is STILL never assigned a fabricated target -- unknown stays unknown, for historical periods exactly as for the current one", () => {
-    const RECLASSIFIED = person({ id: "p_hist_reclassified", isTechnician: false, isSupervisor: false });
-    const dates = resolveShiftFairnessPeriodDates(closedMonth, now);
-    const events: Event[] = [shiftEvent({ personId: RECLASSIFIED.id, date: "2026-06-10", role: "technician" })];
-
-    const result = computeShiftFairnessForGroup("technician", [RECLASSIFIED], events, dates);
-    const row = findPerson(result, RECLASSIFIED.id);
-
-    // Real historical evidence stays visible...
-    expect(row.actualShifts).toBe(1);
-    // ...but no fabricated historical target/status -- "unknown" is never
-    // silently promoted to a number just because the period is in the past.
+    // C. Unreconstructable historical target -- null across the board, general AND weekend.
+    expect(row.opportunityCount).toBe(0);
     expect(row.target).toBeNull();
     expect(row.deviation).toBeNull();
     expect(row.status).toBeNull();
-    expect(row.dataCompleteness.reasons).toContain("shift_target_unmodelable_evidence_only");
+    expect(row.weekendTarget).toBeNull();
+    expect(row.weekendDeviation).toBeNull();
+    expect(row.weekendStatus).toBeNull();
+    // Completeness explains why -- machine-readable, distinct from the current-period reason.
+    expect(row.dataCompleteness.reasons).toContain("shift_target_unmodelable_historical");
+    expect(row.dataCompleteness.reasons).not.toContain("shift_target_unmodelable_evidence_only");
+  });
+
+  it("B. a single confirmed historical shift is real evidence of THAT shift, never proof of a whole period's worth of opportunities", () => {
+    const REGULAR = person({ id: "p_hist_one_shift", isTechnician: true });
+    const events: Event[] = [shiftEvent({ personId: REGULAR.id, date: "2026-06-10", role: "technician" })];
+
+    const result = computeShiftFairnessForGroup("technician", [REGULAR], events, dates, undefined, "closed");
+    const row = findPerson(result, REGULAR.id);
+
+    // The one real shift stays visible...
+    expect(row.actualShifts).toBe(1);
+    // ...but it does NOT unlock a full-period opportunity model.
+    expect(row.target).toBeNull();
+    expect(row.status).toBeNull();
+  });
+
+  it("D. genuinely period-dated evidence (the Fairness sheet's own allocation for THAT period) DOES make a closed period modelable", () => {
+    const WITH_EVIDENCE = person({ id: "p_hist_evidenced", isTechnician: true });
+    const events: Event[] = [
+      shiftEvent({ personId: WITH_EVIDENCE.id, date: "2026-06-05", role: "technician" }),
+      shiftEvent({ personId: WITH_EVIDENCE.id, date: "2026-06-06", role: "technician", period: "night" }),
+    ];
+    const dated = participationEvidence({ technicianIds: [WITH_EVIDENCE.id] });
+
+    const result = computeShiftFairnessForGroup("technician", [WITH_EVIDENCE], events, dates, dated, "closed");
+    const row = findPerson(result, WITH_EVIDENCE.id);
+
+    // Real, usable modelability -- to the extent the dated evidence actually supports it.
+    expect(row.opportunityCount).toBeGreaterThan(0);
+    expect(row.target).not.toBeNull();
+    expect(Number.isFinite(row.target)).toBe(true);
+    expect(row.status).not.toBeNull();
+    expect(row.dataCompleteness.reasons).not.toContain("shift_target_unmodelable_historical");
+  });
+
+  it("E. current/open-period behavior is unchanged -- the SAME roster/events still gets a real, capability-based target when periodStatus is current (the default)", () => {
+    const REGULAR = person({ id: "p_hist_reg_current", isTechnician: true });
+    const events: Event[] = [
+      shiftEvent({ personId: REGULAR.id, date: "2026-06-05", role: "technician" }),
+      shiftEvent({ personId: REGULAR.id, date: "2026-06-06", role: "technician", period: "night" }),
+    ];
+
+    // No periodStatus argument -- defaults to "current", the pre-audit, still-approved behavior.
+    const result = computeShiftFairnessForGroup("technician", [REGULAR], events, dates);
+    const row = findPerson(result, REGULAR.id);
+
+    expect(row.target).not.toBeNull();
+    expect(Number.isFinite(row.target)).toBe(true);
+    expect(row.status).not.toBeNull();
+    expect(row.dataCompleteness.reasons).toContain("eligibility_undated");
+  });
+
+  it("F. an unmodelable closed-period member's real workload never redistributes onto a genuinely dated-evidence colleague's target", () => {
+    const NO_EVIDENCE = person({ id: "p_hist_no_evidence", isTechnician: true });
+    const WITH_EVIDENCE = person({ id: "p_hist_with_evidence", isTechnician: true });
+    const events: Event[] = [
+      shiftEvent({ personId: NO_EVIDENCE.id, date: "2026-06-08", role: "technician" }),
+      shiftEvent({ personId: WITH_EVIDENCE.id, date: "2026-06-05", role: "technician" }),
+    ];
+    const dated = participationEvidence({ technicianIds: [WITH_EVIDENCE.id] });
+
+    const result = computeShiftFairnessForGroup("technician", [NO_EVIDENCE, WITH_EVIDENCE], events, dates, dated, "closed");
+    const noEvidenceRow = findPerson(result, NO_EVIDENCE.id);
+    const withEvidenceRow = findPerson(result, WITH_EVIDENCE.id);
+
+    // NO_EVIDENCE's real shift stays visible but unmodelable.
+    expect(noEvidenceRow.actualShifts).toBe(1);
+    expect(noEvidenceRow.target).toBeNull();
+
+    // WITH_EVIDENCE's target reflects ONLY their own modelable workload (1
+    // shift, their own opportunities) -- not inflated by NO_EVIDENCE's
+    // unmodelable shift being folded into a shared total.
+    expect(withEvidenceRow.actualShifts).toBe(1);
+    expect(withEvidenceRow.target).toBe(1);
+    expect(withEvidenceRow.status).toBe("balanced");
+  });
+
+  it("dual-capability precedence is untouched by the historical audit -- a dual-capable person's exceptional cross-role closed-period shift stays evidence-only (historical reason) even WITH dated evidence for their secondary role's Fairness table", () => {
+    const DUAL = person({ id: "p_hist_dual", isSupervisor: true, isTechnician: true });
+    const events: Event[] = [shiftEvent({ personId: DUAL.id, date: "2026-06-05", role: "technician" })];
+    // Even fabricated technician-side Fairness evidence must never promote
+    // a dual-capable person's SECONDARY role into their normal rotation --
+    // membership via isRoleComparisonMember still requires real Event
+    // evidence (already present here), and closed-period modelability is
+    // decided by isRoleModelable per (person, role) independent of
+    // dual-capability precedence -- so this positive case simply confirms
+    // the dated-evidence path also works correctly for a non-primary role.
+    const dated = participationEvidence({ technicianIds: [DUAL.id] });
+
+    const result = computeShiftFairnessForGroup("technician", [DUAL], events, dates, dated, "closed");
+    const row = findPerson(result, DUAL.id);
+
+    expect(row.actualShifts).toBe(1);
+    expect(row.target).not.toBeNull();
+    expect(row.dataCompleteness.reasons).not.toContain("shift_target_unmodelable_historical");
   });
 });

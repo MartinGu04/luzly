@@ -364,9 +364,12 @@ and never a 0–100 score.
   personal target is their SHARE of the group's total genuine
   opportunities, applied to the group's total ACTUAL shift count:
   `target = totalActual * (personOpportunities / totalOpportunities)` — so
-  someone with fewer real opportunities (a shorter participation window,
-  more constraints, a role they only recently became eligible for) is
-  expected to have done proportionally LESS, never an equal split. "Actual
+  someone with fewer real opportunities this period (a shorter
+  participation window, more constraints) is expected to have done
+  proportionally LESS, never an equal split. This describes the CURRENT
+  period only — a closed historical period's modelability follows a
+  separate, more conservative rule (see the historical qualification audit
+  below). "Actual
   shifts performed" is always counted independently of eligibility/
   opportunity (a real confirmed shift is never discarded just because
   today's eligibility evidence doesn't currently prove it) — CONFIRMED only
@@ -443,26 +446,34 @@ and never a 0–100 score.
   ("a missing previous score is NEVER treated as zero") — reused here, not
   reinvented. `lib/readModels/shiftFairnessTypes.ts`'s
   `ShiftFairnessPersonRowView` mirrors the same nullability.
-- **Historical qualification audit (final, pre-merge).** PR #48 established
-  that `isTechnician`/`isSupervisor` are a CURRENT snapshot only — כ"א
-  carries no effective-from date. This engine reconstructs CLOSED
-  historical periods using exactly the same current capability flags it
-  uses for the current period, and that is a deliberate, audited
-  conclusion, not an oversight: inventing a historical qualification date
-  this codebase doesn't have would manufacture false precision (worse than
-  today's approach); refusing to calculate historical periods at all would
-  make every past month unusable, which nothing in the source data
-  requires. The uncertainty is never silently absorbed —
-  `"eligibility_undated"` is attached to every eligibility-derived result
-  UNCONDITIONALLY, current or historical alike, so a historical target is
-  never presented with more confidence than a current one. Where even that
-  estimate can't honestly be made (an evidence-only member, whether from a
-  changed capability flag or the dual-capability precedence above), the
-  exact same "unknown, never zero" treatment already established for the
-  current period applies identically to a historical one: `null`, never a
-  guessed number. This is the most defensible behavior the actual data
-  supports; no code change was required beyond confirming (with dedicated
-  regression tests) that both halves of this already held.
+- **Historical qualification: closed periods model more conservatively than
+  the current one (final, corrected conclusion).** PR #48 established that
+  `isTechnician`/`isSupervisor` are a CURRENT snapshot only — כ"א carries no
+  effective-from date. The current/open period may still use today's
+  capability as its modelability basis (unchanged, still approved) — there
+  is no "was it true back then" question for a period that hasn't finished
+  yet. A CLOSED historical period is different: current capability is NOT
+  treated as proof of what a person's rotation actually was during a period
+  that's already over — "this is their rotation TODAY" does not establish
+  "this WAS their rotation throughout that PAST period", and a single
+  confirmed historical shift is real evidence of THAT shift, never proof of
+  a whole period's worth of opportunities. `isRoleModelable`
+  (`fairnessShiftEngine.ts`) is therefore period-status-aware: for a closed
+  period, `target`/`deviation`/`status` (and their weekend counterparts) are
+  real numbers ONLY where genuinely period-DATED evidence exists — the
+  Fairness sheet's own allocation for THAT specific historical period,
+  reused via `reserveParticipation` exactly as PR #48 already established
+  it (never a new inference rule, never an invented qualification-effective
+  date). Everyone else's real `actualShifts` stays visible regardless, but
+  `target`/`deviation`/`status` are `null`, flagged
+  `"shift_target_unmodelable_historical"` — distinct from the current
+  period's `"shift_target_unmodelable_evidence_only"`, so a future UI can
+  explain the two differently. `computeShiftFairnessForGroup`'s
+  `periodStatus` parameter defaults to `"current"` (the pre-audit,
+  still-approved behavior) so an existing caller that hasn't been updated
+  to pass it keeps working unchanged; `buildShiftFairnessReadModel.ts`
+  passes its already-resolved `resolveShiftFairnessPeriodStatus` result
+  through explicitly.
 - **Weekend fairness stays separate.** The exact same opportunity-share
   method is computed a SECOND time, restricted to weekend dates only
   (`isFairnessWeekendDate`, reused from `fairnessFoundation.ts`) — no
