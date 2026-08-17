@@ -1,27 +1,37 @@
 import { Panel } from "@/components/ui/Panel";
-import type { NotificationReadinessSummaryView } from "@/lib/presentation/notificationReadiness";
+import type { NotificationReadinessSectionView } from "@/lib/presentation/notificationReadiness";
 
 interface ManagerNotificationReadinessSectionProps {
-  readiness: NotificationReadinessSummaryView | null;
+  readiness: NotificationReadinessSectionView;
 }
 
 /**
  * "מצב התראות" -- operational/data-quality context, NOT a shift conflict:
  * deliberately its OWN small section, never merged into "דורש טיפול"
- * (`ManagerAttentionSection`). Renders nothing at all when `readiness` is
- * null (`buildNotificationReadinessSummary` already returns null for both
- * "the privileged lookup was skipped/failed" and "everyone is ready" --
- * neither case gets a permanent success card here, matching spec: no noise
- * when there's nothing actionable to say).
- *
- * Collapsed by default (same native `<details>`/`<summary>` disclosure
- * `IssueRow`'s "פעולה מומלצת" already uses) -- only the compact one-line
- * summary is visible until a manager opts in to "הצג פרטים". Only names
- * ever reach the DOM -- no ids, no emails, no auth/subscription internals
- * (see `ManagerNotificationReadinessBlocker`/`NotificationReadinessBlockerGroup`).
+ * (`ManagerAttentionSection`). Three distinct renders, matching
+ * `NotificationReadinessSectionView.kind` exactly:
+ * - `hidden` -- nothing at all (lookup skipped, or everyone is ready --
+ *   neither gets a permanent success card, per spec).
+ * - `unavailable` -- a small neutral notice. Deliberately NOT the same as
+ *   `hidden`: an infra failure must never look identical to "everyone is
+ *   ready" to a manager reading this page. No raw error, no technical
+ *   detail, no names, no "דורש טיפול" severity styling -- this is a plain
+ *   muted status line, not an alarm.
+ * - `blockers` -- the compact summary + collapsed `הצג פרטים` disclosure,
+ *   same native `<details>`/`<summary>` pattern `IssueRow`'s "פעולה
+ *   מומלצת" already uses. Only names ever reach the DOM -- no ids, no
+ *   emails, no auth/subscription internals.
  */
 export function ManagerNotificationReadinessSection({ readiness }: ManagerNotificationReadinessSectionProps) {
-  if (!readiness) return null;
+  if (readiness.kind === "hidden") return null;
+
+  if (readiness.kind === "unavailable") {
+    return (
+      <Panel variant="compact">
+        <p className="text-sm text-muted">לא ניתן לבדוק כרגע את מצב ההתראות</p>
+      </Panel>
+    );
+  }
 
   return (
     <Panel variant="compact">

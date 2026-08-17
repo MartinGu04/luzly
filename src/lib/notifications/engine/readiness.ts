@@ -1,7 +1,6 @@
 import "server-only";
-import { findPersonByEmail } from "@/lib/auth/resolveCurrentPerson";
 import type { Person } from "@/lib/domain/types";
-import { fetchAllSubscribedUserIds, fetchAllUserIdsByEmail, normalizeEmail } from "./recipients";
+import { fetchAllSubscribedUserIds, fetchAllUserIdsByEmail, resolvePersonIdentity } from "./recipients";
 
 /**
  * PR #40 -- every deterministic state a roster person can resolve to when
@@ -41,14 +40,14 @@ export interface PersonReadinessResult {
  * `push_subscriptions` select) are fetched CONCURRENTLY via `Promise.all`
  * -- they're independent reads with no data dependency on each other.
  *
- * Reuses `findPersonByEmail` -- the EXACT SAME fail-closed-on-ambiguity
- * email-matching rule `resolveNotificationRecipients` (the worker's own
- * recipient resolution) and the interactive login path both already use
- * -- so the manager-facing readiness view and the worker's actual
- * targeting logic can never quietly drift apart. This function does NOT
- * change or duplicate `resolveNotificationRecipients`'s own aggregate
- * counting behavior (its PII-safe worker logs are untouched) -- it's a
- * separate, per-person projection built from the same underlying primitives.
+ * Reuses `resolvePersonIdentity` -- the EXACT SAME per-person identity
+ * resolution `resolveNotificationRecipients` (the worker's own recipient
+ * resolution) now shares -- so the manager-facing readiness view and the
+ * worker's actual targeting logic can never quietly drift apart. This
+ * function does NOT change or duplicate `resolveNotificationRecipients`'s
+ * own aggregate counting behavior (its PII-safe worker logs are untouched)
+ * -- it's a separate, per-person projection built from the same underlying
+ * primitives.
  */
 export async function computeNotificationReadiness(
   people: readonly Person[],
@@ -71,14 +70,11 @@ function resolvePersonReadiness(
   emailToUserId: ReadonlyMap<string, string>,
   subscribedUserIds: ReadonlySet<string>,
 ): PersonNotificationReadiness {
-  if (!person.email) return "missing_email";
+  const identity = resolvePersonIdentity(person, people, emailToUserId);
 
-  const lookup = findPersonByEmail(people, person.email);
-  if (lookup.status === "ambiguous") return "ambiguous_email";
-  if (lookup.status === "not_found") return "missing_email"; // unreachable: person.email is itself a member of `people`
+  if (identity.status === "no_email" || identity.status === "not_found") return "missing_email"; // not_found is unreachable: person.email is itself a member of `people`
+  if (identity.status === "ambiguous") return "ambiguous_email";
+  if (identity.status === "unmapped") return "unmapped_account";
 
-  const userId = emailToUserId.get(normalizeEmail(person.email));
-  if (!userId) return "unmapped_account";
-
-  return subscribedUserIds.has(userId) ? "ready" : "no_push_subscription";
+  return subscribedUserIds.has(identity.userId) ? "ready" : "no_push_subscription";
 }

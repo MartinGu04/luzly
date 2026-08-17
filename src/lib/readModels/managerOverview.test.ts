@@ -252,10 +252,19 @@ describe("loadManagerOverviewReadModel — PR #40 notification readiness wiring"
     expect(computeNotificationReadiness.mock.calls[0][0]).toHaveLength(2);
   });
 
-  it("selected-person scope: never calls the privileged readiness lookup", async () => {
+  it("selected-person scope: never calls the privileged readiness lookup, model records status: skipped", async () => {
     getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(true));
-    await loadManagerOverviewReadModel({ personId: "p_dani", range: "7d", month: null, problemsOnly: false });
+    const result = await loadManagerOverviewReadModel({
+      personId: "p_dani",
+      range: "7d",
+      month: null,
+      problemsOnly: false,
+    });
     expect(computeNotificationReadiness).not.toHaveBeenCalled();
+    expect(result.status).toBe("ok");
+    if (result.status === "ok") {
+      expect(result.model.notificationReadiness).toEqual({ status: "skipped" });
+    }
   });
 
   it("threads the resolved readiness result into the safe manager projection", async () => {
@@ -273,13 +282,16 @@ describe("loadManagerOverviewReadModel — PR #40 notification readiness wiring"
     expect(second.status).toBe("ok");
     if (second.status !== "ok") return;
     expect(second.model.notificationReadiness).toEqual({
-      readyCount: 0,
-      totalCount: 1,
-      blockers: [{ personId: firstPersonId, personName: result.model.roster[0].name, status: "no_push_subscription" }],
+      status: "available",
+      view: {
+        readyCount: 0,
+        totalCount: 1,
+        blockers: [{ personId: firstPersonId, personName: result.model.roster[0].name, status: "no_push_subscription" }],
+      },
     });
   });
 
-  it("degrades to notificationReadiness: null (never throws) when the readiness lookup itself fails", async () => {
+  it("degrades to notificationReadiness: { status: 'unavailable' } (never throws, and never conflated with skipped) when the readiness lookup itself fails", async () => {
     getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(true));
     computeNotificationReadiness.mockRejectedValue(new Error("supabase unreachable"));
 
@@ -287,7 +299,7 @@ describe("loadManagerOverviewReadModel — PR #40 notification readiness wiring"
 
     expect(result.status).toBe("ok");
     if (result.status === "ok") {
-      expect(result.model.notificationReadiness).toBeNull();
+      expect(result.model.notificationReadiness).toEqual({ status: "unavailable" });
     }
   });
 });

@@ -213,6 +213,26 @@ export interface ManagerNotificationReadinessView {
 }
 
 /**
+ * PR #40 follow-up -- the manager overview must distinguish "the privileged
+ * lookup was never attempted" from "it was attempted and failed", never
+ * collapse both into the same silent absence a viewer could mistake for
+ * "everyone is ready":
+ * - `skipped` -- a person is selected (`ManagerNotificationReadinessSection`
+ *   never renders on that drilldown), so `computeNotificationReadiness()`
+ *   was never called at all.
+ * - `unavailable` -- it WAS called, for the "everyone" scope, and the
+ *   Supabase Admin API / `push_subscriptions` lookup itself failed (see
+ *   `managerOverview.ts`). The manager sees a small neutral notice, not a
+ *   silently missing section.
+ * - `available` -- it succeeded; `view` is the safe projection (may still
+ *   have zero `blockers` when everyone is ready).
+ */
+export type ManagerNotificationReadinessState =
+  | { status: "skipped" }
+  | { status: "unavailable" }
+  | { status: "available"; view: ManagerNotificationReadinessView };
+
+/**
  * The manager-only, broader-scope read model. Separate from
  * `PersonalScheduleReadModel` on purpose (see `README.md`) -- it may see
  * everyone, but every field here is still a typed, explicitly safe
@@ -243,14 +263,14 @@ export interface ManagerOverviewReadModel {
   potentialRequirements: ManagerPotentialRequirementView[];
 
   /**
-   * PR #40 -- push-notification readiness across the whole roster. Only
-   * computed for the "everyone" scope (null whenever a person is
-   * selected, or the privileged lookup itself failed) -- see
+   * PR #40 -- push-notification readiness across the whole roster. Always
+   * one of three explicit states (`ManagerNotificationReadinessState`) --
+   * never a bare `null` conflating "skipped" with "the lookup failed". See
    * `managerOverview.ts`, which skips the Supabase Admin API + bulk
    * `push_subscriptions` calls entirely on person-drilldown navigations,
    * since `ManagerNotificationReadinessSection` never renders there.
    */
-  notificationReadiness: ManagerNotificationReadinessView | null;
+  notificationReadiness: ManagerNotificationReadinessState;
 
   /**
    * The selected person's OWN full personal read model, reused as-is from

@@ -1,4 +1,7 @@
-import type { ManagerNotificationReadinessBlocker, ManagerNotificationReadinessView } from "@/lib/readModels/managerTypes";
+import type {
+  ManagerNotificationReadinessBlocker,
+  ManagerNotificationReadinessState,
+} from "@/lib/readModels/managerTypes";
 
 /**
  * The exact actionable-reason label for each non-`ready` status
@@ -34,12 +37,21 @@ export interface NotificationReadinessBlockerGroup {
   personNames: string[];
 }
 
-export interface NotificationReadinessSummaryView {
-  /** "5 אנשים עדיין לא יכולים לקבל התראות אישיות" -- singular/plural handled, see `notificationReadinessSummaryLabel`. */
-  summary: string;
-  /** Only non-empty groups, in `BLOCKER_STATUS_ORDER`. Preserves each blocker's own name+id sort order from the read model -- never re-sorted here. */
-  groups: NotificationReadinessBlockerGroup[];
-}
+/**
+ * What `ManagerNotificationReadinessSection` renders -- three DISTINCT
+ * outcomes, never collapsed into a boolean/null:
+ * - `hidden` -- nothing worth showing: either the lookup was skipped (a
+ *   person is selected) or it succeeded and everyone is already ready. Both
+ *   are genuinely calm states, not an unknown.
+ * - `unavailable` -- the lookup was attempted and failed; the manager sees
+ *   a small neutral notice instead of a silently missing section (never
+ *   conflated with "everyone is ready").
+ * - `blockers` -- the lookup succeeded and at least one person isn't ready.
+ */
+export type NotificationReadinessSectionView =
+  | { kind: "hidden" }
+  | { kind: "unavailable" }
+  | { kind: "blockers"; summary: string; groups: NotificationReadinessBlockerGroup[] };
 
 /** "אדם אחד" vs "5 אנשים" -- same one/many convention `managerSummaryLabel` already uses elsewhere in this app. */
 function notificationReadinessSummaryLabel(blockerCount: number): string {
@@ -48,24 +60,27 @@ function notificationReadinessSummaryLabel(blockerCount: number): string {
 }
 
 /**
- * Builds the מצב התראות manager section's entire view from the safe
- * `ManagerNotificationReadinessView` projection -- `null` whenever there is
- * nothing to show: the lookup was skipped/failed (`view === null`, e.g. a
- * person-drilldown page, or an infra failure -- see `managerOverview.ts`)
- * OR every roster person is already `ready` (`view.blockers.length === 0`).
- * Both cases render nothing -- a permanent "everyone is ready" success card
- * would be noise (per spec), not a genuinely missing state worth flagging.
+ * Builds the מצב התראות manager section's entire view from the read
+ * model's own three-state `ManagerNotificationReadinessState` -- `skipped`
+ * and an all-ready `available` both render nothing (a permanent success
+ * card would be noise, per spec); `unavailable` renders the neutral
+ * "can't check right now" notice; a non-empty `available` renders the
+ * compact summary + grouped blockers.
  */
 export function buildNotificationReadinessSummary(
-  view: ManagerNotificationReadinessView | null,
-): NotificationReadinessSummaryView | null {
-  if (!view || view.blockers.length === 0) return null;
+  state: ManagerNotificationReadinessState,
+): NotificationReadinessSectionView {
+  if (state.status === "skipped") return { kind: "hidden" };
+  if (state.status === "unavailable") return { kind: "unavailable" };
+  if (state.view.blockers.length === 0) return { kind: "hidden" };
 
   const groups: NotificationReadinessBlockerGroup[] = [];
   for (const status of BLOCKER_STATUS_ORDER) {
-    const personNames = view.blockers.filter((blocker) => blocker.status === status).map((blocker) => blocker.personName);
+    const personNames = state.view.blockers
+      .filter((blocker) => blocker.status === status)
+      .map((blocker) => blocker.personName);
     if (personNames.length > 0) groups.push({ status, label: BLOCKER_STATUS_LABEL[status], personNames });
   }
 
-  return { summary: notificationReadinessSummaryLabel(view.blockers.length), groups };
+  return { kind: "blockers", summary: notificationReadinessSummaryLabel(state.view.blockers.length), groups };
 }
