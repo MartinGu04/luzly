@@ -6,11 +6,13 @@ const getRequestPersonalSchedule = vi.fn();
 const getAuthenticatedIdentity = vi.fn();
 const getWorkbookSnapshot = vi.fn();
 const getJerusalemLocalNow = vi.fn();
+const computeNotificationReadiness = vi.fn();
 
 vi.mock("./getRequestPersonalSchedule", () => ({ getRequestPersonalSchedule }));
 vi.mock("@/lib/auth/currentUser", () => ({ getAuthenticatedIdentity }));
 vi.mock("@/lib/sync", () => ({ getWorkbookSnapshot }));
 vi.mock("@/lib/time/jerusalemClock", () => ({ getJerusalemLocalNow }));
+vi.mock("@/lib/notifications/engine/readiness", () => ({ computeNotificationReadiness }));
 
 const { loadManagerOverviewReadModel } = await import("./managerOverview");
 
@@ -86,6 +88,7 @@ beforeEach(() => {
   getAuthenticatedIdentity.mockReset();
   getWorkbookSnapshot.mockReset();
   getJerusalemLocalNow.mockReset();
+  computeNotificationReadiness.mockReset();
   getJerusalemLocalNow.mockReturnValue({ date: "2026-08-13", minuteOfDay: 600 });
   getAuthenticatedIdentity.mockResolvedValue({
     status: "authenticated",
@@ -94,6 +97,7 @@ beforeEach(() => {
     avatarUrl: null,
   });
   getWorkbookSnapshot.mockResolvedValue(managerSnapshot());
+  computeNotificationReadiness.mockResolvedValue([]);
 });
 
 describe("loadManagerOverviewReadModel — auth pass-through states", () => {
@@ -237,5 +241,53 @@ describe("loadManagerOverviewReadModel — success", () => {
     getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(true));
     const result = await loadManagerOverviewReadModel(DEFAULT_PARAMS);
     expect(JSON.stringify(result)).not.toContain("dani@example.invalid");
+  });
+});
+
+describe("loadManagerOverviewReadModel — PR #40 notification readiness wiring", () => {
+  it("everyone scope: calls computeNotificationReadiness exactly once, with the full roster", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(true));
+    await loadManagerOverviewReadModel(DEFAULT_PARAMS);
+    expect(computeNotificationReadiness).toHaveBeenCalledTimes(1);
+    expect(computeNotificationReadiness.mock.calls[0][0]).toHaveLength(2);
+  });
+
+  it("selected-person scope: never calls the privileged readiness lookup", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(true));
+    await loadManagerOverviewReadModel({ personId: "p_dani", range: "7d", month: null, problemsOnly: false });
+    expect(computeNotificationReadiness).not.toHaveBeenCalled();
+  });
+
+  it("threads the resolved readiness result into the safe manager projection", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(true));
+    getWorkbookSnapshot.mockResolvedValue(managerSnapshot());
+    const result = await loadManagerOverviewReadModel(DEFAULT_PARAMS);
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    const [firstPersonId] = result.model.roster.map((p) => p.id);
+    computeNotificationReadiness.mockResolvedValueOnce([
+      { personId: firstPersonId, status: "no_push_subscription" },
+    ]);
+
+    const second = await loadManagerOverviewReadModel(DEFAULT_PARAMS);
+    expect(second.status).toBe("ok");
+    if (second.status !== "ok") return;
+    expect(second.model.notificationReadiness).toEqual({
+      readyCount: 0,
+      totalCount: 1,
+      blockers: [{ personId: firstPersonId, personName: result.model.roster[0].name, status: "no_push_subscription" }],
+    });
+  });
+
+  it("degrades to notificationReadiness: null (never throws) when the readiness lookup itself fails", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(true));
+    computeNotificationReadiness.mockRejectedValue(new Error("supabase unreachable"));
+
+    const result = await loadManagerOverviewReadModel(DEFAULT_PARAMS);
+
+    expect(result.status).toBe("ok");
+    if (result.status === "ok") {
+      expect(result.model.notificationReadiness).toBeNull();
+    }
   });
 });

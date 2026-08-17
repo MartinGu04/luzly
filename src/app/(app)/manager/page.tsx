@@ -6,6 +6,7 @@ import { ManagerCoverageSection } from "@/components/manager/ManagerCoverageSect
 import { ManagerDutiesAbsencesSection } from "@/components/manager/ManagerDutiesAbsencesSection";
 import { ManagerForbiddenState } from "@/components/manager/ManagerForbiddenState";
 import { ManagerHeader } from "@/components/manager/ManagerHeader";
+import { ManagerNotificationReadinessSection } from "@/components/manager/ManagerNotificationReadinessSection";
 import { ManagerPotentialSection } from "@/components/manager/ManagerPotentialSection";
 import { ManagerRosterSection } from "@/components/manager/ManagerRosterSection";
 import {
@@ -43,6 +44,7 @@ import {
 import type { ManagerHrefParams } from "@/lib/presentation/managerUrl";
 import { managerIssueCoverageReasonLabel } from "@/lib/presentation/managerIssueCoverage";
 import { managerSummaryLabel } from "@/lib/presentation/managerSummary";
+import { buildNotificationReadinessSummary } from "@/lib/presentation/notificationReadiness";
 import { roleCoverageMessage } from "@/lib/presentation/roleCoverage";
 import { formatMissingIntervals } from "@/lib/presentation/scheduleTime";
 import { getRequestManagerOverview } from "@/lib/readModels/getRequestManagerOverview";
@@ -320,6 +322,7 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
   }
 
   const summary = managerSummaryLabel(model);
+  const notificationReadiness = buildNotificationReadinessSummary(model.notificationReadiness);
 
   const coverageByDatePeriod = new Map(
     model.coverageOverview.map((group) => [`${group.date}|${group.period}`, group]),
@@ -365,6 +368,8 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
       {summary ? <ManagerSummaryStrip summary={summary} /> : null}
 
       <ManagerAttentionSection criticalItems={criticalItems} reviewItems={reviewItems} />
+
+      <ManagerNotificationReadinessSection readiness={notificationReadiness} />
 
       {!model.problemsOnly ? (
         <>

@@ -114,6 +114,7 @@ function buildModel(overrides: Partial<Parameters<typeof buildManagerOverviewRea
     range: range7d(),
     selectedPersonId: null,
     problemsOnly: false,
+    notificationReadiness: null,
     ...overrides,
   });
 }
@@ -953,5 +954,65 @@ describe("buildManagerOverviewReadModel — PR #16 manager Potential scope", () 
     expect(model.potentialRequirements).toHaveLength(0);
     expect(model.duties.some((d) => d.personId === EITAN.id)).toBe(true);
     expect(model.roster).toHaveLength(4);
+  });
+});
+
+describe("buildManagerOverviewReadModel — PR #40 notification readiness projection", () => {
+  it("is null when the caller skipped/failed the readiness lookup (person selected, or infra failure)", () => {
+    const model = buildModel({ notificationReadiness: null });
+    expect(model.notificationReadiness).toBeNull();
+  });
+
+  it("excludes ready people from blockers, but still counts them in readyCount/totalCount", () => {
+    const model = buildModel({
+      notificationReadiness: [
+        { personId: MANAGER.id, status: "ready" },
+        { personId: MARTIN.id, status: "no_push_subscription" },
+        { personId: EITAN.id, status: "ready" },
+        { personId: NOA.id, status: "unmapped_account" },
+      ],
+    });
+
+    expect(model.notificationReadiness).not.toBeNull();
+    expect(model.notificationReadiness?.readyCount).toBe(2);
+    expect(model.notificationReadiness?.totalCount).toBe(4);
+    expect(model.notificationReadiness?.blockers.map((b) => b.personId)).toEqual([MARTIN.id, NOA.id]);
+    expect(model.notificationReadiness?.blockers).toHaveLength(2);
+  });
+
+  it("carries only personId/personName/status per blocker -- no email, no auth/subscription internals", () => {
+    const model = buildModel({
+      notificationReadiness: [{ personId: MARTIN.id, status: "missing_email" }],
+    });
+
+    expect(model.notificationReadiness?.blockers).toEqual([
+      { personId: MARTIN.id, personName: MARTIN.name, status: "missing_email" },
+    ]);
+  });
+
+  it("orders blockers by name then id, same tiebreak convention as the roster", () => {
+    const bDup = person({ id: "p_b2", name: "ב", isTechnician: true });
+    const aDup = person({ id: "p_a1", name: "א", isTechnician: true });
+    const model = buildModel({
+      people: [MANAGER, MARTIN, EITAN, NOA, bDup, aDup],
+      notificationReadiness: [
+        { personId: bDup.id, status: "no_push_subscription" },
+        { personId: aDup.id, status: "no_push_subscription" },
+      ],
+    });
+
+    expect(model.notificationReadiness?.blockers.map((b) => b.personId)).toEqual([aDup.id, bDup.id]);
+  });
+
+  it("when everyone is ready, blockers is empty and readyCount equals totalCount", () => {
+    const model = buildModel({
+      notificationReadiness: [
+        { personId: MANAGER.id, status: "ready" },
+        { personId: MARTIN.id, status: "ready" },
+      ],
+    });
+
+    expect(model.notificationReadiness?.blockers).toEqual([]);
+    expect(model.notificationReadiness?.readyCount).toBe(model.notificationReadiness?.totalCount);
   });
 });

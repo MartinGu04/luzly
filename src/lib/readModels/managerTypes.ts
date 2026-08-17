@@ -6,6 +6,7 @@ import type { ManagerRequirementStatus, ManagerSourceConflict } from "@/lib/doma
 import type { MissingCoverageRole } from "@/lib/domain/shiftCoverageRecommendation";
 import type { CoverageStatus } from "@/lib/domain/shiftCoverage";
 import type { MinuteInterval } from "@/lib/domain/shiftSchedule";
+import type { PersonNotificationReadiness } from "@/lib/notifications/engine/readiness";
 import type { PersonalIssueTargetSummary, PersonalScheduleReadModel } from "./types";
 
 /**
@@ -182,6 +183,36 @@ export interface ManagerPotentialRequirementView {
 }
 
 /**
+ * One roster person who currently CANNOT receive a personal push
+ * notification, and the single actionable reason why -- see
+ * `lib/notifications/engine/readiness.ts` for what each status actually
+ * proves/doesn't prove. Never includes a `ready` person (see
+ * `ManagerNotificationReadinessView.blockers`). Carries only `personId`/
+ * `personName`/`status` -- no email, no auth user id, no push
+ * endpoint/keys.
+ */
+export interface ManagerNotificationReadinessBlocker {
+  personId: string;
+  personName: string;
+  status: Exclude<PersonNotificationReadiness, "ready">;
+}
+
+/**
+ * PR #40 -- the smallest safe manager-facing projection of
+ * `computeNotificationReadiness()`'s per-person result: everyone who is
+ * NOT `ready`, grouped by reason at the presentation layer
+ * (`lib/presentation/notificationReadiness.ts`), plus the two counts
+ * needed for the compact "5 אנשים עדיין לא יכולים לקבל התראות אישיות"
+ * summary. Deliberately excludes every `ready` person from `blockers` --
+ * "smallest server-side read model", not a full roster echo.
+ */
+export interface ManagerNotificationReadinessView {
+  readyCount: number;
+  totalCount: number;
+  blockers: ManagerNotificationReadinessBlocker[];
+}
+
+/**
  * The manager-only, broader-scope read model. Separate from
  * `PersonalScheduleReadModel` on purpose (see `README.md`) -- it may see
  * everyone, but every field here is still a typed, explicitly safe
@@ -210,6 +241,16 @@ export interface ManagerOverviewReadModel {
   absences: ManagerAbsenceEntry[];
   /** Potential vs. internal reconciliation rows, within the selected range. */
   potentialRequirements: ManagerPotentialRequirementView[];
+
+  /**
+   * PR #40 -- push-notification readiness across the whole roster. Only
+   * computed for the "everyone" scope (null whenever a person is
+   * selected, or the privileged lookup itself failed) -- see
+   * `managerOverview.ts`, which skips the Supabase Admin API + bulk
+   * `push_subscriptions` calls entirely on person-drilldown navigations,
+   * since `ManagerNotificationReadinessSection` never renders there.
+   */
+  notificationReadiness: ManagerNotificationReadinessView | null;
 
   /**
    * The selected person's OWN full personal read model, reused as-is from

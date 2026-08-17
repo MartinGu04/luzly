@@ -17,11 +17,14 @@ import { resolveReserveRoleParticipation, type ReserveRoleParticipationByPeriod 
 import { buildShiftCoverageRecommendation } from "@/lib/domain/shiftCoverageRecommendation";
 import type { ShiftSchedule } from "@/lib/domain/shiftSchedule";
 import type { Person } from "@/lib/domain/types";
+import type { PersonReadinessResult } from "@/lib/notifications/engine/readiness";
 import { buildPersonalScheduleReadModel } from "./buildPersonalScheduleReadModel";
 import { buildManagerAbsenceEntries, buildManagerDutyEntries, buildShiftStaffingOverview } from "./managerEventProjections";
 import type {
   ManagerIssue,
   ManagerIssueRecommendation,
+  ManagerNotificationReadinessBlocker,
+  ManagerNotificationReadinessView,
   ManagerOverviewReadModel,
   ManagerPersonSummary,
   ManagerPotentialRequirementView,
@@ -58,6 +61,14 @@ export interface BuildManagerOverviewReadModelInput {
   /** Raw, unvalidated -- null means "everyone"; validated against `people` below. */
   selectedPersonId: string | null;
   problemsOnly: boolean;
+  /**
+   * PR #40 -- the caller's raw `computeNotificationReadiness()` result, one
+   * entry per roster person, or null when it was skipped (a person is
+   * selected) or failed (see `managerOverview.ts`). Narrowed to the safe
+   * `ManagerNotificationReadinessView` projection below -- this builder
+   * never re-runs the identity/subscription lookup itself.
+   */
+  notificationReadiness: readonly PersonReadinessResult[] | null;
 }
 
 /**
@@ -83,6 +94,7 @@ export function buildManagerOverviewReadModel(
     range,
     selectedPersonId,
     problemsOnly,
+    notificationReadiness: rawNotificationReadiness,
   } = input;
 
   const peopleById = new Map(people.map((person) => [person.id, person]));
@@ -135,6 +147,10 @@ export function buildManagerOverviewReadModel(
     ? absences.filter((entry) => entry.personId === resolvedSelectedPerson.id)
     : [];
 
+  const notificationReadiness = rawNotificationReadiness
+    ? toManagerNotificationReadinessView(rawNotificationReadiness, peopleById)
+    : null;
+
   return {
     manager: { id: manager.id, name: manager.name },
     fetchedAt,
@@ -150,6 +166,7 @@ export function buildManagerOverviewReadModel(
     potentialRequirements,
     selectedPerson,
     selectedPersonRangeAbsences,
+    notificationReadiness,
   };
 }
 
@@ -297,4 +314,48 @@ function toManagerPotentialRequirementView(
     actualAssignees: reconciliation.actualAssignees,
     sourceConflict: reconciliation.sourceConflict,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Notification readiness
+// ---------------------------------------------------------------------------
+
+/**
+ * Narrows the raw per-person `computeNotificationReadiness()` result down
+ * to the safe manager projection -- every `ready` person is dropped here
+ * (never reaches `blockers`), and only `personId`/`personName`/`status`
+ * survive per blocker. `readyCount` is derived from the SAME pass, so it
+ * always agrees with `totalCount - blockers.length` by construction.
+ */
+function toManagerNotificationReadinessView(
+  results: readonly PersonReadinessResult[],
+  peopleById: ReadonlyMap<string, Person>,
+): ManagerNotificationReadinessView {
+  const blockers: ManagerNotificationReadinessBlocker[] = [];
+  let readyCount = 0;
+
+  for (const result of results) {
+    if (result.status === "ready") {
+      readyCount++;
+      continue;
+    }
+    blockers.push({
+      personId: result.personId,
+      personName: peopleById.get(result.personId)?.name ?? "",
+      status: result.status,
+    });
+  }
+
+  blockers.sort(compareNotificationReadinessBlockers);
+
+  return { readyCount, totalCount: results.length, blockers };
+}
+
+/** By name, then id as a stable tiebreak -- same convention as `compareRosterEntries`. */
+function compareNotificationReadinessBlockers(
+  a: ManagerNotificationReadinessBlocker,
+  b: ManagerNotificationReadinessBlocker,
+): number {
+  if (a.personName !== b.personName) return a.personName < b.personName ? -1 : 1;
+  return a.personId < b.personId ? -1 : a.personId > b.personId ? 1 : 0;
 }

@@ -25,12 +25,19 @@ export interface RecipientResolution {
 const MAX_LIST_USERS_PAGES = 50;
 const LIST_USERS_PER_PAGE = 1000;
 
-function normalizeEmail(email: string): string {
+/** Trimmed + lowercased -- the ONE normalization rule every email comparison in the notification engine (recipient resolution, readiness) shares. */
+export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
-/** Every Supabase auth user's normalized email -> user id, via the Admin API (service-role only). */
-async function fetchAllUserIdsByEmail(): Promise<Map<string, string>> {
+/**
+ * Every Supabase auth user's normalized email -> user id, via the Admin
+ * API (service-role only). Exported (PR #40) so `readiness.ts` can reuse
+ * the exact same live account lookup for the manager notification-
+ * readiness view instead of re-querying/re-implementing it -- one shared
+ * identity source of truth, never two.
+ */
+export async function fetchAllUserIdsByEmail(): Promise<Map<string, string>> {
   const supabase = getNotificationServiceClient();
   const emailToUserId = new Map<string, string>();
 
@@ -116,9 +123,11 @@ export function filterManagerRecipients(
 
 /**
  * Every distinct Supabase user id with at least one active push
- * subscription -- used only for weekly constraints reminders (spec
+ * subscription. Originally added for weekly constraints reminders (spec
  * section 18), which target "all push-enabled users" independent of any
- * כ"א/email mapping.
+ * כ"א/email mapping -- also reused (PR #40) as the ONE bulk subscription
+ * query the manager notification-readiness view needs, instead of calling
+ * `getActiveSubscriptionsForUser()` once per roster person.
  */
 export async function fetchAllSubscribedUserIds(): Promise<string[]> {
   const supabase = getNotificationServiceClient();
