@@ -1,6 +1,7 @@
 import type { Event, EventPeriod } from "./event";
 import { addCalendarDays, formatCalendarDate, subtractCalendarDays } from "./dateRange";
 import { parseCalendarDate } from "./dutyBlocks";
+import type { LocalNow } from "./localNow";
 
 /**
  * מי-מה-מו currently models every shift as exactly 12 hours. Documented here
@@ -205,4 +206,30 @@ export function nextShiftPeriod(date: string, period: EventPeriod): AdjacentShif
   const parsed = parseCalendarDate(date);
   if (!parsed) return null;
   return { date: formatCalendarDate(addCalendarDays(parsed, 1)), period: "day" };
+}
+
+/**
+ * Which canonical shift is active right now, independent of any Event/
+ * assignment -- the day/night cycle is exactly back-to-back 12h blocks with
+ * no gaps (`nightEndMinute` always equals `dayStartMinute` + 1440), so
+ * exactly one of {today's day shift, today's night shift, yesterday's night
+ * shift still running past midnight} always contains `now.minuteOfDay`.
+ * This is the one primitive `previousShiftPeriod`/`nextShiftPeriod` and
+ * `resolveEventShiftInterval` don't provide on their own -- both require an
+ * existing Event to anchor on, whereas coverage for the CURRENT shift must
+ * stay correct even when nobody at all is staffed on it yet.
+ */
+export function resolveCurrentShiftPeriod(now: LocalNow, schedule: ShiftSchedule): AdjacentShiftPeriod {
+  if (now.minuteOfDay >= schedule.dayStartMinute && now.minuteOfDay < schedule.dayEndMinute) {
+    return { date: now.date, period: "day" };
+  }
+  if (now.minuteOfDay >= schedule.nightStartMinute) {
+    return { date: now.date, period: "night" };
+  }
+
+  const parsed = parseCalendarDate(now.date);
+  if (!parsed) {
+    throw new ShiftConfigurationError(`Invalid local date: "${now.date}".`);
+  }
+  return { date: formatCalendarDate(subtractCalendarDays(parsed, 1)), period: "night" };
 }
