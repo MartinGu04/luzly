@@ -153,12 +153,15 @@ export function CommandPalette({ open, onClose, model }: CommandPaletteProps) {
   const highlightedResult = results[clampedIndex];
 
   /**
-   * A disambiguation candidate refines the in-progress shared_shift query
-   * in place -- it records which roster person the ambiguous side resolved
-   * to and lets resolution continue (possibly straight to a final result,
-   * possibly to the second side's own ambiguity), but it deliberately never
-   * navigates or closes the palette merely because the user is resolving
-   * who they meant.
+   * A split-disambiguation candidate commits to one structural reading of
+   * an "<A> ו<B> יחד" sentence (which text belongs to which person) --
+   * resolved BEFORE any per-name ambiguity, since it decides what those
+   * texts even are. A name-disambiguation candidate refines the
+   * in-progress shared_shift query in place -- it records which roster
+   * person the ambiguous side resolved to and lets resolution continue
+   * (possibly straight to a final result, possibly to the second side's
+   * own ambiguity). Neither ever navigates or closes the palette merely
+   * because the user is resolving what they meant.
    *
    * Otherwise, a result with no `href` (e.g. a person with no shared shift)
    * is purely informational -- activating it must never close the palette
@@ -166,6 +169,14 @@ export function CommandPalette({ open, onClose, model }: CommandPaletteProps) {
    * happened.
    */
   function activate(result: GlobalSearchResult) {
+    if (result.kind === "shared_shift_split_disambiguation") {
+      setSharedShiftOverrides((previous) => ({
+        ...previous,
+        splitChoice: { personAText: result.personAText, personBText: result.personBText },
+      }));
+      setHighlightedIndex(0);
+      return;
+    }
     if (result.kind === "shared_shift_disambiguation") {
       setSharedShiftOverrides((previous) => ({
         ...previous,
@@ -351,6 +362,7 @@ function ResultIcon({ result }: { result: GlobalSearchResult }) {
         </span>
       );
     case "shared_shift":
+    case "shared_shift_split_disambiguation":
     case "with_me":
       return (
         <span className={wrapperClassName}>
@@ -422,6 +434,20 @@ function ResultContent({ result }: { result: GlobalSearchResult }) {
               .map((shift) => `${formatHebrewWeekdayAndDate(shift.date)} · ${periodLabel(shift.period)}`)
               .join("  ·  ")}
           </p>
+        </div>
+      );
+    case "shared_shift_split_disambiguation":
+      // "A + B", never "A ו-B" -- the ambiguity being resolved here IS
+      // where the conjunction "ו" sits, so re-inserting a literal "ו"
+      // between the two texts would make two genuinely different splits
+      // (e.g. "רוני" + "ייס וגדעון" vs. "רוני וייס" + "גדעון") render as
+      // the exact same string.
+      return (
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-foreground">
+            {result.personAText} + {result.personBText}
+          </p>
+          <p className="truncate text-xs text-muted">בחרו את הפירוש הנכון</p>
         </div>
       );
     case "shared_shift_disambiguation":

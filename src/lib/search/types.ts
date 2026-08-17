@@ -16,6 +16,22 @@ export type SearchDateSpec =
 export type SearchPersonReference = { kind: "self" } | { kind: "query"; text: string };
 
 /**
+ * One structurally possible way to split a `shared_shift` sentence into two
+ * person references. Almost every supported phrasing has exactly one --
+ * but the generic "<A> ו<B> יחד/ביחד/באותה משמרת" shape is genuinely
+ * ambiguous whenever a name is itself multi-word and a later word happens
+ * to start with "ו" (e.g. "רוני וייס וגדעון" could split after "רוני" or
+ * after "וייס"). The parser never commits to one boundary -- it preserves
+ * every structural candidate here, and `resolveSearchIntent` picks between
+ * them using ONLY the roster (never shift/schedule data), surfacing typed
+ * disambiguation if more than one candidate is genuinely valid.
+ */
+export interface SharedShiftPersonPair {
+  personA: SearchPersonReference;
+  personB: SearchPersonReference;
+}
+
+/**
  * The deterministic, rule-based parse of a normalized query -- never
  * inferred from fuzzy scoring. Exactly one intent per query; an explicit
  * structured pattern (with_me/shared_shift/shift/date) always wins over
@@ -27,7 +43,7 @@ export type SearchIntent =
   | { kind: "date"; date: SearchDateSpec; raw: string }
   | { kind: "shift"; date: SearchDateSpec; period: SearchShiftPeriod; raw: string }
   | { kind: "with_me"; date: SearchDateSpec | null; period: SearchShiftPeriod | null; raw: string }
-  | { kind: "shared_shift"; personA: SearchPersonReference; personB: SearchPersonReference; raw: string };
+  | { kind: "shared_shift"; candidates: SharedShiftPersonPair[]; raw: string };
 
 /** A colleague appearing in a shift/with-me result -- never more than name/role/shadow, the same fields `PersonalCounterpart` already exposes. */
 export interface SearchResultPerson {
@@ -120,6 +136,26 @@ export interface SharedShiftDisambiguationResult {
   href: null;
 }
 
+/**
+ * A candidate SENTENCE SPLIT for an "<A> ו<B> יחד" style query, shown only
+ * when more than one structural boundary resolves against the roster (see
+ * `SharedShiftPersonPair`) -- e.g. "רוני" + "וייס וגדעון" vs. "רוני וייס" +
+ * "גדעון". This is a coarser, earlier disambiguation step than
+ * `SharedShiftDisambiguationResult` (which picks between several roster
+ * people matching the SAME name query): here the ambiguity is which text
+ * belongs to which person in the first place. Selecting one commits to
+ * that split and resolution continues -- possibly straight to an answer,
+ * possibly into ordinary per-name disambiguation if a side is itself an
+ * ambiguous name.
+ */
+export interface SharedShiftSplitDisambiguationResult {
+  kind: "shared_shift_split_disambiguation";
+  key: string;
+  personAText: string;
+  personBText: string;
+  href: null;
+}
+
 export interface WithMeSearchResult {
   kind: "with_me";
   key: string;
@@ -135,6 +171,7 @@ export type GlobalSearchResult =
   | ShiftSearchResult
   | SharedShiftSearchResult
   | SharedShiftDisambiguationResult
+  | SharedShiftSplitDisambiguationResult
   | WithMeSearchResult;
 
 export interface SearchResolution {

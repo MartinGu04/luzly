@@ -128,8 +128,7 @@ describe("parseSearchIntent — query parsing", () => {
   it("7. 'מתי אני ועילאי יחד' parses as a shared_shift intent", () => {
     expect(parseSearchIntent("מתי אני ועילאי יחד")).toEqual({
       kind: "shared_shift",
-      personA: { kind: "self" },
-      personB: { kind: "query", text: "עילאי" },
+      candidates: [{ personA: { kind: "self" }, personB: { kind: "query", text: "עילאי" } }],
       raw: "מתי אני ועילאי יחד",
     });
   });
@@ -137,14 +136,12 @@ describe("parseSearchIntent — query parsing", () => {
   it("'מתי אנחנו יחד עילאי' and 'מתי אני עם עילאי' also parse as shared_shift", () => {
     expect(parseSearchIntent("מתי אנחנו יחד עילאי")).toEqual({
       kind: "shared_shift",
-      personA: { kind: "self" },
-      personB: { kind: "query", text: "עילאי" },
+      candidates: [{ personA: { kind: "self" }, personB: { kind: "query", text: "עילאי" } }],
       raw: "מתי אנחנו יחד עילאי",
     });
     expect(parseSearchIntent("מתי אני עם עילאי")).toEqual({
       kind: "shared_shift",
-      personA: { kind: "self" },
-      personB: { kind: "query", text: "עילאי" },
+      candidates: [{ personA: { kind: "self" }, personB: { kind: "query", text: "עילאי" } }],
       raw: "מתי אני עם עילאי",
     });
   });
@@ -219,16 +216,14 @@ describe("parseSearchIntent — flexible shared_shift phrasing (self + person)",
     const intent = parseSearchIntent(raw);
     expect(intent.kind).toBe("shared_shift");
     if (intent.kind !== "shared_shift") return;
-    expect(intent.personA).toEqual(SELF);
-    expect(intent.personB).toEqual(personQuery("איתי"));
+    expect(intent.candidates).toEqual([{ personA: SELF, personB: personQuery("איתי") }]);
   });
 
   it("'מתי איתי ואני ביחד' (reversed order) resolves to the same semantic pair, with self on the SECOND side", () => {
     const intent = parseSearchIntent("מתי איתי ואני ביחד");
     expect(intent).toEqual({
       kind: "shared_shift",
-      personA: personQuery("איתי"),
-      personB: SELF,
+      candidates: [{ personA: personQuery("איתי"), personB: SELF }],
       raw: "מתי איתי ואני ביחד",
     });
   });
@@ -236,14 +231,12 @@ describe("parseSearchIntent — flexible shared_shift phrasing (self + person)",
   it("a trailing '?' and extra internal whitespace are both tolerated", () => {
     expect(parseSearchIntent("מתי אני ואיתי ביחד?")).toEqual({
       kind: "shared_shift",
-      personA: SELF,
-      personB: personQuery("איתי"),
+      candidates: [{ personA: SELF, personB: personQuery("איתי") }],
       raw: "מתי אני ואיתי ביחד",
     });
     expect(parseSearchIntent("מתי   אני   ואיתי   ביחד")).toEqual({
       kind: "shared_shift",
-      personA: SELF,
-      personB: personQuery("איתי"),
+      candidates: [{ personA: SELF, personB: personQuery("איתי") }],
       raw: "מתי אני ואיתי ביחד",
     });
   });
@@ -259,8 +252,10 @@ describe("parseSearchIntent — flexible shared_shift phrasing (arbitrary person
     const intent = parseSearchIntent(raw);
     expect(intent.kind).toBe("shared_shift");
     if (intent.kind !== "shared_shift") return;
-    expect(intent.personA).toEqual(personQuery("מארק מאירסון"));
-    expect(intent.personB).toEqual(personQuery("גדעון"));
+    // "מאירסון" contains an internal ו with no preceding whitespace, so it
+    // is never mistaken for a conjunction boundary -- exactly one
+    // structural candidate.
+    expect(intent.candidates).toEqual([{ personA: personQuery("מארק מאירסון"), personB: personQuery("גדעון") }]);
   });
 
   it.each([
@@ -272,8 +267,42 @@ describe("parseSearchIntent — flexible shared_shift phrasing (arbitrary person
     const intent = parseSearchIntent(raw);
     expect(intent.kind).toBe("shared_shift");
     if (intent.kind !== "shared_shift") return;
-    expect(intent.personA).toEqual(personQuery("טוביה"));
-    expect(intent.personB).toEqual(personQuery("ליה"));
+    expect(intent.candidates).toEqual([{ personA: personQuery("טוביה"), personB: personQuery("ליה") }]);
+  });
+});
+
+describe("parseSearchIntent — CONJ split ambiguity is preserved, never committed to at parse time", () => {
+  it("'מתי רוני וייס וגדעון ביחד' preserves BOTH structural splits -- the parser never guesses which ו is the conjunction", () => {
+    const intent = parseSearchIntent("מתי רוני וייס וגדעון ביחד");
+    expect(intent.kind).toBe("shared_shift");
+    if (intent.kind !== "shared_shift") return;
+    expect(intent.candidates).toEqual([
+      { personA: personQuery("רוני"), personB: personQuery("ייס וגדעון") },
+      { personA: personQuery("רוני וייס"), personB: personQuery("גדעון") },
+    ]);
+  });
+
+  it("'מתי טוביה וגדעון וייס ביחד' preserves both structural splits in the same way", () => {
+    const intent = parseSearchIntent("מתי טוביה וגדעון וייס ביחד");
+    expect(intent.kind).toBe("shared_shift");
+    if (intent.kind !== "shared_shift") return;
+    // The second boundary's "ו" is, by construction, consumed as ITS split's
+    // conjunction -- leaving "ייס" (not "וייס") as that candidate's personB
+    // text. This candidate is exactly the one the roster (["טוביה",
+    // "גדעון וייס"]) will fail to match on either side, so `choosePersonPair`
+    // discards it and resolves to the first candidate -- see
+    // resolveSearchIntent.test.ts.
+    expect(intent.candidates).toEqual([
+      { personA: personQuery("טוביה"), personB: personQuery("גדעון וייס") },
+      { personA: personQuery("טוביה וגדעון"), personB: personQuery("ייס") },
+    ]);
+  });
+
+  it("a single-boundary CONJ query still parses to exactly one candidate, unaffected by the multi-split machinery", () => {
+    const intent = parseSearchIntent("מתי טוביה וליה ביחד");
+    expect(intent.kind).toBe("shared_shift");
+    if (intent.kind !== "shared_shift") return;
+    expect(intent.candidates).toEqual([{ personA: personQuery("טוביה"), personB: personQuery("ליה") }]);
   });
 });
 

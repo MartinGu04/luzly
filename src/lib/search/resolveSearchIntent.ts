@@ -19,7 +19,9 @@ import type {
   SearchShiftPeriod,
   ShiftSearchResult,
   SharedShiftDisambiguationResult,
+  SharedShiftPersonPair,
   SharedShiftSearchResult,
+  SharedShiftSplitDisambiguationResult,
   WithMeSearchResult,
 } from "./types";
 
@@ -214,16 +216,83 @@ function resolveWithMeIntent(
 }
 
 /**
- * Resolved personIds for one or both sides of a `shared_shift` question,
- * set once the searching user picks a candidate out of an ambiguous-name
- * disambiguation list (see `SharedShiftDisambiguationResult`). Keyed by
- * side rather than by the raw query text -- the UI owns clearing this
- * whenever the query itself changes, so a stale override can never survive
- * into a new, unrelated question.
+ * Choices already made by the searching user while resolving a
+ * `shared_shift` question -- the UI owns clearing this whenever the query
+ * itself changes, so a stale choice can never survive into a new,
+ * unrelated question.
  */
 export interface SharedShiftOverrides {
+  /** Which structural sentence split was picked (see `SharedShiftSplitDisambiguationResult`) -- resolved BEFORE personA/personB, since it decides what those texts even are. */
+  splitChoice?: { personAText: string; personBText: string };
+  /** Resolved personIds for A/B, set once an ambiguous-NAME candidate is picked (see `SharedShiftDisambiguationResult`). */
   personA?: string;
   personB?: string;
+}
+
+function personReferenceText(ref: SearchPersonReference): string | null {
+  return ref.kind === "query" ? ref.text : null;
+}
+
+function personReferenceHasAnyRosterMatch(model: SearchReadModel, ref: SearchPersonReference): boolean {
+  if (ref.kind === "self") return true;
+  return findMatchingPeople(model.roster, ref.text).length > 0;
+}
+
+type ChosenPairResolution =
+  | { status: "resolved"; pair: SharedShiftPersonPair }
+  | { status: "ambiguous"; candidates: SharedShiftPersonPair[] };
+
+/**
+ * Picks which structural sentence split to resolve against, when the
+ * parser preserved more than one (see `splitConjunctionCandidates`).
+ * NEVER consults `model.shiftEvents` -- identity/segmentation resolution
+ * must stay entirely independent of whether a candidate pair happens to
+ * share a shift. A split counts as "valid" only when BOTH of its texts
+ * match at least one real roster person (via the same `findMatchingPeople`
+ * exact/prefix/substring matcher every other search intent uses); exactly
+ * one valid split proceeds automatically, more than one is surfaced as a
+ * typed choice, and zero valid splits fall back to the first structural
+ * candidate so per-side resolution can still report a clear not-found
+ * message rather than silently guessing a real match.
+ */
+function choosePersonPair(
+  model: SearchReadModel,
+  candidates: SharedShiftPersonPair[],
+  overrides: SharedShiftOverrides,
+): ChosenPairResolution {
+  if (overrides.splitChoice) {
+    const chosen = candidates.find(
+      (pair) =>
+        personReferenceText(pair.personA) === overrides.splitChoice?.personAText &&
+        personReferenceText(pair.personB) === overrides.splitChoice?.personBText,
+    );
+    if (chosen) return { status: "resolved", pair: chosen };
+  }
+
+  if (candidates.length === 1) return { status: "resolved", pair: candidates[0] };
+
+  const validSplits = candidates.filter(
+    (pair) =>
+      personReferenceHasAnyRosterMatch(model, pair.personA) && personReferenceHasAnyRosterMatch(model, pair.personB),
+  );
+
+  if (validSplits.length === 1) return { status: "resolved", pair: validSplits[0] };
+  if (validSplits.length > 1) return { status: "ambiguous", candidates: validSplits };
+  return { status: "resolved", pair: candidates[0] };
+}
+
+function buildSplitDisambiguationResults(candidates: SharedShiftPersonPair[]): SharedShiftSplitDisambiguationResult[] {
+  return candidates.map((pair, index) => {
+    const personAText = personReferenceText(pair.personA) ?? "";
+    const personBText = personReferenceText(pair.personB) ?? "";
+    return {
+      kind: "shared_shift_split_disambiguation",
+      key: `shared_shift_split_disambiguation:${index}:${personAText}:${personBText}`,
+      personAText,
+      personBText,
+      href: null,
+    };
+  });
 }
 
 type PersonSideResolution =
@@ -275,12 +344,20 @@ function buildDisambiguationResults(
 
 function resolveSharedShiftIntent(
   model: SearchReadModel,
-  personARef: SearchPersonReference,
-  personBRef: SearchPersonReference,
+  candidates: SharedShiftPersonPair[],
   raw: string,
   overrides: SharedShiftOverrides,
 ): SearchResolution {
-  const intent: SearchIntent = { kind: "shared_shift", personA: personARef, personB: personBRef, raw };
+  const intent: SearchIntent = { kind: "shared_shift", candidates, raw };
+
+  // Which sentence split to resolve against is decided FIRST -- purely
+  // from the roster, never from shift data -- before any per-side
+  // name-ambiguity resolution even begins.
+  const chosenPair = choosePersonPair(model, candidates, overrides);
+  if (chosenPair.status === "ambiguous") {
+    return { intent, results: buildSplitDisambiguationResults(chosenPair.candidates), emptyMessage: null };
+  }
+  const { personA: personARef, personB: personBRef } = chosenPair.pair;
 
   // Disambiguation always proceeds one side at a time, A before B -- never
   // a combinatorial guess across two simultaneously-ambiguous references.
@@ -376,6 +453,6 @@ export function resolveSearchIntent(
     case "with_me":
       return resolveWithMeIntent(model, intent.date, intent.period, intent.raw);
     case "shared_shift":
-      return resolveSharedShiftIntent(model, intent.personA, intent.personB, intent.raw, overrides);
+      return resolveSharedShiftIntent(model, intent.candidates, intent.raw, overrides);
   }
 }

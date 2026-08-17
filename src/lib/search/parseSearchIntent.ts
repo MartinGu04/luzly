@@ -108,9 +108,9 @@ export function parseSearchIntent(raw: string): SearchIntent {
     return { kind: "date", date: wholeExplicitDate, raw: normalized };
   }
 
-  const sharedShiftMatch = parseSharedShiftPhrase(normalized);
-  if (sharedShiftMatch) {
-    return { kind: "shared_shift", personA: sharedShiftMatch.personA, personB: sharedShiftMatch.personB, raw: normalized };
+  const sharedShiftCandidates = parseSharedShiftPhrase(normalized);
+  if (sharedShiftCandidates) {
+    return { kind: "shared_shift", candidates: sharedShiftCandidates, raw: normalized };
   }
 
   const withMeMatch = normalized.match(WITH_ME_RE);
