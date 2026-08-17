@@ -72,11 +72,25 @@ export function ShiftSnapshotCard({ label, shift, todayDate, current }: ShiftSna
           <p className={isCurrent ? "mt-1 text-2xl font-bold text-foreground sm:text-3xl" : "mt-0.5 text-base font-bold text-foreground"}>
             {period}
           </p>
-          <p className="mt-0.5 flex items-center gap-2 text-xs text-muted">
-            <span>{dateLabel}</span>
-            <span aria-hidden="true">·</span>
-            <TimeRange start={shift.startLocalTime} end={shift.endLocalTime} />
-          </p>
+          {isCurrent ? (
+            <p className="mt-0.5 flex items-center gap-2 text-xs text-muted">
+              <span>{dateLabel}</span>
+              <span aria-hidden="true">·</span>
+              <TimeRange start={shift.startLocalTime} end={shift.endLocalTime} />
+            </p>
+          ) : (
+            // Secondary (previous/next) cards get their own width, often
+            // narrower than the dominant current card -- a single-line
+            // "date · time range" row can wrap mid-phrase there. Stacking
+            // date above time range is a deliberate, always-short line each,
+            // never dependent on available width like the inline version.
+            <div className="mt-0.5 text-xs text-muted">
+              <p>{dateLabel}</p>
+              <p className="mt-0.5">
+                <TimeRange start={shift.startLocalTime} end={shift.endLocalTime} />
+              </p>
+            </div>
+          )}
         </div>
         <CoverageBadge status={shift.coverageStatus} />
       </div>

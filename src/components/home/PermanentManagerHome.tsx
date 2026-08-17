@@ -27,7 +27,20 @@ export function PermanentManagerHome({ model }: PermanentManagerHomeProps) {
   return (
     <div className="flex flex-col gap-6">
       <Header personName={model.person.name} localNow={model.localNow} />
-      <DataFreshnessStatus fetchedAt={model.fetchedAt} />
+      {/*
+       * `DataFreshnessStatus` (shared across every route) lays itself out as
+       * a `justify-between` row -- on this page's wide desktop content
+       * column that pushes "רענון נתונים" all the way to the far edge,
+       * detached from the "מקור: Google Sheets · עודכן..." text it belongs
+       * to. `w-fit` (this page only, via the component's own existing
+       * `className` prop -- no change to the shared component itself)
+       * shrinks the row to its content width, so `justify-between` has no
+       * extra space left to distribute and the two ends sit directly next
+       * to each other as one compact metadata group. At narrow (mobile)
+       * widths the content already fills the available width, so this is a
+       * no-op there -- identical wrapping/stacking behavior as before.
+       */}
+      <DataFreshnessStatus fetchedAt={model.fetchedAt} className="w-fit" />
 
       <div>
         <h2 className="mb-3 text-lg font-bold text-foreground sm:text-xl">מה קורה עכשיו במחלקה?</h2>
