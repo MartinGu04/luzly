@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  fairnessPeriodEndDate,
+  fairnessPeriodIdentityLabel,
   fairnessPeriodLabel,
   parseFairnessPeriodParam,
   resolveFairnessPeriod,
@@ -61,5 +63,34 @@ describe("fairnessPeriodLabel", () => {
 
   it("formats h2 with the year read from LocalNow", () => {
     expect(fairnessPeriodLabel("h2", { date: "2027-11-01", minuteOfDay: 0 })).toBe("7–12/2027");
+  });
+});
+
+describe("fairnessPeriodIdentityLabel — same formatting, but from an already-resolved identity", () => {
+  it("formats h1 from identity.year, independent of any LocalNow", () => {
+    expect(fairnessPeriodIdentityLabel({ key: "h1", year: 2026 })).toBe("1–6/2026");
+  });
+
+  it("formats h2 from identity.year", () => {
+    expect(fairnessPeriodIdentityLabel({ key: "h2", year: 2027 })).toBe("7–12/2027");
+  });
+
+  it("agrees exactly with fairnessPeriodLabel for the same key/year", () => {
+    const now = { date: "2026-09-01", minuteOfDay: 0 };
+    expect(fairnessPeriodIdentityLabel({ key: "h2", year: 2026 })).toBe(fairnessPeriodLabel("h2", now));
+  });
+});
+
+describe("fairnessPeriodEndDate — K. H1/H2 period end dates for shared FairnessPeriodStatus resolution", () => {
+  it("h1 ends June 30 of its own year", () => {
+    expect(fairnessPeriodEndDate({ key: "h1", year: 2026 })).toBe("2026-06-30");
+  });
+
+  it("h2 ends December 31 of its own year", () => {
+    expect(fairnessPeriodEndDate({ key: "h2", year: 2026 })).toBe("2026-12-31");
+  });
+
+  it("uses identity.year, never a hard-coded year", () => {
+    expect(fairnessPeriodEndDate({ key: "h1", year: 2031 })).toBe("2031-06-30");
   });
 });

@@ -5,6 +5,7 @@ import {
   computeNormalizedLoad,
   computeScoreDelta,
   resolveComparisonTarget,
+  resolveDutyFairnessStatus,
   resolveFairnessAllocationRole,
   sumDisplayedFairnessRows,
 } from "./fairnessAnalysis";
@@ -101,6 +102,37 @@ describe("computeNormalizedLoad — PR #15 §21/§42", () => {
 
   it("negative/invalid target -> null", () => {
     expect(computeNormalizedLoad(6, -1)).toBeNull();
+  });
+});
+
+describe("resolveDutyFairnessStatus — PR #3, exact comparison, no tolerance band", () => {
+  it("A. below: current < target", () => {
+    expect(resolveDutyFairnessStatus(6, 8)).toBe("below");
+  });
+
+  it("A. balanced: current === target, exactly (unlike Shift Fairness, no ±0.5 tolerance)", () => {
+    expect(resolveDutyFairnessStatus(8, 8)).toBe("balanced");
+  });
+
+  it("A. above: current > target", () => {
+    expect(resolveDutyFairnessStatus(9, 8)).toBe("above");
+  });
+
+  it("A. a gap smaller than Shift Fairness's ±0.5 tolerance is still NOT balanced here -- Duty Fairness has no tolerance band at all", () => {
+    expect(resolveDutyFairnessStatus(8.1, 8)).toBe("above");
+    expect(resolveDutyFairnessStatus(7.9, 8)).toBe("below");
+  });
+
+  it("B. unknown comparison target -> null, never a fake balanced/zero-implied status", () => {
+    expect(resolveDutyFairnessStatus(6, null)).toBeNull();
+  });
+
+  it("C. unknown current score -> null, even though target is known", () => {
+    expect(resolveDutyFairnessStatus(null, 8)).toBeNull();
+  });
+
+  it("both unknown -> null", () => {
+    expect(resolveDutyFairnessStatus(null, null)).toBeNull();
   });
 });
 

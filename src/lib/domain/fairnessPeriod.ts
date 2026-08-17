@@ -30,8 +30,7 @@ export function resolveFairnessPeriod(raw: string | null | undefined, now: Local
 
 /** "1–6/2026" / "7–12/2026" -- the year is read from `now`, never hard-coded, so the label stays correct across years. */
 export function fairnessPeriodLabel(period: FairnessPeriodKey, now: LocalNow): string {
-  const year = now.date.slice(0, 4);
-  return period === "h1" ? `1–6/${year}` : `7–12/${year}`;
+  return fairnessPeriodIdentityLabel({ key: period, year: Number(now.date.slice(0, 4)) });
 }
 
 /**
@@ -54,4 +53,21 @@ export function resolveFairnessPeriodIdentity(
   now: LocalNow,
 ): FairnessPeriodIdentity {
   return { key: resolveFairnessPeriod(raw, now), year: Number(now.date.slice(0, 4)) };
+}
+
+/** Same formatting as `fairnessPeriodLabel`, but reads the year from an already-resolved `FairnessPeriodIdentity` instead of `LocalNow` -- lets a caller that already resolved identity (e.g. PR #3's `buildDutyFairnessReadModel`) label it accurately even when `identity.year` differs from `now`'s own year (PR #39 year-safety, same convention as `resolveReserveRoleParticipation`). */
+export function fairnessPeriodIdentityLabel(identity: FairnessPeriodIdentity): string {
+  return identity.key === "h1" ? `1–6/${identity.year}` : `7–12/${identity.year}`;
+}
+
+/**
+ * The period's own calendar end date -- h1 ends 30/6, h2 ends 31/12, of
+ * `identity.year` (PR #3). Deliberately the ONLY place a duty period's end
+ * date is computed -- feeds `fairnessFoundation.ts`'s
+ * `resolveFairnessPeriodStatus`, which is itself period-SHAPE-agnostic by
+ * design (it only ever takes a plain end-date string, never an h1/h2 key),
+ * so this is the one place that knows h1/h2 actually mean Jan-Jun/Jul-Dec.
+ */
+export function fairnessPeriodEndDate(identity: FairnessPeriodIdentity): string {
+  return identity.key === "h1" ? `${identity.year}-06-30` : `${identity.year}-12-31`;
 }

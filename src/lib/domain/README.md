@@ -538,6 +538,150 @@ unclassified person's window is bounded only by heuristic Event evidence
 The shift engine does not — and cannot — close this gap; it only ever
 reports it honestly through `dataCompleteness`, never silently.
 
-No standalone Fairness page, person cards, duty Fairness integration,
-historical snapshot persistence, analytics, or combined shift+duty scoring
-are added in this PR.
+No standalone Fairness page, person cards, historical snapshot persistence,
+analytics, or combined shift+duty scoring are added in this PR. Duty
+Fairness integration is PR #3, below.
+
+## Duty Fairness integration (PR #3)
+
+Fairness V1 has two INDEPENDENT modes, sharing only the small foundation
+primitives above (status vocabulary, period status, model version, data
+completeness) — never one combined shape, never a generic
+`GenericFairnessEngine<T>`:
+
+1. **Shift Fairness** (PR #2, above) — opportunity-based, month-oriented,
+   reconstructed from shift-slot availability, a ±0.5-shift tolerance band.
+2. **Duty Fairness** (PR #3, this section) — workbook-score-based, H1/H2-
+   oriented, the workbook's own `previousScore`/`currentScore`/comparison
+   target/weekend count/exemptions flow through UNCHANGED. No tolerance band
+   at all.
+
+This PR is domain/read-model integration ONLY — it does not touch
+`/manager/fairness` (still served by the original, untouched
+`buildManagerFairnessReadModel.ts`/`managerFairness.ts`), does not add any
+UI, and does not recalculate a single duty score. `fairnessTable.ts`/
+`fairnessAnalysis.ts`/`fairnessExemptions.ts`/`fairnessPeriod.ts`/
+`lib/parsers/fairness.ts` — PR #15's original duty Fairness system — are
+preserved exactly; this PR only ADDS a few small primitives alongside them
+and a new, parallel read-model boundary that reuses them outright.
+
+- **`currentScore` remains authoritative — no recalculation, ever.** Every
+  new value this PR computes (`delta`/`comparisonTarget`/`gapToTarget`/
+  `normalizedLoad`/`status`) is analysis ON TOP of the workbook's own
+  `previousScore`/`currentScore`, exactly like PR #15 already established.
+  No duty scoring formula was rewritten, no shift-opportunity logic was
+  applied to duties, and no weighted combined score was introduced.
+- **`resolveDutyFairnessStatus` (`fairnessAnalysis.ts`) — exact comparison,
+  NO tolerance.** Unlike Shift Fairness's ±0.5-shift tolerance band (which
+  exists specifically because a fractional opportunity-share target can
+  never be landed on exactly by a discrete shift count), the workbook's
+  `currentScore` and `comparisonTarget` are both already-authoritative
+  source values, not a reconstructed estimate — so `"balanced"` means
+  EXACTLY equal: `currentScore < comparisonTarget` → `"below"`,
+  `currentScore === comparisonTarget` → `"balanced"`,
+  `currentScore > comparisonTarget` → `"above"`, and `null` whenever either
+  side is unavailable (never a fake `"balanced"`, never a target/current of
+  `0` standing in for unknown). `DutyFairnessStatus` and Shift Fairness's
+  `FairnessShiftStatus` are both aliases of the same shared
+  `FairnessStatus` (`fairnessFoundation.ts`) — the three-word vocabulary is
+  shared, the computation is not.
+- **Grouping reuses the EXISTING, proven duty classifier — nothing new.**
+  `buildDutyFairnessReadModel.ts`'s groups (`"supervisor" | "technician" |
+  "other"`) are built with the SAME exact-match `resolveFairnessAllocationRole`
+  classifier `lib/presentation/managerFairnessGrouping.ts` already uses for
+  the live manager Fairness page — only the literal allocation labels
+  'אחמ"ש'/"טכנאי" resolve to a group; every other label (including the
+  literal text 'ר"צ', and "הסמכה") falls to `"other"`, visible with its
+  real score/exemptions/weekend count but no invented target. This is a
+  DIFFERENT concept from Shift Fairness's `resolveFairnessComparisonGroupKey`
+  (capability-based, `isSupervisor`/`isTechnician`) — the two grouping
+  algorithms are never merged, exactly as `fairnessGroups.ts`'s own
+  docstring already establishes.
+- **A REAL, UNRESOLVED DOMAIN QUESTION, left honest rather than guessed.**
+  A reservist supervisor whose organizational title is ר״צ but who is
+  capability-flagged `isSupervisor` DOES land in Shift Fairness's
+  `"supervisor"` GROUP (that classifier is capability-based, not label-
+  based). Whether the DUTY table's own 'ר"צ' ALLOCATION-LABEL text should
+  likewise be folded into the supervisor duty population/target-eligible
+  group is a genuinely different question, and nothing in today's verified
+  domain code (`resolveFairnessAllocationRole`, `ALLOCATION_ROLE_BY_LABEL`)
+  proves an answer either way — inventing that mapping here would have been
+  a new, unverified business rule. A `'ר"צ'`-labeled duty row therefore
+  stays in `"other"` for now, exactly like the existing, tested
+  `groupManagerFairnessRows` behavior. This should be resolved with a real
+  domain owner before any future PR changes duty grouping, not guessed.
+- **Grouping and target eligibility are separate facts, never silently
+  collapsed.** Landing in the `"supervisor"`/`"technician"` presentation
+  group never by itself grants a row a comparison target — `comparisonTarget`
+  is resolved independently via the unchanged `resolveComparisonTarget`, and
+  both happen to derive from the same `allocationLabel` only because
+  `resolveFairnessAllocationRole` already IS the one deterministic,
+  proven classifier for both duty concepts (not because this PR merged
+  them). The `"other"` bucket in particular never receives an invented
+  target.
+- **Data completeness — only genuine gaps are flagged, never noise on every
+  row.** Two new reasons (`fairnessFoundation.ts`): `"duty_identity_unresolved"`
+  (the row's source name didn't resolve to exactly one personnel record —
+  the row still fully displays, only the person-id link is missing) and
+  `"duty_target_unavailable"` (the row's allocation label DOES resolve to a
+  deterministic role, but the period's own X/2X target note is missing/
+  malformed, so target/gap/normalizedLoad/status are all unavailable
+  despite a known role). Deliberately NOT raised for a row whose allocation
+  label has no deterministic role at all — `comparisonTarget: null` there is
+  the normal, complete, expected outcome. Duty Fairness does NOT reuse PR
+  #48's participation/eligibility completeness reasons
+  (`"participation_*"`/`"eligibility_undated"`) — those model a
+  RECONSTRUCTED shift-opportunity estimate; Duty Fairness's scores are
+  directly sourced, so applying them here would manufacture false
+  uncertainty about data that is not actually uncertain.
+- **Exemptions stay descriptive.** `resolveFairnessExemptions` is reused
+  unchanged — an exemption is preserved on the row, never erases
+  `previousScore`/`currentScore`, never forces `currentScore` to `0`, and
+  never by itself produces a Fairness status; `status` is always the plain
+  `resolveDutyFairnessStatus(currentScore, comparisonTarget)` result.
+- **Weekend count stays the workbook's own metric.** `weekendCount` flows
+  through untouched from `FairnessPersonRow` — never replaced by, or mixed
+  with, Shift Fairness's weekend opportunity calculation, and no weekend
+  target/status is invented (no authoritative Duty weekend target exists
+  today).
+- **Totals stay two separate facts.** `reportedXTotal` (the sheet's own "סך
+  הכל:" row) and `displayedXSum` (the independently computed sum of the
+  currently parsed rows) are both carried through via the unchanged
+  `sumDisplayedFairnessRows` — never compared, never labeled a
+  "discrepancy" (PR #15's own hardening pass, reused as-is).
+- **Period status via the shared foundation, not a duplicated
+  computation.** `fairnessPeriod.ts` gained `fairnessPeriodEndDate`
+  (h1 → `YYYY-06-30`, h2 → `YYYY-12-31`, from a `FairnessPeriodIdentity`)
+  and `fairnessPeriodIdentityLabel` (the same "1–6/2026" formatting as the
+  existing `fairnessPeriodLabel`, but from an already-resolved identity) —
+  `buildDutyFairnessReadModel.ts` feeds the computed end date into
+  `fairnessFoundation.ts`'s existing, period-shape-agnostic
+  `resolveFairnessPeriodStatus`, exactly the same primitive Shift Fairness
+  already uses for a calendar month. Duty Fairness itself is NOT converted
+  to calendar months — it keeps H1/H2 exactly as `fairnessPeriod.ts`
+  already resolves it.
+- **Sorting is the existing established order, unchanged.** Lowest
+  normalized load first, unavailable-target rows after every modelable row,
+  stable tie-break by source name then row key — the SAME rule
+  `buildManagerFairnessReadModel.ts`'s `compareFairnessRows` already
+  implements, reused (not redesigned) as `compareDutyFairnessRows`. No row
+  is ever labeled "מומלץ"/"הבא"/"עדיפות" — Fairness describes state, it
+  does not assign the next duty.
+- `lib/readModels/dutyFairnessTypes.ts` / `buildDutyFairnessReadModel.ts` —
+  the SEPARATE, parallel Duty Fairness read model (presentation-safe: no
+  email, no `sourceSheet`/`sourceCell`, no raw Google row; row `key` is
+  derived from `personId`+row order, never a raw cell reference), following
+  `buildManagerFairnessReadModel.ts`'s pure/no-network convention exactly.
+  No Google-fetch/auth/caching orchestration layer is added yet — same as
+  Shift Fairness, there is no standalone page to serve one yet (PR #4), and
+  this read model deliberately carries no manager-only authorization
+  assumption baked into its data so PR #4 can expose it to whichever users
+  the future standalone page actually serves.
+
+**`unknown != zero`** applies here exactly as it does throughout PR #48/#2:
+a missing previous score is never `0`, a missing target is never `0`, an
+unavailable status is never `"balanced"`.
+
+No UI redesign, no standalone `/fairness` route, no removal of
+`/manager/fairness` or its components, and no historical snapshot
+persistence (PR #5) are added in this PR.
