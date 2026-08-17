@@ -159,8 +159,7 @@ export type FairnessRoleEligibilityBasis =
   | "not_capable"
   | "regular_included"
   | "evidence_confirmed"
-  | "evidence_not_found"
-  | "unclassified_excluded";
+  | "evidence_not_found";
 
 /**
  * `dataCompleteness` always carries `"eligibility_undated"` -- see this
@@ -199,22 +198,36 @@ export interface FairnessRoleEligibility {
  * policy here would be wrong: a permanent person who genuinely appears in
  * the period's own evidence is a real participant and must be counted.
  *
+ * FURTHER RECONSIDERED (second follow-up): the eligibility rule initially
+ * still special-cased "unclassified" personnelType (missing/unrecognized
+ * `personnelType`) as automatically excluded, with no evidence check at
+ * all. That repeated the exact same mistake the permanent-service
+ * reconsideration above just fixed for a different category: a person's
+ * personnelType classification is orthogonal to whether they actually,
+ * verifiably performed this role's work -- a CONFIRMED same-role shift
+ * Event or the period's own Fairness-table evidence is proof of real
+ * participation regardless of whether their personnelType happens to be
+ * recognized. Discarding that proof because of an unrelated classification
+ * gap would violate the same Fairness invariant. Unclassified personnel are
+ * therefore evidence-gated exactly like permanent/reserve now -- never
+ * automatically excluded, but also never assumed eligible without evidence
+ * (no guessing either direction).
+ *
  * The rule actually applied: no capability flag -> never (`"not_capable"`).
  * regular-service -> always, once capable (`"regular_included"`) -- the
- * default shift pool, unaffected by this reconsideration. permanent-service
- * AND reserve-service -> capability alone is NOT enough for either; both
- * need the period's own Fairness-table evidence (`reserveParticipation`,
- * from `deriveReserveRoleParticipation`/`resolveReserveRoleParticipation` --
+ * only category still granted eligibility without evidence, since it's the
+ * default shift pool. Every other category (permanent, reserve,
+ * unclassified) -> capability alone is NOT enough; each needs the period's
+ * own Fairness-table evidence (`reserveParticipation`, from
+ * `deriveReserveRoleParticipation`/`resolveReserveRoleParticipation` --
  * despite its `Reserve*` naming, the SET itself is derived from the
  * Fairness sheet's allocation rows with no personnelType filtering, so
- * reusing it for permanent personnel is a correct, not incidental, reuse)
- * OR at least one CONFIRMED same-role shift Event within the period
+ * reusing it beyond reservists is a correct, not incidental, reuse) OR at
+ * least one CONFIRMED same-role shift Event within the period
  * (`"evidence_confirmed"` either way, `"evidence_not_found"` when neither
- * exists). unclassified -> never (`"unclassified_excluded"`, never guessed
- * from silence -- untouched by this reconsideration, since an unclassified
- * person's category itself is unknown, not merely unevidenced).
+ * exists -- never a guess when there is truly no evidence).
  * `reserveParticipation` defaults to empty -- the safe direction, only ever
- * making a permanent/reserve person LESS likely to qualify, never more.
+ * making a non-regular person LESS likely to qualify, never more.
  */
 export function resolveFairnessRoleEligibility(
   person: Person,
@@ -236,10 +249,12 @@ export function resolveFairnessRoleEligibility(
   if (category === "regular") {
     return { personId: person.id, role, eligible: true, basis: "regular_included", dataCompleteness };
   }
-  if (category !== "permanent" && category !== "reserve") {
-    return { personId: person.id, role, eligible: false, basis: "unclassified_excluded", dataCompleteness };
-  }
 
+  // permanent, reserve, AND unclassified are all evidence-gated identically
+  // from here -- confirmed participation evidence must never be discarded
+  // merely because personnelType is unrecognized/missing (see this
+  // function's own docstring for why "unclassified -> automatically
+  // excluded" was reconsidered and rejected).
   const fairnessEvidence =
     role === "technician" ? reserveParticipation.technicianPersonIds : reserveParticipation.supervisorPersonIds;
   if (fairnessEvidence.has(person.id)) {

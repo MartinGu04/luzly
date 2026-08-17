@@ -264,28 +264,32 @@ shift-fairness period without collision.
     carry it into PR2.
   - `resolveFairnessRoleEligibility` — no capability -> never
     (`"not_capable"`); regular -> always once capable (`"regular_included"`,
-    unaffected by the fix below); permanent AND reserve -> capability alone
-    is NOT enough for either, both need the period's own Fairness-table
+    the only category still granted eligibility without evidence); EVERY
+    other category (permanent, reserve, AND unclassified) -> capability
+    alone is NOT enough, all three need the period's own Fairness-table
     evidence OR a confirmed same-role shift Event within the period
-    (`"evidence_confirmed"`/`"evidence_not_found"`); unclassified -> never
-    (`"unclassified_excluded"`). Follow-up fix: the initial version copied
+    (`"evidence_confirmed"`/`"evidence_not_found"`). Two follow-up fixes,
+    both the same underlying mistake: the initial version copied
     `shiftCoverageRecommendation.ts`'s PR #39 `participatesInRoleRotation`
     rule verbatim, including "permanent (קבע) is never eligible, regardless
-    of evidence". Re-checked against the actual domain data: nothing in
-    `lib/parsers/event.ts`/`operationalIssues.ts` prevents a permanent
-    person from holding a real, confirmed shift Event, and
-    `detectCapabilityMismatchIssues` checks capability against every
-    person's Event role without regard to personnelType — so that
-    exclusion was proven to be a policy specific to that OTHER feature's
-    candidate pool (who to proactively page for a last-minute gap), not a
-    domain-wide fact. Encoding it into Fairness would have wrongly
-    discounted real, evidenced participation. Permanent personnel are now
-    evidence-gated exactly like reservists instead. `dataCompleteness`
-    always carries `"eligibility_undated"` — VERIFIED GAP:
-    `isTechnician`/`isSupervisor` are a CURRENT snapshot only, with no
-    effective-from date, so a qualification that became valid partway
-    through the period can never be time-sliced today — carry this into
-    PR2 as well.
+    of evidence" AND "unclassified personnelType is never eligible,
+    regardless of evidence". Re-checked against the actual domain data:
+    nothing in `lib/parsers/event.ts`/`operationalIssues.ts` prevents a
+    permanent OR unclassified person from holding a real, confirmed shift
+    Event, and `detectCapabilityMismatchIssues` checks capability against
+    every person's Event role without regard to personnelType — so BOTH
+    blanket exclusions were proven to be a policy specific to that OTHER
+    feature's candidate pool (who to proactively page for a last-minute
+    gap), never a domain-wide fact. Encoding either into Fairness would
+    have wrongly discounted real, evidenced participation just because of
+    an unrelated classification. Permanent AND unclassified personnel are
+    therefore now evidence-gated exactly like reservists — never
+    automatically excluded, but never assumed eligible without evidence
+    either (no guessing in either direction). `dataCompleteness` always
+    carries `"eligibility_undated"` — VERIFIED GAP: `isTechnician`/
+    `isSupervisor` are a CURRENT snapshot only, with no effective-from
+    date, so a qualification that became valid partway through the period
+    can never be time-sliced today — carry this into PR2 as well.
   - `resolveFairnessShiftOpportunity` — shift-SLOT-level (not merely
     "available days") availability for one (date, period): a blocking
     absence (`BLOCKING_ABSENCE_KINDS`, reused from `operationalIssues.ts`)

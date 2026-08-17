@@ -210,11 +210,27 @@ describe("resolveFairnessRoleEligibility", () => {
     expect(result.basis).toBe("regular_included");
   });
 
-  it("unclassified personnelType is never guessed into eligibility", () => {
+  it("unclassified personnelType with no evidence is never guessed into eligibility", () => {
     const p = person({ id: "p_unk", personnelType: "משהו לא מוכר", isTechnician: true });
     const result = resolveFairnessRoleEligibility(p, "technician", [], PERIOD_START, PERIOD_END);
     expect(result.eligible).toBe(false);
-    expect(result.basis).toBe("unclassified_excluded");
+    expect(result.basis).toBe("evidence_not_found");
+  });
+
+  it("unclassified personnelType WITH a confirmed same-role shift in the period IS eligible -- confirmed participation must never be discarded merely because personnelType is unrecognized", () => {
+    const p = person({ id: "p_unk2", personnelType: "משהו לא מוכר", isSupervisor: true });
+    const events: Event[] = [shiftEvent({ personId: p.id, date: "2026-08-14", role: "supervisor" })];
+    const result = resolveFairnessRoleEligibility(p, "supervisor", events, PERIOD_START, PERIOD_END);
+    expect(result.eligible).toBe(true);
+    expect(result.basis).toBe("evidence_confirmed");
+  });
+
+  it("unclassified personnelType (missing entirely) also qualifies via the period's own Fairness-table evidence", () => {
+    const p = person({ id: "p_unk3", personnelType: null, isTechnician: true });
+    const evidence = participationEvidence({ technicianIds: [p.id] });
+    const result = resolveFairnessRoleEligibility(p, "technician", [], PERIOD_START, PERIOD_END, evidence);
+    expect(result.eligible).toBe(true);
+    expect(result.basis).toBe("evidence_confirmed");
   });
 
   it("reservist qualifies via the period's own Fairness-table evidence", () => {
