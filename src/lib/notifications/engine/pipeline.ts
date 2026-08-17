@@ -7,6 +7,7 @@ import { runChangeDetection } from "./changeDetection";
 import { runReminders } from "./reminders";
 import { runDelivery, type DeliverySummary } from "./delivery";
 import { peekDueJobsCount } from "./store";
+import { runStage } from "./workerErrors";
 
 export type WorkerMode = "dry_run" | "send";
 
@@ -43,7 +44,7 @@ export async function runNotificationWorkerTick(mode: WorkerMode): Promise<Worke
   const startedAt = performance.now();
   const persist = mode === "send";
 
-  const freshRead = await fetchFreshWorkbookRead();
+  const freshRead = await runStage("fresh_workbook_read", () => fetchFreshWorkbookRead());
   if (freshRead.status === "configuration_error") {
     return { status: "configuration_error", message: freshRead.message };
   }
@@ -52,35 +53,39 @@ export async function runNotificationWorkerTick(mode: WorkerMode): Promise<Worke
   const now = getJerusalemLocalNow();
   const week = getOperationalWeek(now);
 
-  const recipientResolution = await resolveNotificationRecipients(people);
+  const recipientResolution = await runStage("recipient_resolution", () => resolveNotificationRecipients(people));
   const personNameById = new Map(people.map((person) => [person.id, person.name]));
 
-  const changeSummary = await runChangeDetection({
-    events,
-    people,
-    shiftSchedule,
-    week,
-    persist,
-    recipientResolution,
-    personNameById,
-  });
+  const changeSummary = await runStage("change_detection", () =>
+    runChangeDetection({
+      events,
+      people,
+      shiftSchedule,
+      week,
+      persist,
+      recipientResolution,
+      personNameById,
+    }),
+  );
 
-  const remindersSummary = await runReminders({
-    events,
-    shiftSchedule,
-    week,
-    now,
-    persist,
-    recipientResolution,
-  });
+  const remindersSummary = await runStage("reminders", () =>
+    runReminders({
+      events,
+      shiftSchedule,
+      week,
+      now,
+      persist,
+      recipientResolution,
+    }),
+  );
 
   let deliverySummary: DeliverySummary | null = null;
   let jobsDue: number;
   if (persist) {
-    deliverySummary = await runDelivery();
+    deliverySummary = await runStage("delivery", () => runDelivery());
     jobsDue = deliverySummary.jobsClaimed;
   } else {
-    jobsDue = await peekDueJobsCount();
+    jobsDue = await runStage("jobs_due_lookup", () => peekDueJobsCount());
   }
 
   const durationMs = Math.round(performance.now() - startedAt);

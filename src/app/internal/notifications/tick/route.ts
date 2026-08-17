@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { isAuthorizedWorkerRequest } from "@/lib/notifications/workerAuth";
 import { runNotificationWorkerTick, type WorkerMode } from "@/lib/notifications/engine/pipeline";
+import { WorkerStageError, formatWorkerErrorLog, sanitizeWorkerError } from "@/lib/notifications/engine/workerErrors";
 
 /**
  * The secured internal worker endpoint Supabase Cron calls every 5
@@ -27,7 +28,15 @@ import { runNotificationWorkerTick, type WorkerMode } from "@/lib/notifications/
  *
  * Response is a small, PII-safe JSON summary of counts only -- never a
  * name, email, push endpoint, or full notification body (spec section
- * 25).
+ * 25). This includes on FAILURE: the HTTP body is always the flat
+ * `{ error: "internal_error" }` (or `{ error: "configuration_error" }`
+ * for the one already-typed config-error path), regardless of what
+ * actually went wrong -- diagnostics only ever go to the server-side log
+ * line below, via `sanitizeWorkerError`/`formatWorkerErrorLog`
+ * (`lib/notifications/engine/workerErrors.ts`), which is itself
+ * PII-safe by construction (never the raw error object, never a stack
+ * trace, redacts anything token/email/URL-shaped) -- see that module's
+ * own docstring.
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const authorized = isAuthorizedWorkerRequest(request.headers.get("authorization"));
@@ -42,13 +51,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const result = await runNotificationWorkerTick(mode);
 
     if (result.status === "configuration_error") {
-      console.error("[notifications] worker configuration error");
+      console.error(
+        formatWorkerErrorLog(
+          "fresh_workbook_read",
+          sanitizeWorkerError(Object.assign(new Error(result.message), { name: "ShiftConfigurationError" })),
+        ),
+      );
       return NextResponse.json({ error: "configuration_error" }, { status: 500 });
     }
 
     return NextResponse.json(result.summary, { status: 200 });
-  } catch {
-    console.error("[notifications] worker tick failed");
+  } catch (error) {
+    const stage = error instanceof WorkerStageError ? error.stage : "unknown";
+    const cause = error instanceof WorkerStageError ? error.cause : error;
+    console.error(formatWorkerErrorLog(stage, sanitizeWorkerError(cause)));
     return NextResponse.json({ error: "internal_error" }, { status: 500 });
   }
 }
