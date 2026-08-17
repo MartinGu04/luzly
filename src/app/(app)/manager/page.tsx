@@ -367,7 +367,7 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
       />
       {summary ? <ManagerSummaryStrip summary={summary} /> : null}
 
-      <ManagerAttentionSection criticalItems={criticalItems} reviewItems={reviewItems} />
+      <ManagerAttentionSection criticalItems={criticalItems} reviewItems={reviewItems} current={hrefParams} />
 
       <ManagerNotificationReadinessSection readiness={notificationReadiness} />
 
