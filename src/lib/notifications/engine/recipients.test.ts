@@ -98,6 +98,52 @@ describe("filterManagerRecipients", () => {
   });
 });
 
+describe("resolvePersonIdentity", () => {
+  it("mapped: a unique email matching a Supabase auth user", async () => {
+    vi.resetModules();
+    const { resolvePersonIdentity } = await import("./recipients");
+    const people = [person({ id: "p1", name: "Dana", email: "dana@example.com" })];
+    const emailToUserId = new Map([["dana@example.com", "user-1"]]);
+
+    expect(resolvePersonIdentity(people[0], people, emailToUserId)).toEqual({
+      status: "mapped",
+      normalizedEmail: "dana@example.com",
+      userId: "user-1",
+    });
+  });
+
+  it("no_email: person has no email at all", async () => {
+    vi.resetModules();
+    const { resolvePersonIdentity } = await import("./recipients");
+    const people = [person({ id: "p1", name: "No Email" })];
+
+    expect(resolvePersonIdentity(people[0], people, new Map())).toEqual({ status: "no_email" });
+  });
+
+  it("ambiguous: two roster people share a normalized email -- fails closed for both", async () => {
+    vi.resetModules();
+    const { resolvePersonIdentity } = await import("./recipients");
+    const people = [
+      person({ id: "p1", name: "First", email: "shared@example.com" }),
+      person({ id: "p2", name: "Second", email: " Shared@Example.com " }),
+    ];
+
+    expect(resolvePersonIdentity(people[0], people, new Map())).toEqual({ status: "ambiguous" });
+    expect(resolvePersonIdentity(people[1], people, new Map())).toEqual({ status: "ambiguous" });
+  });
+
+  it("unmapped: a unique email with no matching Supabase auth user", async () => {
+    vi.resetModules();
+    const { resolvePersonIdentity } = await import("./recipients");
+    const people = [person({ id: "p1", name: "Ghost", email: "ghost@example.com" })];
+
+    expect(resolvePersonIdentity(people[0], people, new Map())).toEqual({
+      status: "unmapped",
+      normalizedEmail: "ghost@example.com",
+    });
+  });
+});
+
 describe("fetchAllSubscribedUserIds", () => {
   it("returns distinct user ids from push_subscriptions", async () => {
     vi.resetModules();

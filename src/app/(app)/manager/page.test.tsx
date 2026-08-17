@@ -150,6 +150,7 @@ function model(overrides: Partial<ManagerOverviewReadModel> = {}): ManagerOvervi
     potentialRequirements: [],
     selectedPerson: null,
     selectedPersonRangeAbsences: [],
+    notificationReadiness: { status: "skipped" },
     ...overrides,
   };
 }
@@ -690,6 +691,98 @@ describe("ManagerPage — problems-only filter", () => {
   });
 });
 
+describe("ManagerPage — PR #40 מצב התראות section", () => {
+  it("skipped: renders nothing (lookup never attempted)", async () => {
+    getRequestManagerOverview.mockResolvedValue(okResult(model({ notificationReadiness: { status: "skipped" } })));
+    await renderPage();
+    expect(screen.queryByText("הצג פרטים")).toBeNull();
+    expect(screen.queryByText("לא ניתן לבדוק כרגע את מצב ההתראות")).toBeNull();
+  });
+
+  it("available, everyone ready: renders nothing -- no permanent success card", async () => {
+    getRequestManagerOverview.mockResolvedValue(
+      okResult(
+        model({
+          notificationReadiness: { status: "available", view: { readyCount: 2, totalCount: 2, blockers: [] } },
+        }),
+      ),
+    );
+    await renderPage();
+    expect(screen.queryByText("הצג פרטים")).toBeNull();
+    expect(screen.queryByText(/לא יכולים לקבל התראות אישיות/)).toBeNull();
+    expect(screen.queryByText("לא ניתן לבדוק כרגע את מצב ההתראות")).toBeNull();
+  });
+
+  it("unavailable: shows the small neutral notice, distinct from both skipped and all-ready", async () => {
+    getRequestManagerOverview.mockResolvedValue(
+      okResult(model({ notificationReadiness: { status: "unavailable" } })),
+    );
+    await renderPage();
+    expect(screen.getByText("לא ניתן לבדוק כרגע את מצב ההתראות")).toBeInTheDocument();
+    expect(screen.queryByText("הצג פרטים")).toBeNull();
+  });
+
+  it("available with blockers: shows the compact summary and grouped names/labels", async () => {
+    getRequestManagerOverview.mockResolvedValue(
+      okResult(
+        model({
+          notificationReadiness: {
+            status: "available",
+            view: {
+              readyCount: 0,
+              totalCount: 2,
+              blockers: [
+                { personId: "p_martin", personName: "מרטין בדיקה", status: "missing_email" },
+                { personId: "p_eitan", personName: "איתן דוגמה", status: "no_push_subscription" },
+              ],
+            },
+          },
+        }),
+      ),
+    );
+    await renderPage();
+    expect(screen.getByText("2 אנשים עדיין לא יכולים לקבל התראות אישיות")).toBeInTheDocument();
+    expect(screen.getByText("הצג פרטים")).toBeInTheDocument();
+    expect(screen.getByText("חסר מייל בכ״א")).toBeInTheDocument();
+    expect(screen.getByText("אין מכשיר רשום להתראות")).toBeInTheDocument();
+  });
+
+  it("stays visible when problemsOnly is set -- data-quality context, not a shift conflict", async () => {
+    getRequestManagerOverview.mockResolvedValue(
+      okResult(
+        model({
+          problemsOnly: true,
+          notificationReadiness: {
+            status: "available",
+            view: {
+              readyCount: 0,
+              totalCount: 1,
+              blockers: [{ personId: "p_martin", personName: "מרטין בדיקה", status: "unmapped_account" }],
+            },
+          },
+        }),
+      ),
+    );
+    await renderPage({ problems: "1" });
+    expect(screen.getByText("אדם אחד עדיין לא יכול לקבל התראות אישיות")).toBeInTheDocument();
+  });
+
+  it("never appears in the selected-person drilldown", async () => {
+    getRequestManagerOverview.mockResolvedValue(
+      okResult(
+        model({
+          selectedPersonId: "p_martin",
+          selectedPerson: personalModel(),
+          notificationReadiness: { status: "skipped" },
+        }),
+      ),
+    );
+    await renderPage({ person: "p_martin" });
+    expect(screen.queryByText("הצג פרטים")).toBeNull();
+    expect(screen.queryByText("לא ניתן לבדוק כרגע את מצב ההתראות")).toBeNull();
+  });
+});
+
 describe("ManagerPage — selected person view", () => {
   it("shows the person-scoped header, never the everyone controls sections", async () => {
     getRequestManagerOverview.mockResolvedValue(
@@ -823,5 +916,25 @@ describe("ManagerPage — privacy", () => {
     expect(container.textContent).not.toContain("sourceCell");
     expect(container.textContent).not.toContain("@");
     expect(container.textContent).not.toContain("spreadsheetId");
+  });
+
+  it("never leaks a blocker's personId or raw status string from the מצב התראות section", async () => {
+    getRequestManagerOverview.mockResolvedValue(
+      okResult(
+        model({
+          notificationReadiness: {
+            status: "available",
+            view: {
+              readyCount: 0,
+              totalCount: 1,
+              blockers: [{ personId: "p_martin_internal_id", personName: "מרטין בדיקה", status: "no_push_subscription" }],
+            },
+          },
+        }),
+      ),
+    );
+    const { container } = await renderPage();
+    expect(container.textContent).not.toContain("p_martin_internal_id");
+    expect(container.textContent).not.toContain("no_push_subscription");
   });
 });

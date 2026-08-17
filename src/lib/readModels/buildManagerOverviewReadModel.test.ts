@@ -114,6 +114,7 @@ function buildModel(overrides: Partial<Parameters<typeof buildManagerOverviewRea
     range: range7d(),
     selectedPersonId: null,
     problemsOnly: false,
+    notificationReadiness: { status: "skipped" },
     ...overrides,
   });
 }
@@ -953,5 +954,86 @@ describe("buildManagerOverviewReadModel — PR #16 manager Potential scope", () 
     expect(model.potentialRequirements).toHaveLength(0);
     expect(model.duties.some((d) => d.personId === EITAN.id)).toBe(true);
     expect(model.roster).toHaveLength(4);
+  });
+});
+
+describe("buildManagerOverviewReadModel — PR #40 notification readiness projection", () => {
+  it("status: skipped -- the caller never attempted the lookup (a person is selected)", () => {
+    const model = buildModel({ notificationReadiness: { status: "skipped" } });
+    expect(model.notificationReadiness).toEqual({ status: "skipped" });
+  });
+
+  it("status: unavailable -- the caller attempted the lookup and it failed, distinct from skipped", () => {
+    const model = buildModel({ notificationReadiness: { status: "unavailable" } });
+    expect(model.notificationReadiness).toEqual({ status: "unavailable" });
+  });
+
+  it("status: available -- excludes ready people from blockers, but still counts them in readyCount/totalCount", () => {
+    const model = buildModel({
+      notificationReadiness: {
+        status: "ok",
+        results: [
+          { personId: MANAGER.id, status: "ready" },
+          { personId: MARTIN.id, status: "no_push_subscription" },
+          { personId: EITAN.id, status: "ready" },
+          { personId: NOA.id, status: "unmapped_account" },
+        ],
+      },
+    });
+
+    expect(model.notificationReadiness.status).toBe("available");
+    if (model.notificationReadiness.status !== "available") return;
+    expect(model.notificationReadiness.view.readyCount).toBe(2);
+    expect(model.notificationReadiness.view.totalCount).toBe(4);
+    expect(model.notificationReadiness.view.blockers.map((b) => b.personId)).toEqual([MARTIN.id, NOA.id]);
+    expect(model.notificationReadiness.view.blockers).toHaveLength(2);
+  });
+
+  it("carries only personId/personName/status per blocker -- no email, no auth/subscription internals", () => {
+    const model = buildModel({
+      notificationReadiness: { status: "ok", results: [{ personId: MARTIN.id, status: "missing_email" }] },
+    });
+
+    expect(model.notificationReadiness.status).toBe("available");
+    if (model.notificationReadiness.status !== "available") return;
+    expect(model.notificationReadiness.view.blockers).toEqual([
+      { personId: MARTIN.id, personName: MARTIN.name, status: "missing_email" },
+    ]);
+  });
+
+  it("orders blockers by name then id, same tiebreak convention as the roster", () => {
+    const bDup = person({ id: "p_b2", name: "ב", isTechnician: true });
+    const aDup = person({ id: "p_a1", name: "א", isTechnician: true });
+    const model = buildModel({
+      people: [MANAGER, MARTIN, EITAN, NOA, bDup, aDup],
+      notificationReadiness: {
+        status: "ok",
+        results: [
+          { personId: bDup.id, status: "no_push_subscription" },
+          { personId: aDup.id, status: "no_push_subscription" },
+        ],
+      },
+    });
+
+    expect(model.notificationReadiness.status).toBe("available");
+    if (model.notificationReadiness.status !== "available") return;
+    expect(model.notificationReadiness.view.blockers.map((b) => b.personId)).toEqual([aDup.id, bDup.id]);
+  });
+
+  it("when everyone is ready, blockers is empty and readyCount equals totalCount", () => {
+    const model = buildModel({
+      notificationReadiness: {
+        status: "ok",
+        results: [
+          { personId: MANAGER.id, status: "ready" },
+          { personId: MARTIN.id, status: "ready" },
+        ],
+      },
+    });
+
+    expect(model.notificationReadiness.status).toBe("available");
+    if (model.notificationReadiness.status !== "available") return;
+    expect(model.notificationReadiness.view.blockers).toEqual([]);
+    expect(model.notificationReadiness.view.readyCount).toBe(model.notificationReadiness.view.totalCount);
   });
 });

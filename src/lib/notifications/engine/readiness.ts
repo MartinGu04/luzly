@@ -1,0 +1,80 @@
+import "server-only";
+import type { Person } from "@/lib/domain/types";
+import { fetchAllSubscribedUserIds, fetchAllUserIdsByEmail, resolvePersonIdentity } from "./recipients";
+
+/**
+ * PR #40 -- every deterministic state a roster person can resolve to when
+ * asking "can Mi-Ma-Mo currently target a personal push notification to
+ * this person, all the way to at least one registered device?". This is a
+ * STRICTLY stronger question than `resolveNotificationRecipients`'
+ * identity mapping (personnel person -> unique email -> matching auth
+ * user): that alone does NOT prove push delivery is possible -- a mapped
+ * account with zero rows in `push_subscriptions` still gets its
+ * notification job marked `skipped` by `delivery.ts`. `no_push_subscription`
+ * is the state that makes that gap visible instead of silently absorbed.
+ *
+ * Precedence is evaluated in this exact order (see `resolvePersonReadiness`)
+ * so every person lands in EXACTLY ONE state, never two:
+ * missing_email > ambiguous_email > unmapped_account > no_push_subscription
+ * > ready. No finer state is ever invented -- these five are everything
+ * the system can actually prove from `כ"א` + Supabase auth + push_subscriptions.
+ */
+export type PersonNotificationReadiness =
+  | "ready"
+  | "missing_email"
+  | "ambiguous_email"
+  | "unmapped_account"
+  | "no_push_subscription";
+
+export interface PersonReadinessResult {
+  personId: string;
+  status: PersonNotificationReadiness;
+}
+
+/**
+ * Computes every roster person's `PersonNotificationReadiness` in one
+ * bulk pass -- never `getActiveSubscriptionsForUser()` per person (that
+ * would be one `push_subscriptions` query per roster member). Identity
+ * mapping (`fetchAllUserIdsByEmail`, the Supabase Admin API) and push-
+ * subscription membership (`fetchAllSubscribedUserIds`, a single bulk
+ * `push_subscriptions` select) are fetched CONCURRENTLY via `Promise.all`
+ * -- they're independent reads with no data dependency on each other.
+ *
+ * Reuses `resolvePersonIdentity` -- the EXACT SAME per-person identity
+ * resolution `resolveNotificationRecipients` (the worker's own recipient
+ * resolution) now shares -- so the manager-facing readiness view and the
+ * worker's actual targeting logic can never quietly drift apart. This
+ * function does NOT change or duplicate `resolveNotificationRecipients`'s
+ * own aggregate counting behavior (its PII-safe worker logs are untouched)
+ * -- it's a separate, per-person projection built from the same underlying
+ * primitives.
+ */
+export async function computeNotificationReadiness(
+  people: readonly Person[],
+): Promise<PersonReadinessResult[]> {
+  const [emailToUserId, subscribedUserIds] = await Promise.all([
+    fetchAllUserIdsByEmail(),
+    fetchAllSubscribedUserIds(),
+  ]);
+  const subscribed = new Set(subscribedUserIds);
+
+  return people.map((person) => ({
+    personId: person.id,
+    status: resolvePersonReadiness(person, people, emailToUserId, subscribed),
+  }));
+}
+
+function resolvePersonReadiness(
+  person: Person,
+  people: readonly Person[],
+  emailToUserId: ReadonlyMap<string, string>,
+  subscribedUserIds: ReadonlySet<string>,
+): PersonNotificationReadiness {
+  const identity = resolvePersonIdentity(person, people, emailToUserId);
+
+  if (identity.status === "no_email" || identity.status === "not_found") return "missing_email"; // not_found is unreachable: person.email is itself a member of `people`
+  if (identity.status === "ambiguous") return "ambiguous_email";
+  if (identity.status === "unmapped") return "unmapped_account";
+
+  return subscribedUserIds.has(identity.userId) ? "ready" : "no_push_subscription";
+}

@@ -4,13 +4,14 @@ import { deriveReserveRoleParticipation, type ReserveRoleParticipationSource } f
 import { ShiftConfigurationError, buildShiftSchedule, type ShiftSchedule } from "@/lib/domain/shiftSchedule";
 import type { Person } from "@/lib/domain/types";
 import { parseSourcePeriodYear, type RawSheet } from "@/lib/google";
+import { computeNotificationReadiness } from "@/lib/notifications/engine/readiness";
 import { parseEvent } from "@/lib/parsers/event";
 import { parseFairnessTable } from "@/lib/parsers/fairness";
 import { parsePotentialSheet } from "@/lib/parsers/potential";
 import { parseScheduleSheet } from "@/lib/parsers/schedule";
 import { parseSettingsSheet } from "@/lib/parsers/settings";
 import { getJerusalemLocalNow } from "@/lib/time/jerusalemClock";
-import { buildManagerOverviewReadModel } from "./buildManagerOverviewReadModel";
+import { buildManagerOverviewReadModel, type NotificationReadinessLookup } from "./buildManagerOverviewReadModel";
 import { getManagerWorkbookSheet, loadManagerWorkbookContext } from "./managerWorkbookContext";
 import type { ManagerOverviewParams } from "./managerOverviewParams";
 import type { ManagerOverviewReadModel } from "./managerTypes";
@@ -41,6 +42,13 @@ export async function loadManagerOverviewReadModel(
   if (contextResult.status !== "ok") return contextResult;
 
   const { manager, people, snapshot } = contextResult.context;
+
+  // PR #40 -- started now (the manager is already authorized above by
+  // `loadManagerWorkbookContext`) so its Supabase Admin API + bulk
+  // `push_subscriptions` calls run concurrently with the synchronous sheet
+  // parsing below instead of serially after it. `loadNotificationReadiness`
+  // itself decides skipped/unavailable/ok -- see its own docstring.
+  const notificationReadinessPromise = loadNotificationReadiness(people, params.personId);
 
   const settings = parseSettingsSheet(getManagerWorkbookSheet(snapshot, "settings"));
 
@@ -82,6 +90,8 @@ export async function loadManagerOverviewReadModel(
   const now = getJerusalemLocalNow();
   const range = resolveManagerDateRange(params.range, params.month, now);
 
+  const notificationReadiness = await notificationReadinessPromise;
+
   const model = buildManagerOverviewReadModel({
     manager,
     people,
@@ -94,9 +104,41 @@ export async function loadManagerOverviewReadModel(
     range,
     selectedPersonId: params.personId,
     problemsOnly: params.problemsOnly,
+    notificationReadiness,
   });
 
   return { status: "ok", model };
+}
+
+/**
+ * The manager overview's own three-way record of the privileged readiness
+ * lookup -- `skipped` (a person is selected; `ManagerNotificationReadinessSection`
+ * never renders there, so the Supabase Admin API + bulk `push_subscriptions`
+ * calls are never even attempted) is explicitly DIFFERENT from `unavailable`
+ * (the "everyone" scope DID attempt it, and it failed) -- collapsing both
+ * into the same `null`/hidden state would let a real infra outage look
+ * identical to "everyone is ready", which is not trustworthy. A push-
+ * subscription/Supabase Admin API infra failure must never take down the
+ * whole manager overview though -- מצב התראות is optional operational
+ * context, not a page-blocking dependency (same defensive convention as
+ * `loadRecentDashboardChanges`'s notification-engine query) -- so `unavailable`
+ * is a caught, logged (fixed PII-safe string only, never the underlying
+ * error, which could carry a raw Supabase response) degradation, not a thrown
+ * exception.
+ */
+async function loadNotificationReadiness(
+  people: readonly Person[],
+  personId: string | null,
+): Promise<NotificationReadinessLookup> {
+  if (personId !== null) return { status: "skipped" };
+
+  try {
+    const results = await computeNotificationReadiness(people);
+    return { status: "ok", results };
+  } catch {
+    console.error("[manager-overview] notification readiness query failed");
+    return { status: "unavailable" };
+  }
 }
 
 /**

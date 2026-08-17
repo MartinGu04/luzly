@@ -17,11 +17,15 @@ import { resolveReserveRoleParticipation, type ReserveRoleParticipationByPeriod 
 import { buildShiftCoverageRecommendation } from "@/lib/domain/shiftCoverageRecommendation";
 import type { ShiftSchedule } from "@/lib/domain/shiftSchedule";
 import type { Person } from "@/lib/domain/types";
+import type { PersonReadinessResult } from "@/lib/notifications/engine/readiness";
 import { buildPersonalScheduleReadModel } from "./buildPersonalScheduleReadModel";
 import { buildManagerAbsenceEntries, buildManagerDutyEntries, buildShiftStaffingOverview } from "./managerEventProjections";
 import type {
   ManagerIssue,
   ManagerIssueRecommendation,
+  ManagerNotificationReadinessBlocker,
+  ManagerNotificationReadinessState,
+  ManagerNotificationReadinessView,
   ManagerOverviewReadModel,
   ManagerPersonSummary,
   ManagerPotentialRequirementView,
@@ -58,7 +62,28 @@ export interface BuildManagerOverviewReadModelInput {
   /** Raw, unvalidated -- null means "everyone"; validated against `people` below. */
   selectedPersonId: string | null;
   problemsOnly: boolean;
+  /**
+   * PR #40 -- the caller's own record of whether `computeNotificationReadiness()`
+   * was skipped, attempted-and-failed, or attempted-and-succeeded (with its
+   * raw per-person results) -- see `managerOverview.ts`'s
+   * `NotificationReadinessLookup`. Narrowed to `ManagerNotificationReadinessState`
+   * below -- this builder never re-runs the identity/subscription lookup
+   * itself, and never collapses "skipped" and "failed" into the same value.
+   */
+  notificationReadiness: NotificationReadinessLookup;
 }
+
+/**
+ * PR #40 follow-up -- what `managerOverview.ts` actually knows about the
+ * privileged readiness lookup for THIS request, before this builder narrows
+ * it to the safe `ManagerNotificationReadinessState` the read model exposes.
+ * Defined here (rather than in `managerOverview.ts`) purely to avoid an
+ * import cycle -- `managerOverview.ts` already imports this file.
+ */
+export type NotificationReadinessLookup =
+  | { status: "skipped" }
+  | { status: "unavailable" }
+  | { status: "ok"; results: readonly PersonReadinessResult[] };
 
 /**
  * Pure, deterministic construction of `ManagerOverviewReadModel` from
@@ -83,6 +108,7 @@ export function buildManagerOverviewReadModel(
     range,
     selectedPersonId,
     problemsOnly,
+    notificationReadiness: rawNotificationReadiness,
   } = input;
 
   const peopleById = new Map(people.map((person) => [person.id, person]));
@@ -135,6 +161,8 @@ export function buildManagerOverviewReadModel(
     ? absences.filter((entry) => entry.personId === resolvedSelectedPerson.id)
     : [];
 
+  const notificationReadiness = toManagerNotificationReadinessState(rawNotificationReadiness, peopleById);
+
   return {
     manager: { id: manager.id, name: manager.name },
     fetchedAt,
@@ -150,6 +178,7 @@ export function buildManagerOverviewReadModel(
     potentialRequirements,
     selectedPerson,
     selectedPersonRangeAbsences,
+    notificationReadiness,
   };
 }
 
@@ -297,4 +326,63 @@ function toManagerPotentialRequirementView(
     actualAssignees: reconciliation.actualAssignees,
     sourceConflict: reconciliation.sourceConflict,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Notification readiness
+// ---------------------------------------------------------------------------
+
+/**
+ * Turns `managerOverview.ts`'s raw `NotificationReadinessLookup` into the
+ * exact three-state `ManagerNotificationReadinessState` the read model
+ * exposes -- `skipped`/`unavailable` pass straight through unchanged
+ * (never conflated with each other, and never collapsed into a bare
+ * `null`); only `ok` is narrowed further, via `toManagerNotificationReadinessView`.
+ */
+function toManagerNotificationReadinessState(
+  lookup: NotificationReadinessLookup,
+  peopleById: ReadonlyMap<string, Person>,
+): ManagerNotificationReadinessState {
+  if (lookup.status !== "ok") return { status: lookup.status };
+  return { status: "available", view: toManagerNotificationReadinessView(lookup.results, peopleById) };
+}
+
+/**
+ * Narrows the raw per-person `computeNotificationReadiness()` result down
+ * to the safe manager projection -- every `ready` person is dropped here
+ * (never reaches `blockers`), and only `personId`/`personName`/`status`
+ * survive per blocker. `readyCount` is derived from the SAME pass, so it
+ * always agrees with `totalCount - blockers.length` by construction.
+ */
+function toManagerNotificationReadinessView(
+  results: readonly PersonReadinessResult[],
+  peopleById: ReadonlyMap<string, Person>,
+): ManagerNotificationReadinessView {
+  const blockers: ManagerNotificationReadinessBlocker[] = [];
+  let readyCount = 0;
+
+  for (const result of results) {
+    if (result.status === "ready") {
+      readyCount++;
+      continue;
+    }
+    blockers.push({
+      personId: result.personId,
+      personName: peopleById.get(result.personId)?.name ?? "",
+      status: result.status,
+    });
+  }
+
+  blockers.sort(compareNotificationReadinessBlockers);
+
+  return { readyCount, totalCount: results.length, blockers };
+}
+
+/** By name, then id as a stable tiebreak -- same convention as `compareRosterEntries`. */
+function compareNotificationReadinessBlockers(
+  a: ManagerNotificationReadinessBlocker,
+  b: ManagerNotificationReadinessBlocker,
+): number {
+  if (a.personName !== b.personName) return a.personName < b.personName ? -1 : 1;
+  return a.personId < b.personId ? -1 : a.personId > b.personId ? 1 : 0;
 }
