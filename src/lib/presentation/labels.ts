@@ -103,6 +103,7 @@ const ABSENCE_KIND_LABELS: Record<AbsenceKind, string> = {
   medical: "גימלים",
   day_off: "יום ד",
   after: "אפטר",
+  referral: "הפנייה",
 };
 
 export function absenceKindLabel(kind: AbsenceKind): string {

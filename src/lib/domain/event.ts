@@ -30,9 +30,10 @@ export type DutyFamily =
  * What kind of absence, for category === "absence" only. Lets rules engines
  * reason about absences without inspecting Hebrew raw text — e.g. "after" is
  * partial/ambiguous and must never be treated as a blocking full-day absence
- * the way vacation/abroad/medical/day_off are.
+ * the way vacation/abroad/medical/day_off are. "referral" (הפנייה/הפניה) was
+ * previously unrepresented and fell through to `category: "other"`.
  */
-export type AbsenceKind = "vacation" | "abroad" | "medical" | "day_off" | "after";
+export type AbsenceKind = "vacation" | "abroad" | "medical" | "day_off" | "after" | "referral";
 
 /**
  * A single person/date cell, semantically classified from a

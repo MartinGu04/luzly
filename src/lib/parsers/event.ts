@@ -255,6 +255,8 @@ const ABSENCE_KIND_BY_PHRASE: Record<string, AbsenceKind> = {
   גימלים: "medical",
   "יום ד": "day_off",
   אפטר: "after",
+  הפנייה: "referral",
+  הפניה: "referral",
 };
 
 const CONSTRAINT_TOKEN = "אילוץ";
