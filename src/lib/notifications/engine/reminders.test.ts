@@ -482,14 +482,14 @@ describe("runReminders -- tomorrow logistics-withdrawal SUPERVISOR reminder (20:
     });
   });
 
-  it("no assignee: supervisor gets the anti-spam warning, and NO technician-wide push exists at 20:00 at all", async () => {
+  it("no assignee: supervisor gets the anti-spam warning, and NO technician-wide push exists at 20:00 at all (Sunday evening -> Monday, a genuine logistics-withdrawal date)", async () => {
     store.listPendingJobDedupeKeysByPrefix.mockResolvedValue([]);
     const { runReminders } = await loadModule();
-    const now: LocalNow = { date: "2026-08-18", minuteOfDay: 1200 };
+    const now: LocalNow = { date: "2026-08-16", minuteOfDay: 1200 }; // Sunday
     const week = getOperationalWeek(now);
 
     await runReminders({
-      events: [daySupervisorShift("p_sup", { date: "2026-08-19" }), dayTechnicianShift("p_tech", { date: "2026-08-19" })],
+      events: [daySupervisorShift("p_sup", { date: "2026-08-17" }), dayTechnicianShift("p_tech", { date: "2026-08-17" })],
       people: [person("p_tech", { isTechnician: true })],
       shiftSchedule: schedule,
       week,
@@ -658,11 +658,11 @@ describe("runReminders -- same-day noon (12:00) logistics-withdrawal team coordi
   it("no assignee at noon: supervisor gets the warning AND eligible technicians get the all-hands fallback", async () => {
     store.listPendingJobDedupeKeysByPrefix.mockResolvedValue([]);
     const { runReminders } = await loadModule();
-    const now: LocalNow = { date: "2026-08-19", minuteOfDay: 600 };
+    const now: LocalNow = { date: "2026-08-17", minuteOfDay: 600 };
     const week = getOperationalWeek(now);
 
     await runReminders({
-      events: [daySupervisorShift("p_sup", { date: "2026-08-19" }), dayTechnicianShift("p_tech", { date: "2026-08-19" })],
+      events: [daySupervisorShift("p_sup", { date: "2026-08-17" }), dayTechnicianShift("p_tech", { date: "2026-08-17" })],
       people: [person("p_tech", { isTechnician: true })],
       shiftSchedule: schedule,
       week,
@@ -693,9 +693,9 @@ describe("runReminders -- same-day noon (12:00) logistics-withdrawal team coordi
 
   it("an assignment appearing before noon replaces the stale fallback jobs on the next tick", async () => {
     const { runReminders } = await loadModule();
-    const now: LocalNow = { date: "2026-08-19", minuteOfDay: 480 }; // 08:00 -- still unassigned
+    const now: LocalNow = { date: "2026-08-17", minuteOfDay: 480 }; // 08:00 -- still unassigned
     const week = getOperationalWeek(now);
-    const events = [daySupervisorShift("p_sup", { date: "2026-08-19" }), dayTechnicianShift("p_tech", { date: "2026-08-19" })];
+    const events = [daySupervisorShift("p_sup", { date: "2026-08-17" }), dayTechnicianShift("p_tech", { date: "2026-08-17" })];
     const people = [person("p_tech", { isTechnician: true })];
     const recipientResolution = resolutionFor([
       ["p_sup", "user-sup"],
@@ -712,13 +712,13 @@ describe("runReminders -- same-day noon (12:00) logistics-withdrawal team coordi
     // previously-upserted fallback jobs as still pending.
     store.upsertPendingReminderJob.mockClear();
     store.listPendingJobDedupeKeysByPrefix.mockImplementation(async (prefix: string) => {
-      if (prefix === "logistics_withdrawal_noon_supervisor:2026-08-19:") return ["logistics_withdrawal_noon_supervisor:2026-08-19:user-sup"];
-      if (prefix === "logistics_withdrawal_noon_team:2026-08-19:") return ["logistics_withdrawal_noon_team:2026-08-19:user-tech"];
+      if (prefix === "logistics_withdrawal_noon_supervisor:2026-08-17:") return ["logistics_withdrawal_noon_supervisor:2026-08-17:user-sup"];
+      if (prefix === "logistics_withdrawal_noon_team:2026-08-17:") return ["logistics_withdrawal_noon_team:2026-08-17:user-tech"];
       return [];
     });
 
     await runReminders({
-      events: [...events, withdrawalAssignment("p_ethan", "2026-08-19")],
+      events: [...events, withdrawalAssignment("p_ethan", "2026-08-17")],
       people,
       shiftSchedule: schedule,
       week,
@@ -729,10 +729,10 @@ describe("runReminders -- same-day noon (12:00) logistics-withdrawal team coordi
 
     // The supervisor's fallback warning is no longer valid -- cancelled.
     expect(upsertedFor("logistics_withdrawal_noon_supervisor")).toHaveLength(0);
-    expect(store.cancelPendingReminderJob).toHaveBeenCalledWith("logistics_withdrawal_noon_supervisor:2026-08-19:user-sup");
+    expect(store.cancelPendingReminderJob).toHaveBeenCalledWith("logistics_withdrawal_noon_supervisor:2026-08-17:user-sup");
     // p_tech is STILL a valid team recipient (still eligible) -- their job
     // is re-upserted with fresh "help Ethan" content, never cancelled.
-    expect(store.cancelPendingReminderJob).not.toHaveBeenCalledWith("logistics_withdrawal_noon_team:2026-08-19:user-tech");
+    expect(store.cancelPendingReminderJob).not.toHaveBeenCalledWith("logistics_withdrawal_noon_team:2026-08-17:user-tech");
     expect(upsertedFor("logistics_withdrawal_noon_assigned")).toHaveLength(1);
     const teamJobs = upsertedFor("logistics_withdrawal_noon_team");
     expect(teamJobs).toHaveLength(1);
@@ -966,6 +966,93 @@ describe("runReminders -- same-day noon (12:00) logistics-withdrawal team coordi
 
     expect(upsertedFor("logistics_withdrawal_noon_assigned")).toEqual([
       expect.objectContaining({ dedupeKey: "logistics_withdrawal_noon_assigned:2026-08-23:user-ethan" }),
+    ]);
+  });
+});
+
+describe("runReminders -- logistics-withdrawal fallback only ever exists for Monday", () => {
+  // 2026-08-16=Sun, 17=Mon, 18=Tue, 19=Wed, 20=Thu, 21=Fri, 22=Sat.
+  const NON_MONDAY_DATES = ["2026-08-16", "2026-08-18", "2026-08-19", "2026-08-20", "2026-08-21", "2026-08-22"];
+
+  it("no fallback job of any kind is created for an unassigned NON-Monday date, noon", async () => {
+    for (const date of NON_MONDAY_DATES) {
+      store.upsertPendingReminderJob.mockClear();
+      store.listPendingJobDedupeKeysByPrefix.mockResolvedValue([]);
+      const { runReminders } = await loadModule();
+      const now: LocalNow = { date, minuteOfDay: 600 };
+      const week = getOperationalWeek(now);
+
+      await runReminders({
+        events: [daySupervisorShift("p_sup", { date }), dayTechnicianShift("p_tech", { date })],
+        people: [person("p_tech", { isTechnician: true })],
+        shiftSchedule: schedule,
+        week,
+        now,
+        persist: true,
+        recipientResolution: resolutionFor([
+          ["p_sup", "user-sup"],
+          ["p_tech", "user-tech"],
+        ]),
+      });
+
+      expect(upsertedFor("logistics_withdrawal_noon_supervisor")).toEqual([]);
+      expect(upsertedFor("logistics_withdrawal_noon_team")).toEqual([]);
+    }
+  });
+
+  it("no fallback job of any kind is created when TOMORROW (the target date) is not a Monday, 20:00", async () => {
+    // now=Monday (17th) -> tomorrow=Tuesday (18th, non-Monday) is the one
+    // case worth singling out: the EVENING of a genuine withdrawal Monday
+    // itself must not produce a fallback for the day AFTER it.
+    store.listPendingJobDedupeKeysByPrefix.mockResolvedValue([]);
+    const { runReminders } = await loadModule();
+    const now: LocalNow = { date: "2026-08-17", minuteOfDay: 1200 };
+    const week = getOperationalWeek(now);
+
+    await runReminders({
+      events: [daySupervisorShift("p_sup", { date: "2026-08-18" }), dayTechnicianShift("p_tech", { date: "2026-08-18" })],
+      people: [person("p_tech", { isTechnician: true })],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: resolutionFor([
+        ["p_sup", "user-sup"],
+        ["p_tech", "user-tech"],
+      ]),
+    });
+
+    expect(upsertedFor("tomorrow_logistics_withdrawal_supervisor")).toEqual([]);
+  });
+
+  it("an explicit 'משיכות' Event on a non-Monday still gets the FULL normal coordination treatment (an intentional exceptional withdrawal)", async () => {
+    store.listPendingJobDedupeKeysByPrefix.mockResolvedValue([]);
+    const { runReminders } = await loadModule();
+    const wednesday = "2026-08-19";
+    const now: LocalNow = { date: wednesday, minuteOfDay: 600 };
+    const week = getOperationalWeek(now);
+
+    await runReminders({
+      events: [
+        withdrawalAssignment("p_ethan", wednesday),
+        daySupervisorShift("p_sup", { date: wednesday }),
+        dayTechnicianShift("p_helper", { date: wednesday }),
+      ],
+      people: [person("p_helper", { isTechnician: true })],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: resolutionFor([
+        ["p_ethan", "user-ethan"],
+        ["p_sup", "user-sup"],
+        ["p_helper", "user-helper"],
+      ]),
+    });
+
+    expect(upsertedFor("logistics_withdrawal_noon_assigned")).toHaveLength(1);
+    expect(upsertedFor("logistics_withdrawal_noon_team")).toEqual([
+      expect.objectContaining({ recipientUserId: "user-helper", title: "🤝 משיכות היום" }),
     ]);
   });
 });

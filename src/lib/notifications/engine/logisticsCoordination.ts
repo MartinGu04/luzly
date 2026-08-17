@@ -2,9 +2,32 @@ import "server-only";
 import { LOGISTICS_WITHDRAWAL_WINDOW, type MinuteWindow } from "@/lib/config/notificationTiming";
 import { clipInterval } from "@/lib/domain/shiftCoverage";
 import { resolveEventShiftInterval, type ShiftSchedule } from "@/lib/domain/shiftSchedule";
+import { dayOfWeek, parseCalendarDate } from "@/lib/domain/dutyBlocks";
 import type { Event } from "@/lib/domain/event";
 import type { Person } from "@/lib/domain/types";
 import { isLogisticsWithdrawalEvent } from "./logisticsWithdrawal";
+
+/** `dayOfWeek` return value for Monday -- see that function's own "0=Sunday .. 6=Saturday" docstring. */
+const MONDAY = 1;
+
+/**
+ * Logistics withdrawals are operationally expected every Monday -- the ONE
+ * date the "nobody is assigned yet" FALLBACK notifications (the
+ * supervisor's anti-spam warning and the all-hands teammate message) are
+ * allowed to exist for. An explicit "משיכות" Event still works completely
+ * normally on any weekday (an intentional exceptional withdrawal) -- this
+ * gate only ever suppresses the FALLBACK path, never the assigned-person
+ * coordination path. Reuses the existing `dayOfWeek`/`parseCalendarDate`
+ * calendar helpers (`lib/domain/dutyBlocks.ts`) -- the same ones
+ * `runConstraintsReminders` already uses for its own weekday gating --
+ * rather than a second date-to-weekday computation. An unparseable date
+ * conservatively never participates in the fallback.
+ */
+export function isLogisticsWithdrawalFallbackDate(date: string): boolean {
+  const parsed = parseCalendarDate(date);
+  if (!parsed) return false;
+  return dayOfWeek(parsed) === MONDAY;
+}
 
 /**
  * Team-coordination logic around logistics withdrawals (משיכות

@@ -21,6 +21,7 @@ import {
   buildSupervisorAssignedInformedBody,
   buildTeamHelpAssignedBody,
   findLogisticsWithdrawalAssignees,
+  isLogisticsWithdrawalFallbackDate,
   resolveEligibleLogisticsTechnicians,
   resolveRelevantSupervisors,
 } from "./logisticsCoordination";
@@ -254,11 +255,16 @@ async function runTomorrowLogisticsWithdrawalReminders(
  * spec "fail conservatively"). Content branches on whether anyone is
  * currently assigned:
  *
- *  - assigned: informs the supervisor who it is (spec Case A.2) --
- *    excludes any assignee who is ALSO a resolved supervisor recipient
- *    (precedence: a person never gets told about their own assignment
- *    twice under two different roles).
- *  - unassigned: the anti-spam warning (spec Case B.1) -- ONLY the
+ *  - assigned: informs the supervisor who it is (spec Case A.2) -- works on
+ *    ANY weekday (an explicit "משיכות" Event is always an intentional
+ *    withdrawal, Monday or not) -- excludes any assignee who is ALSO a
+ *    resolved supervisor recipient (precedence: a person never gets told
+ *    about their own assignment twice under two different roles).
+ *  - unassigned: the anti-spam warning (spec Case B.1) -- ONLY when
+ *    tomorrow is genuinely a logistics-withdrawal date
+ *    (`isLogisticsWithdrawalFallbackDate` -- Monday; withdrawals are not
+ *    operationally expected any other day, so an unassigned Tuesday is not
+ *    a gap worth warning about). Even on a qualifying date, ONLY the
  *    supervisor is warned the evening before; technicians are deliberately
  *    never notified at this hour (spec: "the assignment may still be
  *    fixed before noon").
@@ -276,17 +282,21 @@ async function runTomorrowLogisticsWithdrawalSupervisorReminders(
   const scheduledFor = toIso(input.now.date, TOMORROW_LOGISTICS_WITHDRAWAL_REMINDER_TIME);
   const assignees = findLogisticsWithdrawalAssignees(input.events, tomorrowDate);
   const assignedPersonIds = new Set(assignees.map((assignee) => assignee.personId));
-  const supervisors = resolveRelevantSupervisors(input.events, tomorrowDate, input.shiftSchedule).filter(
-    (supervisor) => !assignedPersonIds.has(supervisor.personId),
-  );
+  const isAssigned = assignees.length > 0;
+  const participatesTomorrow = isAssigned || isLogisticsWithdrawalFallbackDate(tomorrowDate);
 
-  const { title, body } =
-    assignees.length > 0
-      ? { title: "📦 משיכות מחר", body: buildSupervisorAssignedInformedBody(assignees.map((a) => a.personName)) }
-      : {
-          title: "⚠️ לא הוגדר טכנאי למשיכות",
-          body: "לא הוגדר טכנאי למשיכות מחר בין 13:00–14:00. נדרש לוודא שכל הטכנאים הזמינים יוצאים למשיכות.",
-        };
+  const supervisors = participatesTomorrow
+    ? resolveRelevantSupervisors(input.events, tomorrowDate, input.shiftSchedule).filter(
+        (supervisor) => !assignedPersonIds.has(supervisor.personId),
+      )
+    : [];
+
+  const { title, body } = isAssigned
+    ? { title: "📦 משיכות מחר", body: buildSupervisorAssignedInformedBody(assignees.map((a) => a.personName)) }
+    : {
+        title: "⚠️ לא הוגדר טכנאי למשיכות",
+        body: "לא הוגדר טכנאי למשיכות מחר בין 13:00–14:00. נדרש לוודא שכל הטכנאים הזמינים יוצאים למשיכות.",
+      };
 
   const validJobs: NewNotificationJob[] = [];
   for (const supervisor of supervisors) {
@@ -340,6 +350,11 @@ async function runLogisticsWithdrawalNoonReminders(input: RemindersInput): Promi
   const assignees = findLogisticsWithdrawalAssignees(input.events, today);
   const assignedPersonIds = new Set(assignees.map((assignee) => assignee.personId));
   const isAssigned = assignees.length > 0;
+  // An explicit "משיכות" Event works on any weekday; the UNASSIGNED
+  // fallback (supervisor warning + all-hands teammate message) only ever
+  // exists on a genuine logistics-withdrawal date (Monday) -- see
+  // `isLogisticsWithdrawalFallbackDate`'s own docstring.
+  const participatesToday = isAssigned || isLogisticsWithdrawalFallbackDate(today);
 
   const assignedJobs: NewNotificationJob[] = [];
   for (const assignee of assignees) {
@@ -366,12 +381,16 @@ async function runLogisticsWithdrawalNoonReminders(input: RemindersInput): Promi
 
   // Supervisor fallback: ONLY when still unassigned at this tick (spec
   // Case A never lists a noon supervisor message; that's exclusively the
-  // Case B anti-spam warning). No supervisor jobs at all once assigned --
-  // any previously-upserted warning naturally becomes stale and is
-  // cancelled by `applyReminderJobs`'s own prefix sweep.
-  const supervisorCandidates = resolveRelevantSupervisors(input.events, today, input.shiftSchedule).filter(
-    (supervisor) => !assignedPersonIds.has(supervisor.personId),
-  );
+  // Case B anti-spam warning) AND today is a genuine logistics-withdrawal
+  // date (`participatesToday`). No supervisor jobs at all once assigned,
+  // or on a non-Monday with nothing assigned -- any previously-upserted
+  // warning naturally becomes stale and is cancelled by
+  // `applyReminderJobs`'s own prefix sweep.
+  const supervisorCandidates = participatesToday
+    ? resolveRelevantSupervisors(input.events, today, input.shiftSchedule).filter(
+        (supervisor) => !assignedPersonIds.has(supervisor.personId),
+      )
+    : [];
   const supervisorJobs: NewNotificationJob[] = [];
   if (!isAssigned) {
     for (const supervisor of supervisorCandidates) {
@@ -398,13 +417,15 @@ async function runLogisticsWithdrawalNoonReminders(input: RemindersInput): Promi
   );
 
   // Eligible teammates, excluding anyone already reached above (precedence).
+  // Same `participatesToday` gate as the supervisor fallback: on a
+  // non-Monday with nothing assigned, there is no team notification either
+  // (spec: "create zero logistics fallback jobs").
   const supervisorRecipientPersonIds = new Set(supervisorCandidates.map((supervisor) => supervisor.personId));
-  const eligibleTechnicians: readonly Person[] = resolveEligibleLogisticsTechnicians(
-    input.events,
-    input.people,
-    today,
-    input.shiftSchedule,
-  ).filter((person) => !assignedPersonIds.has(person.id) && !supervisorRecipientPersonIds.has(person.id));
+  const eligibleTechnicians: readonly Person[] = participatesToday
+    ? resolveEligibleLogisticsTechnicians(input.events, input.people, today, input.shiftSchedule).filter(
+        (person) => !assignedPersonIds.has(person.id) && !supervisorRecipientPersonIds.has(person.id),
+      )
+    : [];
 
   const { title: teamTitle, body: teamBody } = isAssigned
     ? { title: "🤝 משיכות היום", body: buildTeamHelpAssignedBody(assignees.map((a) => a.personName)) }

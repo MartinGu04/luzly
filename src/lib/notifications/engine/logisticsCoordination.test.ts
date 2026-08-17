@@ -6,6 +6,7 @@ import {
   buildSupervisorAssignedInformedBody,
   buildTeamHelpAssignedBody,
   findLogisticsWithdrawalAssignees,
+  isLogisticsWithdrawalFallbackDate,
   joinNamesWithVav,
   resolveEligibleLogisticsTechnicians,
   resolveRelevantSupervisors,
@@ -247,5 +248,29 @@ describe("buildSupervisorAssignedInformedBody / buildTeamHelpAssignedBody -- sin
     expect(buildTeamHelpAssignedBody(["איתן", "דניאל"])).toBe(
       "איתן ודניאל עושים משיכות היום בין 13:00–14:00. נדרש לעזור להם.",
     );
+  });
+});
+
+describe("isLogisticsWithdrawalFallbackDate", () => {
+  it("Monday is the only genuine logistics-withdrawal fallback date", () => {
+    expect(isLogisticsWithdrawalFallbackDate("2026-08-17")).toBe(true); // Monday
+  });
+
+  it("every other weekday is never a fallback date", () => {
+    expect(isLogisticsWithdrawalFallbackDate("2026-08-16")).toBe(false); // Sunday
+    expect(isLogisticsWithdrawalFallbackDate("2026-08-18")).toBe(false); // Tuesday
+    expect(isLogisticsWithdrawalFallbackDate("2026-08-19")).toBe(false); // Wednesday
+    expect(isLogisticsWithdrawalFallbackDate("2026-08-20")).toBe(false); // Thursday
+    expect(isLogisticsWithdrawalFallbackDate("2026-08-21")).toBe(false); // Friday
+    expect(isLogisticsWithdrawalFallbackDate("2026-08-22")).toBe(false); // Saturday
+  });
+
+  it("holds across a month/week boundary -- the next Monday is still true", () => {
+    expect(isLogisticsWithdrawalFallbackDate("2026-08-24")).toBe(true); // Monday
+    expect(isLogisticsWithdrawalFallbackDate("2026-08-31")).toBe(true); // Monday, crosses into September
+  });
+
+  it("an unparseable date conservatively never participates in the fallback", () => {
+    expect(isLogisticsWithdrawalFallbackDate("not-a-date")).toBe(false);
   });
 });
