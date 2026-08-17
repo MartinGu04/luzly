@@ -5,7 +5,11 @@
  * date-punctuation tolerance (`.`/`/`/`-`) are handled at the point of use
  * (person-name matching, date-token parsing) since they're type-specific,
  * not a generic query-wide transform.
+ *
+ * A single trailing "?" is also stripped -- a natural-language question
+ * like "מתי אני ואיתי ביחד?" carries no different meaning than without it,
+ * and every pattern below is written without one.
  */
 export function normalizeSearchQuery(raw: string): string {
-  return raw.replace(/\s+/g, " ").trim();
+  return raw.replace(/\s+/g, " ").trim().replace(/\?+$/, "").trim();
 }

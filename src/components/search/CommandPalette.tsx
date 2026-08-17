@@ -9,8 +9,8 @@ import { formatHebrewWeekdayAndDate } from "@/lib/presentation/hebrewDate";
 import { periodLabel } from "@/lib/presentation/labels";
 import type { SearchReadModel } from "@/lib/readModels/searchTypes";
 import { parseSearchIntent } from "@/lib/search/parseSearchIntent";
-import { resolveSearchIntent } from "@/lib/search/resolveSearchIntent";
-import type { GlobalSearchResult, SearchShiftPeriod } from "@/lib/search/types";
+import { resolveSearchIntent, type SharedShiftOverrides } from "@/lib/search/resolveSearchIntent";
+import type { GlobalSearchResult, SearchShiftPeriod, SharedShiftSearchResult } from "@/lib/search/types";
 
 interface CommandPaletteProps {
   open: boolean;
@@ -18,7 +18,9 @@ interface CommandPaletteProps {
   model: SearchReadModel;
 }
 
-const EXAMPLE_QUERIES = ["עילאי", "מי איתי בשבת", "19.8", "מתי אני ועילאי יחד"];
+const EXAMPLE_QUERIES = ["עילאי", "מי איתי בשבת", "19.8", "מתי יש לי משמרת עם איתי"];
+
+const NO_SHARED_SHIFT_OVERRIDES: SharedShiftOverrides = {};
 
 function periodEmoji(period: SearchShiftPeriod): string {
   return assignmentEmoji({ category: "shift", period, dutyFamily: null, absenceKind: null }) ?? "";
@@ -58,6 +60,11 @@ export function CommandPalette({ open, onClose, model }: CommandPaletteProps) {
   const [query, setQuery] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const [syncedOpen, setSyncedOpen] = useState(open);
+  // PersonIds already picked to resolve an ambiguous shared_shift name (see
+  // `SharedShiftDisambiguationResult`) -- reset whenever the query text
+  // itself changes or the palette re-opens, so a stale choice can never
+  // silently leak into a new, unrelated question.
+  const [sharedShiftOverrides, setSharedShiftOverrides] = useState<SharedShiftOverrides>(NO_SHARED_SHIFT_OVERRIDES);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -77,6 +84,7 @@ export function CommandPalette({ open, onClose, model }: CommandPaletteProps) {
     if (open) {
       setQuery("");
       setHighlightedIndex(0);
+      setSharedShiftOverrides(NO_SHARED_SHIFT_OVERRIDES);
     }
   }
 
@@ -137,15 +145,46 @@ export function CommandPalette({ open, onClose, model }: CommandPaletteProps) {
   const resolution = useMemo(() => {
     if (!open) return null;
     const intent = parseSearchIntent(query);
-    return resolveSearchIntent(intent, model);
-  }, [open, query, model]);
+    return resolveSearchIntent(intent, model, sharedShiftOverrides);
+  }, [open, query, model, sharedShiftOverrides]);
 
   const results = resolution?.results ?? [];
   const clampedIndex = Math.min(highlightedIndex, Math.max(results.length - 1, 0));
   const highlightedResult = results[clampedIndex];
 
-  /** A result with no `href` (e.g. a person with no shared shift) is purely informational -- activating it must never close the palette or navigate, which would misleadingly read as an action having happened. */
+  /**
+   * A split-disambiguation candidate commits to one structural reading of
+   * an "<A> ו<B> יחד" sentence (which text belongs to which person) --
+   * resolved BEFORE any per-name ambiguity, since it decides what those
+   * texts even are. A name-disambiguation candidate refines the
+   * in-progress shared_shift query in place -- it records which roster
+   * person the ambiguous side resolved to and lets resolution continue
+   * (possibly straight to a final result, possibly to the second side's
+   * own ambiguity). Neither ever navigates or closes the palette merely
+   * because the user is resolving what they meant.
+   *
+   * Otherwise, a result with no `href` (e.g. a person with no shared shift)
+   * is purely informational -- activating it must never close the palette
+   * or navigate, which would misleadingly read as an action having
+   * happened.
+   */
   function activate(result: GlobalSearchResult) {
+    if (result.kind === "shared_shift_split_disambiguation") {
+      setSharedShiftOverrides((previous) => ({
+        ...previous,
+        splitChoice: { personAText: result.personAText, personBText: result.personBText },
+      }));
+      setHighlightedIndex(0);
+      return;
+    }
+    if (result.kind === "shared_shift_disambiguation") {
+      setSharedShiftOverrides((previous) => ({
+        ...previous,
+        [result.side === "A" ? "personA" : "personB"]: result.personId,
+      }));
+      setHighlightedIndex(0);
+      return;
+    }
     const href = resultHref(result);
     if (!href) return;
     onClose();
@@ -194,6 +233,7 @@ export function CommandPalette({ open, onClose, model }: CommandPaletteProps) {
             onChange={(event) => {
               setQuery(event.target.value);
               setHighlightedIndex(0);
+              setSharedShiftOverrides(NO_SHARED_SHIFT_OVERRIDES);
             }}
             onKeyDown={handleInputKeyDown}
             className="min-w-0 flex-1 bg-transparent text-base text-foreground placeholder:text-muted-2 focus:outline-none sm:text-sm"
@@ -210,7 +250,13 @@ export function CommandPalette({ open, onClose, model }: CommandPaletteProps) {
 
         <div className="min-h-0 flex-1 overflow-y-auto p-2">
           {query.trim() === "" ? (
-            <IdlePane onPick={setQuery} />
+            <IdlePane
+              onPick={(example) => {
+                setQuery(example);
+                setHighlightedIndex(0);
+                setSharedShiftOverrides(NO_SHARED_SHIFT_OVERRIDES);
+              }}
+            />
           ) : results.length === 0 ? (
             <EmptyPane message={resolution?.emptyMessage ?? null} />
           ) : (
@@ -297,6 +343,7 @@ function ResultIcon({ result }: { result: GlobalSearchResult }) {
 
   switch (result.kind) {
     case "person":
+    case "shared_shift_disambiguation":
       return (
         <span className={wrapperClassName}>
           <UserRound className={iconClassName} aria-hidden="true" strokeWidth={1.75} />
@@ -315,6 +362,7 @@ function ResultIcon({ result }: { result: GlobalSearchResult }) {
         </span>
       );
     case "shared_shift":
+    case "shared_shift_split_disambiguation":
     case "with_me":
       return (
         <span className={wrapperClassName}>
@@ -322,6 +370,13 @@ function ResultIcon({ result }: { result: GlobalSearchResult }) {
         </span>
       );
   }
+}
+
+/** "ביחד עם X" when the searching user is one side of the pair, "X ו-Y" for an arbitrary other+other pair -- never a meaningless third-person phrasing about oneself. */
+function sharedShiftTitle(result: SharedShiftSearchResult): string {
+  if (result.personA.isSelf) return `ביחד עם ${result.personB.name}`;
+  if (result.personB.isSelf) return `ביחד עם ${result.personA.name}`;
+  return `${result.personA.name} ו${result.personB.name}`;
 }
 
 function ResultContent({ result }: { result: GlobalSearchResult }) {
@@ -373,11 +428,34 @@ function ResultContent({ result }: { result: GlobalSearchResult }) {
     case "shared_shift":
       return (
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium text-foreground">ביחד עם {result.personName}</p>
+          <p className="truncate text-sm font-medium text-foreground">{sharedShiftTitle(result)}</p>
           <p className="truncate text-xs text-muted">
             {result.shifts
               .map((shift) => `${formatHebrewWeekdayAndDate(shift.date)} · ${periodLabel(shift.period)}`)
               .join("  ·  ")}
+          </p>
+        </div>
+      );
+    case "shared_shift_split_disambiguation":
+      // "A + B", never "A ו-B" -- the ambiguity being resolved here IS
+      // where the conjunction "ו" sits, so re-inserting a literal "ו"
+      // between the two texts would make two genuinely different splits
+      // (e.g. "רוני" + "ייס וגדעון" vs. "רוני וייס" + "גדעון") render as
+      // the exact same string.
+      return (
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-foreground">
+            {result.personAText} + {result.personBText}
+          </p>
+          <p className="truncate text-xs text-muted">בחרו את הפירוש הנכון</p>
+        </div>
+      );
+    case "shared_shift_disambiguation":
+      return (
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-foreground">{result.name}</p>
+          <p className="truncate text-xs text-muted">
+            {[result.roleLabel, result.personnelTypeLabel].filter(Boolean).join(" · ")}
           </p>
         </div>
       );

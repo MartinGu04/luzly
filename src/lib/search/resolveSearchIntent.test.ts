@@ -180,7 +180,12 @@ describe("resolveSearchIntent — person results", () => {
   });
 });
 
-describe("resolveSearchIntent — shared shift (מתי אני ו...)", () => {
+const SELF_REF = { kind: "self" } as const;
+function queryRef(text: string) {
+  return { kind: "query", text } as const;
+}
+
+describe("resolveSearchIntent — shared shift (self + person)", () => {
   it("16. finds the correct next common shift between me and the named person", () => {
     const withShared = model({
       shiftEvents: [
@@ -188,12 +193,16 @@ describe("resolveSearchIntent — shared shift (מתי אני ו...)", () => {
         shiftEvent({ personId: ME_ID, date: "2026-08-15", period: "day", temporalState: "upcoming" }),
       ],
     });
-    const resolution = resolveSearchIntent({ kind: "shared_shift", personQuery: "עילאי", raw: "" }, withShared);
+    const resolution = resolveSearchIntent(
+      { kind: "shared_shift", candidates: [{ personA: SELF_REF, personB: queryRef("עילאי") }], raw: "" },
+      withShared,
+    );
     expect(resolution.results).toHaveLength(1);
     const [result] = resolution.results;
     expect(result.kind).toBe("shared_shift");
     if (result.kind === "shared_shift") {
-      expect(result.personName).toBe("עילאי כהן");
+      expect(result.personA).toEqual({ personId: ME_ID, name: "דני בדיקה", isSelf: true });
+      expect(result.personB).toEqual({ personId: COLLEAGUE_ID, name: "עילאי כהן", isSelf: false });
       expect(result.shifts).toEqual([{ date: "2026-08-15", period: "day" }]);
       expect(result.href).toBe("/schedule?date=2026-08-15");
     }
@@ -207,7 +216,7 @@ describe("resolveSearchIntent — shared shift (מתי אני ו...)", () => {
       ],
     });
     const resolution = resolveSearchIntent(
-      { kind: "shared_shift", personQuery: "עילאי", raw: "" },
+      { kind: "shared_shift", candidates: [{ personA: SELF_REF, personB: queryRef("עילאי") }], raw: "" },
       differentPeriods,
     );
     expect(resolution.results).toEqual([]);
@@ -221,21 +230,31 @@ describe("resolveSearchIntent — shared shift (מתי אני ו...)", () => {
         shiftEvent({ personId: ME_ID, date: "2026-09-01", period: "night", temporalState: "upcoming" }),
       ],
     });
-    const resolution = resolveSearchIntent({ kind: "shared_shift", personQuery: "עילאי", raw: "" }, acrossBoundary);
+    const resolution = resolveSearchIntent(
+      { kind: "shared_shift", candidates: [{ personA: SELF_REF, personB: queryRef("עילאי") }], raw: "" },
+      acrossBoundary,
+    );
     expect(resolution.results[0].kind).toBe("shared_shift");
     if (resolution.results[0].kind === "shared_shift") {
       expect(resolution.results[0].shifts).toEqual([{ date: "2026-09-01", period: "night" }]);
     }
   });
 
-  it("19. an explicit shared-shift question with no answer gets a tasteful specific empty message", () => {
-    const resolution = resolveSearchIntent({ kind: "shared_shift", personQuery: "עילאי", raw: "" }, model());
+  it("19. an explicit shared-shift question with no answer gets a tasteful specific empty message naming the resolved person", () => {
+    const resolution = resolveSearchIntent(
+      { kind: "shared_shift", candidates: [{ personA: SELF_REF, personB: queryRef("עילאי") }], raw: "" },
+      model(),
+    );
     expect(resolution.results).toEqual([]);
     expect(resolution.emptyMessage).toContain("עילאי");
+    expect(resolution.emptyMessage).toMatch(/^אין לכם משמרת משותפת בתקופה הזמינה עם/);
   });
 
   it("an unmatched name gets a distinct 'no such person' message", () => {
-    const resolution = resolveSearchIntent({ kind: "shared_shift", personQuery: "זזזזז", raw: "" }, model());
+    const resolution = resolveSearchIntent(
+      { kind: "shared_shift", candidates: [{ personA: SELF_REF, personB: queryRef("זזזזז") }], raw: "" },
+      model(),
+    );
     expect(resolution.results).toEqual([]);
     expect(resolution.emptyMessage).toContain("זזזזז");
   });
@@ -253,7 +272,10 @@ describe("resolveSearchIntent — shared shift (מתי אני ו...)", () => {
         shiftEvent({ personId: ME_ID, date: "2026-08-25", period: "day", temporalState: "upcoming" }),
       ],
     });
-    const resolution = resolveSearchIntent({ kind: "shared_shift", personQuery: "עילאי", raw: "" }, manyShared);
+    const resolution = resolveSearchIntent(
+      { kind: "shared_shift", candidates: [{ personA: SELF_REF, personB: queryRef("עילאי") }], raw: "" },
+      manyShared,
+    );
     expect(resolution.results[0].kind).toBe("shared_shift");
     if (resolution.results[0].kind === "shared_shift") {
       expect(resolution.results[0].shifts.length).toBeLessThanOrEqual(3);
@@ -271,6 +293,259 @@ describe("resolveSearchIntent — shared shift (מתי אני ו...)", () => {
     const intent = parseSearchIntent("מתי אני ועילאי יחד");
     const resolution = resolveSearchIntent(intent, withShared);
     expect(resolution.results[0].kind).toBe("shared_shift");
+  });
+
+  it("the reversed phrasing 'מתי עילאי ואני ביחד' (person named first) resolves to the identical shared-shift result", () => {
+    const withShared = model({
+      shiftEvents: [
+        shiftEvent({ personId: COLLEAGUE_ID, date: "2026-08-15", period: "day", temporalState: "upcoming" }),
+        shiftEvent({ personId: ME_ID, date: "2026-08-15", period: "day", temporalState: "upcoming" }),
+      ],
+    });
+    const intent = parseSearchIntent("מתי עילאי ואני ביחד");
+    expect(intent).toEqual({
+      kind: "shared_shift",
+      candidates: [{ personA: queryRef("עילאי"), personB: SELF_REF }],
+      raw: "מתי עילאי ואני ביחד",
+    });
+    const resolution = resolveSearchIntent(intent, withShared);
+    expect(resolution.results[0].kind).toBe("shared_shift");
+    if (resolution.results[0].kind === "shared_shift") {
+      // Even though personA is the "עילאי" query and personB is self in the
+      // parsed intent, the resolved result always exposes isSelf on
+      // whichever side actually IS the searching user.
+      expect(resolution.results[0].personA.isSelf).toBe(false);
+      expect(resolution.results[0].personB.isSelf).toBe(true);
+    }
+  });
+});
+
+describe("resolveSearchIntent — shared shift (arbitrary person + person)", () => {
+  const OTHER_ID = "p_toviya";
+  function otherPerson(overrides: Partial<SearchRosterPerson> = {}): SearchRosterPerson {
+    return {
+      id: OTHER_ID,
+      name: "טוביה מור",
+      personnelType: "סדיר",
+      isSupervisor: false,
+      isTechnician: true,
+      ...overrides,
+    };
+  }
+
+  it("finds the shared shift between two roster people, neither of them the searching user", () => {
+    const withOther = model({
+      roster: [me(), rosterPerson(), otherPerson()],
+      shiftEvents: [
+        shiftEvent({ personId: COLLEAGUE_ID, date: "2026-08-15", period: "day", temporalState: "upcoming" }),
+        shiftEvent({ personId: OTHER_ID, date: "2026-08-15", period: "day", temporalState: "upcoming" }),
+      ],
+    });
+    const resolution = resolveSearchIntent(
+      { kind: "shared_shift", candidates: [{ personA: queryRef("טוביה"), personB: queryRef("עילאי") }], raw: "" },
+      withOther,
+    );
+    expect(resolution.results).toHaveLength(1);
+    const [result] = resolution.results;
+    expect(result.kind).toBe("shared_shift");
+    if (result.kind === "shared_shift") {
+      expect(result.personA).toEqual({ personId: OTHER_ID, name: "טוביה מור", isSelf: false });
+      expect(result.personB).toEqual({ personId: COLLEAGUE_ID, name: "עילאי כהן", isSelf: false });
+      expect(result.shifts).toEqual([{ date: "2026-08-15", period: "day" }]);
+    }
+  });
+
+  it("an arbitrary other+other pair NEVER gets a /schedule href, even with a shared shift found -- /schedule is only ever the VIEWER's own calendar", () => {
+    const withOther = model({
+      roster: [me(), rosterPerson(), otherPerson()],
+      shiftEvents: [
+        shiftEvent({ personId: COLLEAGUE_ID, date: "2026-08-15", period: "day", temporalState: "upcoming" }),
+        shiftEvent({ personId: OTHER_ID, date: "2026-08-15", period: "day", temporalState: "upcoming" }),
+      ],
+    });
+    const resolution = resolveSearchIntent(
+      { kind: "shared_shift", candidates: [{ personA: queryRef("טוביה"), personB: queryRef("עילאי") }], raw: "" },
+      withOther,
+    );
+    expect(resolution.results[0].kind).toBe("shared_shift");
+    if (resolution.results[0].kind === "shared_shift") {
+      expect(resolution.results[0].href).toBeNull();
+    }
+  });
+
+  it("a self+other pair keeps the /schedule?date= href, unaffected by the other+other rule", () => {
+    const withShared = model({
+      shiftEvents: [
+        shiftEvent({ personId: COLLEAGUE_ID, date: "2026-08-15", period: "day", temporalState: "upcoming" }),
+        shiftEvent({ personId: ME_ID, date: "2026-08-15", period: "day", temporalState: "upcoming" }),
+      ],
+    });
+    const resolution = resolveSearchIntent(
+      { kind: "shared_shift", candidates: [{ personA: SELF_REF, personB: queryRef("עילאי") }], raw: "" },
+      withShared,
+    );
+    expect(resolution.results[0].kind).toBe("shared_shift");
+    if (resolution.results[0].kind === "shared_shift") {
+      expect(resolution.results[0].href).toBe("/schedule?date=2026-08-15");
+    }
+  });
+
+  it("no-shared-shift copy for an other+other pair names BOTH resolved people, and never claims 'never'", () => {
+    const withOther = model({ roster: [me(), rosterPerson(), otherPerson()] });
+    const resolution = resolveSearchIntent(
+      { kind: "shared_shift", candidates: [{ personA: queryRef("טוביה"), personB: queryRef("עילאי") }], raw: "" },
+      withOther,
+    );
+    expect(resolution.results).toEqual([]);
+    expect(resolution.emptyMessage).toBe("לא נמצאה משמרת משותפת בתקופה הזמינה עבור טוביה מור ועילאי כהן.");
+  });
+
+  it("no-shared-shift copy for a self+other pair matches the required exact wording", () => {
+    const resolution = resolveSearchIntent(
+      { kind: "shared_shift", candidates: [{ personA: SELF_REF, personB: queryRef("עילאי") }], raw: "" },
+      model(),
+    );
+    expect(resolution.emptyMessage).toBe("אין לכם משמרת משותפת בתקופה הזמינה עם עילאי כהן.");
+  });
+
+  it("a self-reference resolving on the 'other' side (query text matching the searching user's own name) fails gracefully instead of a meaningless self-vs-self result", () => {
+    const resolution = resolveSearchIntent(
+      { kind: "shared_shift", candidates: [{ personA: SELF_REF, personB: queryRef("דני") }], raw: "" },
+      model(),
+    );
+    expect(resolution.results).toEqual([]);
+    expect(resolution.emptyMessage).not.toBeNull();
+    expect(resolution.emptyMessage).not.toContain("undefined");
+  });
+});
+
+describe("resolveSearchIntent — shared shift ambiguous-name disambiguation", () => {
+  const ILAY2_ID = "p_ilay2";
+  function ilay2(overrides: Partial<SearchRosterPerson> = {}): SearchRosterPerson {
+    return {
+      id: ILAY2_ID,
+      name: "עילי מזרחי",
+      personnelType: "מילואים",
+      isSupervisor: false,
+      isTechnician: true,
+      ...overrides,
+    };
+  }
+
+  function twoMatchesModel(overrides: Partial<SearchReadModel> = {}): SearchReadModel {
+    return model({ roster: [me(), rosterPerson(), ilay2()], ...overrides });
+  }
+
+  it("an ambiguous personB query never silently picks a candidate -- it surfaces every match as a disambiguation choice", () => {
+    const resolution = resolveSearchIntent(
+      { kind: "shared_shift", candidates: [{ personA: SELF_REF, personB: queryRef("עיל") }], raw: "" },
+      twoMatchesModel(),
+    );
+    expect(resolution.results).toHaveLength(2);
+    expect(resolution.results.every((result) => result.kind === "shared_shift_disambiguation")).toBe(true);
+    const names = resolution.results.map((result) =>
+      result.kind === "shared_shift_disambiguation" ? result.name : null,
+    );
+    expect(names.sort()).toEqual(["עילאי כהן", "עילי מזרחי"].sort());
+  });
+
+  it("disambiguation candidates are surfaced regardless of whether they happen to share a shift with anyone -- the schedule is NEVER used to disambiguate", () => {
+    // Only עילאי (not עילי) has a shared shift with me -- the old
+    // implementation silently filtered ambiguous candidates down to only
+    // those with a shared shift, which is exactly the bug this replaces.
+    const onlyOneHasSharedShift = twoMatchesModel({
+      shiftEvents: [
+        shiftEvent({ personId: COLLEAGUE_ID, date: "2026-08-15", period: "day", temporalState: "upcoming" }),
+        shiftEvent({ personId: ME_ID, date: "2026-08-15", period: "day", temporalState: "upcoming" }),
+      ],
+    });
+    const resolution = resolveSearchIntent(
+      { kind: "shared_shift", candidates: [{ personA: SELF_REF, personB: queryRef("עיל") }], raw: "" },
+      onlyOneHasSharedShift,
+    );
+    expect(resolution.results).toHaveLength(2);
+    expect(resolution.results.every((result) => result.kind === "shared_shift_disambiguation")).toBe(true);
+  });
+
+  it("each disambiguation candidate carries role and personnel-group labels", () => {
+    const resolution = resolveSearchIntent(
+      { kind: "shared_shift", candidates: [{ personA: SELF_REF, personB: queryRef("עיל") }], raw: "" },
+      twoMatchesModel(),
+    );
+    const ilay = resolution.results.find(
+      (result) => result.kind === "shared_shift_disambiguation" && result.personId === COLLEAGUE_ID,
+    );
+    expect(ilay).toBeDefined();
+    if (ilay?.kind === "shared_shift_disambiguation") {
+      expect(ilay.roleLabel).toBe('אחמ"ש');
+      expect(ilay.personnelTypeLabel).toBe("קבע");
+    }
+  });
+
+  it("disambiguation results carry no href -- selecting one refines the query in place, never navigates", () => {
+    const resolution = resolveSearchIntent(
+      { kind: "shared_shift", candidates: [{ personA: SELF_REF, personB: queryRef("עיל") }], raw: "" },
+      twoMatchesModel(),
+    );
+    expect(resolution.results.every((result) => result.href === null)).toBe(true);
+  });
+
+  it("supplying an override for the ambiguous side resolves straight to the final shared-shift result", () => {
+    const withShared = twoMatchesModel({
+      shiftEvents: [
+        shiftEvent({ personId: COLLEAGUE_ID, date: "2026-08-15", period: "day", temporalState: "upcoming" }),
+        shiftEvent({ personId: ME_ID, date: "2026-08-15", period: "day", temporalState: "upcoming" }),
+      ],
+    });
+    const resolution = resolveSearchIntent(
+      { kind: "shared_shift", candidates: [{ personA: SELF_REF, personB: queryRef("עיל") }], raw: "" },
+      withShared,
+      { personB: COLLEAGUE_ID },
+    );
+    expect(resolution.results).toHaveLength(1);
+    expect(resolution.results[0].kind).toBe("shared_shift");
+  });
+
+  it("when BOTH sides are ambiguous, they resolve one at a time, deterministically A before B", () => {
+    const bothAmbiguousModel = model({
+      roster: [me(), rosterPerson(), ilay2(), { id: "p_dan1", name: "דן לוי", personnelType: "קבע", isSupervisor: false, isTechnician: true }, { id: "p_dan2", name: "דן כהן", personnelType: "חובה", isSupervisor: false, isTechnician: true }],
+    });
+
+    // A ("דן") is ambiguous -- surfaced first, B's ambiguity not yet visible.
+    const firstPass = resolveSearchIntent(
+      { kind: "shared_shift", candidates: [{ personA: queryRef("דן"), personB: queryRef("עיל") }], raw: "" },
+      bothAmbiguousModel,
+    );
+    expect(firstPass.results).toHaveLength(2);
+    expect(firstPass.results.every((r) => r.kind === "shared_shift_disambiguation" && r.side === "A")).toBe(true);
+
+    // Once A is resolved via override, B's ambiguity becomes visible.
+    const secondPass = resolveSearchIntent(
+      { kind: "shared_shift", candidates: [{ personA: queryRef("דן"), personB: queryRef("עיל") }], raw: "" },
+      bothAmbiguousModel,
+      { personA: "p_dan1" },
+    );
+    expect(secondPass.results).toHaveLength(2);
+    expect(secondPass.results.every((r) => r.kind === "shared_shift_disambiguation" && r.side === "B")).toBe(true);
+
+    // Once both are resolved via overrides, resolution proceeds to a final
+    // answer (no shift data in this fixture, so a specific empty message --
+    // but crucially, no more disambiguation).
+    const thirdPass = resolveSearchIntent(
+      { kind: "shared_shift", candidates: [{ personA: queryRef("דן"), personB: queryRef("עיל") }], raw: "" },
+      bothAmbiguousModel,
+      { personA: "p_dan1", personB: COLLEAGUE_ID },
+    );
+    expect(thirdPass.results.every((r) => r.kind !== "shared_shift_disambiguation")).toBe(true);
+    expect(thirdPass.emptyMessage).not.toBeNull();
+  });
+
+  it("an exact/unique full name proceeds directly without any disambiguation, even when a partial match would have been ambiguous", () => {
+    const resolution = resolveSearchIntent(
+      { kind: "shared_shift", candidates: [{ personA: SELF_REF, personB: queryRef("עילאי כהן") }], raw: "" },
+      twoMatchesModel(),
+    );
+    expect(resolution.results.every((result) => result.kind !== "shared_shift_disambiguation")).toBe(true);
   });
 });
 
@@ -404,6 +679,195 @@ describe("resolveSearchIntent — date and shift navigation", () => {
       expect(result.period).toBe("night");
       expect(result.people.map((person) => person.name)).toEqual(["עילאי כהן"]);
       expect(result.href).toBe("/schedule?date=2026-08-19");
+    }
+  });
+});
+
+describe("resolveSearchIntent — shared shift CONJ split resolution (multi-word names containing ו)", () => {
+  const RONI_WEISS_ID = "p_roni_weiss";
+  const GIDON_ID = "p_gidon";
+  const TUVIA_ID = "p_tuvia";
+  const GIDON_WEISS_ID = "p_gidon_weiss";
+
+  function roniWeissModel(overrides: Partial<SearchReadModel> = {}): SearchReadModel {
+    return model({
+      roster: [
+        me(),
+        { id: RONI_WEISS_ID, name: "רוני וייס", personnelType: "סדיר", isSupervisor: false, isTechnician: true },
+        { id: GIDON_ID, name: "גדעון", personnelType: "קבע", isSupervisor: true, isTechnician: false },
+      ],
+      ...overrides,
+    });
+  }
+
+  function tuviaModel(overrides: Partial<SearchReadModel> = {}): SearchReadModel {
+    return model({
+      roster: [
+        me(),
+        { id: TUVIA_ID, name: "טוביה", personnelType: "חובה", isSupervisor: false, isTechnician: true },
+        { id: GIDON_WEISS_ID, name: "גדעון וייס", personnelType: "קבע", isSupervisor: true, isTechnician: false },
+      ],
+      ...overrides,
+    });
+  }
+
+  it("1. 'מתי רוני וייס וגדעון ביחד' resolves the correct pair -- the FIRST ו is part of the surname 'וייס', not the conjunction", () => {
+    const intent = parseSearchIntent("מתי רוני וייס וגדעון ביחד");
+    const resolution = resolveSearchIntent(
+      intent,
+      roniWeissModel({
+        shiftEvents: [
+          shiftEvent({ personId: RONI_WEISS_ID, date: "2026-08-15", period: "day", temporalState: "upcoming" }),
+          shiftEvent({ personId: GIDON_ID, date: "2026-08-15", period: "day", temporalState: "upcoming" }),
+        ],
+      }),
+    );
+    expect(resolution.results).toHaveLength(1);
+    const [result] = resolution.results;
+    expect(result.kind).toBe("shared_shift");
+    if (result.kind === "shared_shift") {
+      expect(result.personA).toMatchObject({ personId: RONI_WEISS_ID, name: "רוני וייס" });
+      expect(result.personB).toMatchObject({ personId: GIDON_ID, name: "גדעון" });
+    }
+  });
+
+  it("2. 'מתי טוביה וגדעון וייס ביחד' resolves the correct pair -- the SECOND ו is part of the surname 'וייס' this time", () => {
+    const intent = parseSearchIntent("מתי טוביה וגדעון וייס ביחד");
+    const resolution = resolveSearchIntent(
+      intent,
+      tuviaModel({
+        shiftEvents: [
+          shiftEvent({ personId: TUVIA_ID, date: "2026-08-15", period: "day", temporalState: "upcoming" }),
+          shiftEvent({ personId: GIDON_WEISS_ID, date: "2026-08-15", period: "day", temporalState: "upcoming" }),
+        ],
+      }),
+    );
+    expect(resolution.results).toHaveLength(1);
+    const [result] = resolution.results;
+    expect(result.kind).toBe("shared_shift");
+    if (result.kind === "shared_shift") {
+      expect(result.personA).toMatchObject({ personId: TUVIA_ID, name: "טוביה" });
+      expect(result.personB).toMatchObject({ personId: GIDON_WEISS_ID, name: "גדעון וייס" });
+    }
+  });
+
+  it("3. when MORE THAN ONE structural split resolves against the roster, it is never silently guessed -- a typed split choice is surfaced instead", () => {
+    // A deliberately confusable synthetic roster where BOTH ways of
+    // splitting "רוני וייס וגדעון" happen to match real people: (רוני, ייס
+    // וגדעון) via prefix/exact matches, AND (רוני וייס, גדעון) via exact
+    // matches.
+    const bothSplitsValidModel = model({
+      roster: [
+        me(),
+        { id: "p_roni_cohen", name: "רוני כהן", personnelType: "חובה", isSupervisor: false, isTechnician: true },
+        { id: "p_yes_gidon", name: "ייס וגדעון", personnelType: "סדיר", isSupervisor: false, isTechnician: true },
+        { id: RONI_WEISS_ID, name: "רוני וייס", personnelType: "סדיר", isSupervisor: false, isTechnician: true },
+        { id: GIDON_ID, name: "גדעון", personnelType: "קבע", isSupervisor: true, isTechnician: false },
+      ],
+    });
+    const intent = parseSearchIntent("מתי רוני וייס וגדעון ביחד");
+    const resolution = resolveSearchIntent(intent, bothSplitsValidModel);
+
+    expect(resolution.results.length).toBeGreaterThan(1);
+    expect(resolution.results.every((result) => result.kind === "shared_shift_split_disambiguation")).toBe(true);
+    const readable = resolution.results.map((result) =>
+      result.kind === "shared_shift_split_disambiguation" ? `${result.personAText}|${result.personBText}` : null,
+    );
+    expect(readable.sort()).toEqual(["רוני וייס|גדעון", "רוני|ייס וגדעון"].sort());
+  });
+
+  it("4. the split choice is proven ONLY from the roster -- shift/schedule data never participates, even when only one split has an actual shared shift", () => {
+    const bothSplitsValidModel = model({
+      roster: [
+        me(),
+        { id: "p_roni_cohen", name: "רוני כהן", personnelType: "חובה", isSupervisor: false, isTechnician: true },
+        { id: "p_yes_gidon", name: "ייס וגדעון", personnelType: "סדיר", isSupervisor: false, isTechnician: true },
+        { id: RONI_WEISS_ID, name: "רוני וייס", personnelType: "סדיר", isSupervisor: false, isTechnician: true },
+        { id: GIDON_ID, name: "גדעון", personnelType: "קבע", isSupervisor: true, isTechnician: false },
+      ],
+      // Only ("רוני וייס", "גדעון") actually shares a shift -- ("רוני כהן",
+      // "ייס וגדעון") never appears together anywhere. If shift data leaked
+      // into split selection, this would silently prefer the split WITH a
+      // shared shift; it must not.
+      shiftEvents: [
+        shiftEvent({ personId: RONI_WEISS_ID, date: "2026-08-15", period: "day", temporalState: "upcoming" }),
+        shiftEvent({ personId: GIDON_ID, date: "2026-08-15", period: "day", temporalState: "upcoming" }),
+      ],
+    });
+    const intent = parseSearchIntent("מתי רוני וייס וגדעון ביחד");
+    const resolution = resolveSearchIntent(intent, bothSplitsValidModel);
+
+    // Both splits are still surfaced, identically to the no-shift-data
+    // case above -- the presence of a real shared shift for one of them
+    // changes nothing about which splits are considered valid.
+    expect(resolution.results.length).toBeGreaterThan(1);
+    expect(resolution.results.every((result) => result.kind === "shared_shift_split_disambiguation")).toBe(true);
+  });
+
+  it("selecting a split via override resolves straight through to the final answer, reusing the ordinary per-side resolution machinery", () => {
+    // Deliberately the same two-person roster as tests 1/2 (no incidental
+    // substring collisions like "ייס וגדעון" containing "גדעון") so this
+    // test isolates the split-override mechanism from ordinary per-NAME
+    // ambiguity, which is covered separately elsewhere.
+    const intent = parseSearchIntent("מתי רוני וייס וגדעון ביחד");
+    const resolution = resolveSearchIntent(
+      intent,
+      roniWeissModel({
+        shiftEvents: [
+          shiftEvent({ personId: RONI_WEISS_ID, date: "2026-08-15", period: "day", temporalState: "upcoming" }),
+          shiftEvent({ personId: GIDON_ID, date: "2026-08-15", period: "day", temporalState: "upcoming" }),
+        ],
+      }),
+      { splitChoice: { personAText: "רוני וייס", personBText: "גדעון" } },
+    );
+    expect(resolution.results).toHaveLength(1);
+    const [result] = resolution.results;
+    expect(result.kind).toBe("shared_shift");
+    if (result.kind === "shared_shift") {
+      expect(result.personA.personId).toBe(RONI_WEISS_ID);
+      expect(result.personB.personId).toBe(GIDON_ID);
+    }
+  });
+
+  it("5. the existing 'מתי מארק מאירסון וגדעון ביחד' regression (single valid boundary) still works unchanged", () => {
+    const markModel = model({
+      roster: [
+        me(),
+        { id: "p_mark", name: "מארק מאירסון", personnelType: "סדיר", isSupervisor: false, isTechnician: true },
+        { id: GIDON_ID, name: "גדעון", personnelType: "קבע", isSupervisor: true, isTechnician: false },
+      ],
+      shiftEvents: [
+        shiftEvent({ personId: "p_mark", date: "2026-08-15", period: "day", temporalState: "upcoming" }),
+        shiftEvent({ personId: GIDON_ID, date: "2026-08-15", period: "day", temporalState: "upcoming" }),
+      ],
+    });
+    const intent = parseSearchIntent("מתי מארק מאירסון וגדעון ביחד");
+    expect(intent.kind).toBe("shared_shift");
+    if (intent.kind === "shared_shift") expect(intent.candidates).toHaveLength(1);
+    const resolution = resolveSearchIntent(intent, markModel);
+    expect(resolution.results).toHaveLength(1);
+    expect(resolution.results[0].kind).toBe("shared_shift");
+  });
+
+  it("6. self+person forms are unaffected by the split machinery -- a multi-word 'other' name resolves as one whole query, never split", () => {
+    const withShared = roniWeissModel({
+      shiftEvents: [
+        shiftEvent({ personId: RONI_WEISS_ID, date: "2026-08-15", period: "day", temporalState: "upcoming" }),
+        shiftEvent({ personId: ME_ID, date: "2026-08-15", period: "day", temporalState: "upcoming" }),
+      ],
+    });
+    const intent = parseSearchIntent("מתי אני ורוני וייס יחד");
+    expect(intent.kind).toBe("shared_shift");
+    if (intent.kind === "shared_shift") {
+      expect(intent.candidates).toEqual([{ personA: SELF_REF, personB: queryRef("רוני וייס") }]);
+    }
+    const resolution = resolveSearchIntent(intent, withShared);
+    expect(resolution.results).toHaveLength(1);
+    const [result] = resolution.results;
+    expect(result.kind).toBe("shared_shift");
+    if (result.kind === "shared_shift") {
+      expect(result.personA.isSelf).toBe(true);
+      expect(result.personB).toMatchObject({ personId: RONI_WEISS_ID, name: "רוני וייס" });
     }
   });
 });

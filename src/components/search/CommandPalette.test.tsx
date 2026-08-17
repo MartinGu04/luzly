@@ -336,7 +336,7 @@ describe("Command palette — keyboard focus trap", () => {
     renderPalette();
     fireEvent.click(screen.getByRole("button", { name: "חיפוש" }));
 
-    const exampleButtons = screen.getAllByRole("button", { name: /^(עילאי|מי איתי בשבת|19\.8|מתי אני ועילאי יחד)$/ });
+    const exampleButtons = screen.getAllByRole("button", { name: /^(עילאי|מי איתי בשבת|19\.8|מתי יש לי משמרת עם איתי)$/ });
     const lastExample = exampleButtons[exampleButtons.length - 1];
     lastExample.focus();
     expect(document.activeElement).toBe(lastExample);
@@ -351,7 +351,7 @@ describe("Command palette — keyboard focus trap", () => {
     fireEvent.click(screen.getByRole("button", { name: "חיפוש" }));
     expect(document.activeElement).toBe(searchInput());
 
-    const exampleButtons = screen.getAllByRole("button", { name: /^(עילאי|מי איתי בשבת|19\.8|מתי אני ועילאי יחד)$/ });
+    const exampleButtons = screen.getAllByRole("button", { name: /^(עילאי|מי איתי בשבת|19\.8|מתי יש לי משמרת עם איתי)$/ });
     const lastExample = exampleButtons[exampleButtons.length - 1];
 
     fireEvent.keyDown(searchInput(), { key: "Tab", shiftKey: true });
@@ -400,5 +400,187 @@ describe("Command palette — keyboard focus trap", () => {
     fireEvent.keyDown(searchInput(), { key: "Enter" });
 
     expect(push).toHaveBeenCalledWith("/schedule?date=2026-08-19");
+  });
+});
+
+const AMBIGUOUS_ID = "p_ilay2";
+
+function ambiguousRosterModel(overrides: Partial<SearchReadModel> = {}): SearchReadModel {
+  return fixtureModel({
+    roster: [
+      ...fixtureModel().roster,
+      { id: AMBIGUOUS_ID, name: "עילי מזרחי", personnelType: "מילואים", isSupervisor: false, isTechnician: true },
+    ],
+    ...overrides,
+  });
+}
+
+describe("Command palette — flexible shared-shift phrasing end-to-end", () => {
+  it("a natural 'מתי יש לי משמרת עם עילאי' phrasing resolves and renders the self-aware 'ביחד עם' copy", () => {
+    renderPalette(
+      fixtureModel({
+        shiftEvents: [
+          { personId: COLLEAGUE_ID, date: "2026-08-15", period: "day", role: "supervisor", certainty: "confirmed", shadow: false, temporalState: "upcoming" },
+          { personId: ME_ID, date: "2026-08-15", period: "day", role: "technician", certainty: "confirmed", shadow: false, temporalState: "upcoming" },
+        ],
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "חיפוש" }));
+    fireEvent.change(searchInput(), { target: { value: "מתי יש לי משמרת עם עילאי" } });
+
+    expect(screen.getByText(/^ביחד עם עילאי כהן/)).toBeInTheDocument();
+  });
+
+  it("an arbitrary other+other pair renders both names, has no href, and Enter neither navigates nor closes the palette", () => {
+    renderPalette(
+      ambiguousRosterModel({
+        shiftEvents: [
+          { personId: COLLEAGUE_ID, date: "2026-08-15", period: "day", role: "supervisor", certainty: "confirmed", shadow: false, temporalState: "upcoming" },
+          { personId: "p_roni", date: "2026-08-15", period: "day", role: "technician", certainty: "confirmed", shadow: false, temporalState: "upcoming" },
+        ],
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "חיפוש" }));
+    fireEvent.change(searchInput(), { target: { value: "מתי עילאי ורוני ביחד" } });
+
+    expect(screen.getByText(/עילאי כהן ורוני שדה/)).toBeInTheDocument();
+
+    fireEvent.keyDown(searchInput(), { key: "Enter" });
+    expect(push).not.toHaveBeenCalled();
+    expect(dialog()).toBeInTheDocument();
+  });
+});
+
+describe("Command palette — shared-shift ambiguous-name disambiguation", () => {
+  it("an ambiguous person reference shows every matching candidate, never silently picking one", () => {
+    renderPalette(ambiguousRosterModel());
+    fireEvent.click(screen.getByRole("button", { name: "חיפוש" }));
+    fireEvent.change(searchInput(), { target: { value: "מתי אני ועיל ביחד" } });
+
+    const options = screen.getAllByRole("option");
+    expect(options).toHaveLength(2);
+    expect(screen.getByText("עילאי כהן")).toBeInTheDocument();
+    expect(screen.getByText("עילי מזרחי")).toBeInTheDocument();
+  });
+
+  it("selecting a disambiguation candidate via Enter refines the query in place -- it neither closes the palette nor navigates", () => {
+    renderPalette(
+      ambiguousRosterModel({
+        shiftEvents: [
+          { personId: COLLEAGUE_ID, date: "2026-08-15", period: "day", role: "supervisor", certainty: "confirmed", shadow: false, temporalState: "upcoming" },
+          { personId: ME_ID, date: "2026-08-15", period: "day", role: "technician", certainty: "confirmed", shadow: false, temporalState: "upcoming" },
+        ],
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "חיפוש" }));
+    fireEvent.change(searchInput(), { target: { value: "מתי אני ועיל ביחד" } });
+    expect(screen.getAllByRole("option")).toHaveLength(2);
+
+    fireEvent.keyDown(searchInput(), { key: "Enter" });
+
+    expect(push).not.toHaveBeenCalled();
+    expect(dialog()).toBeInTheDocument();
+    // Refined straight to the final shared-shift answer for עילאי כהן (the
+    // first candidate, highlighted by default).
+    expect(screen.getByText(/^ביחד עם עילאי כהן/)).toBeInTheDocument();
+  });
+
+  it("selecting a disambiguation candidate via mouse click also refines in place without navigating", () => {
+    renderPalette(
+      ambiguousRosterModel({
+        shiftEvents: [
+          { personId: AMBIGUOUS_ID, date: "2026-08-20", period: "night", role: "technician", certainty: "confirmed", shadow: false, temporalState: "upcoming" },
+          { personId: ME_ID, date: "2026-08-20", period: "night", role: "technician", certainty: "confirmed", shadow: false, temporalState: "upcoming" },
+        ],
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "חיפוש" }));
+    fireEvent.change(searchInput(), { target: { value: "מתי אני ועיל ביחד" } });
+
+    const ilayMizrahiOption = screen.getByText("עילי מזרחי").closest('[role="option"]');
+    expect(ilayMizrahiOption).not.toBeNull();
+    fireEvent.click(ilayMizrahiOption as Element);
+
+    expect(push).not.toHaveBeenCalled();
+    expect(dialog()).toBeInTheDocument();
+    expect(screen.getByText(/^ביחד עם עילי מזרחי/)).toBeInTheDocument();
+  });
+
+  it("a fresh keystroke after resolving an ambiguity clears the stale choice instead of leaking it into the new query", () => {
+    renderPalette(ambiguousRosterModel());
+    fireEvent.click(screen.getByRole("button", { name: "חיפוש" }));
+    fireEvent.change(searchInput(), { target: { value: "מתי אני ועיל ביחד" } });
+    fireEvent.keyDown(searchInput(), { key: "Enter" }); // resolves the "עיל" ambiguity in place
+
+    // A brand-new query about a different (unambiguous) person must not be
+    // affected by the previously-picked override.
+    fireEvent.change(searchInput(), { target: { value: "רוני" } });
+    expect(screen.getByText("רוני שדה")).toBeInTheDocument();
+  });
+});
+
+describe("Command palette — shared-shift sentence-split disambiguation (multi-word names containing ו)", () => {
+  const RONI_WEISS_ID = "p_roni_weiss";
+  const GIDON_ID = "p_gidon";
+
+  function roniWeissModel(overrides: Partial<SearchReadModel> = {}): SearchReadModel {
+    return fixtureModel({
+      roster: [
+        ...fixtureModel().roster,
+        { id: RONI_WEISS_ID, name: "רוני וייס", personnelType: "סדיר", isSupervisor: false, isTechnician: true },
+        { id: GIDON_ID, name: "גדעון", personnelType: "קבע", isSupervisor: true, isTechnician: false },
+      ],
+      shiftEvents: [
+        { personId: RONI_WEISS_ID, date: "2026-08-15", period: "day", role: "technician", certainty: "confirmed", shadow: false, temporalState: "upcoming" },
+        { personId: GIDON_ID, date: "2026-08-15", period: "day", role: "supervisor", certainty: "confirmed", shadow: false, temporalState: "upcoming" },
+      ],
+      ...overrides,
+    });
+  }
+
+  it("a multi-word name containing an internal ו resolves the correct pair directly, with no split ambiguity ever shown", () => {
+    renderPalette(roniWeissModel());
+    fireEvent.click(screen.getByRole("button", { name: "חיפוש" }));
+    fireEvent.change(searchInput(), { target: { value: "מתי רוני וייס וגדעון ביחד" } });
+
+    expect(screen.getByText("רוני וייס וגדעון")).toBeInTheDocument();
+  });
+
+  it("a genuinely split-ambiguous query surfaces typed split choices (never the same text twice), and selecting one refines in place without navigating", () => {
+    // A deliberately confusable roster where both ways of splitting "רוני
+    // וייס וגדעון" match real people.
+    const bothSplitsValid = roniWeissModel({
+      roster: [
+        ...fixtureModel().roster,
+        { id: RONI_WEISS_ID, name: "רוני וייס", personnelType: "סדיר", isSupervisor: false, isTechnician: true },
+        { id: GIDON_ID, name: "גדעון", personnelType: "קבע", isSupervisor: true, isTechnician: false },
+        { id: "p_roni_cohen", name: "רוני כהן", personnelType: "חובה", isSupervisor: false, isTechnician: true },
+        { id: "p_yes_gidon", name: "ייס וגדעון", personnelType: "סדיר", isSupervisor: false, isTechnician: true },
+      ],
+    });
+    renderPalette(bothSplitsValid);
+    fireEvent.click(screen.getByRole("button", { name: "חיפוש" }));
+    fireEvent.change(searchInput(), { target: { value: "מתי רוני וייס וגדעון ביחד" } });
+
+    const options = screen.getAllByRole("option");
+    expect(options).toHaveLength(2);
+    // Rendered with a literal "+" separator, never "A ו-B" -- otherwise
+    // both splits ("רוני" + "ייס וגדעון" and "רוני וייס" + "גדעון") would
+    // collapse to the identical displayed string "רוני וייס וגדעון".
+    expect(screen.getByText("רוני + ייס וגדעון")).toBeInTheDocument();
+    expect(screen.getByText("רוני וייס + גדעון")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("רוני וייס + גדעון"));
+
+    // Clicking never navigates or closes the palette merely to resolve
+    // which split was meant. This particular roster also makes "גדעון"
+    // ambiguous against "ייס וגדעון" as a NAME once the split is chosen, so
+    // the next screen is a person-level disambiguation, not yet a final
+    // answer -- proving the split choice really did stick and progress
+    // happened, without over-asserting exactly what renders next.
+    expect(push).not.toHaveBeenCalled();
+    expect(dialog()).toBeInTheDocument();
+    expect(screen.queryByText("רוני + ייס וגדעון")).toBeNull();
+    expect(screen.queryByText("רוני וייס + גדעון")).toBeNull();
   });
 });

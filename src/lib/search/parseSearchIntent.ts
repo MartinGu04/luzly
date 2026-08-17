@@ -1,5 +1,6 @@
 import { parseHebrewWeekdayName } from "@/lib/presentation/hebrewDate";
 import { normalizeSearchQuery } from "./normalizeSearchQuery";
+import { parseSharedShiftPhrase } from "./parseSharedShiftPhrase";
 import type { SearchDateSpec, SearchIntent, SearchShiftPeriod } from "./types";
 
 /** "19.8" / "19/8" / "19-8" -- day then month, no year (Israeli convention). Actual range validation happens at resolution (`resolveNearestCalendarDate`), never here. */
@@ -7,12 +8,6 @@ const EXPLICIT_DATE_RE = /^(\d{1,2})[./-](\d{1,2})$/;
 
 const PERIOD_WORDS: Record<string, SearchShiftPeriod> = { "יום": "day", "לילה": "night" };
 const FILLER_WORDS = new Set(["משמרת"]);
-
-const SHARED_SHIFT_PATTERNS: RegExp[] = [
-  /^מתי\s+אני\s+ו(.+?)\s+יחד$/,
-  /^מתי\s+אנחנו\s+יחד\s+(.+)$/,
-  /^מתי\s+אני\s+עם\s+(.+)$/,
-];
 
 // No `\b` word-boundary here -- JS regex `\b` is defined against `\w`
 // (ASCII letters/digits/underscore only), so it never behaves correctly
@@ -113,12 +108,9 @@ export function parseSearchIntent(raw: string): SearchIntent {
     return { kind: "date", date: wholeExplicitDate, raw: normalized };
   }
 
-  for (const pattern of SHARED_SHIFT_PATTERNS) {
-    const match = normalized.match(pattern);
-    const personQuery = match?.[1]?.trim();
-    if (personQuery) {
-      return { kind: "shared_shift", personQuery, raw: normalized };
-    }
+  const sharedShiftCandidates = parseSharedShiftPhrase(normalized);
+  if (sharedShiftCandidates) {
+    return { kind: "shared_shift", candidates: sharedShiftCandidates, raw: normalized };
   }
 
   const withMeMatch = normalized.match(WITH_ME_RE);
