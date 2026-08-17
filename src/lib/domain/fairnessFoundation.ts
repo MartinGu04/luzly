@@ -19,6 +19,19 @@ export const FAIRNESS_MODEL_VERSION = 1;
 
 export type FairnessPeriodStatus = "current" | "closed";
 
+// ---------------------------------------------------------------------------
+// Shared status vocabulary -- both Fairness modes report a person's standing
+// with the SAME three words, even though each mode computes it differently
+// (PR #3): Shift Fairness (`fairnessShiftEngine.ts`) applies a
+// ±0.5-shift tolerance band around an opportunity-based target; Duty
+// Fairness (`fairnessAnalysis.ts`) is an EXACT currentScore-vs-comparisonTarget
+// comparison with no tolerance at all. Sharing the vocabulary (not the
+// computation) is the point -- see this module's own docs and PR #3's README
+// entry for why the two engines stay separate.
+// ---------------------------------------------------------------------------
+
+export type FairnessStatus = "below" | "balanced" | "above";
+
 /**
  * A period is "closed" once its own end date is strictly before `now.date`
  * -- otherwise (including the end date itself, still in progress) it's
@@ -116,6 +129,26 @@ export function resolveFairnessPeriodStatus(periodEndDate: string, now: LocalNow
  *   `actualShifts` stays visible, but `null` otherwise -- one confirmed
  *   historical shift is real evidence of THAT shift, never proof of a
  *   whole period's worth of opportunities.
+ * - `duty_identity_unresolved` -- PR #3's Duty Fairness read model
+ *   (`buildDutyFairnessReadModel.ts`): the Fairness table's own row name
+ *   (`FairnessPersonRow.sourceName`) did not resolve to exactly one
+ *   personnel record (`resolvedPersonId === null` -- zero or duplicate
+ *   matches, see `parseFairnessTable`'s own resolution rule). The row
+ *   itself is still real, valid source data and stays fully visible
+ *   (score/target/status all still compute normally) -- only the link to a
+ *   stable person id is missing.
+ * - `duty_target_unavailable` -- PR #3's Duty Fairness read model: this
+ *   row's `allocationLabel` DOES resolve to a deterministic target role
+ *   (`resolveFairnessAllocationRole` -- 'אחמ"ש'/"טכנאי"), but the period's
+ *   own X/2X target note could not be found or parsed
+ *   (`resolveComparisonTarget` returned `null` despite a known role), so
+ *   `comparisonTarget`/`gapToTarget`/`normalizedLoad`/`status` are all
+ *   unavailable for this row even though it is clearly a target-bearing
+ *   role. Deliberately NOT raised for a row whose allocation label has no
+ *   deterministic role at all (e.g. "הסמכה", "ר\"צ", an unrecognized
+ *   label) -- a non-target-bearing row having `comparisonTarget: null` is
+ *   the normal, complete, expected outcome, not a gap (never noise on
+ *   every row).
  */
 export type FairnessDataCompletenessReason =
   | "participation_assumed_full_period"
@@ -126,7 +159,9 @@ export type FairnessDataCompletenessReason =
   | "fairness_group_unassigned"
   | "shift_target_unmodelable_evidence_only"
   | "shift_target_unmodelable_historical"
-  | "shift_target_no_group_opportunities";
+  | "shift_target_no_group_opportunities"
+  | "duty_identity_unresolved"
+  | "duty_target_unavailable";
 
 export interface FairnessDataCompleteness {
   status: "complete" | "partial";

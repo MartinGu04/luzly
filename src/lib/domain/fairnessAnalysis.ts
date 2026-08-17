@@ -1,3 +1,4 @@
+import type { FairnessStatus } from "./fairnessFoundation";
 import type { FairnessPersonRow, FairnessTargets } from "./fairnessTable";
 
 export type FairnessAllocationRole = "supervisor" | "technician";
@@ -54,6 +55,31 @@ export function computeNormalizedLoad(currentScore: number | null, comparisonTar
   if (currentScore === null || comparisonTarget === null) return null;
   if (comparisonTarget <= 0) return null;
   return currentScore / comparisonTarget;
+}
+
+/** Duty Fairness's own status vocabulary -- see `resolveDutyFairnessStatus` for why it carries NO tolerance, unlike Shift Fairness's `FairnessShiftStatus`. */
+export type DutyFairnessStatus = FairnessStatus;
+
+/**
+ * PR #3 -- Duty Fairness status: an EXACT `currentScore` vs `comparisonTarget`
+ * comparison, deliberately with NO tolerance band. This is intentionally
+ * different from Shift Fairness's `resolveFairnessShiftStatus`, which
+ * tolerates a ±0.5-shift gap because a shift target is a fractional
+ * opportunity-share estimate that a discrete shift count can never land on
+ * exactly. The workbook's `currentScore` and `comparisonTarget` are both
+ * already-authoritative source values (not a reconstructed estimate), so
+ * "balanced" means exactly equal, nothing more forgiving. `null` whenever
+ * either `currentScore` or `comparisonTarget` is unavailable -- never a
+ * guessed status standing in for "unknown".
+ */
+export function resolveDutyFairnessStatus(
+  currentScore: number | null,
+  comparisonTarget: number | null,
+): DutyFairnessStatus | null {
+  if (currentScore === null || comparisonTarget === null) return null;
+  if (currentScore < comparisonTarget) return "below";
+  if (currentScore > comparisonTarget) return "above";
+  return "balanced";
 }
 
 /**

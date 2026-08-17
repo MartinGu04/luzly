@@ -9,6 +9,7 @@ import {
   resolveFairnessPeriodStatus,
   type FairnessDataCompleteness,
   type FairnessPeriodStatus,
+  type FairnessStatus,
 } from "./fairnessFoundation";
 import {
   buildFairnessPersonContext,
@@ -117,7 +118,17 @@ export function resolveShiftFairnessPeriodStatus(month: CalendarMonthKey, now: L
  */
 export const SHIFT_FAIRNESS_BALANCED_TOLERANCE_SHIFTS = 0.5;
 
-export type FairnessShiftStatus = "below" | "balanced" | "above";
+/**
+ * Shares its three-word vocabulary with Duty Fairness's `DutyFairnessStatus`
+ * (`fairnessAnalysis.ts`) via the common `FairnessStatus` alias
+ * (`fairnessFoundation.ts`) -- kept as its own named type here because the
+ * two modes compute it completely differently (this one has a ±0.5-shift
+ * tolerance band; Duty Fairness has none). Re-exported under this name
+ * unchanged so nothing importing `FairnessShiftStatus` from this module
+ * needs to change (PR #3 is a pure type extraction here, not a behavior
+ * change to Shift Fairness).
+ */
+export type FairnessShiftStatus = FairnessStatus;
 
 /** `deviation = actual - target`. Within `±SHIFT_FAIRNESS_BALANCED_TOLERANCE_SHIFTS` (inclusive) is `"balanced"` -- see the tolerance's own docstring for why. */
 export function resolveFairnessShiftStatus(deviation: number): FairnessShiftStatus {
