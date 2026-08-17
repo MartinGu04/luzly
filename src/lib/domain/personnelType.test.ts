@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyPersonnelType } from "./personnelType";
+import { classifyPersonnelType, classifyRoleGroup } from "./personnelType";
 
 describe("classifyPersonnelType", () => {
   it("קבע -> permanent", () => {
@@ -31,5 +31,19 @@ describe("classifyPersonnelType", () => {
   it("never partial-matches -- a string merely containing a valid label is unclassified", () => {
     expect(classifyPersonnelType("קבע לשעבר")).toBe("unclassified");
     expect(classifyPersonnelType("לא חובה")).toBe("unclassified");
+  });
+});
+
+describe("classifyRoleGroup", () => {
+  it("isSupervisor takes precedence even when also isTechnician -- one group only", () => {
+    expect(classifyRoleGroup({ isSupervisor: true, isTechnician: true })).toBe("supervisor");
+  });
+
+  it("technician-only resolves to technician", () => {
+    expect(classifyRoleGroup({ isSupervisor: false, isTechnician: true })).toBe("technician");
+  });
+
+  it("neither flag resolves to other", () => {
+    expect(classifyRoleGroup({ isSupervisor: false, isTechnician: false })).toBe("other");
   });
 });

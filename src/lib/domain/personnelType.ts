@@ -25,3 +25,32 @@ export function classifyPersonnelType(personnelType: string | null): PersonnelSe
   if (normalized === "מילואים") return "reserve";
   return "unclassified";
 }
+
+/**
+ * Which shift-rotation role group a person belongs to, from their actual
+ * capability flags -- never from a job-title string. This is the same
+ * grouping rule `lib/presentation/roster.ts`'s roster listing already
+ * applied (now co-located here so `lib/domain/fairnessGroups.ts`'s
+ * comparison-group foundation and the roster hierarchy share ONE
+ * definition, the same convention this file already set for
+ * `classifyPersonnelType` itself -- see that function's own docstring).
+ */
+export type FairnessRoleGroupKey = "supervisor" | "technician" | "other";
+
+/** The minimal shape `classifyRoleGroup` needs -- any typed record carrying these two capability flags. */
+export interface RoleGroupable {
+  isSupervisor: boolean;
+  isTechnician: boolean;
+}
+
+/**
+ * `isSupervisor` takes precedence even when the same person is also
+ * `isTechnician` (a supervisor who can also work as a technician still
+ * counts once, as "supervisor") -- never mutates the input, never
+ * re-derives the underlying flags.
+ */
+export function classifyRoleGroup(person: RoleGroupable): FairnessRoleGroupKey {
+  if (person.isSupervisor) return "supervisor";
+  if (person.isTechnician) return "technician";
+  return "other";
+}
