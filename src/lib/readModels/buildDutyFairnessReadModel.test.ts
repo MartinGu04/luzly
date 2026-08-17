@@ -147,21 +147,51 @@ describe("buildDutyFairnessReadModel — E. existing deterministic target mappin
 });
 
 describe("buildDutyFairnessReadModel — F. grouping vs target eligibility are separate facts", () => {
-  it('a \'ר"צ\'-labeled row is visible in the "other" presentation group without gaining a target from that grouping', () => {
+  it('a \'ר"צ\'-labeled row belongs to the SUPERVISOR presentation group (a decided domain rule), but that grouping alone grants it no target', () => {
     const model = buildDutyFairnessReadModel({
       parseResult: parseResult({
-        personRows: [personRow({ allocationLabel: 'ר"צ', currentScore: 5 })],
+        personRows: [personRow({ allocationLabel: 'ר"צ', currentScore: 5, weekendCount: 1, exemptions: ["מטבח"] })],
         targets: { supervisorTarget: 4, technicianTarget: 8 },
       }),
       periodIdentity: { key: "h1", year: 2026 },
       fetchedAt: "2026-08-15T10:00:00.000Z",
       now: NOW,
     });
-    expect(model.groups.map((g) => g.key)).toEqual(["other"]);
+    expect(model.groups.map((g) => g.key)).toEqual(["supervisor"]);
     const row = model.groups[0].rows[0];
+    // Real workbook scores/weekend/exemptions still fully preserved.
     expect(row.currentScore).toBe(5);
+    expect(row.weekendCount).toBe(1);
+    expect(row.exemptions).toEqual([{ raw: "מטבח", affectedDutyFamilies: ["daily_kitchen", "full_kitchen", "weekend_kitchen"] }]);
+    // But grouping alone never grants a target -- 'ר"צ' is not a target-bearing label.
     expect(row.comparisonTarget).toBeNull();
+    expect(row.gapToTarget).toBeNull();
+    expect(row.normalizedLoad).toBeNull();
     expect(row.status).toBeNull();
+    // Not a genuine target gap either -- this is the normal, expected outcome for a non-target-bearing label.
+    expect(row.dataCompleteness.reasons).not.toContain("duty_target_unavailable");
+  });
+
+  it('a \'ר"צ\'-labeled row sits alongside real \'אחמ"ש\' rows in the SAME supervisor group', () => {
+    const model = buildDutyFairnessReadModel({
+      parseResult: parseResult({
+        personRows: [
+          personRow({ resolvedPersonId: "p_rats", sourceName: "רס", allocationLabel: 'ר"צ', currentScore: 5 }),
+          personRow({ resolvedPersonId: "p_sup", sourceName: "אחמש", allocationLabel: 'אחמ"ש', currentScore: 4 }),
+        ],
+        targets: { supervisorTarget: 4, technicianTarget: 8 },
+      }),
+      periodIdentity: { key: "h1", year: 2026 },
+      fetchedAt: "2026-08-15T10:00:00.000Z",
+      now: NOW,
+    });
+    expect(model.groups.map((g) => g.key)).toEqual(["supervisor"]);
+    const supervisorGroup = model.groups.find((g) => g.key === "supervisor");
+    expect(supervisorGroup?.rows).toHaveLength(2);
+    const ratzRow = supervisorGroup?.rows.find((r) => r.allocationLabel === 'ר"צ');
+    const supRow = supervisorGroup?.rows.find((r) => r.allocationLabel === 'אחמ"ש');
+    expect(ratzRow?.comparisonTarget).toBeNull();
+    expect(supRow?.comparisonTarget).toBe(4);
   });
 
   it("groups omit entirely when empty -- no invented empty supervisor/technician bucket", () => {

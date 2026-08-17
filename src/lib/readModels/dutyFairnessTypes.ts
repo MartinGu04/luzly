@@ -22,16 +22,18 @@ import type { FairnessPeriodKey } from "@/lib/domain/fairnessPeriod";
  */
 
 /**
- * Which duty population a row's `allocationLabel` deterministically belongs
- * to -- reuses the SAME exact-match classifier already proven for duty
- * scoring/target eligibility (`resolveFairnessAllocationRole`,
- * `lib/domain/fairnessAnalysis.ts`), the identical one
- * `lib/presentation/managerFairnessGrouping.ts` already uses to group the
- * existing manager Fairness page. `"other"` is every allocation label that
- * doesn't resolve to a deterministic role (e.g. "הסמכה", 'ר"צ', an unknown
- * label) -- metadata/context, never its own comparison group with an
- * invented target. See `buildDutyFairnessReadModel.ts`'s own docs for a real
- * domain ambiguity this PR deliberately did NOT resolve around `'ר"צ'`.
+ * Which duty population a row's `allocationLabel` belongs to --
+ * `resolveDutyFairnessGroupKey` (`buildDutyFairnessReadModel.ts`), a
+ * DELIBERATELY SEPARATE classifier from the narrower target-eligibility
+ * mapping (`resolveFairnessAllocationRole`, `lib/domain/fairnessAnalysis.ts`):
+ * 'אחמ"ש' and 'ר"צ' both belong to the `"supervisor"` group (a decided
+ * domain rule -- reservist/ר"צ personnel are part of the אחמ"ש population),
+ * "טכנאי" belongs to `"technician"`. `"other"` is every other allocation
+ * label (e.g. "הסמכה", an unrecognized label) -- metadata/context, never
+ * its own comparison group with an invented target. Landing in the
+ * `"supervisor"` group does NOT by itself grant a comparison target -- 'ר"צ'
+ * still has `comparisonTarget: null`, since only 'אחמ"ש'/"טכנאי" carry a
+ * deterministic X/2X target (see `resolveComparisonTarget`, unchanged).
  */
 export type DutyFairnessGroupKey = "supervisor" | "technician" | "other";
 

@@ -50,24 +50,17 @@ export interface BuildDutyFairnessReadModelInput {
  * (delta/target/gap/normalizedLoad/status) is analysis ON TOP of it, never
  * a replacement (PR #15 §10, unchanged).
  *
- * A REAL, UNRESOLVED DOMAIN QUESTION (deliberately left as-is, not guessed):
- * grouping here reuses `resolveFairnessAllocationRole`, the SAME exact-match
- * classifier the existing `lib/presentation/managerFairnessGrouping.ts`
- * already uses for the live manager Fairness page -- only the literal
- * allocation labels 'אחמ"ש'/"טכנאי" resolve to a group; every other label,
- * including the literal text 'ר"צ', falls to `"other"`, exactly like the
- * existing, tested `groupManagerFairnessRows` behavior. A person whose
- * organizational title is ר"צ but who is ALSO capability-flagged
- * `isSupervisor` DOES land in the `"supervisor"` group for Shift Fairness
- * (`fairnessGroups.ts`'s `resolveFairnessComparisonGroupKey`, a genuinely
- * separate, capability-based classifier for a genuinely separate mode) --
- * but nothing in today's verified domain code proves that the DUTY table's
- * own 'ר"צ' ALLOCATION-LABEL text itself should be folded into the
- * supervisor duty population/target-eligible group. Inventing that mapping
- * here would be a new, unverified business rule, so it was deliberately NOT
- * added -- a 'ר"צ'-labeled duty row stays in `"other"`, visible with its
- * real score/exemptions/weekend count, `comparisonTarget: null` (correctly,
- * since `resolveFairnessAllocationRole` doesn't grant it a target either).
+ * GROUPING AND TARGET ELIGIBILITY ARE DELIBERATELY TWO SEPARATE
+ * CLASSIFIERS, not one. Presentation grouping (`resolveDutyFairnessGroupKey`,
+ * below) is a decided domain rule: 'ר"צ' is part of the supervisor duty
+ * population, alongside 'אחמ"ש'. Target eligibility
+ * (`resolveFairnessAllocationRole`/`resolveComparisonTarget`,
+ * `fairnessAnalysis.ts`, UNCHANGED) stays the narrower, proven mapping --
+ * only 'אחמ"ש' and "טכנאי" carry a deterministic X/2X target. 'ר"צ'
+ * therefore lands in the `"supervisor"` GROUP with a real, visible score,
+ * but `comparisonTarget`/`gapToTarget`/`normalizedLoad`/`status` stay
+ * `null` for it, exactly as they would for any other non-target-bearing
+ * label -- landing in a group never by itself grants a target.
  */
 export function buildDutyFairnessReadModel(input: BuildDutyFairnessReadModelInput): DutyFairnessReadModel {
   const { parseResult, periodIdentity, fetchedAt, now } = input;
@@ -138,9 +131,30 @@ function toTotalsView(
 const GROUP_ORDER: readonly DutyFairnessGroupKey[] = ["supervisor", "technician", "other"];
 
 /**
- * Buckets the ALREADY-sorted rows by `allocationLabel` -- never re-sorts
- * within a bucket, so each group preserves the exact relative order
- * established by `compareDutyFairnessRows` (same convention as
+ * Duty Fairness PRESENTATION grouping -- a decided domain rule, and a
+ * DELIBERATELY SEPARATE classifier from `resolveFairnessAllocationRole`'s
+ * target-eligibility mapping (`fairnessAnalysis.ts`, unchanged): 'ר"צ' is
+ * part of the supervisor duty population, same as 'אחמ"ש', but it is NOT
+ * one of the two labels that carries a deterministic X/2X target, so it
+ * must not be classified with the SAME function used to decide target
+ * eligibility (that would silently grant it a target it was never proven
+ * to have). Every other unrecognized/non-target-bearing label (הסמכה,
+ * משתחרר, ...) falls to `"other"`, same as before.
+ */
+const DUTY_GROUP_BY_LABEL: Readonly<Record<string, DutyFairnessGroupKey>> = {
+  'אחמ"ש': "supervisor",
+  'ר"צ': "supervisor",
+  טכנאי: "technician",
+};
+
+function resolveDutyFairnessGroupKey(allocationLabel: string): DutyFairnessGroupKey {
+  return DUTY_GROUP_BY_LABEL[allocationLabel] ?? "other";
+}
+
+/**
+ * Buckets the ALREADY-sorted rows by `resolveDutyFairnessGroupKey` -- never
+ * re-sorts within a bucket, so each group preserves the exact relative
+ * order established by `compareDutyFairnessRows` (same convention as
  * `lib/presentation/managerFairnessGrouping.ts`'s own grouping of an
  * already-sorted read model). A group with zero rows is omitted entirely,
  * never rendered as an empty bucket.
@@ -148,7 +162,7 @@ const GROUP_ORDER: readonly DutyFairnessGroupKey[] = ["supervisor", "technician"
 function buildGroups(sortedRows: readonly DutyFairnessPersonRowView[]): DutyFairnessGroupView[] {
   const byGroup = new Map<DutyFairnessGroupKey, DutyFairnessPersonRowView[]>();
   for (const row of sortedRows) {
-    const key: DutyFairnessGroupKey = resolveFairnessAllocationRole(row.allocationLabel) ?? "other";
+    const key = resolveDutyFairnessGroupKey(row.allocationLabel);
     const bucket = byGroup.get(key);
     if (bucket) bucket.push(row);
     else byGroup.set(key, [row]);

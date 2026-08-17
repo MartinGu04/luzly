@@ -585,40 +585,28 @@ and a new, parallel read-model boundary that reuses them outright.
   `FairnessShiftStatus` are both aliases of the same shared
   `FairnessStatus` (`fairnessFoundation.ts`) — the three-word vocabulary is
   shared, the computation is not.
-- **Grouping reuses the EXISTING, proven duty classifier — nothing new.**
-  `buildDutyFairnessReadModel.ts`'s groups (`"supervisor" | "technician" |
-  "other"`) are built with the SAME exact-match `resolveFairnessAllocationRole`
-  classifier `lib/presentation/managerFairnessGrouping.ts` already uses for
-  the live manager Fairness page — only the literal allocation labels
-  'אחמ"ש'/"טכנאי" resolve to a group; every other label (including the
-  literal text 'ר"צ', and "הסמכה") falls to `"other"`, visible with its
-  real score/exemptions/weekend count but no invented target. This is a
-  DIFFERENT concept from Shift Fairness's `resolveFairnessComparisonGroupKey`
-  (capability-based, `isSupervisor`/`isTechnician`) — the two grouping
-  algorithms are never merged, exactly as `fairnessGroups.ts`'s own
-  docstring already establishes.
-- **A REAL, UNRESOLVED DOMAIN QUESTION, left honest rather than guessed.**
-  A reservist supervisor whose organizational title is ר״צ but who is
-  capability-flagged `isSupervisor` DOES land in Shift Fairness's
-  `"supervisor"` GROUP (that classifier is capability-based, not label-
-  based). Whether the DUTY table's own 'ר"צ' ALLOCATION-LABEL text should
-  likewise be folded into the supervisor duty population/target-eligible
-  group is a genuinely different question, and nothing in today's verified
-  domain code (`resolveFairnessAllocationRole`, `ALLOCATION_ROLE_BY_LABEL`)
-  proves an answer either way — inventing that mapping here would have been
-  a new, unverified business rule. A `'ר"צ'`-labeled duty row therefore
-  stays in `"other"` for now, exactly like the existing, tested
-  `groupManagerFairnessRows` behavior. This should be resolved with a real
-  domain owner before any future PR changes duty grouping, not guessed.
+- **Grouping is a decided domain rule, using its OWN classifier — never the
+  target-eligibility one.** `buildDutyFairnessReadModel.ts`'s
+  `resolveDutyFairnessGroupKey` decides which duty population
+  (`"supervisor" | "technician" | "other"`) a row belongs to: 'אחמ"ש' AND
+  'ר"צ' both belong to `"supervisor"` (reservist/ר״צ personnel are part of
+  the אחמ"ש population — the same conclusion `fairnessGroups.ts`'s own
+  capability-based Shift Fairness classifier already reaches for a
+  ר״צ-titled `isSupervisor === true` person, now made explicit for the duty
+  table's own allocation-label text too), "טכנאי" belongs to
+  `"technician"`, everything else (e.g. "הסמכה") falls to `"other"`. This
+  is DELIBERATELY a separate function from `resolveFairnessAllocationRole`
+  (`fairnessAnalysis.ts`, UNCHANGED) — the narrower classifier that decides
+  target eligibility, where only 'אחמ"ש'/"טכנאי" carry a deterministic X/2X
+  target. Using the SAME function for both would have silently granted
+  'ר"צ' a supervisor target it was never proven to have.
 - **Grouping and target eligibility are separate facts, never silently
-  collapsed.** Landing in the `"supervisor"`/`"technician"` presentation
-  group never by itself grants a row a comparison target — `comparisonTarget`
-  is resolved independently via the unchanged `resolveComparisonTarget`, and
-  both happen to derive from the same `allocationLabel` only because
-  `resolveFairnessAllocationRole` already IS the one deterministic,
-  proven classifier for both duty concepts (not because this PR merged
-  them). The `"other"` bucket in particular never receives an invented
-  target.
+  collapsed — 'ר"צ' is the concrete case that proves why.** A `'ר"צ'`-labeled
+  row lands in the `"supervisor"` GROUP with its real score/exemptions/
+  weekend count fully visible, but `comparisonTarget`/`gapToTarget`/
+  `normalizedLoad`/`status` all stay `null` for it — landing in a group
+  never by itself grants a target. `"other"` never receives an invented
+  target either.
 - **Data completeness — only genuine gaps are flagged, never noise on every
   row.** Two new reasons (`fairnessFoundation.ts`): `"duty_identity_unresolved"`
   (the row's source name didn't resolve to exactly one personnel record —
