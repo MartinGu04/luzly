@@ -1,4 +1,9 @@
-import { classifyPersonnelType, type PersonnelServiceCategory } from "@/lib/domain/personnelType";
+import {
+  classifyPersonnelType,
+  classifyRoleGroup,
+  type FairnessRoleGroupKey,
+  type PersonnelServiceCategory,
+} from "@/lib/domain/personnelType";
 
 // Re-exported so existing presentation-layer consumers of this module keep
 // working unchanged -- the classification itself now lives in
@@ -21,7 +26,14 @@ export function personnelTypeGroupLabel(group: RosterPersonnelTypeGroup): string
   return PERSONNEL_TYPE_GROUP_LABEL[group];
 }
 
-export type RosterRegularRoleGroup = "supervisor" | "technician" | "other";
+// Re-exported the same way as `classifyPersonnelType` above -- the
+// grouping rule itself now lives in `lib/domain/personnelType.ts`
+// (`classifyRoleGroup`), reused by `lib/domain/fairnessGroups.ts`'s
+// comparison-group foundation so the roster hierarchy and future fairness
+// grouping can never drift apart. ONLY called here for the "סדיר"
+// top-level group -- קבע/מילואים/לא מסווג never subdivide by role.
+export type RosterRegularRoleGroup = FairnessRoleGroupKey;
+export { classifyRoleGroup as classifyRegularRole };
 
 const REGULAR_ROLE_GROUP_LABEL: Record<RosterRegularRoleGroup, string> = {
   supervisor: "אחמ״שים",
@@ -31,20 +43,6 @@ const REGULAR_ROLE_GROUP_LABEL: Record<RosterRegularRoleGroup, string> = {
 
 export function regularRoleGroupLabel(group: RosterRegularRoleGroup): string {
   return REGULAR_ROLE_GROUP_LABEL[group];
-}
-
-/**
- * ONLY called for the "סדיר" top-level group -- קבע/מילואים/לא מסווג never
- * subdivide by role. `isSupervisor` takes precedence even when the same
- * person is also `isTechnician` (a supervisor who can also work as a
- * technician still appears exactly once, under אחמ״שים) -- this never
- * changes the underlying domain flags, it only decides which ONE
- * presentation bucket a person lands in.
- */
-export function classifyRegularRole(person: Pick<PersonGroupable, "isSupervisor" | "isTechnician">): RosterRegularRoleGroup {
-  if (person.isSupervisor) return "supervisor";
-  if (person.isTechnician) return "technician";
-  return "other";
 }
 
 /**
@@ -115,7 +113,7 @@ export function groupRosterHierarchy<T extends PersonGroupable>(roster: readonly
 
     const bySubgroup = new Map<RosterRegularRoleGroup, T[]>();
     for (const person of people) {
-      const subKey = classifyRegularRole(person);
+      const subKey = classifyRoleGroup(person);
       const bucket = bySubgroup.get(subKey);
       if (bucket) bucket.push(person);
       else bySubgroup.set(subKey, [person]);
