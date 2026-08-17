@@ -375,19 +375,33 @@ and never a 0–100 score.
   convention.
 - **Group membership preserves evidence past a changed capability flag
   (follow-up fix).** Comparison-group membership is `resolveFairnessComparisonGroupKey(person)
-  === role` (current capability) **OR** the person has a real confirmed,
-  non-shadow shift for `role` within the period (`isRoleComparisonMember`).
-  Capability is undated (`"eligibility_undated"`) — if it changes, a real
-  shift someone actually worked as that role must never simply vanish from
-  the results because `people.filter(...)` silently dropped their row.
-  A person included only via this evidence path still gets `opportunityCount:
-  0` (the eligibility check inside `computePersonShiftFacts` still requires
-  the CURRENT capability flag, unaffected by this fix — this is a fix for
-  VISIBILITY only, not a reopening of eligibility), so their real
-  `actualShifts` count still flows into `totalActual` and is redistributed
-  as opportunity share onto whoever DOES currently hold real opportunities
-  — a documented, narrow, and regression-tested consequence of preserving
-  visibility rather than a formula change.
+  === role` (current capability, "MODELABLE") **OR** the person has a real
+  confirmed, non-shadow shift for `role` within the period
+  (`isRoleComparisonMember`, "evidence-only"). Capability is undated
+  (`"eligibility_undated"`) — if it changes, a real shift someone actually
+  worked as that role must never simply vanish from the results because
+  `people.filter(...)` silently dropped their row. An evidence-only
+  member's `opportunityCount` still stays `0` (the eligibility check inside
+  `computePersonShiftFacts` still requires the CURRENT capability flag,
+  unaffected by this fix — a fix for VISIBILITY only, not a reopening of
+  eligibility).
+- **An evidence-only member's real workload is never redistributed onto
+  someone else's target (SECOND follow-up fix).** The first version of the
+  fix above let an evidence-only member's real `actualShifts` flow into the
+  group's shared `totalActual`, which the opportunity-share formula then
+  redistributed onto whichever MODELABLE members held real opportunities —
+  manufacturing an inflated target for people whose own availability never
+  changed, since their historical opportunities can't honestly be
+  reconstructed once capability isn't historically dated. `totalActual`/
+  `totalOpportunity` (general AND weekend) are now summed over MODELABLE
+  members ONLY; an evidence-only member's own `target`/`weekendTarget` is
+  fixed at `0` (never computed from the share formula) and flagged with the
+  new `"shift_target_unmodelable_evidence_only"` completeness reason —
+  distinct from the group-level `"shift_target_no_group_opportunities"`,
+  which now only ever reflects a genuine anomaly within the MODELABLE pool
+  itself (e.g. a data inconsistency: a confirmed shift recorded alongside a
+  conflicting absence/constraint the same date, for someone whose current
+  capability DOES match the role).
 - **Weekend fairness stays separate.** The exact same opportunity-share
   method is computed a SECOND time, restricted to weekend dates only
   (`isFairnessWeekendDate`, reused from `fairnessFoundation.ts`) — no
@@ -417,15 +431,17 @@ and never a 0–100 score.
   reads `"current"`.
 - **`"shift_target_no_group_opportunities"` means unallocatable, not
   merely empty (follow-up fix).** This completeness reason (see
-  `fairnessFoundation.ts`) is attached ONLY when the group (or its weekend
-  subset) has real actual workload (`totalActual > 0`) that zero
-  opportunities failed to explain — a genuine gap, most commonly the
-  group-membership fix above surfacing someone's real shifts with no
-  current opportunity to attribute them to. Zero opportunities WITH zero
-  actual work (an idle group/subset, or an empty period) is simply nothing
-  to distribute, and is never flagged incomplete — the initial version of
-  this PR incorrectly raised the reason any time opportunities were zero,
-  regardless of whether there was any real workload to explain.
+  `fairnessFoundation.ts`) is attached ONLY when the MODELABLE pool (or its
+  weekend subset) has real actual workload (`totalActual > 0`, computed
+  from modelable members only — see the second follow-up fix above) that
+  zero MODELABLE opportunities failed to explain — a genuine data anomaly
+  even among people whose current capability matches the role (e.g. a
+  confirmed shift recorded alongside a conflicting absence/constraint the
+  same date). Zero opportunities WITH zero actual work (an idle group/
+  subset, or an empty period) is simply nothing to distribute, and is
+  never flagged incomplete. An evidence-only member's own unmodelable
+  workload is a SEPARATE, per-person fact
+  (`"shift_target_unmodelable_evidence_only"`), never this group-level one.
 - **Period-shape-agnostic by construction.** `computeShiftFairnessForGroup`
   takes a plain `periodDates: readonly string[]` — the exact same function
   serves a calendar month OR a single week with zero engine changes, only a

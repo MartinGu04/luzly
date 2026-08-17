@@ -299,12 +299,29 @@ function computeShare(personOpportunities: number, totalOpportunities: number, t
 /**
  * Computes shift Fairness for every member of comparison group `role` --
  * `resolveFairnessComparisonGroupKey(person) === role` (from
- * `fairnessGroups.ts`, never a separate/duplicated group definition) OR,
- * per the follow-up fix above, a person whose CURRENT capability no longer
- * includes `role` but who has real confirmed evidence of having worked it
- * this period (`isRoleComparisonMember`) -- their evidenced work stays
- * visible even though it can no longer earn them a forward opportunity
- * share (capability isn't historically dated -- see `"eligibility_undated"`).
+ * `fairnessGroups.ts`, never a separate/duplicated group definition;
+ * called "MODELABLE" members below) OR, per an earlier follow-up fix, a
+ * person whose CURRENT capability no longer includes `role` but who has
+ * real confirmed evidence of having worked it this period
+ * (`isRoleComparisonMember`; called "evidence-only" members below) --
+ * their evidenced work stays visible even though it can no longer earn
+ * them a forward opportunity share (capability isn't historically dated).
+ *
+ * SECOND follow-up fix: an evidence-only member's real `actualShifts` is
+ * NEVER folded into the totals the opportunity-share formula redistributes
+ * onto other people's targets. Not being able to model their historical
+ * opportunities (their current capability flag says they shouldn't have
+ * any) is not license to silently hand their real workload to whichever
+ * modelable members currently hold opportunities -- that would manufacture
+ * an inflated target for people whose own availability never changed.
+ * `totalActual`/`totalOpportunity` (general and weekend) are therefore
+ * summed over MODELABLE members ONLY; an evidence-only member's own
+ * `target`/`weekendTarget` is fixed at `0` (never computed from the share
+ * formula, never inventing a historical eligibility this codebase doesn't
+ * have) and flagged with `"shift_target_unmodelable_evidence_only"` --
+ * distinct from the group-level `"shift_target_no_group_opportunities"`,
+ * which now only ever reflects an anomaly within the MODELABLE pool
+ * itself.
  *
  * `people`/`events` may be the full roster/period Event set -- this filters
  * to the group and to each person's own Events itself. `periodDates` is
@@ -335,17 +352,23 @@ export function computeShiftFairnessForGroup(
     computePersonShiftFacts(person, role, events, sortedDates, periodStartDate, periodEndDate, reserveParticipation),
   );
 
-  const totalActual = facts.reduce((sum, fact) => sum + fact.actualShifts, 0);
-  const totalOpportunity = facts.reduce((sum, fact) => sum + fact.opportunityCount, 0);
-  const totalWeekendActual = facts.reduce((sum, fact) => sum + fact.weekendActualShifts, 0);
-  const totalWeekendOpportunity = facts.reduce((sum, fact) => sum + fact.weekendOpportunityCount, 0);
+  // Only members whose CURRENT capability actually matches `role` count
+  // toward the totals the share formula redistributes -- see this
+  // function's own docstring for why an evidence-only member's workload
+  // must never inflate someone else's target.
+  const modelableFacts = facts.filter((fact) => resolveFairnessComparisonGroupKey(fact.person) === role);
 
-  // Follow-up fix: zero opportunities is only a genuine data-incompleteness
-  // signal when there was real workload it failed to explain (`totalActual
-  // > 0` -- "unallocatable workload", e.g. the widened-membership case
-  // above). Zero opportunities WITH zero actual work is simply nothing to
-  // distribute -- a normal, complete outcome (an idle group/subset, or an
-  // empty period), never flagged as incomplete.
+  const totalActual = modelableFacts.reduce((sum, fact) => sum + fact.actualShifts, 0);
+  const totalOpportunity = modelableFacts.reduce((sum, fact) => sum + fact.opportunityCount, 0);
+  const totalWeekendActual = modelableFacts.reduce((sum, fact) => sum + fact.weekendActualShifts, 0);
+  const totalWeekendOpportunity = modelableFacts.reduce((sum, fact) => sum + fact.weekendOpportunityCount, 0);
+
+  // Zero (modelable) opportunities is only a genuine data-incompleteness
+  // signal when there was real (modelable) workload it failed to explain
+  // (`totalActual > 0` -- "unallocatable workload"). Zero opportunities
+  // WITH zero actual work is simply nothing to distribute -- a normal,
+  // complete outcome (an idle group/subset, or an empty period), never
+  // flagged as incomplete.
   const groupOpportunityGap =
     totalOpportunity === 0 && totalActual > 0
       ? fairnessDataCompleteness(["shift_target_no_group_opportunities"])
@@ -356,10 +379,24 @@ export function computeShiftFairnessForGroup(
       : COMPLETE_FAIRNESS_DATA;
 
   const personResults: ShiftFairnessPersonResult[] = facts.map((fact) => {
-    const target = computeShare(fact.opportunityCount, totalOpportunity, totalActual);
-    const weekendTarget = computeShare(fact.weekendOpportunityCount, totalWeekendOpportunity, totalWeekendActual);
+    const isModelable = resolveFairnessComparisonGroupKey(fact.person) === role;
+
+    // An evidence-only member's `opportunityCount` is always 0 (eligibility
+    // still requires the current capability flag -- see
+    // `computePersonShiftFacts`), so `computeShare` would already yield 0
+    // for them either way; the explicit branch below exists to make that
+    // "never modeled, never guessed" intent robust to change, not to rely
+    // on that coincidence, and to attach the dedicated completeness reason.
+    const target = isModelable ? computeShare(fact.opportunityCount, totalOpportunity, totalActual) : 0;
+    const weekendTarget = isModelable
+      ? computeShare(fact.weekendOpportunityCount, totalWeekendOpportunity, totalWeekendActual)
+      : 0;
     const deviation = fact.actualShifts - target;
     const weekendDeviation = fact.weekendActualShifts - weekendTarget;
+
+    const unmodelableReason = isModelable
+      ? COMPLETE_FAIRNESS_DATA
+      : fairnessDataCompleteness(["shift_target_unmodelable_evidence_only"]);
 
     return {
       personId: fact.person.id,
@@ -373,7 +410,12 @@ export function computeShiftFairnessForGroup(
       weekendStatus: resolveFairnessShiftStatus(weekendDeviation),
       opportunityCount: fact.opportunityCount,
       weekendOpportunityCount: fact.weekendOpportunityCount,
-      dataCompleteness: combineFairnessDataCompleteness([fact.dataCompleteness, groupOpportunityGap, weekendGroupOpportunityGap]),
+      dataCompleteness: combineFairnessDataCompleteness([
+        fact.dataCompleteness,
+        groupOpportunityGap,
+        weekendGroupOpportunityGap,
+        unmodelableReason,
+      ]),
     };
   });
 

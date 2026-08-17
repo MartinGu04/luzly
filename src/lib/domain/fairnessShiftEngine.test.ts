@@ -472,18 +472,24 @@ describe("computeShiftFairnessForGroup — partial/incomplete data propagation",
     expect(row.dataCompleteness).toEqual({ status: "complete", reasons: [] });
   });
 
-  it("real actual work with zero opportunities to explain it IS a genuinely unallocatable workload -- flagged incomplete", () => {
-    // A person whose current capability flag no longer matches a real
-    // confirmed shift they evidently worked -- see the group-membership
-    // regression tests below for why this person still gets a row at all.
-    const NO_LONGER_FLAGGED = person({ id: "p_reclassified", isTechnician: false, isSupervisor: false });
+  it("real actual work from a MODELABLE member with zero opportunities to explain it IS a genuinely unallocatable workload -- flagged incomplete", () => {
+    // A genuine data inconsistency: a confirmed shift recorded alongside a
+    // conflicting full-day constraint the SAME date, for someone whose
+    // current capability DOES match the role (modelable) -- unlike the
+    // evidence-only case (see the group-membership regression tests below),
+    // this is exactly what shift_target_no_group_opportunities exists for.
+    const MODELABLE = person({ id: "p_modelable", isTechnician: true });
     const date = "2026-08-10";
-    const events: Event[] = [shiftEvent({ personId: NO_LONGER_FLAGGED.id, date, role: "technician" })];
-    const result = computeShiftFairnessForGroup("technician", [NO_LONGER_FLAGGED], events, [date]);
-    const row = findPerson(result, NO_LONGER_FLAGGED.id);
+    const events: Event[] = [
+      shiftEvent({ personId: MODELABLE.id, date, role: "technician" }),
+      constraintEvent({ personId: MODELABLE.id, date, period: "unspecified" }),
+    ];
+    const result = computeShiftFairnessForGroup("technician", [MODELABLE], events, [date]);
+    const row = findPerson(result, MODELABLE.id);
     expect(row.actualShifts).toBe(1);
     expect(row.opportunityCount).toBe(0);
     expect(row.dataCompleteness.reasons).toContain("shift_target_no_group_opportunities");
+    expect(row.dataCompleteness.reasons).not.toContain("shift_target_unmodelable_evidence_only");
   });
 });
 
@@ -510,18 +516,16 @@ describe("computeShiftFairnessForGroup — group membership preserves real evide
     expect(row.target).toBe(0);
   });
 
-  it("an evidence-only member's real shifts still count toward the group's total actual workload -- documented, deliberate consequence of preserving visibility", () => {
-    // This is the one honest side effect of the fix: the group's
-    // "totalActual" (the real workload the opportunity-share formula
-    // redistributes) is a simple sum across every VISIBLE member, evidence-
-    // only ones included -- their own real work is part of the group's real
-    // total, exactly as it should be. Because they hold zero opportunities,
-    // none of that total actually redistributes back to them (their own
-    // target stays 0) -- it flows entirely onto the currently-eligible
-    // opportunity holder(s) instead. The formula itself is intentionally
-    // UNCHANGED (see this PR's own note) -- this test exists to make the
-    // real, if narrow, consequence explicit and regression-tested rather
-    // than silently relying on it.
+  it("an evidence-only member's real shifts are visible but NEVER redistributed onto a modelable colleague's target (second follow-up fix)", () => {
+    // Earlier behavior (fixed by this test): the evidence-only member's
+    // real shift used to be folded into the group's shared "totalActual",
+    // inflating CURRENT's target to 2 (their own 1 shift PLUS the
+    // reclassified colleague's 1 shift) even though CURRENT's own
+    // availability never changed and they worked every opportunity they
+    // actually held. That manufactured a false target: we cannot honestly
+    // claim the reclassified person's historical workload should have
+    // belonged to CURRENT, since we have no way to model what opportunities
+    // the reclassified person themselves might have had.
     const NO_LONGER_FLAGGED = person({ id: "p_reclassified", isTechnician: false, isSupervisor: false });
     const CURRENT = person({ id: "p_current", isTechnician: true });
     const date = "2026-08-10";
@@ -535,19 +539,65 @@ describe("computeShiftFairnessForGroup — group membership preserves real evide
     const reclassified = findPerson(result, NO_LONGER_FLAGGED.id);
     const current = findPerson(result, CURRENT.id);
 
+    // The reclassified person's real work stays visible...
     expect(reclassified.actualShifts).toBe(1);
+    // ...but their target is fixed at 0, explicitly flagged unmodelable --
+    // never computed, never guessed at a historical eligibility.
     expect(reclassified.opportunityCount).toBe(0);
     expect(reclassified.target).toBe(0);
+    expect(reclassified.dataCompleteness.reasons).toContain("shift_target_unmodelable_evidence_only");
 
-    // CURRENT holds the group's only opportunities (2: day + night, both
-    // free) and therefore absorbs the group's ENTIRE total actual (2: their
-    // own 1 shift plus the reclassified colleague's 1 shift) as their own
-    // target -- landing them "below" despite having worked every opportunity
-    // they were actually offered.
+    // CURRENT's target reflects ONLY the modelable pool (themselves): their
+    // own 1 opportunity out of the modelable total of 1 opportunity, times
+    // the modelable total actual of 1 shift -- exactly their own work, not
+    // inflated by the reclassified colleague's unmodelable shift.
     expect(current.opportunityCount).toBe(2);
     expect(current.actualShifts).toBe(1);
-    expect(current.target).toBe(2);
-    expect(current.status).toBe("below");
+    expect(current.target).toBe(1);
+    expect(current.status).toBe("balanced");
+    expect(current.dataCompleteness.reasons).not.toContain("shift_target_unmodelable_evidence_only");
+  });
+
+  it("an evidence-only member's real shifts are also excluded from the WEEKEND redistribution total", () => {
+    const NO_LONGER_FLAGGED = person({ id: "p_reclassified2", isTechnician: false, isSupervisor: false });
+    const CURRENT = person({ id: "p_current2", isTechnician: true });
+    const weekendDate = "2026-08-13"; // Thursday -- weekend
+
+    const events: Event[] = [
+      shiftEvent({ personId: NO_LONGER_FLAGGED.id, date: weekendDate, role: "technician" }),
+      shiftEvent({ personId: CURRENT.id, date: weekendDate, role: "technician", period: "night" }),
+    ];
+
+    const result = computeShiftFairnessForGroup("technician", [NO_LONGER_FLAGGED, CURRENT], events, [weekendDate]);
+
+    const reclassified = findPerson(result, NO_LONGER_FLAGGED.id);
+    const current = findPerson(result, CURRENT.id);
+
+    expect(reclassified.weekendActualShifts).toBe(1);
+    expect(reclassified.weekendTarget).toBe(0);
+
+    // CURRENT's weekend target reflects only their own modelable weekend
+    // opportunity/actual (1 shift out of 1 modelable weekend opportunity
+    // share), not inflated by the reclassified colleague's weekend shift.
+    expect(current.weekendActualShifts).toBe(1);
+    expect(current.weekendTarget).toBe(1);
+    expect(current.weekendStatus).toBe("balanced");
+  });
+
+  it("a group whose ONLY workload is unmodelable never raises the group-level shift_target_no_group_opportunities reason", () => {
+    // shift_target_no_group_opportunities means "MODELABLE workload with no
+    // modelable opportunity to explain it" -- an evidence-only member's own
+    // unmodelable workload is a SEPARATE, per-person fact
+    // (shift_target_unmodelable_evidence_only), never the group-level one.
+    const NO_LONGER_FLAGGED = person({ id: "p_reclassified3", isTechnician: false, isSupervisor: false });
+    const date = "2026-08-10";
+    const events: Event[] = [shiftEvent({ personId: NO_LONGER_FLAGGED.id, date, role: "technician" })];
+
+    const result = computeShiftFairnessForGroup("technician", [NO_LONGER_FLAGGED], events, [date]);
+    const row = findPerson(result, NO_LONGER_FLAGGED.id);
+
+    expect(row.dataCompleteness.reasons).toContain("shift_target_unmodelable_evidence_only");
+    expect(row.dataCompleteness.reasons).not.toContain("shift_target_no_group_opportunities");
   });
 
   it("a dual-capable person's primary group is supervisor, but real confirmed technician evidence still surfaces in the technician group too", () => {
