@@ -8,18 +8,25 @@ import type { FairnessShiftStatus } from "@/lib/domain/fairnessShiftEngine";
  * `ManagerFairnessReadModel` (`lib/readModels/managerFairnessTypes.ts`),
  * which this is a SEPARATE, parallel read model from (shift Fairness and
  * duty Fairness are two different modes, never combined in this PR).
+ *
+ * `target`/`deviation`/`status` (and their weekend counterparts) are `null`
+ * ONLY for an evidence-only comparison-group member whose target cannot be
+ * modeled from today's data (see `fairnessShiftEngine.ts`'s
+ * `ShiftFairnessPersonResult`) -- never a guessed `0`/`"balanced"` standing
+ * in for "not computable", same convention `lib/domain/fairnessAnalysis.ts`
+ * already established for the duty Fairness table's own score delta/gap.
  */
 export interface ShiftFairnessPersonRowView {
   personId: string;
   personName: string;
   actualShifts: number;
-  target: number;
-  deviation: number;
-  status: FairnessShiftStatus;
+  target: number | null;
+  deviation: number | null;
+  status: FairnessShiftStatus | null;
   weekendActualShifts: number;
-  weekendTarget: number;
-  weekendDeviation: number;
-  weekendStatus: FairnessShiftStatus;
+  weekendTarget: number | null;
+  weekendDeviation: number | null;
+  weekendStatus: FairnessShiftStatus | null;
   dataCompleteness: FairnessDataCompleteness;
 }
 

@@ -394,14 +394,28 @@ and never a 0–100 score.
   changed, since their historical opportunities can't honestly be
   reconstructed once capability isn't historically dated. `totalActual`/
   `totalOpportunity` (general AND weekend) are now summed over MODELABLE
-  members ONLY; an evidence-only member's own `target`/`weekendTarget` is
-  fixed at `0` (never computed from the share formula) and flagged with the
-  new `"shift_target_unmodelable_evidence_only"` completeness reason —
-  distinct from the group-level `"shift_target_no_group_opportunities"`,
-  which now only ever reflects a genuine anomaly within the MODELABLE pool
-  itself (e.g. a data inconsistency: a confirmed shift recorded alongside a
+  members ONLY, and are flagged with the new
+  `"shift_target_unmodelable_evidence_only"` completeness reason — distinct
+  from the group-level `"shift_target_no_group_opportunities"`, which now
+  only ever reflects a genuine anomaly within the MODELABLE pool itself
+  (e.g. a data inconsistency: a confirmed shift recorded alongside a
   conflicting absence/constraint the same date, for someone whose current
   capability DOES match the role).
+- **An unmodelable target is `null`, never a guessed `0` (THIRD follow-up
+  fix).** The second fix above initially still represented an evidence-only
+  member's `target`/`weekendTarget` as `0` -- a real, computed target of
+  `0` is a DIFFERENT fact from "this target cannot be modeled at all", and
+  `deviation = actualShifts - 0` produced a misleading `"above"` status for
+  anyone with real evidenced work. `target`/`deviation`/`status` (and their
+  weekend counterparts) on `ShiftFairnessPersonResult` are now `number |
+  null`/`FairnessShiftStatus | null` — `null` ONLY for an evidence-only
+  member, never for a modelable member (whose target of `0` stays a real,
+  meaningful `0`, e.g. someone currently capable with zero genuine
+  opportunities this period). Same convention `lib/domain/fairnessAnalysis.ts`
+  already established for the duty Fairness table's own score delta/gap
+  ("a missing previous score is NEVER treated as zero") — reused here, not
+  reinvented. `lib/readModels/shiftFairnessTypes.ts`'s
+  `ShiftFairnessPersonRowView` mirrors the same nullability.
 - **Weekend fairness stays separate.** The exact same opportunity-share
   method is computed a SECOND time, restricted to weekend dates only
   (`isFairnessWeekendDate`, reused from `fairnessFoundation.ts`) — no

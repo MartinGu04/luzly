@@ -121,16 +121,29 @@ export function resolveFairnessShiftStatus(deviation: number): FairnessShiftStat
 
 const SHIFT_PERIODS = ["day", "night"] as const;
 
+/**
+ * `target`/`deviation`/`status` (and their weekend counterparts) are `null`
+ * ONLY for an evidence-only member (see `isRoleComparisonMember`) -- their
+ * target genuinely cannot be modeled from today's data (capability isn't
+ * historically dated, so their historical opportunities can't honestly be
+ * reconstructed), which is a DIFFERENT fact from a real, computed target of
+ * `0` (a modelable member who simply had no genuine opportunity). Never
+ * guess a `0` in place of `null` here -- same convention
+ * `lib/domain/fairnessAnalysis.ts`'s `computeScoreDelta`/`computeGapToTarget`
+ * already established for the duty Fairness table ("a missing previous
+ * score is NEVER treated as zero"). `null` here always pairs with the
+ * `"shift_target_unmodelable_evidence_only"` reason in `dataCompleteness`.
+ */
 export interface ShiftFairnessPersonResult {
   personId: string;
   actualShifts: number;
-  target: number;
-  deviation: number;
-  status: FairnessShiftStatus;
+  target: number | null;
+  deviation: number | null;
+  status: FairnessShiftStatus | null;
   weekendActualShifts: number;
-  weekendTarget: number;
-  weekendDeviation: number;
-  weekendStatus: FairnessShiftStatus;
+  weekendTarget: number | null;
+  weekendDeviation: number | null;
+  weekendStatus: FairnessShiftStatus | null;
   /** How many genuine (date, day/night) opportunities this person had this period -- context for the target, not a metric of its own. */
   opportunityCount: number;
   weekendOpportunityCount: number;
@@ -381,18 +394,18 @@ export function computeShiftFairnessForGroup(
   const personResults: ShiftFairnessPersonResult[] = facts.map((fact) => {
     const isModelable = resolveFairnessComparisonGroupKey(fact.person) === role;
 
-    // An evidence-only member's `opportunityCount` is always 0 (eligibility
-    // still requires the current capability flag -- see
-    // `computePersonShiftFacts`), so `computeShare` would already yield 0
-    // for them either way; the explicit branch below exists to make that
-    // "never modeled, never guessed" intent robust to change, not to rely
-    // on that coincidence, and to attach the dedicated completeness reason.
-    const target = isModelable ? computeShare(fact.opportunityCount, totalOpportunity, totalActual) : 0;
+    // An evidence-only member's target is NOT modelable -- never a guessed
+    // `0` standing in for "no meaningful target exists" (that would produce
+    // a misleading "above" status from `actualShifts - 0`). `null`
+    // propagates through deviation/status too, so a per-person view can
+    // never show a normal below/balanced/above verdict for workload this
+    // engine genuinely cannot attribute an opportunity to.
+    const target = isModelable ? computeShare(fact.opportunityCount, totalOpportunity, totalActual) : null;
     const weekendTarget = isModelable
       ? computeShare(fact.weekendOpportunityCount, totalWeekendOpportunity, totalWeekendActual)
-      : 0;
-    const deviation = fact.actualShifts - target;
-    const weekendDeviation = fact.weekendActualShifts - weekendTarget;
+      : null;
+    const deviation = target === null ? null : fact.actualShifts - target;
+    const weekendDeviation = weekendTarget === null ? null : fact.weekendActualShifts - weekendTarget;
 
     const unmodelableReason = isModelable
       ? COMPLETE_FAIRNESS_DATA
@@ -403,11 +416,11 @@ export function computeShiftFairnessForGroup(
       actualShifts: fact.actualShifts,
       target,
       deviation,
-      status: resolveFairnessShiftStatus(deviation),
+      status: deviation === null ? null : resolveFairnessShiftStatus(deviation),
       weekendActualShifts: fact.weekendActualShifts,
       weekendTarget,
       weekendDeviation,
-      weekendStatus: resolveFairnessShiftStatus(weekendDeviation),
+      weekendStatus: weekendDeviation === null ? null : resolveFairnessShiftStatus(weekendDeviation),
       opportunityCount: fact.opportunityCount,
       weekendOpportunityCount: fact.weekendOpportunityCount,
       dataCompleteness: combineFairnessDataCompleteness([

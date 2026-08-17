@@ -513,7 +513,12 @@ describe("computeShiftFairnessForGroup — group membership preserves real evide
     // stale evidence -- opportunity still requires the CURRENT capability
     // flag, unaffected by this fix.
     expect(row.opportunityCount).toBe(0);
-    expect(row.target).toBe(0);
+    // Not a real, computed target of 0 -- genuinely unmodelable, so target/
+    // deviation/status are null rather than a misleading "above" from
+    // `actualShifts - 0`.
+    expect(row.target).toBeNull();
+    expect(row.deviation).toBeNull();
+    expect(row.status).toBeNull();
   });
 
   it("an evidence-only member's real shifts are visible but NEVER redistributed onto a modelable colleague's target (second follow-up fix)", () => {
@@ -541,10 +546,12 @@ describe("computeShiftFairnessForGroup — group membership preserves real evide
 
     // The reclassified person's real work stays visible...
     expect(reclassified.actualShifts).toBe(1);
-    // ...but their target is fixed at 0, explicitly flagged unmodelable --
-    // never computed, never guessed at a historical eligibility.
+    // ...but their target/deviation/status are null -- unmodelable, never a
+    // guessed 0 that would produce a misleading "above" verdict.
     expect(reclassified.opportunityCount).toBe(0);
-    expect(reclassified.target).toBe(0);
+    expect(reclassified.target).toBeNull();
+    expect(reclassified.deviation).toBeNull();
+    expect(reclassified.status).toBeNull();
     expect(reclassified.dataCompleteness.reasons).toContain("shift_target_unmodelable_evidence_only");
 
     // CURRENT's target reflects ONLY the modelable pool (themselves): their
@@ -574,7 +581,9 @@ describe("computeShiftFairnessForGroup — group membership preserves real evide
     const current = findPerson(result, CURRENT.id);
 
     expect(reclassified.weekendActualShifts).toBe(1);
-    expect(reclassified.weekendTarget).toBe(0);
+    expect(reclassified.weekendTarget).toBeNull();
+    expect(reclassified.weekendDeviation).toBeNull();
+    expect(reclassified.weekendStatus).toBeNull();
 
     // CURRENT's weekend target reflects only their own modelable weekend
     // opportunity/actual (1 shift out of 1 modelable weekend opportunity
@@ -598,6 +607,33 @@ describe("computeShiftFairnessForGroup — group membership preserves real evide
 
     expect(row.dataCompleteness.reasons).toContain("shift_target_unmodelable_evidence_only");
     expect(row.dataCompleteness.reasons).not.toContain("shift_target_no_group_opportunities");
+  });
+
+  it("an unmodelable target never produces a normal below/balanced/above status -- third follow-up fix", () => {
+    // Before this fix: target was a guessed 0, so deviation = actualShifts
+    // - 0 = actualShifts, and a person who evidently worked several real
+    // shifts would misleadingly read as "above" -- a normal Fairness
+    // verdict manufactured from a target that was never actually modeled.
+    // After this fix: target/deviation/status are null, not "above".
+    const HEAVILY_WORKED_BUT_UNMODELABLE = person({ id: "p_unmodelable", isTechnician: false, isSupervisor: false });
+    const dates = ["2026-08-10", "2026-08-11", "2026-08-12"];
+    const events: Event[] = [
+      shiftEvent({ personId: HEAVILY_WORKED_BUT_UNMODELABLE.id, date: "2026-08-10", role: "technician" }),
+      shiftEvent({ personId: HEAVILY_WORKED_BUT_UNMODELABLE.id, date: "2026-08-11", role: "technician" }),
+      shiftEvent({ personId: HEAVILY_WORKED_BUT_UNMODELABLE.id, date: "2026-08-12", role: "technician" }),
+    ];
+
+    const result = computeShiftFairnessForGroup("technician", [HEAVILY_WORKED_BUT_UNMODELABLE], events, dates);
+    const row = findPerson(result, HEAVILY_WORKED_BUT_UNMODELABLE.id);
+
+    expect(row.actualShifts).toBe(3);
+    expect(row.target).toBeNull();
+    expect(row.deviation).toBeNull();
+    expect(row.status).toBeNull();
+    // Never any of the three real statuses either -- null is not a silent alias for "balanced".
+    expect(row.status).not.toBe("above");
+    expect(row.status).not.toBe("below");
+    expect(row.status).not.toBe("balanced");
   });
 
   it("a dual-capable person's primary group is supervisor, but real confirmed technician evidence still surfaces in the technician group too", () => {
@@ -686,9 +722,15 @@ describe("computeShiftFairnessForGroup — sanity check against a realistic synt
     expect(result.people).toHaveLength(5);
 
     const totalActual = result.people.reduce((sum, row) => sum + row.actualShifts, 0);
-    const totalTarget = result.people.reduce((sum, row) => sum + row.target, 0);
+    // Every fixture in this scenario currently holds the technician
+    // capability flag -- nobody here is evidence-only, so target/status are
+    // never actually null for this particular roster (the null case has
+    // its own dedicated regression coverage below); `?? 0` keeps the sum
+    // type-safe against the general (nullable) result shape regardless.
+    const totalTarget = result.people.reduce((sum, row) => sum + (row.target ?? 0), 0);
 
     for (const row of result.people) {
+      expect(row.target).not.toBeNull();
       expect(Number.isFinite(row.target)).toBe(true);
       expect(row.target).toBeGreaterThanOrEqual(0);
       expect(Number.isFinite(row.deviation)).toBe(true);
