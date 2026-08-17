@@ -140,6 +140,35 @@ describe("parseEvent — absence / constraint", () => {
     expect(event.absenceKind).toBe("after");
   });
 
+  it("הפנייה is a real absence (referral), not 'other'", () => {
+    const event = parseEvent(rawAssignment("הפנייה"));
+    expect(event.category).toBe("absence");
+    expect(event.absenceKind).toBe("referral");
+  });
+
+  it("הפניה (alternate spelling, missing the י) is ALSO recognized as referral", () => {
+    const event = parseEvent(rawAssignment("הפניה"));
+    expect(event.category).toBe("absence");
+    expect(event.absenceKind).toBe("referral");
+  });
+
+  it("a tentative referral ('הפנייה?') is still classified as referral, just marked tentative", () => {
+    const event = parseEvent(rawAssignment("הפנייה?"));
+    expect(event.category).toBe("absence");
+    expect(event.absenceKind).toBe("referral");
+    expect(event.certainty).toBe("tentative");
+  });
+
+  it("referral recognition is an exact match only, never a fuzzy substring -- unrelated text containing similar letters stays 'other'", () => {
+    const notReferral = parseEvent(rawAssignment("הפנייה למחלקה אחרת"));
+    expect(notReferral.category).not.toBe("absence");
+    expect(notReferral.absenceKind).toBeNull();
+
+    const alsoNotReferral = parseEvent(rawAssignment("משהו הפנייה"));
+    expect(alsoNotReferral.category).not.toBe("absence");
+    expect(alsoNotReferral.absenceKind).toBeNull();
+  });
+
   it("absenceKind is null for every non-absence category", () => {
     expect(parseEvent(rawAssignment('אחמ"ש יום')).absenceKind).toBeNull();
     expect(parseEvent(rawAssignment("אוקסיד")).absenceKind).toBeNull();

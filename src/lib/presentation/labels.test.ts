@@ -44,7 +44,7 @@ describe("requiredCapabilityLabel", () => {
 });
 
 describe("absenceKindLabel", () => {
-  const kinds: AbsenceKind[] = ["vacation", "abroad", "medical", "day_off", "after"];
+  const kinds: AbsenceKind[] = ["vacation", "abroad", "medical", "day_off", "after", "referral"];
 
   it("every AbsenceKind maps to distinct, non-empty copy", () => {
     const labels = kinds.map(absenceKindLabel);
@@ -56,5 +56,6 @@ describe("absenceKindLabel", () => {
     expect(absenceKindLabel("vacation")).toBe("חופש");
     expect(absenceKindLabel("abroad")).toBe('חו"ל');
     expect(absenceKindLabel("medical")).toBe("גימלים");
+    expect(absenceKindLabel("referral")).toBe("הפנייה");
   });
 });

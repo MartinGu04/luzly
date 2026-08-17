@@ -1,5 +1,6 @@
 import "server-only";
 import type { Event } from "@/lib/domain/event";
+import type { Person } from "@/lib/domain/types";
 import type { OperationalWeek } from "@/lib/domain/operationalWeek";
 import type { LocalNow } from "@/lib/domain/localNow";
 import { nextCalendarDateString } from "@/lib/domain/operationalWeek";
@@ -10,11 +11,20 @@ import { jerusalemLocalTimeToInstant } from "@/lib/time/jerusalemClock";
 import {
   CONSTRAINTS_MONDAY_REMINDER_TIME,
   CONSTRAINTS_SUNDAY_REMINDER_TIME,
+  LOGISTICS_WITHDRAWAL_NOON_REMINDER_TIME,
   TOMORROW_DUTY_REMINDER_TIME,
   TOMORROW_LOGISTICS_WITHDRAWAL_REMINDER_TIME,
   TOMORROW_SHIFT_REMINDER_TIME,
   type LocalClockTime,
 } from "@/lib/config/notificationTiming";
+import {
+  buildSupervisorAssignedInformedBody,
+  buildTeamHelpAssignedBody,
+  findLogisticsWithdrawalAssignees,
+  isLogisticsWithdrawalFallbackDate,
+  resolveEligibleLogisticsTechnicians,
+  resolveRelevantSupervisors,
+} from "./logisticsCoordination";
 import { isLogisticsWithdrawalEvent } from "./logisticsWithdrawal";
 import { fetchAllSubscribedUserIds, type RecipientResolution } from "./recipients";
 import {
@@ -29,14 +39,24 @@ export interface RemindersSummary {
   tomorrowShiftJobs: number;
   tomorrowDutyJobs: number;
   tomorrowLogisticsWithdrawalJobs: number;
+  tomorrowLogisticsWithdrawalSupervisorJobs: number;
+  logisticsWithdrawalNoonAssignedJobs: number;
+  logisticsWithdrawalNoonSupervisorJobs: number;
+  logisticsWithdrawalNoonTeamJobs: number;
   tomorrowShiftCancelled: number;
   tomorrowDutyCancelled: number;
   tomorrowLogisticsWithdrawalCancelled: number;
+  tomorrowLogisticsWithdrawalSupervisorCancelled: number;
+  logisticsWithdrawalNoonAssignedCancelled: number;
+  logisticsWithdrawalNoonSupervisorCancelled: number;
+  logisticsWithdrawalNoonTeamCancelled: number;
   constraintsJobs: number;
 }
 
 export interface RemindersInput {
   events: readonly Event[];
+  /** Needed only by the logistics-withdrawal team-coordination reminders (`isTechnician` eligibility) -- every other reminder in this file is Event-driven alone. */
+  people: readonly Person[];
   shiftSchedule: ShiftSchedule;
   week: OperationalWeek;
   now: LocalNow;
@@ -67,15 +87,25 @@ export async function runReminders(input: RemindersInput): Promise<RemindersSumm
   const tomorrowShift = await runTomorrowShiftReminders(input);
   const tomorrowDuty = await runTomorrowDutyReminders(input);
   const tomorrowLogisticsWithdrawal = await runTomorrowLogisticsWithdrawalReminders(input);
+  const tomorrowLogisticsWithdrawalSupervisor = await runTomorrowLogisticsWithdrawalSupervisorReminders(input);
+  const logisticsWithdrawalNoon = await runLogisticsWithdrawalNoonReminders(input);
   const constraintsJobs = await runConstraintsReminders(input);
 
   return {
     tomorrowShiftJobs: tomorrowShift.created,
     tomorrowDutyJobs: tomorrowDuty.created,
     tomorrowLogisticsWithdrawalJobs: tomorrowLogisticsWithdrawal.created,
+    tomorrowLogisticsWithdrawalSupervisorJobs: tomorrowLogisticsWithdrawalSupervisor.created,
+    logisticsWithdrawalNoonAssignedJobs: logisticsWithdrawalNoon.assigned.created,
+    logisticsWithdrawalNoonSupervisorJobs: logisticsWithdrawalNoon.supervisor.created,
+    logisticsWithdrawalNoonTeamJobs: logisticsWithdrawalNoon.team.created,
     tomorrowShiftCancelled: tomorrowShift.cancelled,
     tomorrowDutyCancelled: tomorrowDuty.cancelled,
     tomorrowLogisticsWithdrawalCancelled: tomorrowLogisticsWithdrawal.cancelled,
+    tomorrowLogisticsWithdrawalSupervisorCancelled: tomorrowLogisticsWithdrawalSupervisor.cancelled,
+    logisticsWithdrawalNoonAssignedCancelled: logisticsWithdrawalNoon.assigned.cancelled,
+    logisticsWithdrawalNoonSupervisorCancelled: logisticsWithdrawalNoon.supervisor.cancelled,
+    logisticsWithdrawalNoonTeamCancelled: logisticsWithdrawalNoon.team.cancelled,
     constraintsJobs,
   };
 }
@@ -193,7 +223,10 @@ async function runTomorrowLogisticsWithdrawalReminders(
       category: "tomorrow_logistics_withdrawal",
       recipientUserId: recipient.userId,
       title: "📦 משיכות מהלוגיסטיקה מחר",
-      body: "מחר אתה משובץ למשיכות מהלוגיסטיקה.",
+      // Names the operational window explicitly (13:00–14:00) rather than
+      // the former generic "אתה משובץ" -- part of this feature's team-
+      // coordination expansion (see `logisticsCoordination.ts`).
+      body: "מחר אתה עושה משיכות בין 13:00–14:00.",
       // No dedicated page represents this assignment -- but it already
       // surfaces generically on the dashboard's todayEvents/upcomingEvents
       // (buildPersonalScheduleReadModel includes every category, unfiltered),
@@ -210,19 +243,245 @@ async function runTomorrowLogisticsWithdrawalReminders(
   return applyReminderJobs("tomorrow_logistics_withdrawal", tomorrowDate, validJobs, input.persist);
 }
 
+// ---------------------------------------------------------------------------
+// Tomorrow logistics-withdrawal SUPERVISOR reminder (day-before, 20:00) --
+// team-coordination expansion on top of the assigned-person reminder above.
+// ---------------------------------------------------------------------------
+
 /**
- * Shared upsert-or-cancel application for every tomorrow-reminder
- * category: every job whose content is still valid this tick is
- * upserted (creating it, or refreshing its content/recipient if the
- * underlying assignment changed before send -- spec sections 16-17);
- * every previously-created, still-pending job for the same date whose
- * dedupe_key is no longer among the valid set (the assignment
- * disappeared, or moved to a different recipient, whose dedupe_key
- * differs by construction) is cancelled.
+ * One consolidated 20:00 job per relevant אחמ"ש for TOMORROW's withdrawal
+ * window (`resolveRelevantSupervisors` -- structural, never
+ * `Person.isSupervisor` alone; empty when no supervisor can be proven, per
+ * spec "fail conservatively"). Content branches on whether anyone is
+ * currently assigned:
+ *
+ *  - assigned: informs the supervisor who it is (spec Case A.2) -- works on
+ *    ANY weekday (an explicit "משיכות" Event is always an intentional
+ *    withdrawal, Monday or not) -- excludes any assignee who is ALSO a
+ *    resolved supervisor recipient (precedence: a person never gets told
+ *    about their own assignment twice under two different roles).
+ *  - unassigned: the anti-spam warning (spec Case B.1) -- ONLY when
+ *    tomorrow is genuinely a logistics-withdrawal date
+ *    (`isLogisticsWithdrawalFallbackDate` -- Monday; withdrawals are not
+ *    operationally expected any other day, so an unassigned Tuesday is not
+ *    a gap worth warning about). Even on a qualifying date, ONLY the
+ *    supervisor is warned the evening before; technicians are deliberately
+ *    never notified at this hour (spec: "the assignment may still be
+ *    fixed before noon").
+ *
+ * Same upsert-or-cancel-by-prefix model as every other tomorrow reminder,
+ * so a supervisor swap, a newly-proven assignment, or an assignment
+ * disappearing all resolve correctly on the next tick.
+ */
+async function runTomorrowLogisticsWithdrawalSupervisorReminders(
+  input: RemindersInput,
+): Promise<{ created: number; cancelled: number }> {
+  const tomorrowDate = nextCalendarDateString(input.now.date);
+  if (!tomorrowDate) return { created: 0, cancelled: 0 };
+
+  const scheduledFor = toIso(input.now.date, TOMORROW_LOGISTICS_WITHDRAWAL_REMINDER_TIME);
+  const assignees = findLogisticsWithdrawalAssignees(input.events, tomorrowDate);
+  const assignedPersonIds = new Set(assignees.map((assignee) => assignee.personId));
+  const isAssigned = assignees.length > 0;
+  const participatesTomorrow = isAssigned || isLogisticsWithdrawalFallbackDate(tomorrowDate);
+
+  const supervisors = participatesTomorrow
+    ? resolveRelevantSupervisors(input.events, tomorrowDate, input.shiftSchedule).filter(
+        (supervisor) => !assignedPersonIds.has(supervisor.personId),
+      )
+    : [];
+
+  const { title, body } = isAssigned
+    ? { title: "📦 משיכות מחר", body: buildSupervisorAssignedInformedBody(assignees.map((a) => a.personName)) }
+    : {
+        title: "⚠️ לא הוגדר טכנאי למשיכות",
+        body: "לא הוגדר טכנאי למשיכות מחר בין 13:00–14:00. נדרש לוודא שכל הטכנאים הזמינים יוצאים למשיכות.",
+      };
+
+  const validJobs: NewNotificationJob[] = [];
+  for (const supervisor of supervisors) {
+    const recipient = input.recipientResolution.resolved.get(supervisor.personId);
+    if (!recipient) continue;
+
+    validJobs.push({
+      category: "tomorrow_logistics_withdrawal_supervisor",
+      recipientUserId: recipient.userId,
+      title,
+      body,
+      path: "/",
+      tag: `tomorrow-logistics-withdrawal-supervisor-${tomorrowDate}-${recipient.userId}`,
+      dedupeKey: `tomorrow_logistics_withdrawal_supervisor:${tomorrowDate}:${recipient.userId}`,
+      scheduledFor,
+      sourceRef: `logistics_withdrawal_supervisor:${supervisor.personId}:${tomorrowDate}`,
+    });
+  }
+
+  return applyReminderJobs("tomorrow_logistics_withdrawal_supervisor", tomorrowDate, validJobs, input.persist);
+}
+
+// ---------------------------------------------------------------------------
+// Same-day noon (12:00) logistics-withdrawal team coordination:
+// assigned technician / supervisor fallback (only if still unassigned) /
+// eligible teammates -- all computed together since they share the SAME
+// underlying "who's assigned / who's the supervisor / who's eligible"
+// query for TODAY's date.
+// ---------------------------------------------------------------------------
+
+interface NoonReminderCategorySummary {
+  assigned: { created: number; cancelled: number };
+  supervisor: { created: number; cancelled: number };
+  team: { created: number; cancelled: number };
+}
+
+/**
+ * Recipient precedence, enforced by construction (spec: "A single user
+ * should not receive two pushes for the same logistics purpose/time
+ * merely because they hold multiple capability flags"):
+ *   1. assigned-person-specific copy (the assignee(s) themselves)
+ *   2. supervisor-specific fallback/warning copy (excludes anyone already
+ *      an assignee)
+ *   3. generic technician-team copy (excludes anyone already an assignee
+ *      OR already a supervisor recipient above)
+ */
+async function runLogisticsWithdrawalNoonReminders(input: RemindersInput): Promise<NoonReminderCategorySummary> {
+  const today = input.now.date;
+  const scheduledFor = toIso(today, LOGISTICS_WITHDRAWAL_NOON_REMINDER_TIME);
+
+  const assignees = findLogisticsWithdrawalAssignees(input.events, today);
+  const assignedPersonIds = new Set(assignees.map((assignee) => assignee.personId));
+  const isAssigned = assignees.length > 0;
+  // An explicit "משיכות" Event works on any weekday; the UNASSIGNED
+  // fallback (supervisor warning + all-hands teammate message) only ever
+  // exists on a genuine logistics-withdrawal date (Monday) -- see
+  // `isLogisticsWithdrawalFallbackDate`'s own docstring.
+  const participatesToday = isAssigned || isLogisticsWithdrawalFallbackDate(today);
+
+  const assignedJobs: NewNotificationJob[] = [];
+  for (const assignee of assignees) {
+    const recipient = input.recipientResolution.resolved.get(assignee.personId);
+    if (!recipient) continue;
+    assignedJobs.push({
+      category: "logistics_withdrawal_noon_assigned",
+      recipientUserId: recipient.userId,
+      title: "📦 משיכות בעוד שעה",
+      body: "היום אתה עושה משיכות בין 13:00–14:00.",
+      path: "/",
+      tag: `logistics-withdrawal-noon-assigned-${today}-${recipient.userId}`,
+      dedupeKey: `logistics_withdrawal_noon_assigned:${today}:${recipient.userId}`,
+      scheduledFor,
+      sourceRef: `logistics_withdrawal:${assignee.personId}:${today}`,
+    });
+  }
+  const assignedResult = await applyReminderJobs(
+    "logistics_withdrawal_noon_assigned",
+    today,
+    assignedJobs,
+    input.persist,
+  );
+
+  // Supervisor fallback: ONLY when still unassigned at this tick (spec
+  // Case A never lists a noon supervisor message; that's exclusively the
+  // Case B anti-spam warning) AND today is a genuine logistics-withdrawal
+  // date (`participatesToday`). No supervisor jobs at all once assigned,
+  // or on a non-Monday with nothing assigned -- any previously-upserted
+  // warning naturally becomes stale and is cancelled by
+  // `applyReminderJobs`'s own prefix sweep.
+  const supervisorCandidates = participatesToday
+    ? resolveRelevantSupervisors(input.events, today, input.shiftSchedule).filter(
+        (supervisor) => !assignedPersonIds.has(supervisor.personId),
+      )
+    : [];
+  const supervisorJobs: NewNotificationJob[] = [];
+  if (!isAssigned) {
+    for (const supervisor of supervisorCandidates) {
+      const recipient = input.recipientResolution.resolved.get(supervisor.personId);
+      if (!recipient) continue;
+      supervisorJobs.push({
+        category: "logistics_withdrawal_noon_supervisor",
+        recipientUserId: recipient.userId,
+        title: "⚠️ לא הוגדר טכנאי למשיכות",
+        body: "לא הוגדר טכנאי למשיכות היום בין 13:00–14:00. נדרש לוודא שכל הטכנאים הזמינים יוצאים למשיכות.",
+        path: "/",
+        tag: `logistics-withdrawal-noon-supervisor-${today}-${recipient.userId}`,
+        dedupeKey: `logistics_withdrawal_noon_supervisor:${today}:${recipient.userId}`,
+        scheduledFor,
+        sourceRef: `logistics_withdrawal_supervisor:${supervisor.personId}:${today}`,
+      });
+    }
+  }
+  const supervisorResult = await applyReminderJobs(
+    "logistics_withdrawal_noon_supervisor",
+    today,
+    supervisorJobs,
+    input.persist,
+  );
+
+  // Eligible teammates, excluding anyone already reached above (precedence).
+  // Same `participatesToday` gate as the supervisor fallback: on a
+  // non-Monday with nothing assigned, there is no team notification either
+  // (spec: "create zero logistics fallback jobs").
+  const supervisorRecipientPersonIds = new Set(supervisorCandidates.map((supervisor) => supervisor.personId));
+  const eligibleTechnicians: readonly Person[] = participatesToday
+    ? resolveEligibleLogisticsTechnicians(input.events, input.people, today, input.shiftSchedule).filter(
+        (person) => !assignedPersonIds.has(person.id) && !supervisorRecipientPersonIds.has(person.id),
+      )
+    : [];
+
+  const { title: teamTitle, body: teamBody } = isAssigned
+    ? { title: "🤝 משיכות היום", body: buildTeamHelpAssignedBody(assignees.map((a) => a.personName)) }
+    : {
+        title: "📦 משיכות היום",
+        body: "לא הוגדר טכנאי למשיכות היום. כל הטכנאים הזמינים נדרשים לצאת למשיכות בין 13:00–14:00.",
+      };
+
+  const teamJobs: NewNotificationJob[] = [];
+  for (const person of eligibleTechnicians) {
+    const recipient = input.recipientResolution.resolved.get(person.id);
+    if (!recipient) continue;
+    teamJobs.push({
+      category: "logistics_withdrawal_noon_team",
+      recipientUserId: recipient.userId,
+      title: teamTitle,
+      body: teamBody,
+      path: "/",
+      tag: `logistics-withdrawal-noon-team-${today}-${recipient.userId}`,
+      dedupeKey: `logistics_withdrawal_noon_team:${today}:${recipient.userId}`,
+      scheduledFor,
+      sourceRef: `logistics_withdrawal_team:${person.id}:${today}`,
+    });
+  }
+  const teamResult = await applyReminderJobs("logistics_withdrawal_noon_team", today, teamJobs, input.persist);
+
+  return { assigned: assignedResult, supervisor: supervisorResult, team: teamResult };
+}
+
+/** Every dedupe-key prefix any reminder category above ever uses -- kept as a union so `applyReminderJobs` can't be called with a typo'd/unrelated category string. */
+type ReminderCategory =
+  | "tomorrow_shift"
+  | "tomorrow_duty"
+  | "tomorrow_logistics_withdrawal"
+  | "tomorrow_logistics_withdrawal_supervisor"
+  | "logistics_withdrawal_noon_assigned"
+  | "logistics_withdrawal_noon_supervisor"
+  | "logistics_withdrawal_noon_team";
+
+/**
+ * Shared upsert-or-cancel application for every time-based reminder
+ * category (both the day-before-at-20:00 ones and the same-day-at-12:00
+ * logistics-coordination ones): every job whose content is still valid
+ * this tick is upserted (creating it, or refreshing its content/recipient
+ * if the underlying assignment changed before send -- spec sections
+ * 16-17); every previously-created, still-pending job for the same
+ * `dateKey` whose dedupe_key is no longer among the valid set (the
+ * assignment disappeared, moved to a different recipient, or the
+ * recipient set itself changed) is cancelled. `dateKey` is whichever
+ * calendar date the category's own dedupe-key scheme uses (tomorrow's
+ * date for the 20:00 categories, today's date for the noon ones) -- never
+ * assumed to be "tomorrow" specifically.
  */
 async function applyReminderJobs(
-  category: "tomorrow_shift" | "tomorrow_duty" | "tomorrow_logistics_withdrawal",
-  tomorrowDate: string,
+  category: ReminderCategory,
+  dateKey: string,
   validJobs: readonly NewNotificationJob[],
   persist: boolean,
 ): Promise<{ created: number; cancelled: number }> {
@@ -234,7 +493,7 @@ async function applyReminderJobs(
     await upsertPendingReminderJob(job);
   }
 
-  const prefix = `${category}:${tomorrowDate}:`;
+  const prefix = `${category}:${dateKey}:`;
   const existingKeys = await listPendingJobDedupeKeysByPrefix(prefix);
   const validKeys = new Set(validJobs.map((job) => job.dedupeKey));
   const staleKeys = existingKeys.filter((key) => !validKeys.has(key));

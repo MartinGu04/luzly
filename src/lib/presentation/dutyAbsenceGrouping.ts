@@ -30,7 +30,7 @@ const DUTY_FAMILY_ORDER: readonly DutyFamily[] = [
   "callup",
 ];
 
-const ABSENCE_KIND_ORDER: readonly AbsenceKind[] = ["vacation", "abroad", "medical", "day_off", "after"];
+const ABSENCE_KIND_ORDER: readonly AbsenceKind[] = ["vacation", "abroad", "medical", "day_off", "after", "referral"];
 
 /**
  * Groups manager duty rows by their typed `dutyFamily` (Design Pass PR #21

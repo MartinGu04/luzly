@@ -71,6 +71,7 @@ export async function runNotificationWorkerTick(mode: WorkerMode): Promise<Worke
   const remindersSummary = await runStage("reminders", () =>
     runReminders({
       events,
+      people,
       shiftSchedule,
       week,
       now,
@@ -102,6 +103,10 @@ export async function runNotificationWorkerTick(mode: WorkerMode): Promise<Worke
       remindersSummary.tomorrowShiftJobs +
       remindersSummary.tomorrowDutyJobs +
       remindersSummary.tomorrowLogisticsWithdrawalJobs +
+      remindersSummary.tomorrowLogisticsWithdrawalSupervisorJobs +
+      remindersSummary.logisticsWithdrawalNoonAssignedJobs +
+      remindersSummary.logisticsWithdrawalNoonSupervisorJobs +
+      remindersSummary.logisticsWithdrawalNoonTeamJobs +
       remindersSummary.constraintsJobs,
     jobsDue,
     recipientCount: recipientResolution.resolved.size,

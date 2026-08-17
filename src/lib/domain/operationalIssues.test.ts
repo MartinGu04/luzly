@@ -74,6 +74,7 @@ const ABSENCE_TEXT: Record<AbsenceKind, string> = {
   medical: "גימלים",
   day_off: "יום ד",
   after: "אפטר",
+  referral: "הפנייה",
 };
 
 function absenceEvent(kind: AbsenceKind, overrides: Partial<Event> = {}): Event {

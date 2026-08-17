@@ -31,6 +31,14 @@ implements; this file is the module map.
   `category: "other"` with the text preserved verbatim, and that's what
   a "משיכות" cell produces today. This module is a keyword filter over
   that existing output, nothing more -- see its own docstring.
+- `logisticsCoordination.ts` (pure) -- team-coordination logic ON TOP of
+  the detection above: who is the relevant אחמ"ש for the 13:00–14:00
+  withdrawal window (structural, via `resolveEventShiftInterval` +
+  `clipInterval` over Schedule Events -- never `Person.isSupervisor`
+  alone), which technicians are eligible to help (present for the window,
+  `isTechnician`, no same-date absence, no אילוץ יום), and the
+  singular/plural Hebrew copy for a multi-assignee date. Never reads
+  Potential H1/H2; never a second shift-time engine.
 
 ## Server-only orchestration
 
@@ -55,7 +63,19 @@ implements; this file is the module map.
   assignment cancels the old recipient's job and creates the new
   recipient's, since dedupe_key includes the resolved user id) and
   weekly constraints reminders (all push-enabled users, Sunday/Monday
-  only).
+  only). Also the logistics-withdrawal team-coordination reminders built
+  on `logisticsCoordination.ts`: a day-before (20:00) supervisor
+  notification (informed of the assignee, or an anti-spam-only warning
+  if still unassigned -- never a technician-wide push that evening), and
+  a same-day (12:00) trio -- the assigned technician's personal reminder,
+  a supervisor warning ONLY if still unassigned, and a consolidated
+  teammate notification (excludes the assignee and any supervisor
+  recipient, per the "one push per purpose" precedence rule). Every one
+  of these categories reuses the SAME upsert-or-cancel-by-prefix model as
+  the shift/duty reminders -- every tick recomputes fresh from the
+  current Schedule truth, so a reassignment, a newly-proven/lost
+  supervisor, or a technician's eligibility change all resolve correctly
+  before the job is ever delivered.
 - `delivery.ts` -- claims due outbox jobs, fans out to every active
   subscription per recipient, reuses PR #29's `sendPush` classification
   (permanent 404/410 -> delete subscription; transient -> never delete,
