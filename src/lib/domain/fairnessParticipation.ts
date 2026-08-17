@@ -21,17 +21,22 @@ import type { Person } from "./types";
  * chronologically) -- no `Date`/UTC, matching every other file in this
  * directory.
  *
- * Deliberately reuses -- never re-derives -- the existing evidenced rules
- * this codebase already established for the closest existing concept
+ * Reuses -- never re-derives -- the closest existing prior art
  * (`shiftCoverageRecommendation.ts`'s PR #37/#39 "participates in role R's
- * rotation" check): `classifyPersonnelType`'s permanent/regular/reserve/
- * unclassified categories, and `ReserveRoleParticipation`'s Fairness-table
- * evidence. This is intentionally a SEPARATE primitive, not a call into
+ * rotation" check) for its genuinely shared building blocks:
+ * `classifyPersonnelType`'s permanent/regular/reserve/unclassified
+ * categories, and `ReserveRoleParticipation`'s Fairness-table evidence.
+ * This is intentionally a SEPARATE primitive, not a call into
  * `shiftCoverageRecommendation.ts` itself -- that module's rules are scoped
  * to one operational issue's date+missing-interval, evaluating shift/
  * absence/constraint OVERLAP against a specific gap; Fairness reasons over
  * a whole PERIOD instead, evaluating overall participation and per-day
  * shift-slot opportunity independently of any specific coverage problem.
+ * `resolveFairnessRoleEligibility`'s permanent-service handling
+ * deliberately DIVERGES from `participatesInRoleRotation` (see its own
+ * docstring below) -- that source's "permanent is never eligible" turned
+ * out to be a policy specific to that OTHER feature's candidate pool, not
+ * a domain-wide fact, so it is not reused here.
  */
 
 // ---------------------------------------------------------------------------
@@ -53,14 +58,19 @@ export type FairnessParticipationBasis = "full_period" | "inferred_from_events" 
  * listing never questions whether a קבע/חובה person is "still active"),
  * not a verified fact -- a permanent/regular person who joined or left
  * mid-period is NOT distinguishable from one present the whole period with
- * today's data. `"inferred_from_events"` (reserve/unclassified personnel)
- * is a heuristic lower bound/upper bound from actual Event evidence in the
- * period, not an authoritative window either -- a reservist can easily have
- * gaps in their own recorded Events within their real service window (no
- * shift that particular day is normal, not evidence of having left) -- so
- * this window is always a CONSERVATIVE evidence range, never asserted as
- * the person's literal first/last day of service. Both limitations are
- * reflected honestly via `dataCompleteness`, never hidden.
+ * today's data. Because it's an assumption, NOT a verified fact,
+ * `dataCompleteness` is `"partial"` for `"full_period"` too (see
+ * `"participation_assumed_full_period"`) -- assumed participation must
+ * never be presented with the same confidence as a verified one.
+ * `"inferred_from_events"` (reserve/unclassified personnel) is a heuristic
+ * lower bound/upper bound from actual Event evidence in the period, not an
+ * authoritative window either -- a reservist can easily have gaps in their
+ * own recorded Events within their real service window (no shift that
+ * particular day is normal, not evidence of having left) -- so this window
+ * is always a CONSERVATIVE evidence range, never asserted as the person's
+ * literal first/last day of service. Every limitation here is reflected
+ * honestly via `dataCompleteness`, never hidden -- `"complete"` is reserved
+ * for facts this function can actually verify, which today is none of them.
  */
 export interface FairnessParticipationWindow {
   personId: string;
@@ -80,8 +90,9 @@ export interface FairnessParticipationWindow {
  * `shiftCoverageRecommendation.ts`'s own internal `candidateEvents` filter).
  *
  * - permanent/regular (`classifyPersonnelType`) -> `"full_period"`, the
- *   whole period, `dataCompleteness` complete (this app's existing default
- *   assumption for these two categories, not new to this function).
+ *   whole period -- this app's existing default ASSUMPTION for these two
+ *   categories (not new to this function), so `dataCompleteness` is
+ *   `"partial"` (`"participation_assumed_full_period"`), never `"complete"`.
  * - reserve/unclassified -> bounded ONLY by actual Event evidence
  *   (any category -- a shift, duty, absence, or constraint Event all
  *   equally prove "this person was in the system that day") within the
@@ -103,7 +114,7 @@ export function resolveFairnessParticipationWindow(
       activeStartDate: periodStartDate,
       activeEndDate: periodEndDate,
       basis: "full_period",
-      dataCompleteness: COMPLETE_FAIRNESS_DATA,
+      dataCompleteness: fairnessDataCompleteness(["participation_assumed_full_period"]),
     };
   }
 
@@ -146,10 +157,9 @@ export type FairnessEligibilityRole = "supervisor" | "technician";
 
 export type FairnessRoleEligibilityBasis =
   | "not_capable"
-  | "permanent_excluded"
   | "regular_included"
-  | "reserve_evidence"
-  | "reserve_no_evidence"
+  | "evidence_confirmed"
+  | "evidence_not_found"
   | "unclassified_excluded";
 
 /**
@@ -170,17 +180,41 @@ export interface FairnessRoleEligibility {
 }
 
 /**
- * Whether `person` is eligible for role R's rotation this period --
- * mirrors `shiftCoverageRecommendation.ts`'s PR #39 `participatesInRoleRotation`
- * rule exactly (a deliberate, evidenced business rule, not incidental to
- * that feature): no capability flag -> never; permanent-service -> never,
- * regardless of capability; regular-service -> always, once capable; reserve
- * -> capability alone is NOT enough, needs the period's own Fairness-table
- * evidence (`reserveParticipation`, from `deriveReserveRoleParticipation` /
- * `resolveReserveRoleParticipation`) OR at least one CONFIRMED same-role
- * shift Event within the period; unclassified -> never (never guessed from
- * silence). `reserveParticipation` defaults to empty -- the safe direction,
- * only ever making a reservist LESS likely to qualify, never more.
+ * Whether `person` is eligible for role R's rotation this period.
+ *
+ * RECONSIDERED (follow-up to this PR): the initial version of this function
+ * mirrored `shiftCoverageRecommendation.ts`'s PR #39
+ * `participatesInRoleRotation` rule verbatim, including "permanent-service
+ * (קבע) is never eligible, regardless of capability or evidence". Re-checking
+ * that rule against the actual domain data found NO evidence it is a
+ * domain-wide fact -- nothing in `lib/parsers/event.ts`/
+ * `lib/domain/operationalIssues.ts` prevents a קבע person from holding a
+ * real, confirmed shift Event, and `detectCapabilityMismatchIssues` checks
+ * capability against the Event's role for EVERY person, permanent included.
+ * The exclusion is scoped to that OTHER feature's own candidate pool (who
+ * should be proactively paged to fill a last-minute gap) -- a prospective,
+ * feature-specific policy choice, not proof that permanent personnel never
+ * actually work shifts. Fairness asks a different, retrospective question
+ * ("did this person actually do this work"), so encoding that unrelated
+ * policy here would be wrong: a permanent person who genuinely appears in
+ * the period's own evidence is a real participant and must be counted.
+ *
+ * The rule actually applied: no capability flag -> never (`"not_capable"`).
+ * regular-service -> always, once capable (`"regular_included"`) -- the
+ * default shift pool, unaffected by this reconsideration. permanent-service
+ * AND reserve-service -> capability alone is NOT enough for either; both
+ * need the period's own Fairness-table evidence (`reserveParticipation`,
+ * from `deriveReserveRoleParticipation`/`resolveReserveRoleParticipation` --
+ * despite its `Reserve*` naming, the SET itself is derived from the
+ * Fairness sheet's allocation rows with no personnelType filtering, so
+ * reusing it for permanent personnel is a correct, not incidental, reuse)
+ * OR at least one CONFIRMED same-role shift Event within the period
+ * (`"evidence_confirmed"` either way, `"evidence_not_found"` when neither
+ * exists). unclassified -> never (`"unclassified_excluded"`, never guessed
+ * from silence -- untouched by this reconsideration, since an unclassified
+ * person's category itself is unknown, not merely unevidenced).
+ * `reserveParticipation` defaults to empty -- the safe direction, only ever
+ * making a permanent/reserve person LESS likely to qualify, never more.
  */
 export function resolveFairnessRoleEligibility(
   person: Person,
@@ -199,20 +233,17 @@ export function resolveFairnessRoleEligibility(
 
   const category = classifyPersonnelType(person.personnelType);
 
-  if (category === "permanent") {
-    return { personId: person.id, role, eligible: false, basis: "permanent_excluded", dataCompleteness };
-  }
   if (category === "regular") {
     return { personId: person.id, role, eligible: true, basis: "regular_included", dataCompleteness };
   }
-  if (category !== "reserve") {
+  if (category !== "permanent" && category !== "reserve") {
     return { personId: person.id, role, eligible: false, basis: "unclassified_excluded", dataCompleteness };
   }
 
   const fairnessEvidence =
     role === "technician" ? reserveParticipation.technicianPersonIds : reserveParticipation.supervisorPersonIds;
   if (fairnessEvidence.has(person.id)) {
-    return { personId: person.id, role, eligible: true, basis: "reserve_evidence", dataCompleteness };
+    return { personId: person.id, role, eligible: true, basis: "evidence_confirmed", dataCompleteness };
   }
 
   const hasConfirmedSameRoleShiftInPeriod = events.some(
@@ -229,7 +260,7 @@ export function resolveFairnessRoleEligibility(
     personId: person.id,
     role,
     eligible: hasConfirmedSameRoleShiftInPeriod,
-    basis: hasConfirmedSameRoleShiftInPeriod ? "reserve_evidence" : "reserve_no_evidence",
+    basis: hasConfirmedSameRoleShiftInPeriod ? "evidence_confirmed" : "evidence_not_found",
     dataCompleteness,
   };
 }

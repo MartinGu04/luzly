@@ -91,7 +91,7 @@ function participationEvidence(overrides: { technicianIds?: string[]; supervisor
 // ---------------------------------------------------------------------------
 
 describe("resolveFairnessParticipationWindow", () => {
-  it("full-period participant: permanent (קבע) -> full_period, whole period, complete data", () => {
+  it("full-period participant: permanent (קבע) -> full_period, whole period, but only ASSUMED, never complete", () => {
     const p = person({ id: "p_1", personnelType: "קבע" });
     const window = resolveFairnessParticipationWindow(p, [], PERIOD_START, PERIOD_END);
     expect(window).toEqual({
@@ -101,15 +101,15 @@ describe("resolveFairnessParticipationWindow", () => {
       activeStartDate: PERIOD_START,
       activeEndDate: PERIOD_END,
       basis: "full_period",
-      dataCompleteness: { status: "complete", reasons: [] },
+      dataCompleteness: { status: "partial", reasons: ["participation_assumed_full_period"] },
     });
   });
 
-  it("full-period participant: regular (חובה) -> full_period too, regardless of any Events", () => {
+  it("full-period participant: regular (חובה) -> full_period too, regardless of any Events, still only assumed", () => {
     const p = person({ id: "p_2", personnelType: "חובה" });
     const window = resolveFairnessParticipationWindow(p, [], PERIOD_START, PERIOD_END);
     expect(window.basis).toBe("full_period");
-    expect(window.dataCompleteness.status).toBe("complete");
+    expect(window.dataCompleteness).toEqual({ status: "partial", reasons: ["participation_assumed_full_period"] });
   });
 
   it("reservist with a bounded service window: inferred from Event evidence, never asserted as the full period", () => {
@@ -180,11 +180,27 @@ describe("resolveFairnessRoleEligibility", () => {
     });
   });
 
-  it("permanent (קבע) is excluded from rotation eligibility even when capable", () => {
+  it("permanent (קבע) with no evidence at all does not qualify -- capability alone is never enough (same evidence gate as reserve)", () => {
     const p = person({ id: "p_perm", personnelType: "קבע", isTechnician: true });
     const result = resolveFairnessRoleEligibility(p, "technician", [], PERIOD_START, PERIOD_END);
     expect(result.eligible).toBe(false);
-    expect(result.basis).toBe("permanent_excluded");
+    expect(result.basis).toBe("evidence_not_found");
+  });
+
+  it("permanent (קבע) WITH a confirmed same-role shift in the period IS eligible -- actual participation is never excluded merely for personnelType (reconsidered: the old shiftCoverageRecommendation-style blanket exclusion was scoped to that feature's candidate pool, not a domain-wide fact)", () => {
+    const p = person({ id: "p_perm2", personnelType: "קבע", isSupervisor: true });
+    const events: Event[] = [shiftEvent({ personId: p.id, date: "2026-08-14", role: "supervisor" })];
+    const result = resolveFairnessRoleEligibility(p, "supervisor", events, PERIOD_START, PERIOD_END);
+    expect(result.eligible).toBe(true);
+    expect(result.basis).toBe("evidence_confirmed");
+  });
+
+  it("permanent (קבע) qualifies via the period's own Fairness-table evidence too, same as reserve", () => {
+    const p = person({ id: "p_perm3", personnelType: "קבע", isTechnician: true });
+    const evidence = participationEvidence({ technicianIds: [p.id] });
+    const result = resolveFairnessRoleEligibility(p, "technician", [], PERIOD_START, PERIOD_END, evidence);
+    expect(result.eligible).toBe(true);
+    expect(result.basis).toBe("evidence_confirmed");
   });
 
   it("regular (חובה) is eligible whenever capable, no further evidence required", () => {
@@ -206,7 +222,7 @@ describe("resolveFairnessRoleEligibility", () => {
     const evidence = participationEvidence({ technicianIds: [p.id] });
     const result = resolveFairnessRoleEligibility(p, "technician", [], PERIOD_START, PERIOD_END, evidence);
     expect(result.eligible).toBe(true);
-    expect(result.basis).toBe("reserve_evidence");
+    expect(result.basis).toBe("evidence_confirmed");
   });
 
   it("reservist qualifies via a confirmed same-role shift within the period, absent Fairness evidence", () => {
@@ -221,14 +237,14 @@ describe("resolveFairnessRoleEligibility", () => {
       EMPTY_RESERVE_ROLE_PARTICIPATION,
     );
     expect(result.eligible).toBe(true);
-    expect(result.basis).toBe("reserve_evidence");
+    expect(result.basis).toBe("evidence_confirmed");
   });
 
   it("reservist with no evidence at all does not qualify -- capability alone is never enough", () => {
     const p = person({ id: "p_res3", personnelType: "מילואים", isTechnician: true });
     const result = resolveFairnessRoleEligibility(p, "technician", [], PERIOD_START, PERIOD_END);
     expect(result.eligible).toBe(false);
-    expect(result.basis).toBe("reserve_no_evidence");
+    expect(result.basis).toBe("evidence_not_found");
   });
 
   it("a tentative same-role shift is never treated as confirmed evidence", () => {

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildFairnessComparisonGroups, buildFairnessPersonContext } from "./fairnessGroups";
+import {
+  buildFairnessComparisonGroups,
+  buildFairnessPersonContext,
+  resolveFairnessComparisonGroupKey,
+} from "./fairnessGroups";
 import type { Person } from "./types";
 
 const PERIOD_START = "2026-08-01";
@@ -18,19 +22,46 @@ function person(overrides: Partial<Person> = {}): Person {
   };
 }
 
+describe("resolveFairnessComparisonGroupKey", () => {
+  it("supervisor capability -> supervisor", () => {
+    expect(resolveFairnessComparisonGroupKey(person({ isSupervisor: true }))).toBe("supervisor");
+  });
+
+  it("technician capability -> technician", () => {
+    expect(resolveFairnessComparisonGroupKey(person({ isTechnician: true }))).toBe("technician");
+  });
+
+  it("neither capability -> null, never a fabricated 'other' group", () => {
+    expect(resolveFairnessComparisonGroupKey(person())).toBeNull();
+  });
+});
+
 describe("buildFairnessComparisonGroups", () => {
   it("groups by actual rotation capability, never by personnelType/title", () => {
     const supervisor = person({ id: "p_sup", isSupervisor: true });
     const technician = person({ id: "p_tech", isTechnician: true });
-    const other = person({ id: "p_other" });
 
-    const groups = buildFairnessComparisonGroups([supervisor, technician, other]);
+    const groups = buildFairnessComparisonGroups([supervisor, technician]);
 
     expect(groups).toEqual([
       { key: "supervisor", personIds: ["p_sup"] },
       { key: "technician", personIds: ["p_tech"] },
-      { key: "other", personIds: ["p_other"] },
     ]);
+  });
+
+  it("a person who is neither supervisor- nor technician-capable is omitted entirely -- never forced into a catch-all 'other' group", () => {
+    const supervisor = person({ id: "p_sup", isSupervisor: true });
+    const neither = person({ id: "p_neither" });
+
+    const groups = buildFairnessComparisonGroups([supervisor, neither]);
+
+    expect(groups).toEqual([{ key: "supervisor", personIds: ["p_sup"] }]);
+    expect(groups.some((group) => group.personIds.includes("p_neither"))).toBe(false);
+  });
+
+  it("everyone lacking a capability -> no groups at all, never an empty-but-present 'other' bucket", () => {
+    const groups = buildFairnessComparisonGroups([person({ id: "p_a" }), person({ id: "p_b" })]);
+    expect(groups).toEqual([]);
   });
 
   it("an empty group is omitted, never rendered as an empty bucket", () => {
@@ -74,17 +105,28 @@ describe("buildFairnessPersonContext", () => {
     expect(context.eligibility).toHaveLength(2);
     expect(context.eligibility.find((entry) => entry.role === "supervisor")?.eligible).toBe(true);
     expect(context.eligibility.find((entry) => entry.role === "technician")?.eligible).toBe(false);
-    // eligibility is always partial ("eligibility_undated") -- so the combined result is too, even though participation was complete.
+    // Both participation (assumed full_period) and eligibility (undated) are only partially known today, so the combined result is partial too.
     expect(context.dataCompleteness.status).toBe("partial");
-    expect(context.dataCompleteness.reasons).toContain("eligibility_undated");
+    expect(context.dataCompleteness.reasons).toEqual(
+      expect.arrayContaining(["participation_assumed_full_period", "eligibility_undated"]),
+    );
+    // A capable, grouped person contributes no "fairness_group_unassigned" reason.
+    expect(context.dataCompleteness.reasons).not.toContain("fairness_group_unassigned");
   });
 
   it("carries participation's own incompleteness reason through to the combined result", () => {
-    const p = person({ id: "p_res", personnelType: "מילואים" });
+    const p = person({ id: "p_res", isSupervisor: true, personnelType: "מילואים" });
     const context = buildFairnessPersonContext(p, [], PERIOD_START, PERIOD_END);
     expect(context.participation.basis).toBe("unknown");
     expect(context.dataCompleteness.reasons).toEqual(
       expect.arrayContaining(["participation_unknown", "eligibility_undated"]),
     );
+  });
+
+  it("a person in no meaningful comparison group gets group: null and a 'fairness_group_unassigned' completeness reason", () => {
+    const p = person({ id: "p_neither", personnelType: "חובה" });
+    const context = buildFairnessPersonContext(p, [], PERIOD_START, PERIOD_END);
+    expect(context.group).toBeNull();
+    expect(context.dataCompleteness.reasons).toContain("fairness_group_unassigned");
   });
 });

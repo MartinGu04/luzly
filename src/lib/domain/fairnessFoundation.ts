@@ -46,6 +46,13 @@ export function resolveFairnessPeriodStatus(periodEndDate: string, now: LocalNow
  * a REAL, currently-verified gap in the source data -- never a placeholder
  * for a hypothetical one:
  *
+ * - `participation_assumed_full_period` -- a participation window came from
+ *   `full_period`, itself only an ASSUMPTION for permanent/regular
+ *   personnel (this app's existing default treatment of them elsewhere,
+ *   e.g. `lib/presentation/roster.ts`'s roster listing), never a verified
+ *   stored join/leave date -- none exists today for anyone, of any
+ *   personnel type. Assumed participation must never be presented with the
+ *   same confidence as verified participation.
  * - `participation_inferred` -- a participation window came from
  *   `inferred_from_events` (first/last Event evidence within the period),
  *   never an authoritative stored join/leave date (none exists today).
@@ -60,12 +67,17 @@ export function resolveFairnessPeriodStatus(periodEndDate: string, now: LocalNow
  *   `resolveFairnessShiftOpportunity`) -- its effect on availability is
  *   real but not represented here, never silently dropped OR silently
  *   treated as blocking.
+ * - `fairness_group_unassigned` -- a person is neither supervisor- nor
+ *   technician-capable, so no comparison group they belong to has been
+ *   PROVEN comparable by today's data -- see `fairnessGroups.ts`.
  */
 export type FairnessDataCompletenessReason =
+  | "participation_assumed_full_period"
   | "participation_inferred"
   | "participation_unknown"
   | "eligibility_undated"
-  | "constraint_period_unmodeled";
+  | "constraint_period_unmodeled"
+  | "fairness_group_unassigned";
 
 export interface FairnessDataCompleteness {
   status: "complete" | "partial";

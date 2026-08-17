@@ -1,21 +1,25 @@
 import type { Event } from "./event";
-import { combineFairnessDataCompleteness, type FairnessDataCompleteness } from "./fairnessFoundation";
+import {
+  combineFairnessDataCompleteness,
+  COMPLETE_FAIRNESS_DATA,
+  fairnessDataCompleteness,
+  type FairnessDataCompleteness,
+} from "./fairnessFoundation";
 import {
   resolveFairnessParticipationWindow,
   resolveFairnessRoleEligibility,
   type FairnessParticipationWindow,
   type FairnessRoleEligibility,
 } from "./fairnessParticipation";
-import { classifyRoleGroup, type FairnessRoleGroupKey } from "./personnelType";
+import { classifyRoleGroup } from "./personnelType";
 import { EMPTY_RESERVE_ROLE_PARTICIPATION, type ReserveRoleParticipation } from "./reserveParticipation";
 import type { Person } from "./types";
 
 /**
  * PR #48 -- Fairness COMPARISON groups: "people who can reasonably be
  * compared for the same workload", never blindly equated with official
- * organizational role/title. Grouping is driven ENTIRELY by
- * `classifyRoleGroup` (`isSupervisor`/`isTechnician` capability flags,
- * `lib/domain/personnelType.ts`) -- a person's actual rotation-participation
+ * organizational role/title. Grouping is driven ENTIRELY by capability
+ * (`isSupervisor`/`isTechnician`) -- a person's actual rotation-participation
  * capability -- never by `personnelType` (קבע/חובה/מילואים is a SERVICE
  * category, orthogonal to which rotation someone works) and never by a
  * free-text role label. This is a genuinely SEPARATE concept from the
@@ -33,20 +37,56 @@ import type { Person } from "./types";
  * a future role-metadata field), never a separate fairness group of their
  * own and never a reason to exclude someone from the group they actually
  * work in.
+ *
+ * RECONSIDERED (follow-up to this PR): the initial version reused
+ * `classifyRoleGroup`'s three-way `"supervisor" | "technician" | "other"`
+ * split (`lib/presentation/roster.ts`'s own roster-hierarchy grouping)
+ * directly for Fairness, which forced every non-supervisor/non-technician
+ * person into one shared `"other"` group -- a fabricated comparability
+ * claim: nothing in today's data shows an אחר-bucket person is doing
+ * comparable work to every OTHER אחר-bucket person (unlike supervisor/
+ * technician, which really is one shared rotation each). `"other"` stays
+ * exactly right for `roster.ts`'s presentation purpose (listing every
+ * roster member somewhere, capability aside) -- it is simply the wrong
+ * answer to "who can be fairly compared", so Fairness comparison groups
+ * now cover ONLY `"supervisor"`/`"technician"`; a person who fits neither
+ * gets `group: null` ("not assigned to a meaningful Fairness comparison
+ * group") instead of being folded into an invented catch-all. This is not
+ * a new grouping rule -- it reuses `classifyRoleGroup`'s own supervisor-
+ * over-technician precedence unchanged, it only stops treating that
+ * function's `"other"` result as if it meant "one more real group".
  */
+export type FairnessComparisonGroupKey = "supervisor" | "technician";
+
 export interface FairnessComparisonGroup {
-  key: FairnessRoleGroupKey;
+  key: FairnessComparisonGroupKey;
   /** Deterministic, insertion order (the input roster's own order) -- never re-sorted here. */
   personIds: readonly string[];
 }
 
-const GROUP_ORDER: readonly FairnessRoleGroupKey[] = ["supervisor", "technician", "other"];
+const GROUP_ORDER: readonly FairnessComparisonGroupKey[] = ["supervisor", "technician"];
 
-/** Groups `people` by `classifyRoleGroup` -- every person appears in exactly one group; an empty group is omitted, never rendered as an empty bucket. */
+/**
+ * `classifyRoleGroup`'s `"other"` result is translated to `null` here --
+ * never treated as a third Fairness comparison group (see this file's own
+ * top docstring for why).
+ */
+export function resolveFairnessComparisonGroupKey(person: Person): FairnessComparisonGroupKey | null {
+  const roleGroup = classifyRoleGroup(person);
+  return roleGroup === "other" ? null : roleGroup;
+}
+
+/**
+ * Groups `people` by `resolveFairnessComparisonGroupKey` -- a person with no
+ * meaningfully comparable group (`null`) is simply omitted from every
+ * group, never forced into a catch-all; an empty group is likewise omitted,
+ * never rendered as an empty bucket.
+ */
 export function buildFairnessComparisonGroups(people: readonly Person[]): FairnessComparisonGroup[] {
-  const byGroup = new Map<FairnessRoleGroupKey, string[]>();
+  const byGroup = new Map<FairnessComparisonGroupKey, string[]>();
   for (const person of people) {
-    const key = classifyRoleGroup(person);
+    const key = resolveFairnessComparisonGroupKey(person);
+    if (key === null) continue;
     const bucket = byGroup.get(key);
     if (bucket) bucket.push(person.id);
     else byGroup.set(key, [person.id]);
@@ -64,14 +104,16 @@ export function buildFairnessComparisonGroups(people: readonly Person[]): Fairne
 /**
  * One person's complete Fairness context for one period -- the "read-model
  * primitive" this foundation exists to provide: which comparison group they
- * belong to, their participation window, their per-role eligibility, and
- * one combined `dataCompleteness` covering every fact that went into it.
- * Deliberately carries NO score/workload number -- that's future shift/duty
- * scoring, explicitly out of scope for this PR.
+ * belong to (`null` when nothing today proves them meaningfully comparable
+ * to anyone -- see `resolveFairnessComparisonGroupKey`), their participation
+ * window, their per-role eligibility, and one combined `dataCompleteness`
+ * covering every fact that went into it (including `"fairness_group_unassigned"`
+ * when `group` is `null`). Deliberately carries NO score/workload number --
+ * that's future shift/duty scoring, explicitly out of scope for this PR.
  */
 export interface FairnessPersonContext {
   personId: string;
-  group: FairnessRoleGroupKey;
+  group: FairnessComparisonGroupKey | null;
   participation: FairnessParticipationWindow;
   /** Both roles are always resolved (`resolveFairnessRoleEligibility` itself decides `eligible: false` for a role the person has no capability for) -- never omitted, so a caller can always find "the" supervisor/technician entry without a lookup miss. */
   eligibility: readonly FairnessRoleEligibility[];
@@ -112,14 +154,17 @@ export function buildFairnessPersonContext(
     ),
   ];
 
+  const group = resolveFairnessComparisonGroupKey(person);
+
   return {
     personId: person.id,
-    group: classifyRoleGroup(person),
+    group,
     participation,
     eligibility,
     dataCompleteness: combineFairnessDataCompleteness([
       participation.dataCompleteness,
       ...eligibility.map((entry) => entry.dataCompleteness),
+      group === null ? fairnessDataCompleteness(["fairness_group_unassigned"]) : COMPLETE_FAIRNESS_DATA,
     ]),
   };
 }

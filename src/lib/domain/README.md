@@ -246,27 +246,46 @@ shift-fairness period without collision.
   reusing (never re-deriving) `classifyPersonnelType` and
   `ReserveRoleParticipation`:
   - `resolveFairnessParticipationWindow` — permanent/regular ->
-    `"full_period"` (this app's existing default assumption for these two
+    `"full_period"` (this app's existing default ASSUMPTION for these two
     categories, e.g. `lib/presentation/roster.ts`'s roster listing never
     questions whether a קבע/חובה person is "still active"); reserve/
     unclassified -> `"inferred_from_events"` (bounded by actual Event
-    evidence in the period) or `"unknown"` (zero evidence). VERIFIED GAP:
-    כ״א carries NO stored join/leave/service-window date for any person —
-    a regular/permanent person joining mid-period is therefore NOT
-    distinguishable from one present the whole period with today's data;
-    this is reflected honestly via `dataCompleteness`, never hidden, and
-    documented with an explicit test rather than invented as solved.
-  - `resolveFairnessRoleEligibility` — mirrors
+    evidence in the period) or `"unknown"` (zero evidence). `"full_period"`
+    is an ASSUMPTION, not a verified fact, so `dataCompleteness` is
+    `"partial"` (`"participation_assumed_full_period"`) for it too — never
+    `"complete"` (follow-up fix: the initial version wrongly treated the
+    assumption as verified). VERIFIED GAP: כ״א carries NO stored
+    join/leave/service-window date for any person — a regular/permanent
+    person joining mid-period is therefore NOT distinguishable from one
+    present the whole period with today's data; this is reflected honestly
+    via `dataCompleteness`, never hidden, and documented with an explicit
+    test rather than invented as solved. This is the ONE genuine data gap
+    this foundation cannot close without a future stored join/leave date —
+    carry it into PR2.
+  - `resolveFairnessRoleEligibility` — no capability -> never
+    (`"not_capable"`); regular -> always once capable (`"regular_included"`,
+    unaffected by the fix below); permanent AND reserve -> capability alone
+    is NOT enough for either, both need the period's own Fairness-table
+    evidence OR a confirmed same-role shift Event within the period
+    (`"evidence_confirmed"`/`"evidence_not_found"`); unclassified -> never
+    (`"unclassified_excluded"`). Follow-up fix: the initial version copied
     `shiftCoverageRecommendation.ts`'s PR #39 `participatesInRoleRotation`
-    rule exactly (a deliberate, evidenced business rule, not incidental to
-    that feature — reused here rather than re-derived): no capability ->
-    never; permanent -> never; regular -> always once capable; reserve ->
-    needs the period's own Fairness-table evidence OR a confirmed
-    same-role shift Event within the period; unclassified -> never.
-    `dataCompleteness` always carries `"eligibility_undated"` — VERIFIED
-    GAP: `isTechnician`/`isSupervisor` are a CURRENT snapshot only, with no
+    rule verbatim, including "permanent (קבע) is never eligible, regardless
+    of evidence". Re-checked against the actual domain data: nothing in
+    `lib/parsers/event.ts`/`operationalIssues.ts` prevents a permanent
+    person from holding a real, confirmed shift Event, and
+    `detectCapabilityMismatchIssues` checks capability against every
+    person's Event role without regard to personnelType — so that
+    exclusion was proven to be a policy specific to that OTHER feature's
+    candidate pool (who to proactively page for a last-minute gap), not a
+    domain-wide fact. Encoding it into Fairness would have wrongly
+    discounted real, evidenced participation. Permanent personnel are now
+    evidence-gated exactly like reservists instead. `dataCompleteness`
+    always carries `"eligibility_undated"` — VERIFIED GAP:
+    `isTechnician`/`isSupervisor` are a CURRENT snapshot only, with no
     effective-from date, so a qualification that became valid partway
-    through the period can never be time-sliced today.
+    through the period can never be time-sliced today — carry this into
+    PR2 as well.
   - `resolveFairnessShiftOpportunity` — shift-SLOT-level (not merely
     "available days") availability for one (date, period): a blocking
     absence (`BLOCKING_ABSENCE_KINDS`, reused from `operationalIssues.ts`)
@@ -276,19 +295,32 @@ shift-fairness period without collision.
     available — it returns `"unmodeled_constraint"` with `dataCompleteness`
     marked partial instead.
 - `fairnessGroups.ts` — comparison groups: "people who can reasonably be
-  compared for the same workload", from `classifyRoleGroup` alone — never
-  blindly equated with `personnelType`/a free-text role label. A SEPARATE
-  concept from the existing duty-fairness grouping
-  (`lib/presentation/managerFairnessGrouping.ts`'s
+  compared for the same workload". A SEPARATE concept from the existing
+  duty-fairness grouping (`lib/presentation/managerFairnessGrouping.ts`'s
   `resolveFairnessAllocationRole`, which classifies the Potential sheet's
   own "הקצאה" text and is left untouched) — a reservist אחמ״ש, or a person
   whose organizational title is ר״צ but who actually works the אחמ״ש
   rotation (`isSupervisor === true`), lands in the SAME `"supervisor"`
   group as every other אחמ״ש; `מילואים`/`ר״צ` stay contextual metadata,
-  never a separate fairness group. `buildFairnessPersonContext` composes
-  one person's group + participation window + per-role eligibility + one
-  combined `dataCompleteness` — the "read-model primitive" this foundation
-  exists to provide, deliberately carrying no score/workload number (future
+  never a separate fairness group. Follow-up fix: the initial version
+  reused `personnelType.ts`'s `classifyRoleGroup` (still
+  `"supervisor" | "technician" | "other"`, unchanged, and still what
+  `lib/presentation/roster.ts`'s roster hierarchy uses) DIRECTLY for
+  Fairness, which forced every non-supervisor/non-technician person into
+  one shared `"other"` comparison group — a fabricated comparability claim
+  nothing in today's data supports (unlike supervisor/technician, which
+  really is one shared rotation each). `resolveFairnessComparisonGroupKey`
+  now translates `classifyRoleGroup`'s `"other"` into `null` instead —
+  `FairnessComparisonGroup`/`buildFairnessComparisonGroups` cover ONLY
+  `"supervisor"`/`"technician"`, and a person who fits neither is simply
+  omitted from every group rather than bucketed into an invented one; this
+  reuses `classifyRoleGroup`'s existing supervisor-over-technician
+  precedence unchanged, it does not invent a new grouping rule.
+  `buildFairnessPersonContext` composes one person's group (`null` when
+  unassigned) + participation window + per-role eligibility + one combined
+  `dataCompleteness` (carrying `"fairness_group_unassigned"` when `group`
+  is `null`) — the "read-model primitive" this foundation exists to
+  provide, deliberately carrying no score/workload number (future
   shift/duty scoring is explicitly out of scope for this PR).
 
 No read-model/page/caching layer is added yet — every primitive above is
