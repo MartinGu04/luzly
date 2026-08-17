@@ -193,25 +193,43 @@ function countActualShiftsForDate(personEvents: readonly Event[], date: string, 
 /**
  * Whether `person` belongs to comparison group `role` for the PURPOSE OF
  * THIS ENGINE -- a strictly WIDER test than `resolveFairnessComparisonGroupKey`
- * alone (follow-up fix). A person's CURRENT `isSupervisor`/`isTechnician`
- * flags decide group membership everywhere else in the foundation, but
- * capability is undated (see `"eligibility_undated"`) -- if it changes
- * (someone stops being flagged a technician, is reclassified, etc.), a
- * REAL confirmed shift they actually worked as that role, this period,
- * must never simply disappear because the flag no longer matches. Without
- * this widening, `computeShiftFairnessForGroup`'s own `people.filter(...)`
- * would silently drop that person's row entirely -- their evidenced work
- * wouldn't just be excluded from opportunity accounting, it would never
- * be visible ANYWHERE in this role's results.
+ * alone (follow-up fix). `role` being this person's PRIMARY comparison
+ * group (supervisor-over-technician precedence, same as everywhere else in
+ * the foundation) always qualifies. Two DIFFERENT situations both fall
+ * through to the evidence check below instead:
  *
- * A person included ONLY via this evidence path (current capability for
- * `role` is false) still goes through `resolveFairnessRoleEligibility`
- * normally in `computePersonShiftFacts` -- which requires the CURRENT
- * capability flag first -- so they correctly receive zero opportunities
- * (nothing here grants them a forward-looking share they're not currently
- * flagged capable of); only their real `actualShifts` count is preserved.
- * That is a deliberate, narrow fix for VISIBILITY of real evidence, not a
- * reopening of the eligibility rule itself.
+ * - Capability for `role` is undated (see `"eligibility_undated"`) -- if it
+ *   changes (someone stops being flagged a technician, is reclassified,
+ *   etc.), a REAL confirmed shift they actually worked as that role, this
+ *   period, must never simply disappear because the flag no longer
+ *   matches.
+ * - A dual-capable person (`isSupervisor && isTechnician`) whose PRIMARY
+ *   rotation is the OTHER role (clarified business rule: supervisor is the
+ *   normal rotation for a dual-capable person; a supervisor working an
+ *   occasional technician shift is exceptional/emergency, not proof they
+ *   belong to the normal technician rotation) -- their real technician
+ *   shift must still be visible in the technician group's own results,
+ *   even though it's not evidence of normal technician-rotation
+ *   membership.
+ *
+ * Without this widening, `computeShiftFairnessForGroup`'s own
+ * `people.filter(...)` would silently drop that person's row entirely in
+ * either case -- their evidenced work wouldn't just be excluded from
+ * opportunity accounting, it would never be visible ANYWHERE in this
+ * role's results.
+ *
+ * A person included ONLY via this evidence path -- whether because their
+ * CURRENT capability for `role` is false, or because `role` is merely
+ * their non-primary (secondary) capability -- correctly receives ZERO
+ * opportunities in `computePersonShiftFacts` (which gates the opportunity
+ * loop on "`role` IS this person's primary group", not merely
+ * `resolveFairnessRoleEligibility`'s own capability check -- eligibility
+ * alone is deliberately role-symmetric, true for both of a dual-capable
+ * person's roles, so it cannot be the gate here); only their real
+ * `actualShifts` count is preserved. That is a deliberate, narrow fix for
+ * VISIBILITY of real evidence, not a reopening of the eligibility rule
+ * itself, and not a promotion of exceptional cross-role work into a normal
+ * rotation.
  */
 function isRoleComparisonMember(
   person: Person,
@@ -269,11 +287,27 @@ function computePersonShiftFacts(
   let opportunityCount = 0;
   let weekendOpportunityCount = 0;
 
-  // Not eligible for this role's rotation at all this period -> zero
-  // opportunities, full stop -- a person who cannot perform this role must
-  // never receive an opportunity share (this is intentionally checked BEFORE
-  // the per-slot loop, not per-slot, since eligibility is a whole-period fact).
-  if (eligibility?.eligible) {
+  // `role` must be this person's PRIMARY comparison group
+  // (`resolveFairnessComparisonGroupKey`, supervisor-over-technician
+  // precedence) to accrue any opportunity -- NOT merely eligible per
+  // `resolveFairnessRoleEligibility`'s own capability check. Those are
+  // different questions: eligibility asks "is this person capable of role
+  // R at all" (true for BOTH roles of a dual-capable person, by design --
+  // PR #48's eligibility is deliberately role-symmetric); this asks "is
+  // role R this person's NORMAL rotation" (true for exactly one role,
+  // supervisor for a dual-capable person). A dual-capable person's
+  // NON-primary role must never accrue real opportunities merely because
+  // their capability flag for it happens to be true -- that would treat an
+  // exceptional/emergency cross-role assignment as if it were their normal
+  // rotation. This gate is intentionally checked BEFORE the per-slot loop,
+  // not per-slot, since "which is this person's normal rotation" is a
+  // whole-period fact, exactly like eligibility itself.
+  const isPrimaryGroup = resolveFairnessComparisonGroupKey(person) === role;
+
+  // Not their primary rotation, or not eligible for it at all this period
+  // -> zero opportunities, full stop -- neither case earns a forward
+  // opportunity share.
+  if (isPrimaryGroup && eligibility?.eligible) {
     for (const date of sortedDates) {
       if (!withinParticipationWindow(date, context.participation)) continue;
       const eventsForDate = personEvents.filter((event) => event.date === date);
@@ -314,27 +348,39 @@ function computeShare(personOpportunities: number, totalOpportunities: number, t
  * `resolveFairnessComparisonGroupKey(person) === role` (from
  * `fairnessGroups.ts`, never a separate/duplicated group definition;
  * called "MODELABLE" members below) OR, per an earlier follow-up fix, a
- * person whose CURRENT capability no longer includes `role` but who has
- * real confirmed evidence of having worked it this period
- * (`isRoleComparisonMember`; called "evidence-only" members below) --
- * their evidenced work stays visible even though it can no longer earn
- * them a forward opportunity share (capability isn't historically dated).
+ * person for whom `role` is NOT their primary rotation -- either their
+ * CURRENT capability no longer includes `role` at all, or (clarified
+ * business rule) `role` is merely their SECONDARY capability (a
+ * dual-capable person's normal rotation is supervisor; an occasional
+ * technician shift is exceptional, not proof of normal technician-rotation
+ * membership) -- who nonetheless has real confirmed evidence of having
+ * worked it this period (`isRoleComparisonMember`; called "evidence-only"
+ * members below). Their evidenced work stays visible even though it can
+ * never earn them a forward opportunity share -- see
+ * `computePersonShiftFacts`'s own primary-group gate, which is what keeps
+ * `opportunityCount` at `0` for these members (never merely
+ * `resolveFairnessRoleEligibility`'s capability check alone, which is
+ * deliberately role-symmetric and would otherwise happily grant a
+ * dual-capable person full technician opportunities too).
  *
  * SECOND follow-up fix: an evidence-only member's real `actualShifts` is
  * NEVER folded into the totals the opportunity-share formula redistributes
  * onto other people's targets. Not being able to model their historical
  * opportunities (their current capability flag says they shouldn't have
- * any) is not license to silently hand their real workload to whichever
- * modelable members currently hold opportunities -- that would manufacture
- * an inflated target for people whose own availability never changed.
+ * any, or `role` is merely their secondary capability) is not license to
+ * silently hand their real workload to whichever modelable members
+ * currently hold opportunities -- that would manufacture an inflated
+ * target for people whose own availability never changed.
  * `totalActual`/`totalOpportunity` (general and weekend) are therefore
  * summed over MODELABLE members ONLY; an evidence-only member's own
- * `target`/`weekendTarget` is fixed at `0` (never computed from the share
- * formula, never inventing a historical eligibility this codebase doesn't
- * have) and flagged with `"shift_target_unmodelable_evidence_only"` --
- * distinct from the group-level `"shift_target_no_group_opportunities"`,
- * which now only ever reflects an anomaly within the MODELABLE pool
- * itself.
+ * `target`/`weekendTarget` (and `deviation`/`status`) is `null` -- NEVER a
+ * guessed `0` standing in for "no meaningful target exists" (a real,
+ * computed `0` is a DIFFERENT fact -- a modelable member who simply had no
+ * genuine opportunity), never computed from the share formula, never
+ * inventing a historical eligibility this codebase doesn't have -- and
+ * flagged with `"shift_target_unmodelable_evidence_only"` -- distinct from
+ * the group-level `"shift_target_no_group_opportunities"`, which now only
+ * ever reflects an anomaly within the MODELABLE pool itself.
  *
  * `people`/`events` may be the full roster/period Event set -- this filters
  * to the group and to each person's own Events itself. `periodDates` is
@@ -365,10 +411,13 @@ export function computeShiftFairnessForGroup(
     computePersonShiftFacts(person, role, events, sortedDates, periodStartDate, periodEndDate, reserveParticipation),
   );
 
-  // Only members whose CURRENT capability actually matches `role` count
-  // toward the totals the share formula redistributes -- see this
-  // function's own docstring for why an evidence-only member's workload
-  // must never inflate someone else's target.
+  // Only members for whom `role` IS their PRIMARY rotation (the same
+  // exclusive, supervisor-over-technician classifier `fairnessGroups.ts`
+  // uses everywhere else) count toward the totals the share formula
+  // redistributes -- see this function's own docstring for why an
+  // evidence-only member's workload (including a dual-capable person's
+  // exceptional shift in their SECONDARY role) must never inflate someone
+  // else's target.
   const modelableFacts = facts.filter((fact) => resolveFairnessComparisonGroupKey(fact.person) === role);
 
   const totalActual = modelableFacts.reduce((sum, fact) => sum + fact.actualShifts, 0);

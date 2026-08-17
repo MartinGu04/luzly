@@ -636,18 +636,143 @@ describe("computeShiftFairnessForGroup — group membership preserves real evide
     expect(row.status).not.toBe("balanced");
   });
 
-  it("a dual-capable person's primary group is supervisor, but real confirmed technician evidence still surfaces in the technician group too", () => {
-    // A dual-capable (supervisor + technician) person's PRIMARY comparison
-    // group is "supervisor" (fairnessGroups.ts precedence) -- but if they
-    // also have real confirmed TECHNICIAN evidence, that work must not
-    // disappear from the technician group's own results either.
-    const DUAL = person({ id: "p_dual", isSupervisor: true, isTechnician: true });
-    const date = "2026-08-10";
-    const events: Event[] = [shiftEvent({ personId: DUAL.id, date, role: "technician" })];
+});
 
-    const technicianResult = computeShiftFairnessForGroup("technician", [DUAL], events, [date]);
-    expect(technicianResult.people).toHaveLength(1);
-    expect(findPerson(technicianResult, DUAL.id).actualShifts).toBe(1);
+// ---------------------------------------------------------------------------
+// Dual-capability rotation precedence (clarified rule): a dual-capable
+// (isSupervisor && isTechnician) person's NORMAL rotation is supervisor --
+// exactly the same supervisor-over-technician precedence
+// `resolveFairnessComparisonGroupKey` (`fairnessGroups.ts`) already applies
+// everywhere else. This is intentional, not a bug: in normal operations
+// someone designated supervisor works supervisor shifts, and a supervisor
+// working an occasional technician shift is an exceptional/emergency case,
+// not proof they belong to the normal technician rotation. Exceptional
+// cross-role work is handled by the SAME evidence-only mechanism already
+// covering a changed-capability-flag person (see the describe block above)
+// -- actual stays visible, target/deviation/status stay null, and it is
+// never redistributed onto the normal rotation's members.
+// ---------------------------------------------------------------------------
+
+describe("computeShiftFairnessForGroup — dual-capability rotation precedence", () => {
+  it("A. dual-capable person doing NORMAL supervisor work is a full modelable supervisor member, and is not automatically a technician member at all", () => {
+    const DUAL = person({ id: "p_dual_a", isSupervisor: true, isTechnician: true });
+    const dates = ["2026-08-10", "2026-08-11"];
+    const events: Event[] = [
+      shiftEvent({ personId: DUAL.id, date: "2026-08-10", role: "supervisor" }),
+      shiftEvent({ personId: DUAL.id, date: "2026-08-11", role: "supervisor", period: "night" }),
+    ];
+
+    const supervisorResult = computeShiftFairnessForGroup("supervisor", [DUAL], events, dates);
+    const supervisorRow = findPerson(supervisorResult, DUAL.id);
+    expect(supervisorRow.actualShifts).toBe(2);
+    expect(supervisorRow.opportunityCount).toBe(4); // 2 dates * day+night, nothing blocked
+    expect(supervisorRow.target).toBe(2); // sole member: totalActual 2 * (4/4) = 2
+    expect(supervisorRow.deviation).toBe(0);
+    expect(supervisorRow.status).toBe("balanced");
+    expect(supervisorRow.dataCompleteness.reasons).not.toContain("shift_target_unmodelable_evidence_only");
+
+    // No technician evidence at all this period -> not automatically a
+    // technician-group member, modelable or otherwise. Their capability
+    // flag alone is never enough (same evidence-gating principle as
+    // permanent/reserve/unclassified eligibility).
+    const technicianResult = computeShiftFairnessForGroup("technician", [DUAL], events, dates);
+    expect(technicianResult.people).toHaveLength(0);
+  });
+
+  it("B. the SAME dual-capable person's exceptional confirmed technician shift stays visible but is never a normal technician opportunity/target", () => {
+    const DUAL = person({ id: "p_dual_b", isSupervisor: true, isTechnician: true });
+    const dates = ["2026-08-10", "2026-08-11"];
+    const events: Event[] = [
+      shiftEvent({ personId: DUAL.id, date: "2026-08-10", role: "supervisor" }), // normal rotation
+      shiftEvent({ personId: DUAL.id, date: "2026-08-11", role: "technician", period: "night" }), // exceptional
+    ];
+
+    const technicianResult = computeShiftFairnessForGroup("technician", [DUAL], events, dates);
+    const row = findPerson(technicianResult, DUAL.id);
+
+    // Real, visible -- never discarded.
+    expect(row.actualShifts).toBe(1);
+    // Never a normal opportunity holder merely because isTechnician === true
+    // -- their capability flag alone does not reclassify them into the
+    // normal technician rotation.
+    expect(row.opportunityCount).toBe(0);
+    // No fake target/status manufactured from unavailable historical
+    // opportunity data -- unmodelable, not a guessed 0/"above".
+    expect(row.target).toBeNull();
+    expect(row.deviation).toBeNull();
+    expect(row.status).toBeNull();
+    expect(row.dataCompleteness.reasons).toContain("shift_target_unmodelable_evidence_only");
+
+    // Their normal supervisor rotation work is completely unaffected by
+    // having also worked one exceptional technician shift.
+    const supervisorResult = computeShiftFairnessForGroup("supervisor", [DUAL], events, dates);
+    const supervisorRow = findPerson(supervisorResult, DUAL.id);
+    expect(supervisorRow.actualShifts).toBe(1);
+    expect(supervisorRow.opportunityCount).toBe(4);
+    expect(supervisorRow.target).toBe(1);
+    expect(supervisorRow.status).toBe("balanced");
+  });
+
+  it("C. a technician-ONLY person's normal technician behavior is unaffected by this precedence rule", () => {
+    const TECH_ONLY = person({ id: "p_tech_only", isSupervisor: false, isTechnician: true });
+    const dates = ["2026-08-10", "2026-08-11"];
+    const events: Event[] = [
+      shiftEvent({ personId: TECH_ONLY.id, date: "2026-08-10", role: "technician" }),
+      shiftEvent({ personId: TECH_ONLY.id, date: "2026-08-11", role: "technician", period: "night" }),
+    ];
+
+    const technicianResult = computeShiftFairnessForGroup("technician", [TECH_ONLY], events, dates);
+    const row = findPerson(technicianResult, TECH_ONLY.id);
+    expect(row.actualShifts).toBe(2);
+    expect(row.opportunityCount).toBe(4);
+    expect(row.target).toBe(2);
+    expect(row.status).toBe("balanced");
+
+    // Not a supervisor-group member at all -- no capability, no evidence.
+    const supervisorResult = computeShiftFairnessForGroup("supervisor", [TECH_ONLY], events, dates);
+    expect(supervisorResult.people).toHaveLength(0);
+  });
+
+  it("D. an exceptional cross-role shift never double-counts opportunities/targets, and never leaks across the two group computations", () => {
+    const DUAL = person({ id: "p_dual_d", isSupervisor: true, isTechnician: true });
+    const TECH_ONLY = person({ id: "p_tech_only_d", isSupervisor: false, isTechnician: true });
+    const dates = ["2026-08-10", "2026-08-11"];
+
+    const events: Event[] = [
+      // DUAL: normal supervisor work, plus one exceptional technician shift.
+      shiftEvent({ personId: DUAL.id, date: "2026-08-10", role: "supervisor" }),
+      shiftEvent({ personId: DUAL.id, date: "2026-08-11", role: "technician", period: "night" }),
+      // TECH_ONLY: the group's one real normal technician-rotation member.
+      shiftEvent({ personId: TECH_ONLY.id, date: "2026-08-10", role: "technician" }),
+    ];
+
+    const technicianResult = computeShiftFairnessForGroup("technician", [DUAL, TECH_ONLY], events, dates);
+    const dualRow = findPerson(technicianResult, DUAL.id);
+    const techOnlyRow = findPerson(technicianResult, TECH_ONLY.id);
+
+    // DUAL contributes zero opportunities to the technician pool -- their
+    // exceptional shift is not folded into TECH_ONLY's target either.
+    expect(dualRow.opportunityCount).toBe(0);
+    expect(dualRow.target).toBeNull();
+    expect(techOnlyRow.opportunityCount).toBe(4);
+    // TECH_ONLY's target reflects ONLY the modelable pool (themselves: 1
+    // actual shift, their own 4 opportunities out of a modelable total of
+    // 4) -- not inflated by DUAL's exceptional shift being added to a
+    // shared total.
+    expect(techOnlyRow.actualShifts).toBe(1);
+    expect(techOnlyRow.target).toBe(1);
+    expect(techOnlyRow.status).toBe("balanced");
+
+    // DUAL's supervisor-side numbers are computed independently and are not
+    // affected by having also appeared (as evidence-only) in the technician
+    // group's results above.
+    const supervisorResult = computeShiftFairnessForGroup("supervisor", [DUAL, TECH_ONLY], events, dates);
+    expect(supervisorResult.people).toHaveLength(1); // TECH_ONLY has no supervisor capability/evidence at all
+    const dualSupervisorRow = findPerson(supervisorResult, DUAL.id);
+    expect(dualSupervisorRow.actualShifts).toBe(1);
+    expect(dualSupervisorRow.opportunityCount).toBe(4);
+    expect(dualSupervisorRow.target).toBe(1);
+    expect(dualSupervisorRow.status).toBe("balanced");
   });
 });
 
@@ -752,5 +877,85 @@ describe("computeShiftFairnessForGroup — sanity check against a realistic synt
     // The reservist's opportunities must stay bounded to their own evidence window (2026-08-15..2026-08-17 = 3 dates * 2 = 6), never the full 14-date period.
     const reservist = findPerson(result, RESERVIST.id);
     expect(reservist.opportunityCount).toBeLessThanOrEqual(6);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Historical qualification audit.
+//
+// PR #48 established: isTechnician/isSupervisor are a CURRENT snapshot only
+// -- כ"א carries no effective-from date, so there is no way to know whether
+// a person's capability was the same a month (or a year) ago as it is
+// today. The engine reconstructs CLOSED historical periods using exactly
+// the same current capability flags it uses for the current period -- this
+// is a deliberate, audited choice, not an oversight:
+//
+// - Inventing a historical qualification date this codebase doesn't have
+//   would manufacture false precision (worse than the current approach).
+// - Refusing to calculate historical periods at all would make every past
+//   month unusable, which the source data does not require -- capability
+//   changes are presumably rare, and the best available estimate (today's
+//   capability, honestly flagged) is more useful than no result.
+// - The uncertainty is not silently absorbed: `"eligibility_undated"` is
+//   attached to EVERY eligibility-derived result unconditionally (checked
+//   below for a genuinely closed month), current or historical, so a
+//   historical target is never presented with more confidence than a
+//   current one.
+// - Where today's data genuinely cannot support even that estimate (an
+//   evidence-only member -- capability doesn't currently match, or `role`
+//   is only their secondary capability), the SAME "unknown, not zero"
+//   treatment already established for the current period applies exactly
+//   as-is for a historical one: target/deviation/status stay null, never a
+//   guessed number.
+// ---------------------------------------------------------------------------
+
+describe("computeShiftFairnessForGroup — historical qualification audit", () => {
+  const now: LocalNow = { date: "2026-08-15", minuteOfDay: 600 };
+  const closedMonth = { year: 2026, month: 6 }; // June 2026 -- fully in the past relative to `now`
+
+  it("a closed historical month really is reported closed", () => {
+    expect(resolveShiftFairnessPeriodStatus(closedMonth, now)).toBe("closed");
+  });
+
+  it("a modelable member's historical target is a real, usable estimate -- but always flagged eligibility_undated, never presented as verified", () => {
+    const REGULAR = person({ id: "p_hist_reg", isTechnician: true });
+    const dates = resolveShiftFairnessPeriodDates(closedMonth, now); // full June 2026, fully in the past
+    expect(dates).toHaveLength(30);
+
+    const events: Event[] = [
+      shiftEvent({ personId: REGULAR.id, date: "2026-06-05", role: "technician" }),
+      shiftEvent({ personId: REGULAR.id, date: "2026-06-06", role: "technician", period: "night" }),
+    ];
+
+    const result = computeShiftFairnessForGroup("technician", [REGULAR], events, dates);
+    const row = findPerson(result, REGULAR.id);
+
+    // A real, usable estimate -- not refused merely because the period is historical.
+    expect(row.target).not.toBeNull();
+    expect(Number.isFinite(row.target)).toBe(true);
+    expect(row.status).not.toBeNull();
+    // But the estimate is honestly flagged: capability is a current
+    // snapshot applied to a historical period, never presented as a
+    // verified historical fact.
+    expect(row.dataCompleteness.status).toBe("partial");
+    expect(row.dataCompleteness.reasons).toContain("eligibility_undated");
+  });
+
+  it("an evidence-only member's historical workload is STILL never assigned a fabricated target -- unknown stays unknown, for historical periods exactly as for the current one", () => {
+    const RECLASSIFIED = person({ id: "p_hist_reclassified", isTechnician: false, isSupervisor: false });
+    const dates = resolveShiftFairnessPeriodDates(closedMonth, now);
+    const events: Event[] = [shiftEvent({ personId: RECLASSIFIED.id, date: "2026-06-10", role: "technician" })];
+
+    const result = computeShiftFairnessForGroup("technician", [RECLASSIFIED], events, dates);
+    const row = findPerson(result, RECLASSIFIED.id);
+
+    // Real historical evidence stays visible...
+    expect(row.actualShifts).toBe(1);
+    // ...but no fabricated historical target/status -- "unknown" is never
+    // silently promoted to a number just because the period is in the past.
+    expect(row.target).toBeNull();
+    expect(row.deviation).toBeNull();
+    expect(row.status).toBeNull();
+    expect(row.dataCompleteness.reasons).toContain("shift_target_unmodelable_evidence_only");
   });
 });

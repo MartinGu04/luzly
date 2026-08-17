@@ -375,16 +375,43 @@ and never a 0–100 score.
   convention.
 - **Group membership preserves evidence past a changed capability flag
   (follow-up fix).** Comparison-group membership is `resolveFairnessComparisonGroupKey(person)
-  === role` (current capability, "MODELABLE") **OR** the person has a real
-  confirmed, non-shadow shift for `role` within the period
+  === role` (current PRIMARY capability, "MODELABLE") **OR** the person has
+  a real confirmed, non-shadow shift for `role` within the period
   (`isRoleComparisonMember`, "evidence-only"). Capability is undated
   (`"eligibility_undated"`) — if it changes, a real shift someone actually
   worked as that role must never simply vanish from the results because
   `people.filter(...)` silently dropped their row. An evidence-only
-  member's `opportunityCount` still stays `0` (the eligibility check inside
-  `computePersonShiftFacts` still requires the CURRENT capability flag,
-  unaffected by this fix — a fix for VISIBILITY only, not a reopening of
-  eligibility).
+  member's `opportunityCount` stays `0` — `computePersonShiftFacts` gates
+  its opportunity loop on `role` being the person's PRIMARY comparison
+  group, NOT merely `resolveFairnessRoleEligibility`'s own capability check
+  (which is deliberately role-symmetric and would otherwise happily grant
+  real opportunities for either role of a dual-capable person — see the
+  dual-capability bullet below for why that distinction matters) — a fix
+  for VISIBILITY only, not a reopening of eligibility.
+- **Dual-capability rotation precedence is intentional, not a bug (audited
+  and clarified).** A dual-capable person (`isSupervisor && isTechnician`)
+  has exactly ONE normal rotation — supervisor, the same
+  supervisor-over-technician precedence `resolveFairnessComparisonGroupKey`
+  already applies everywhere else in the foundation. This was deliberately
+  investigated as a possible bug (an early version of this fix tried
+  replacing the exclusive classifier with a per-role capability check,
+  `hasFairnessRoleCapability`, so a dual-capable person would count as a
+  full modelable member of BOTH groups at once) and REJECTED: in normal
+  operations someone designated supervisor works supervisor shifts, and an
+  occasional technician shift from a supervisor-qualified person is an
+  exceptional/emergency case, not evidence they belong to the normal
+  technician rotation — treating it as normal would silently grant them
+  (and inflate the technician pool's totals with) opportunities nothing in
+  the data actually supports. `hasFairnessRoleCapability` (added to
+  `fairnessParticipation.ts`, reused inside
+  `resolveFairnessRoleEligibility` itself, which was ALREADY correctly
+  per-role-independent) stays as a small shared capability-check helper,
+  but comparison-group MEMBERSHIP/MODELABILITY in this engine deliberately
+  keeps using the EXCLUSIVE `resolveFairnessComparisonGroupKey`. A
+  dual-capable person's exceptional cross-role shift is handled by the
+  SAME evidence-only mechanism as a changed-capability-flag person above:
+  visible `actualShifts`, `null` target/deviation/status, never
+  redistributed onto the normal rotation's members.
 - **An evidence-only member's real workload is never redistributed onto
   someone else's target (SECOND follow-up fix).** The first version of the
   fix above let an evidence-only member's real `actualShifts` flow into the
@@ -416,6 +443,26 @@ and never a 0–100 score.
   ("a missing previous score is NEVER treated as zero") — reused here, not
   reinvented. `lib/readModels/shiftFairnessTypes.ts`'s
   `ShiftFairnessPersonRowView` mirrors the same nullability.
+- **Historical qualification audit (final, pre-merge).** PR #48 established
+  that `isTechnician`/`isSupervisor` are a CURRENT snapshot only — כ"א
+  carries no effective-from date. This engine reconstructs CLOSED
+  historical periods using exactly the same current capability flags it
+  uses for the current period, and that is a deliberate, audited
+  conclusion, not an oversight: inventing a historical qualification date
+  this codebase doesn't have would manufacture false precision (worse than
+  today's approach); refusing to calculate historical periods at all would
+  make every past month unusable, which nothing in the source data
+  requires. The uncertainty is never silently absorbed —
+  `"eligibility_undated"` is attached to every eligibility-derived result
+  UNCONDITIONALLY, current or historical alike, so a historical target is
+  never presented with more confidence than a current one. Where even that
+  estimate can't honestly be made (an evidence-only member, whether from a
+  changed capability flag or the dual-capability precedence above), the
+  exact same "unknown, never zero" treatment already established for the
+  current period applies identically to a historical one: `null`, never a
+  guessed number. This is the most defensible behavior the actual data
+  supports; no code change was required beyond confirming (with dedicated
+  regression tests) that both halves of this already held.
 - **Weekend fairness stays separate.** The exact same opportunity-share
   method is computed a SECOND time, restricted to weekend dates only
   (`isFairnessWeekendDate`, reused from `fairnessFoundation.ts`) — no
