@@ -1,6 +1,6 @@
 import type { IssueReason } from "@/lib/domain/operationalIssues";
 import type { MinuteInterval } from "@/lib/domain/shiftSchedule";
-import type { ManagerIssueRecommendation } from "@/lib/readModels/managerTypes";
+import type { ManagerIssueRecommendation, ManagerRecommendationCandidate } from "@/lib/readModels/managerTypes";
 import { formatMissingIntervals } from "./scheduleTime";
 
 /**
@@ -13,10 +13,23 @@ import { formatMissingIntervals } from "./scheduleTime";
  * e.g. WhatsApp, is simply unknown to Mi-Ma-Mo).
  */
 
+/**
+ * One piece of a recommendation sentence: either restrained literal Hebrew
+ * text, or a specific candidate whose name should be presented as a link to
+ * their own manager drill-down (`/manager?person=<personId>`). Kept as a
+ * structured sequence -- never flattened into one string -- so the UI can
+ * render a candidate's name as a `<Link>` using its own `personId` straight
+ * from the domain-produced candidate, with no name-to-id parsing/lookup
+ * ever needed downstream.
+ */
+export type IssueRecommendationTextPart =
+  | { kind: "text"; value: string }
+  | { kind: "candidateLink"; personId: string; personName: string };
+
 export interface IssueRecommendationLastResortView {
   /** "מוצא אחרון · הצג אפשרויות נוספות" -- the collapsed disclosure's own summary/trigger. */
   triggerLabel: string;
-  text: string;
+  text: readonly IssueRecommendationTextPart[];
   disclaimer: string;
 }
 
@@ -29,7 +42,7 @@ export interface IssueRecommendationLastResortView {
  * `lastResort.disclaimer` once that nested section is opened).
  */
 export interface IssueRecommendationView {
-  primaryText: string;
+  primaryText: readonly IssueRecommendationTextPart[];
   disclaimer: string | null;
   lastResort: IssueRecommendationLastResortView | null;
 }
@@ -39,10 +52,34 @@ const TECHNICIAN_NOT_FOUND_TEXT = "לא נמצאו טכנאים מתאימים �
 const LAST_RESORT_TRIGGER_LABEL = "מוצא אחרון · הצג אפשרויות נוספות";
 const LAST_RESORT_DISCLAIMER = "האפשרויות האלו מוצגות כמוצא אחרון בלבד, וייתכנו אילוצים אישיים שלא מופיעים במערכת.";
 
-/** "X" / "X או Y" / "X, Y או Z" -- never implies X is better than Y, just lists every candidate. */
-function joinHebrewNames(names: readonly string[]): string {
-  if (names.length <= 1) return names[0] ?? "";
-  return `${names.slice(0, -1).join(", ")} או ${names[names.length - 1]}`;
+function textPart(value: string): IssueRecommendationTextPart {
+  return { kind: "text", value };
+}
+
+function candidateLinkPart(candidate: ManagerRecommendationCandidate): IssueRecommendationTextPart {
+  return { kind: "candidateLink", personId: candidate.personId, personName: candidate.personName };
+}
+
+/**
+ * "X" / "X או Y" / "X, Y או Z" as a part sequence -- the SAME join shape the
+ * former flat-string `joinHebrewNames` produced (never implies X is better
+ * than Y, just lists every candidate), except each name is its own
+ * `candidateLink` part rather than text baked into a joined string, so the
+ * UI never has to parse a name back out of anything.
+ */
+function joinCandidateParts(candidates: readonly ManagerRecommendationCandidate[]): IssueRecommendationTextPart[] {
+  if (candidates.length === 0) return [];
+  if (candidates.length === 1) return [candidateLinkPart(candidates[0])];
+
+  const parts: IssueRecommendationTextPart[] = [];
+  const allButLast = candidates.slice(0, -1);
+  allButLast.forEach((candidate, index) => {
+    if (index > 0) parts.push(textPart(", "));
+    parts.push(candidateLinkPart(candidate));
+  });
+  parts.push(textPart(" או "));
+  parts.push(candidateLinkPart(candidates[candidates.length - 1]));
+  return parts;
 }
 
 /**
@@ -78,26 +115,32 @@ export function buildIssueRecommendationView(
   if (!recommendation) return null;
 
   if (recommendation.primaryCandidates.length > 0) {
-    const names = joinHebrewNames(recommendation.primaryCandidates.map((candidate) => candidate.personName));
     return {
-      primaryText: `לפי הסידור הקיים, אפשר לבדוק עם ${names} לגבי הכיסוי${intervalSuffix(reason, missingIntervals)}.`,
+      primaryText: [
+        textPart("לפי הסידור הקיים, אפשר לבדוק עם "),
+        ...joinCandidateParts(recommendation.primaryCandidates),
+        textPart(` לגבי הכיסוי${intervalSuffix(reason, missingIntervals)}.`),
+      ],
       disclaimer: CONSTRAINTS_DISCLAIMER,
       lastResort: null,
     };
   }
 
   if (recommendation.missingRole === "technician" && recommendation.fallbackCandidates.length > 0) {
-    const names = joinHebrewNames(recommendation.fallbackCandidates.map((candidate) => candidate.personName));
     const capabilityNote =
       recommendation.fallbackCandidates.length === 1
         ? "שמסומן גם כבעל יכולת טכנית"
         : "שמסומנים גם כבעלי יכולת טכנית";
     return {
-      primaryText: TECHNICIAN_NOT_FOUND_TEXT,
+      primaryText: [textPart(TECHNICIAN_NOT_FOUND_TEXT)],
       disclaimer: null,
       lastResort: {
         triggerLabel: LAST_RESORT_TRIGGER_LABEL,
-        text: `לא נמצאו טכנאים רגילים מתאימים. לפי הסידור הקיים, אפשר לבדוק גם עם ${names}, ${capabilityNote}.`,
+        text: [
+          textPart("לא נמצאו טכנאים רגילים מתאימים. לפי הסידור הקיים, אפשר לבדוק גם עם "),
+          ...joinCandidateParts(recommendation.fallbackCandidates),
+          textPart(`, ${capabilityNote}.`),
+        ],
         disclaimer: LAST_RESORT_DISCLAIMER,
       },
     };

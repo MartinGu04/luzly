@@ -381,10 +381,15 @@ describe("ManagerPage — PR #37 recommendation wiring", () => {
         }),
       ),
     );
-    await renderPage();
+    const { container } = await renderPage();
     const summary = screen.getByText("פעולה מומלצת");
     expect(summary.closest("details")).not.toHaveAttribute("open");
-    expect(screen.getByText("לפי הסידור הקיים, אפשר לבדוק עם איתי אוליר לגבי הכיסוי.")).toBeInTheDocument();
+    // The candidate name renders as a link to their own manager drill-down (see the
+    // "candidate name links" describe block below for the dedicated coverage of this);
+    // the surrounding sentence copy is unchanged, just split around that link now.
+    const candidateLink = screen.getByRole("link", { name: "איתי אוליר" });
+    expect(candidateLink).toHaveAttribute("href", "/manager?person=p_extra");
+    expect(container.textContent).toContain("לפי הסידור הקיים, אפשר לבדוק עם איתי אוליר לגבי הכיסוי.");
     expect(screen.getByText("ייתכנו אילוצים אישיים שלא מופיעים במערכת.")).toBeInTheDocument();
   });
 
@@ -410,14 +415,15 @@ describe("ManagerPage — PR #37 recommendation wiring", () => {
         }),
       ),
     );
-    await renderPage();
+    const { container } = await renderPage();
     expect(screen.getByText("לא נמצאו טכנאים מתאימים לפי המידע הקיים.")).toBeInTheDocument();
     expect(screen.getByText("מוצא אחרון · הצג אפשרויות נוספות")).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "לא נמצאו טכנאים רגילים מתאימים. לפי הסידור הקיים, אפשר לבדוק גם עם טוביה כהן, שמסומן גם כבעל יכולת טכנית.",
-      ),
-    ).toBeInTheDocument();
+    // The fallback/last-resort candidate is ALSO a clickable link to their own drill-down.
+    const candidateLink = screen.getByRole("link", { name: "טוביה כהן" });
+    expect(candidateLink).toHaveAttribute("href", "/manager?person=p_dual");
+    expect(container.textContent).toContain(
+      "לא נמצאו טכנאים רגילים מתאימים. לפי הסידור הקיים, אפשר לבדוק גם עם טוביה כהן, שמסומן גם כבעל יכולת טכנית.",
+    );
   });
 
   it("42. the everyone-wide 'דורש טיפול' structure (severity grouping, empty state) remains intact regardless of recommendations", async () => {

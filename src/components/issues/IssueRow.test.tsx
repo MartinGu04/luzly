@@ -1,12 +1,20 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
-import type { IssueRecommendationView } from "@/lib/presentation/issueRecommendation";
+import type { IssueRecommendationTextPart, IssueRecommendationView } from "@/lib/presentation/issueRecommendation";
+import type { ManagerHrefParams } from "@/lib/presentation/managerUrl";
 import type { IssueRowView } from "./types";
 import { IssueRow } from "./IssueRow";
 
+const CURRENT: ManagerHrefParams = { personId: null, range: "7d", month: null, problemsOnly: false };
+
+/** A single plain-text part -- the equivalent of the former flat `primaryText: string` shape, for tests that don't care about candidate links specifically. */
+function textOnly(value: string): IssueRecommendationTextPart[] {
+  return [{ kind: "text", value }];
+}
+
 function recommendationView(overrides: Partial<IssueRecommendationView> = {}): IssueRecommendationView {
   return {
-    primaryText: "לפי הסידור הקיים, אפשר לבדוק עם איתי לגבי הכיסוי.",
+    primaryText: textOnly("לפי הסידור הקיים, אפשר לבדוק עם איתי לגבי הכיסוי."),
     disclaimer: "ייתכנו אילוצים אישיים שלא מופיעים במערכת.",
     lastResort: null,
     ...overrides,
@@ -113,7 +121,7 @@ describe("IssueRow — recommendation (secondary, collapsed) [PR #37]", () => {
       <IssueRow
         view={view({
           recommendation: recommendationView({
-            primaryText: "לפי הסידור הקיים, אפשר לבדוק עם איתי אוליר או עילאי שפירא לגבי הכיסוי.",
+            primaryText: textOnly("לפי הסידור הקיים, אפשר לבדוק עם איתי אוליר או עילאי שפירא לגבי הכיסוי."),
           }),
         })}
       />,
@@ -130,7 +138,10 @@ describe("IssueRow — recommendation (secondary, collapsed) [PR #37]", () => {
     render(
       <IssueRow
         view={view({
-          recommendation: recommendationView({ primaryText: "לא נמצאו טכנאים מתאימים לפי המידע הקיים.", disclaimer: null }),
+          recommendation: recommendationView({
+            primaryText: textOnly("לא נמצאו טכנאים מתאימים לפי המידע הקיים."),
+            disclaimer: null,
+          }),
         })}
       />,
     );
@@ -147,11 +158,13 @@ describe("IssueRow — recommendation (secondary, collapsed) [PR #37]", () => {
       <IssueRow
         view={view({
           recommendation: recommendationView({
-            primaryText: "לא נמצאו טכנאים מתאימים לפי המידע הקיים.",
+            primaryText: textOnly("לא נמצאו טכנאים מתאימים לפי המידע הקיים."),
             disclaimer: null,
             lastResort: {
               triggerLabel: "מוצא אחרון · הצג אפשרויות נוספות",
-              text: "לא נמצאו טכנאים רגילים מתאימים. לפי הסידור הקיים, אפשר לבדוק גם עם טוביה כהן, שמסומן גם כבעל יכולת טכנית.",
+              text: textOnly(
+                "לא נמצאו טכנאים רגילים מתאימים. לפי הסידור הקיים, אפשר לבדוק גם עם טוביה כהן, שמסומן גם כבעל יכולת טכנית.",
+              ),
               disclaimer: "האפשרויות האלו מוצגות כמוצא אחרון בלבד, וייתכנו אילוצים אישיים שלא מופיעים במערכת.",
             },
           }),
@@ -173,5 +186,180 @@ describe("IssueRow — recommendation (secondary, collapsed) [PR #37]", () => {
     expect(
       screen.getByText("האפשרויות האלו מוצגות כמוצא אחרון בלבד, וייתכנו אילוצים אישיים שלא מופיעים במערכת."),
     ).toBeInTheDocument();
+  });
+});
+
+describe("IssueRow — recommendation candidate names link to their manager drill-down", () => {
+  it("a primary candidate's name renders as a link, not plain text", () => {
+    render(
+      <IssueRow
+        view={view({
+          recommendation: recommendationView({
+            primaryText: [
+              { kind: "text", value: "לפי הסידור הקיים, אפשר לבדוק עם " },
+              { kind: "candidateLink", personId: "p_extra", personName: "איתי אוליר" },
+              { kind: "text", value: " לגבי הכיסוי." },
+            ],
+          }),
+        })}
+        current={CURRENT}
+      />,
+    );
+    expect(screen.getByRole("link", { name: "איתי אוליר" })).toBeInTheDocument();
+  });
+
+  it("the link's href points to that exact candidate's personId via /manager?person=<personId>", () => {
+    render(
+      <IssueRow
+        view={view({
+          recommendation: recommendationView({
+            primaryText: [
+              { kind: "text", value: "לפי הסידור הקיים, אפשר לבדוק עם " },
+              { kind: "candidateLink", personId: "p_extra", personName: "איתי אוליר" },
+              { kind: "text", value: " לגבי הכיסוי." },
+            ],
+          }),
+        })}
+        current={CURRENT}
+      />,
+    );
+    expect(screen.getByRole("link", { name: "איתי אוליר" })).toHaveAttribute("href", "/manager?person=p_extra");
+  });
+
+  it("preserves the current manager range/month/problems URL state in the candidate's href, via the same buildManagerHref used elsewhere", () => {
+    const currentWithState: ManagerHrefParams = { personId: null, range: "month", month: "2026-08", problemsOnly: true };
+    render(
+      <IssueRow
+        view={view({
+          recommendation: recommendationView({
+            primaryText: [{ kind: "candidateLink", personId: "p_extra", personName: "איתי אוליר" }],
+          }),
+        })}
+        current={currentWithState}
+      />,
+    );
+    const href = screen.getByRole("link", { name: "איתי אוליר" }).getAttribute("href");
+    expect(href).toContain("person=p_extra");
+    expect(href).toContain("range=month");
+    expect(href).toContain("month=2026-08");
+    expect(href).toContain("problems=1");
+  });
+
+  it("multiple candidates each link to their own distinct person", () => {
+    render(
+      <IssueRow
+        view={view({
+          recommendation: recommendationView({
+            primaryText: [
+              { kind: "text", value: "לפי הסידור הקיים, אפשר לבדוק עם " },
+              { kind: "candidateLink", personId: "p_a", personName: "איתי אוליר" },
+              { kind: "text", value: " או " },
+              { kind: "candidateLink", personId: "p_b", personName: "עילאי שפירא" },
+              { kind: "text", value: " לגבי הכיסוי." },
+            ],
+          }),
+        })}
+        current={CURRENT}
+      />,
+    );
+    expect(screen.getByRole("link", { name: "איתי אוליר" })).toHaveAttribute("href", "/manager?person=p_a");
+    expect(screen.getByRole("link", { name: "עילאי שפירא" })).toHaveAttribute("href", "/manager?person=p_b");
+  });
+
+  it("fallback/last-resort candidates are ALSO clickable links, not just primary ones", () => {
+    render(
+      <IssueRow
+        view={view({
+          recommendation: recommendationView({
+            primaryText: textOnly("לא נמצאו טכנאים מתאימים לפי המידע הקיים."),
+            disclaimer: null,
+            lastResort: {
+              triggerLabel: "מוצא אחרון · הצג אפשרויות נוספות",
+              text: [
+                { kind: "text", value: "לא נמצאו טכנאים רגילים מתאימים. לפי הסידור הקיים, אפשר לבדוק גם עם " },
+                { kind: "candidateLink", personId: "p_dual", personName: "טוביה כהן" },
+                { kind: "text", value: ", שמסומן גם כבעל יכולת טכנית." },
+              ],
+              disclaimer: "האפשרויות האלו מוצגות כמוצא אחרון בלבד, וייתכנו אילוצים אישיים שלא מופיעים במערכת.",
+            },
+          }),
+        })}
+        current={CURRENT}
+      />,
+    );
+    expect(screen.getByRole("link", { name: "טוביה כהן" })).toHaveAttribute("href", "/manager?person=p_dual");
+  });
+
+  it("surrounding recommendation copy stays exactly the same, just split around the link", () => {
+    const { container } = render(
+      <IssueRow
+        view={view({
+          recommendation: recommendationView({
+            primaryText: [
+              { kind: "text", value: "לפי הסידור הקיים, אפשר לבדוק עם " },
+              { kind: "candidateLink", personId: "p_extra", personName: "איתי אוליר" },
+              { kind: "text", value: " לגבי הכיסוי." },
+            ],
+          }),
+        })}
+        current={CURRENT}
+      />,
+    );
+    expect(container.textContent).toContain("לפי הסידור הקיים, אפשר לבדוק עם איתי אוליר לגבי הכיסוי.");
+  });
+
+  it("the whole recommendation row is NOT clickable -- only the candidate name itself is a link", () => {
+    const { container } = render(
+      <IssueRow
+        view={view({
+          recommendation: recommendationView({
+            primaryText: [
+              { kind: "text", value: "לפי הסידור הקיים, אפשר לבדוק עם " },
+              { kind: "candidateLink", personId: "p_extra", personName: "איתי אוליר" },
+              { kind: "text", value: " לגבי הכיסוי." },
+            ],
+          }),
+        })}
+        current={CURRENT}
+      />,
+    );
+    expect(container.querySelectorAll("a").length).toBe(1);
+    expect(screen.getByText("פעולה מומלצת").closest("li")?.querySelector("a")).not.toBeNull();
+  });
+
+  it("without a current URL state, a candidate name still renders (falls back to plain text, never crashes)", () => {
+    render(
+      <IssueRow
+        view={view({
+          recommendation: recommendationView({
+            primaryText: [
+              { kind: "text", value: "לפי הסידור הקיים, אפשר לבדוק עם " },
+              { kind: "candidateLink", personId: "p_extra", personName: "איתי אוליר" },
+              { kind: "text", value: " לגבי הכיסוי." },
+            ],
+          }),
+        })}
+      />,
+    );
+    expect(screen.queryByRole("link", { name: "איתי אוליר" })).toBeNull();
+    expect(screen.getByText(/איתי אוליר/)).toBeInTheDocument();
+  });
+
+  it("no name-to-ID lookup exists: the href is built directly from the candidate part's own personId, independent of what the display name looks like", () => {
+    render(
+      <IssueRow
+        view={view({
+          recommendation: recommendationView({
+            // A person name that would be ambiguous/impossible to reverse-parse
+            // (contains the separator words themselves) -- proves the href
+            // still resolves correctly because it comes from `personId`
+            // directly, never from parsing this text.
+            primaryText: [{ kind: "candidateLink", personId: "p_tricky", personName: 'עם, או "בדיקה' }],
+          }),
+        })}
+        current={CURRENT}
+      />,
+    );
+    expect(screen.getByRole("link", { name: 'עם, או "בדיקה' })).toHaveAttribute("href", "/manager?person=p_tricky");
   });
 });

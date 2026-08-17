@@ -3,24 +3,33 @@ import { Panel } from "@/components/ui/Panel";
 import { IssueSeverityBadge } from "@/components/ui/IssueSeverityBadge";
 import { IssueRow } from "@/components/issues/IssueRow";
 import { issueSeverityLabel } from "@/lib/presentation/labels";
+import type { ManagerHrefParams } from "@/lib/presentation/managerUrl";
 import { ManagerPotentialRow } from "./ManagerPotentialRow";
 import type { ManagerAttentionItem } from "./types";
 
 interface ManagerAttentionSectionProps {
   criticalItems: ManagerAttentionItem[];
   reviewItems: ManagerAttentionItem[];
+  /** The manager's current range/month/problems URL state -- threaded down to `IssueRow` so a recommended candidate's name can link to their drill-down (`/manager?person=<personId>`) while preserving it. Same `ManagerHrefParams` `ManagerRosterSection` already uses. */
+  current: ManagerHrefParams;
 }
 
-function AttentionItemRow({ item }: { item: ManagerAttentionItem }) {
-  return item.kind === "issue" ? <IssueRow view={item.view} /> : <ManagerPotentialRow view={item.view} />;
+function AttentionItemRow({ item, current }: { item: ManagerAttentionItem; current: ManagerHrefParams }) {
+  return item.kind === "issue" ? (
+    <IssueRow view={item.view} current={current} />
+  ) : (
+    <ManagerPotentialRow view={item.view} />
+  );
 }
 
 function AttentionGroup({
   severity,
   items,
+  current,
 }: {
   severity: "critical" | "review";
   items: ManagerAttentionItem[];
+  current: ManagerHrefParams;
 }) {
   if (items.length === 0) return null;
 
@@ -34,7 +43,7 @@ function AttentionGroup({
       <Panel variant="panel" className="mt-2">
         <ul className="divide-y divide-border">
           {items.map((item) => (
-            <AttentionItemRow key={item.view.key} item={item} />
+            <AttentionItemRow key={item.view.key} item={item} current={current} />
           ))}
         </ul>
       </Panel>
@@ -57,7 +66,7 @@ function AttentionGroup({
  * never re-derives. Empty (a single calm success state) only when both
  * groups are empty.
  */
-export function ManagerAttentionSection({ criticalItems, reviewItems }: ManagerAttentionSectionProps) {
+export function ManagerAttentionSection({ criticalItems, reviewItems, current }: ManagerAttentionSectionProps) {
   const isEmpty = criticalItems.length === 0 && reviewItems.length === 0;
 
   if (isEmpty) {
@@ -72,8 +81,8 @@ export function ManagerAttentionSection({ criticalItems, reviewItems }: ManagerA
   return (
     <div className="flex flex-col gap-4">
       <h2 className="text-xl font-bold text-foreground sm:text-2xl">דורש טיפול</h2>
-      <AttentionGroup severity="critical" items={criticalItems} />
-      <AttentionGroup severity="review" items={reviewItems} />
+      <AttentionGroup severity="critical" items={criticalItems} current={current} />
+      <AttentionGroup severity="review" items={reviewItems} current={current} />
     </div>
   );
 }

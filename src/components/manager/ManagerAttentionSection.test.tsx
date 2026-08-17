@@ -3,6 +3,9 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { ManagerAttentionSection } from "./ManagerAttentionSection";
 import type { ManagerAttentionItem, ManagerPotentialRowView } from "./types";
 import type { IssueRowView } from "@/components/issues/types";
+import type { ManagerHrefParams } from "@/lib/presentation/managerUrl";
+
+const CURRENT: ManagerHrefParams = { personId: null, range: "7d", month: null, problemsOnly: false };
 
 afterEach(() => {
   cleanup();
@@ -47,12 +50,12 @@ function potentialItem(overrides: Partial<ManagerPotentialRowView> = {}): Manage
 
 describe("ManagerAttentionSection", () => {
   it("shows the calm success state when everything is empty", () => {
-    render(<ManagerAttentionSection criticalItems={[]} reviewItems={[]} />);
+    render(<ManagerAttentionSection criticalItems={[]} reviewItems={[]} current={CURRENT} />);
     expect(screen.getByText("אין כרגע דברים שדורשים טיפול בטווח שנבחר")).toBeInTheDocument();
   });
 
   it("shows the דורש טיפול heading and critical issues under the דחוף heading", () => {
-    render(<ManagerAttentionSection criticalItems={[issueItem()]} reviewItems={[]} />);
+    render(<ManagerAttentionSection criticalItems={[issueItem()]} reviewItems={[]} current={CURRENT} />);
     expect(screen.getByText("דורש טיפול")).toBeInTheDocument();
     expect(screen.getByText("דחוף")).toBeInTheDocument();
     expect(screen.getByText(/מרטין בדיקה/)).toBeInTheDocument();
@@ -63,13 +66,14 @@ describe("ManagerAttentionSection", () => {
       <ManagerAttentionSection
         criticalItems={[]}
         reviewItems={[issueItem({ severity: "review", key: "k2" })]}
+        current={CURRENT}
       />,
     );
     expect(screen.getByText("לבדיקה")).toBeInTheDocument();
   });
 
   it("renders a Potential staffing problem as a plain row under a severity heading, never under a separate technical section", () => {
-    render(<ManagerAttentionSection criticalItems={[potentialItem()]} reviewItems={[]} />);
+    render(<ManagerAttentionSection criticalItems={[potentialItem()]} reviewItems={[]} current={CURRENT} />);
     expect(screen.getByText("דחוף")).toBeInTheDocument();
     expect(screen.getByText("כונן פינויים")).toBeInTheDocument();
     expect(screen.queryByText(/Potential/)).toBeNull();
@@ -80,6 +84,7 @@ describe("ManagerAttentionSection", () => {
       <ManagerAttentionSection
         criticalItems={[issueItem({ key: "i1" }), potentialItem({ key: "p1" })]}
         reviewItems={[]}
+        current={CURRENT}
       />,
     );
     const panel = screen.getByText("דחוף").closest("section");
@@ -92,6 +97,7 @@ describe("ManagerAttentionSection", () => {
       <ManagerAttentionSection
         criticalItems={[issueItem()]}
         reviewItems={[issueItem({ severity: "review", key: "k2" })]}
+        current={CURRENT}
       />,
     );
     expect(screen.getByText("דחוף")).toBeInTheDocument();
