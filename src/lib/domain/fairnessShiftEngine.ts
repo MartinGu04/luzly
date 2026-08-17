@@ -159,22 +159,64 @@ interface PersonShiftFacts {
 }
 
 /**
- * "Actual shifts performed" this date, role `role`, for `personEvents`
- * (already filtered to one person) -- CONFIRMED only (a tentative shift is
- * not yet a settled fact) and never a shadow ("- צל") assignment, the same
- * convention `lib/domain/shiftCoverage.ts` already established ("shadow
- * shifts never count as primary coverage") -- a shadow assignment means
- * observing/learning, not independently carrying the workload.
+ * A real, settled shift Event for role `role` -- CONFIRMED only (a
+ * tentative shift is not yet a settled fact) and never a shadow ("- צל")
+ * assignment, the same convention `lib/domain/shiftCoverage.ts` already
+ * established ("shadow shifts never count as primary coverage") -- a
+ * shadow assignment means observing/learning, not independently carrying
+ * the workload. Shared by the per-date actual count below AND by group
+ * membership (see `isRoleComparisonMember`) so the two never define
+ * "confirmed role evidence" differently.
  */
+function isConfirmedNonShadowRoleShift(event: Event, role: FairnessComparisonGroupKey): boolean {
+  return event.category === "shift" && event.certainty === "confirmed" && event.role === role && !event.shadow;
+}
+
+/** "Actual shifts performed" this date, role `role`, for `personEvents` (already filtered to one person). */
 function countActualShiftsForDate(personEvents: readonly Event[], date: string, role: FairnessComparisonGroupKey): number {
-  return personEvents.filter(
+  return personEvents.filter((event) => event.date === date && isConfirmedNonShadowRoleShift(event, role)).length;
+}
+
+/**
+ * Whether `person` belongs to comparison group `role` for the PURPOSE OF
+ * THIS ENGINE -- a strictly WIDER test than `resolveFairnessComparisonGroupKey`
+ * alone (follow-up fix). A person's CURRENT `isSupervisor`/`isTechnician`
+ * flags decide group membership everywhere else in the foundation, but
+ * capability is undated (see `"eligibility_undated"`) -- if it changes
+ * (someone stops being flagged a technician, is reclassified, etc.), a
+ * REAL confirmed shift they actually worked as that role, this period,
+ * must never simply disappear because the flag no longer matches. Without
+ * this widening, `computeShiftFairnessForGroup`'s own `people.filter(...)`
+ * would silently drop that person's row entirely -- their evidenced work
+ * wouldn't just be excluded from opportunity accounting, it would never
+ * be visible ANYWHERE in this role's results.
+ *
+ * A person included ONLY via this evidence path (current capability for
+ * `role` is false) still goes through `resolveFairnessRoleEligibility`
+ * normally in `computePersonShiftFacts` -- which requires the CURRENT
+ * capability flag first -- so they correctly receive zero opportunities
+ * (nothing here grants them a forward-looking share they're not currently
+ * flagged capable of); only their real `actualShifts` count is preserved.
+ * That is a deliberate, narrow fix for VISIBILITY of real evidence, not a
+ * reopening of the eligibility rule itself.
+ */
+function isRoleComparisonMember(
+  person: Person,
+  role: FairnessComparisonGroupKey,
+  events: readonly Event[],
+  periodStartDate: string | null,
+  periodEndDate: string | null,
+): boolean {
+  if (resolveFairnessComparisonGroupKey(person) === role) return true;
+  if (periodStartDate === null || periodEndDate === null) return false;
+
+  return events.some(
     (event) =>
-      event.date === date &&
-      event.category === "shift" &&
-      event.certainty === "confirmed" &&
-      event.role === role &&
-      !event.shadow,
-  ).length;
+      event.personId === person.id &&
+      isConfirmedNonShadowRoleShift(event, role) &&
+      event.date >= periodStartDate &&
+      event.date <= periodEndDate,
+  );
 }
 
 function computePersonShiftFacts(
@@ -255,18 +297,21 @@ function computeShare(personOpportunities: number, totalOpportunities: number, t
 }
 
 /**
- * Computes shift Fairness for every member of comparison group `role`
- * (`resolveFairnessComparisonGroupKey(person) === role`, from
- * `fairnessGroups.ts` -- never a separate/duplicated group definition).
+ * Computes shift Fairness for every member of comparison group `role` --
+ * `resolveFairnessComparisonGroupKey(person) === role` (from
+ * `fairnessGroups.ts`, never a separate/duplicated group definition) OR,
+ * per the follow-up fix above, a person whose CURRENT capability no longer
+ * includes `role` but who has real confirmed evidence of having worked it
+ * this period (`isRoleComparisonMember`) -- their evidenced work stays
+ * visible even though it can no longer earn them a forward opportunity
+ * share (capability isn't historically dated -- see `"eligibility_undated"`).
  *
  * `people`/`events` may be the full roster/period Event set -- this filters
  * to the group and to each person's own Events itself. `periodDates` is
  * whatever the caller resolved (typically
  * `resolveShiftFairnessPeriodDates`'s today-capped current-month dates, or
  * a full historical month/week) -- an EMPTY array is handled safely: every
- * member gets `actualShifts: 0`, `target: 0`, `status: "balanced"`, and the
- * group-level `"shift_target_no_group_opportunities"` completeness reason
- * (there is nothing to distribute a share of).
+ * member gets `actualShifts: 0`, `target: 0`, `status: "balanced"`.
  *
  * `reserveParticipation` defaults to empty, the safe direction (see
  * `fairnessParticipation.ts`).
@@ -278,10 +323,13 @@ export function computeShiftFairnessForGroup(
   periodDates: readonly string[],
   reserveParticipation: ReserveRoleParticipation = EMPTY_RESERVE_ROLE_PARTICIPATION,
 ): ShiftFairnessGroupResult {
-  const groupMembers = people.filter((person) => resolveFairnessComparisonGroupKey(person) === role);
   const sortedDates = [...periodDates].sort();
   const periodStartDate = sortedDates[0] ?? null;
   const periodEndDate = sortedDates[sortedDates.length - 1] ?? null;
+
+  const groupMembers = people.filter((person) =>
+    isRoleComparisonMember(person, role, events, periodStartDate, periodEndDate),
+  );
 
   const facts = groupMembers.map((person) =>
     computePersonShiftFacts(person, role, events, sortedDates, periodStartDate, periodEndDate, reserveParticipation),
@@ -292,10 +340,18 @@ export function computeShiftFairnessForGroup(
   const totalWeekendActual = facts.reduce((sum, fact) => sum + fact.weekendActualShifts, 0);
   const totalWeekendOpportunity = facts.reduce((sum, fact) => sum + fact.weekendOpportunityCount, 0);
 
+  // Follow-up fix: zero opportunities is only a genuine data-incompleteness
+  // signal when there was real workload it failed to explain (`totalActual
+  // > 0` -- "unallocatable workload", e.g. the widened-membership case
+  // above). Zero opportunities WITH zero actual work is simply nothing to
+  // distribute -- a normal, complete outcome (an idle group/subset, or an
+  // empty period), never flagged as incomplete.
   const groupOpportunityGap =
-    totalOpportunity === 0 ? fairnessDataCompleteness(["shift_target_no_group_opportunities"]) : COMPLETE_FAIRNESS_DATA;
+    totalOpportunity === 0 && totalActual > 0
+      ? fairnessDataCompleteness(["shift_target_no_group_opportunities"])
+      : COMPLETE_FAIRNESS_DATA;
   const weekendGroupOpportunityGap =
-    totalWeekendOpportunity === 0
+    totalWeekendOpportunity === 0 && totalWeekendActual > 0
       ? fairnessDataCompleteness(["shift_target_no_group_opportunities"])
       : COMPLETE_FAIRNESS_DATA;
 

@@ -373,6 +373,21 @@ and never a 0–100 score.
   (never tentative) and never a shadow ("- צל") assignment, reusing
   `shiftCoverage.ts`'s own "shadow shifts never count as primary coverage"
   convention.
+- **Group membership preserves evidence past a changed capability flag
+  (follow-up fix).** Comparison-group membership is `resolveFairnessComparisonGroupKey(person)
+  === role` (current capability) **OR** the person has a real confirmed,
+  non-shadow shift for `role` within the period (`isRoleComparisonMember`).
+  Capability is undated (`"eligibility_undated"`) — if it changes, a real
+  shift someone actually worked as that role must never simply vanish from
+  the results because `people.filter(...)` silently dropped their row.
+  A person included only via this evidence path still gets `opportunityCount:
+  0` (the eligibility check inside `computePersonShiftFacts` still requires
+  the CURRENT capability flag, unaffected by this fix — this is a fix for
+  VISIBILITY only, not a reopening of eligibility), so their real
+  `actualShifts` count still flows into `totalActual` and is redistributed
+  as opportunity share onto whoever DOES currently hold real opportunities
+  — a documented, narrow, and regression-tested consequence of preserving
+  visibility rather than a formula change.
 - **Weekend fairness stays separate.** The exact same opportunity-share
   method is computed a SECOND time, restricted to weekend dates only
   (`isFairnessWeekendDate`, reused from `fairnessFoundation.ts`) — no
@@ -393,12 +408,24 @@ and never a 0–100 score.
   month at `now.date` (never projecting into the future portion of the
   month); a past month is returned in full; a wholly future month returns
   an empty date list, which `computeShiftFairnessForGroup` handles safely
-  (every member: zero actual/target/opportunity, `"balanced"`, and the new
-  `"shift_target_no_group_opportunities"` completeness reason — see
-  `fairnessFoundation.ts`). `resolveShiftFairnessPeriodStatus` separately
+  (every member: zero actual/target/opportunity, `"balanced"`, and —
+  follow-up fix — `dataCompleteness: complete`, not `"shift_target_no_group_opportunities"`;
+  see the completeness bullet below for why an empty/idle period is never
+  flagged as incomplete). `resolveShiftFairnessPeriodStatus` separately
   reports `"current"`/`"closed"` from the month's own real end date (never
   from the today-capped date list), so a future month still correctly
   reads `"current"`.
+- **`"shift_target_no_group_opportunities"` means unallocatable, not
+  merely empty (follow-up fix).** This completeness reason (see
+  `fairnessFoundation.ts`) is attached ONLY when the group (or its weekend
+  subset) has real actual workload (`totalActual > 0`) that zero
+  opportunities failed to explain — a genuine gap, most commonly the
+  group-membership fix above surfacing someone's real shifts with no
+  current opportunity to attribute them to. Zero opportunities WITH zero
+  actual work (an idle group/subset, or an empty period) is simply nothing
+  to distribute, and is never flagged incomplete — the initial version of
+  this PR incorrectly raised the reason any time opportunities were zero,
+  regardless of whether there was any real workload to explain.
 - **Period-shape-agnostic by construction.** `computeShiftFairnessForGroup`
   takes a plain `periodDates: readonly string[]` — the exact same function
   serves a calendar month OR a single week with zero engine changes, only a

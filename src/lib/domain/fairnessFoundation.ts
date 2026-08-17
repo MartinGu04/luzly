@@ -71,14 +71,21 @@ export function resolveFairnessPeriodStatus(periodEndDate: string, now: LocalNow
  *   technician-capable, so no comparison group they belong to has been
  *   PROVEN comparable by today's data -- see `fairnessGroups.ts`.
  * - `shift_target_no_group_opportunities` -- PR #2's shift Fairness engine
- *   (`fairnessShiftEngine.ts`) could not establish ANY valid opportunity
- *   across the whole comparison group for the period (or the weekend
- *   subset of it) -- every member's personal target defaults to 0 rather
- *   than a real proportional share, since there is nothing to distribute a
- *   share OF. This is a group-level fact, not a per-person one -- it is
- *   attached to every member's own `dataCompleteness` so a per-person view
- *   never looks confidently "balanced" while the underlying target was
- *   never really computable.
+ *   (`fairnessShiftEngine.ts`) found real, evidenced workload for the
+ *   comparison group (or its weekend subset) that it could not attribute
+ *   to ANY valid opportunity -- workload actually happened, but nothing in
+ *   today's data explains who was genuinely positioned to do it, so every
+ *   member's personal target defaults to 0 instead of a real proportional
+ *   share. This is deliberately NOT raised merely because both the
+ *   workload and the opportunity count are zero (an idle group/subset, or
+ *   an empty period, with nothing to distribute) -- that is a normal,
+ *   complete outcome, not a gap. Only a genuinely UNALLOCATABLE workload
+ *   (actual shifts > 0 with zero opportunities to explain them -- e.g. a
+ *   person's own capability flag no longer matches a real shift they
+ *   evidently worked) counts as incomplete. This is a group-level fact,
+ *   not a per-person one -- it is attached to every member's own
+ *   `dataCompleteness` so a per-person view never looks confidently
+ *   "balanced" while the underlying target was never really computable.
  */
 export type FairnessDataCompletenessReason =
   | "participation_assumed_full_period"

@@ -454,21 +454,114 @@ describe("computeShiftFairnessForGroup — partial/incomplete data propagation",
     expect(row.dataCompleteness.reasons).toContain("constraint_period_unmodeled");
   });
 
-  it("a group with zero total opportunities flags shift_target_no_group_opportunities for every member", () => {
-    const PERMANENT = person({ id: "p_perm", personnelType: "קבע", isSupervisor: true }); // zero evidence -> zero opportunities
+  it("zero opportunities with zero actual work is nothing to distribute -- NOT flagged incomplete", () => {
+    const PERMANENT = person({ id: "p_perm", personnelType: "קבע", isSupervisor: true }); // zero evidence -> zero opportunities, zero actual
     const result = computeShiftFairnessForGroup("supervisor", [PERMANENT], [], ["2026-08-10"]);
     const row = findPerson(result, PERMANENT.id);
-    expect(row.dataCompleteness.reasons).toContain("shift_target_no_group_opportunities");
+    expect(row.actualShifts).toBe(0);
+    expect(row.dataCompleteness.reasons).not.toContain("shift_target_no_group_opportunities");
   });
 
-  it("an empty period (a wholly future month) never crashes and reports the group-opportunity gap", () => {
+  it("an empty period (a wholly future month) never crashes and is trivially complete -- nothing happened, nothing to distribute", () => {
     const SOLO = person({ id: "p_solo", isTechnician: true });
     const result = computeShiftFairnessForGroup("technician", [SOLO], [], []);
     const row = findPerson(result, SOLO.id);
     expect(row.actualShifts).toBe(0);
     expect(row.target).toBe(0);
     expect(row.status).toBe("balanced");
+    expect(row.dataCompleteness).toEqual({ status: "complete", reasons: [] });
+  });
+
+  it("real actual work with zero opportunities to explain it IS a genuinely unallocatable workload -- flagged incomplete", () => {
+    // A person whose current capability flag no longer matches a real
+    // confirmed shift they evidently worked -- see the group-membership
+    // regression tests below for why this person still gets a row at all.
+    const NO_LONGER_FLAGGED = person({ id: "p_reclassified", isTechnician: false, isSupervisor: false });
+    const date = "2026-08-10";
+    const events: Event[] = [shiftEvent({ personId: NO_LONGER_FLAGGED.id, date, role: "technician" })];
+    const result = computeShiftFairnessForGroup("technician", [NO_LONGER_FLAGGED], events, [date]);
+    const row = findPerson(result, NO_LONGER_FLAGGED.id);
+    expect(row.actualShifts).toBe(1);
+    expect(row.opportunityCount).toBe(0);
     expect(row.dataCompleteness.reasons).toContain("shift_target_no_group_opportunities");
+  });
+});
+
+describe("computeShiftFairnessForGroup — group membership preserves real evidence despite a changed capability flag", () => {
+  it("a person no longer flagged capable for the role still appears, with their real confirmed shifts counted as actual", () => {
+    const NO_LONGER_FLAGGED = person({ id: "p_reclassified", isTechnician: false, isSupervisor: false });
+    const dates = ["2026-08-10", "2026-08-11"];
+    const events: Event[] = [
+      shiftEvent({ personId: NO_LONGER_FLAGGED.id, date: "2026-08-10", role: "technician" }),
+      shiftEvent({ personId: NO_LONGER_FLAGGED.id, date: "2026-08-11", role: "technician", period: "night" }),
+    ];
+
+    const result = computeShiftFairnessForGroup("technician", [NO_LONGER_FLAGGED], events, dates);
+
+    // Without the fix, this person would have no row at all -- their real,
+    // confirmed work would simply be invisible in the technician group.
+    expect(result.people).toHaveLength(1);
+    const row = findPerson(result, NO_LONGER_FLAGGED.id);
+    expect(row.actualShifts).toBe(2);
+    // Never granted a forward-looking opportunity share on the strength of
+    // stale evidence -- opportunity still requires the CURRENT capability
+    // flag, unaffected by this fix.
+    expect(row.opportunityCount).toBe(0);
+    expect(row.target).toBe(0);
+  });
+
+  it("an evidence-only member's real shifts still count toward the group's total actual workload -- documented, deliberate consequence of preserving visibility", () => {
+    // This is the one honest side effect of the fix: the group's
+    // "totalActual" (the real workload the opportunity-share formula
+    // redistributes) is a simple sum across every VISIBLE member, evidence-
+    // only ones included -- their own real work is part of the group's real
+    // total, exactly as it should be. Because they hold zero opportunities,
+    // none of that total actually redistributes back to them (their own
+    // target stays 0) -- it flows entirely onto the currently-eligible
+    // opportunity holder(s) instead. The formula itself is intentionally
+    // UNCHANGED (see this PR's own note) -- this test exists to make the
+    // real, if narrow, consequence explicit and regression-tested rather
+    // than silently relying on it.
+    const NO_LONGER_FLAGGED = person({ id: "p_reclassified", isTechnician: false, isSupervisor: false });
+    const CURRENT = person({ id: "p_current", isTechnician: true });
+    const date = "2026-08-10";
+    const events: Event[] = [
+      shiftEvent({ personId: NO_LONGER_FLAGGED.id, date, role: "technician" }),
+      shiftEvent({ personId: CURRENT.id, date, role: "technician", period: "night" }),
+    ];
+
+    const result = computeShiftFairnessForGroup("technician", [NO_LONGER_FLAGGED, CURRENT], events, [date]);
+
+    const reclassified = findPerson(result, NO_LONGER_FLAGGED.id);
+    const current = findPerson(result, CURRENT.id);
+
+    expect(reclassified.actualShifts).toBe(1);
+    expect(reclassified.opportunityCount).toBe(0);
+    expect(reclassified.target).toBe(0);
+
+    // CURRENT holds the group's only opportunities (2: day + night, both
+    // free) and therefore absorbs the group's ENTIRE total actual (2: their
+    // own 1 shift plus the reclassified colleague's 1 shift) as their own
+    // target -- landing them "below" despite having worked every opportunity
+    // they were actually offered.
+    expect(current.opportunityCount).toBe(2);
+    expect(current.actualShifts).toBe(1);
+    expect(current.target).toBe(2);
+    expect(current.status).toBe("below");
+  });
+
+  it("a dual-capable person's primary group is supervisor, but real confirmed technician evidence still surfaces in the technician group too", () => {
+    // A dual-capable (supervisor + technician) person's PRIMARY comparison
+    // group is "supervisor" (fairnessGroups.ts precedence) -- but if they
+    // also have real confirmed TECHNICIAN evidence, that work must not
+    // disappear from the technician group's own results either.
+    const DUAL = person({ id: "p_dual", isSupervisor: true, isTechnician: true });
+    const date = "2026-08-10";
+    const events: Event[] = [shiftEvent({ personId: DUAL.id, date, role: "technician" })];
+
+    const technicianResult = computeShiftFairnessForGroup("technician", [DUAL], events, [date]);
+    expect(technicianResult.people).toHaveLength(1);
+    expect(findPerson(technicianResult, DUAL.id).actualShifts).toBe(1);
   });
 });
 
