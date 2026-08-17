@@ -15,6 +15,14 @@ import { getRequestRecentDashboardChanges } from "@/lib/readModels/getRequestRec
  * SEPARATE, optional call -- it never throws (see its own docstring), so
  * a failure there can never turn this page into `ConfigurationErrorState`;
  * the personal schedule stays the page's one load-bearing dependency.
+ *
+ * Deliberately still awaited AFTER `result`, not in parallel: unlike the
+ * protected layout's own `Promise.all` (PR #38), this second call is
+ * skipped entirely whenever `result.status !== "ok"` -- a broken shift
+ * configuration has nothing worth recapping, so this never spends an
+ * extra Supabase round trip finding that out. See this file's own test
+ * ("never fetches recent changes at all when the personal schedule itself
+ * failed") for the behavior this preserves.
  */
 export default async function DashboardPage() {
   const result = await getRequestPersonalSchedule();
