@@ -1,9 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { detectOperationalIssues, type OperationalIssue } from "./operationalIssues";
+import { EMPTY_RESERVE_ROLE_PARTICIPATION, type ReserveRoleParticipation } from "./reserveParticipation";
 import { buildShiftSchedule } from "./shiftSchedule";
 import type { Event } from "./event";
 import type { Person } from "./types";
-import { buildShiftCoverageRecommendation, dayOffsetMinutes, MAX_RECOMMENDATION_CANDIDATES } from "./shiftCoverageRecommendation";
+import {
+  buildShiftCoverageRecommendation,
+  dayOffsetMinutes,
+  MAX_RECOMMENDATION_CANDIDATES,
+  RESERVE_RECENT_SHIFT_EVIDENCE_WINDOW_DAYS,
+} from "./shiftCoverageRecommendation";
 
 // day 07:30-19:30 (450-1170), night 19:30-07:30(+1) (1170-1890)
 const schedule = buildShiftSchedule("07:30");
@@ -18,6 +24,12 @@ function nextCell(): string {
   return `C${cellCounter}`;
 }
 
+// Default personnelType is "חובה" (regular/mandatory service, PR #39) so
+// every pre-existing fixture person is automatically eligible for
+// participation without needing Fairness/shift evidence -- the same
+// normal-pool status these fixtures always implicitly represented, now
+// made explicit. Participation-specific tests below override this per case
+// (permanent/reserve/unclassified).
 function person(overrides: Partial<Person> = {}): Person {
   return {
     id: "p_x",
@@ -26,7 +38,7 @@ function person(overrides: Partial<Person> = {}): Person {
     isManager: false,
     isTechnician: false,
     isSupervisor: false,
-    personnelType: null,
+    personnelType: "חובה",
     ...overrides,
   };
 }
@@ -87,6 +99,14 @@ function dutyEvent(overrides: Partial<Event> & { personId: string }): Event {
     rawValue: "שומר 1",
     ...overrides,
   });
+}
+
+/** Builds a `ReserveRoleParticipation` with only the given technician/supervisor ids as Fairness-evidenced -- never a raw Fairness row, matching the minimal projection `buildShiftCoverageRecommendation` actually receives. */
+function participation(overrides: { technicianIds?: string[]; supervisorIds?: string[] } = {}): ReserveRoleParticipation {
+  return {
+    technicianPersonIds: new Set(overrides.technicianIds ?? []),
+    supervisorPersonIds: new Set(overrides.supervisorIds ?? []),
+  };
 }
 
 /** Runs the real `detectOperationalIssues` pipeline and returns the (only) coverage-reason issue -- never a hand-built fake `OperationalIssue`, so `missingIntervals`/`targetEvent` stay internally consistent with real domain output. */
@@ -781,5 +801,282 @@ describe("buildShiftCoverageRecommendation — unsupported problems", () => {
     const issue = issues.find((i) => i.reason === "role_capability_mismatch")!;
     expect(issue).toBeDefined();
     expect(buildShiftCoverageRecommendation(issue, people, events, schedule)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PR #39 -- participation eligibility (separate from, and checked before,
+// the interval-compatibility exclusions covered above).
+// ---------------------------------------------------------------------------
+
+describe("buildShiftCoverageRecommendation — PR #39 participation eligibility", () => {
+  describe("permanent service (קבע) is never recommended", () => {
+    it("a permanent technician is excluded from the primary technician pool even though capability is true", () => {
+      const PERM_TECH = person({ id: "p_perm_tech", name: "קבוע טכנאי", personnelType: "קבע", isTechnician: true });
+      const events = [shiftEvent({ personId: SUP.id, role: "supervisor" })];
+      const people = [SUP, PERM_TECH];
+      const issue = findCoverageIssue(events, people);
+      const recommendation = buildShiftCoverageRecommendation(issue, people, events, schedule);
+      expect(recommendation).toBeNull();
+    });
+
+    it("a permanent supervisor is excluded from the primary supervisor pool even though capability is true", () => {
+      const TECH_ANCHOR = person({ id: "p_tech_anchor", name: "עוגן", isTechnician: true });
+      const PERM_SUP = person({ id: "p_perm_sup", name: "קבוע אחמ״ש", personnelType: "קבע", isSupervisor: true });
+      const events = [shiftEvent({ personId: TECH_ANCHOR.id, role: "technician" })];
+      const people = [TECH_ANCHOR, PERM_SUP];
+      const issue = findCoverageIssue(events, people);
+      const recommendation = buildShiftCoverageRecommendation(issue, people, events, schedule);
+      expect(recommendation).toBeNull();
+    });
+
+    it("a permanent dual-role (technician+supervisor) person never enters the technician last-resort fallback, even with Fairness evidence", () => {
+      const PERM_DUAL = person({
+        id: "p_perm_dual",
+        name: "קבוע כפול",
+        personnelType: "קבע",
+        isTechnician: true,
+        isSupervisor: true,
+      });
+      const events = [shiftEvent({ personId: SUP.id, role: "supervisor" })];
+      const people = [SUP, PERM_DUAL];
+      const issue = findCoverageIssue(events, people);
+      // Even fabricated Fairness evidence for this permanent person must never matter.
+      const evidence = participation({ technicianIds: [PERM_DUAL.id] });
+      const recommendation = buildShiftCoverageRecommendation(issue, people, events, schedule, evidence);
+      expect(recommendation).toBeNull();
+    });
+  });
+
+  describe("regular/mandatory service (חובה) participates with capability alone -- no evidence required", () => {
+    it("a regular technician is a candidate with zero Fairness/shift evidence", () => {
+      const REGULAR_TECH = person({ id: "p_reg_tech", name: "חובה טכנאי", personnelType: "חובה", isTechnician: true });
+      const events = [shiftEvent({ personId: SUP.id, role: "supervisor" })];
+      const people = [SUP, REGULAR_TECH];
+      const issue = findCoverageIssue(events, people);
+      const recommendation = buildShiftCoverageRecommendation(issue, people, events, schedule, EMPTY_RESERVE_ROLE_PARTICIPATION);
+      expect(recommendation?.primaryCandidateIds).toEqual([REGULAR_TECH.id]);
+    });
+
+    it("a regular supervisor is a candidate with zero Fairness/shift evidence", () => {
+      const TECH = person({ id: "p_tech", name: "טכנאי", isTechnician: true });
+      const REGULAR_SUP = person({ id: "p_reg_sup", name: "חובה אחמ״ש", personnelType: "חובה", isSupervisor: true });
+      const events = [shiftEvent({ personId: TECH.id, role: "technician" })];
+      const people = [TECH, REGULAR_SUP];
+      const issue = findCoverageIssue(events, people);
+      const recommendation = buildShiftCoverageRecommendation(issue, people, events, schedule, EMPTY_RESERVE_ROLE_PARTICIPATION);
+      expect(recommendation?.primaryCandidateIds).toEqual([REGULAR_SUP.id]);
+    });
+  });
+
+  describe("unknown/missing personnelType fails conservatively", () => {
+    it.each([
+      ["null personnelType", null],
+      ["an unrecognized personnelType string", "משהו לא מוכר"],
+    ])("%s -- never a candidate, even with full capability and Fairness evidence", (_label, personnelType) => {
+      const UNCLASSIFIED = person({ id: "p_unclassified", name: "לא מסווג", personnelType, isTechnician: true });
+      const events = [shiftEvent({ personId: SUP.id, role: "supervisor" })];
+      const people = [SUP, UNCLASSIFIED];
+      const issue = findCoverageIssue(events, people);
+      const evidence = participation({ technicianIds: [UNCLASSIFIED.id] });
+      const recommendation = buildShiftCoverageRecommendation(issue, people, events, schedule, evidence);
+      expect(recommendation).toBeNull();
+    });
+  });
+
+  describe("reservists (מילואים) need capability AND positive evidence -- Fairness OR a recent confirmed same-role shift", () => {
+    function reserveFixture(role: "technician" | "supervisor") {
+      const anchorRole: "technician" | "supervisor" = role === "technician" ? "supervisor" : "technician";
+      const ANCHOR = person({ id: "p_anchor", name: "עוגן", [anchorRole === "technician" ? "isTechnician" : "isSupervisor"]: true });
+      const RESERVE = person({
+        id: "p_reserve",
+        name: "מילואימניק",
+        personnelType: "מילואים",
+        isTechnician: role === "technician",
+        isSupervisor: role === "supervisor",
+      });
+      const events = [shiftEvent({ personId: ANCHOR.id, role: anchorRole })];
+      const people = [ANCHOR, RESERVE];
+      return { RESERVE, events, people };
+    }
+
+    it.each(["technician", "supervisor"] as const)(
+      "capability alone, with ZERO evidence, does NOT qualify a reserve %s",
+      (role) => {
+        const { events, people } = reserveFixture(role);
+        const issue = findCoverageIssue(events, people);
+        const recommendation = buildShiftCoverageRecommendation(issue, people, events, schedule, EMPTY_RESERVE_ROLE_PARTICIPATION);
+        expect(recommendation).toBeNull();
+      },
+    );
+
+    it.each(["technician", "supervisor"] as const)(
+      "a matching current-period Fairness allocation qualifies a reserve %s",
+      (role) => {
+        const { RESERVE, events, people } = reserveFixture(role);
+        const issue = findCoverageIssue(events, people);
+        const evidence =
+          role === "technician" ? participation({ technicianIds: [RESERVE.id] }) : participation({ supervisorIds: [RESERVE.id] });
+        const recommendation = buildShiftCoverageRecommendation(issue, people, events, schedule, evidence);
+        expect(recommendation?.primaryCandidateIds).toEqual([RESERVE.id]);
+      },
+    );
+
+    it.each(["technician", "supervisor"] as const)(
+      "a recent CONFIRMED same-role shift (no Fairness evidence at all) qualifies a reserve %s",
+      (role) => {
+        const { RESERVE, events, people } = reserveFixture(role);
+        // 5 days before the issue date -- inside the window, far enough away to never overlap the missing interval.
+        const evidenceShiftDate = "2026-08-08";
+        const withEvidence = [...events, shiftEvent({ personId: RESERVE.id, role, date: evidenceShiftDate, certainty: "confirmed" })];
+        const issue = findCoverageIssue(withEvidence, people);
+        const recommendation = buildShiftCoverageRecommendation(issue, people, withEvidence, schedule, EMPTY_RESERVE_ROLE_PARTICIPATION);
+        expect(recommendation?.primaryCandidateIds).toEqual([RESERVE.id]);
+      },
+    );
+
+    describe("negative evidence -- none of these establish participation", () => {
+      it("wrong-role Fairness evidence (technician evidence for a supervisor role) does not count", () => {
+        const { RESERVE, events, people } = reserveFixture("supervisor");
+        const evidence = participation({ technicianIds: [RESERVE.id] }); // wrong role
+        const issue = findCoverageIssue(events, people);
+        expect(buildShiftCoverageRecommendation(issue, people, events, schedule, evidence)).toBeNull();
+      });
+
+      it("Fairness evidence for a DIFFERENT person does not count for this candidate", () => {
+        const { events, people } = reserveFixture("technician");
+        const evidence = participation({ technicianIds: ["p_someone_else"] });
+        const issue = findCoverageIssue(events, people);
+        expect(buildShiftCoverageRecommendation(issue, people, events, schedule, evidence)).toBeNull();
+      });
+
+      it("'wrong H1/H2 period' -- the caller resolving the OTHER period's (empty) participation for this candidate does not count", () => {
+        // Simulates the read-model layer having picked the period that does NOT
+        // contain this reservist's Fairness row -- from this function's own
+        // point of view that's indistinguishable from "no evidence at all".
+        const { events, people } = reserveFixture("technician");
+        const issue = findCoverageIssue(events, people);
+        expect(buildShiftCoverageRecommendation(issue, people, events, schedule, EMPTY_RESERVE_ROLE_PARTICIPATION)).toBeNull();
+      });
+
+      it("a wrong-role recent shift (confirmed supervisor shift, technician role needed) does not count", () => {
+        const { RESERVE, events, people } = reserveFixture("technician");
+        const withWrongRoleShift = [
+          ...events,
+          shiftEvent({ personId: RESERVE.id, role: "supervisor", date: "2026-08-08", certainty: "confirmed" }),
+        ];
+        const issue = findCoverageIssue(withWrongRoleShift, people);
+        expect(
+          buildShiftCoverageRecommendation(issue, people, withWrongRoleShift, schedule, EMPTY_RESERVE_ROLE_PARTICIPATION),
+        ).toBeNull();
+      });
+
+      it("a TENTATIVE same-role shift does not count as evidence", () => {
+        const { RESERVE, events, people } = reserveFixture("technician");
+        const withTentative = [
+          ...events,
+          shiftEvent({ personId: RESERVE.id, role: "technician", date: "2026-08-08", certainty: "tentative" }),
+        ];
+        const issue = findCoverageIssue(withTentative, people);
+        expect(
+          buildShiftCoverageRecommendation(issue, people, withTentative, schedule, EMPTY_RESERVE_ROLE_PARTICIPATION),
+        ).toBeNull();
+      });
+
+      it(`an OLD same-role shift, more than ${RESERVE_RECENT_SHIFT_EVIDENCE_WINDOW_DAYS} days before the issue date, does not count`, () => {
+        const { RESERVE, events, people } = reserveFixture("technician");
+        const withOldShift = [
+          ...events,
+          shiftEvent({ personId: RESERVE.id, role: "technician", date: "2026-07-20", certainty: "confirmed" }),
+        ];
+        const issue = findCoverageIssue(withOldShift, people);
+        expect(
+          buildShiftCoverageRecommendation(issue, people, withOldShift, schedule, EMPTY_RESERVE_ROLE_PARTICIPATION),
+        ).toBeNull();
+      });
+
+      it("missing role capability excludes a reservist even with matching Fairness evidence for that role", () => {
+        // RESERVE has no isTechnician/isSupervisor capability at all.
+        const RESERVE = person({ id: "p_reserve_nocap", name: "בלי יכולת", personnelType: "מילואים" });
+        const events = [shiftEvent({ personId: SUP.id, role: "supervisor" })];
+        const people = [SUP, RESERVE];
+        const issue = findCoverageIssue(events, people);
+        const evidence = participation({ technicianIds: [RESERVE.id] });
+        expect(buildShiftCoverageRecommendation(issue, people, events, schedule, evidence)).toBeNull();
+      });
+    });
+  });
+
+  describe("tier ordering and fallback gating", () => {
+    it("regular and active-reserve technicians are BOTH normal primary candidates, with the regular one ordered first", () => {
+      const REGULAR = person({ id: "p_regular", name: "ת חובה", personnelType: "חובה", isTechnician: true });
+      const RESERVE = person({ id: "p_reserve", name: "א מילואים", personnelType: "מילואים", isTechnician: true });
+      const events = [shiftEvent({ personId: SUP.id, role: "supervisor" })];
+      const people = [SUP, REGULAR, RESERVE];
+      const issue = findCoverageIssue(events, people);
+      const evidence = participation({ technicianIds: [RESERVE.id] });
+      const recommendation = buildShiftCoverageRecommendation(issue, people, events, schedule, evidence);
+      // RESERVE's name ("א...") sorts before REGULAR's ("ת...") alphabetically,
+      // proving the regular-first ordering is NOT just a name sort.
+      expect(recommendation?.primaryCandidateIds).toEqual([REGULAR.id, RESERVE.id]);
+    });
+
+    it("an active-reserve technician (participation proven) prevents the dual-role technician fallback from ever appearing", () => {
+      const RESERVE_TECH = person({ id: "p_reserve_tech", name: "מילואים טכנאי", personnelType: "מילואים", isTechnician: true });
+      const DUAL = person({ id: "p_dual", name: "כפול", isTechnician: true, isSupervisor: true }); // regular by default
+      const events = [shiftEvent({ personId: SUP.id, role: "supervisor" })];
+      const people = [SUP, RESERVE_TECH, DUAL];
+      const issue = findCoverageIssue(events, people);
+      const evidence = participation({ technicianIds: [RESERVE_TECH.id] });
+      const recommendation = buildShiftCoverageRecommendation(issue, people, events, schedule, evidence);
+      expect(recommendation?.primaryCandidateIds).toEqual([RESERVE_TECH.id]);
+      expect(recommendation?.fallbackCandidateIds).toEqual([]);
+    });
+
+    it("the dual-role fallback still appears once the entire normal (regular+reserve) technician pool is genuinely empty", () => {
+      const DUAL = person({ id: "p_dual", name: "כפול", isTechnician: true, isSupervisor: true }); // regular by default
+      const events = [shiftEvent({ personId: SUP.id, role: "supervisor" })];
+      const people = [SUP, DUAL];
+      const issue = findCoverageIssue(events, people);
+      const recommendation = buildShiftCoverageRecommendation(issue, people, events, schedule, EMPTY_RESERVE_ROLE_PARTICIPATION);
+      expect(recommendation?.primaryCandidateIds).toEqual([]);
+      expect(recommendation?.fallbackCandidateIds).toEqual([DUAL.id]);
+    });
+
+    it("a reserve dual-role person needs TECHNICIAN-specific evidence to enter the fallback -- supervisor evidence alone is insufficient", () => {
+      const RESERVE_DUAL = person({
+        id: "p_reserve_dual",
+        name: "מילואים כפול",
+        personnelType: "מילואים",
+        isTechnician: true,
+        isSupervisor: true,
+      });
+      const events = [shiftEvent({ personId: SUP.id, role: "supervisor" })];
+      const people = [SUP, RESERVE_DUAL];
+      const issue = findCoverageIssue(events, people);
+
+      // Supervisor-only evidence: does NOT unlock the technician fallback.
+      const supervisorOnlyEvidence = participation({ supervisorIds: [RESERVE_DUAL.id] });
+      expect(buildShiftCoverageRecommendation(issue, people, events, schedule, supervisorOnlyEvidence)).toBeNull();
+
+      // Technician evidence: unlocks it.
+      const technicianEvidence = participation({ technicianIds: [RESERVE_DUAL.id] });
+      const recommendation = buildShiftCoverageRecommendation(issue, people, events, schedule, technicianEvidence);
+      expect(recommendation?.primaryCandidateIds).toEqual([]);
+      expect(recommendation?.fallbackCandidateIds).toEqual([RESERVE_DUAL.id]);
+    });
+
+    it("regular and active-reserve SUPERVISORS are both normal candidates, with the regular one ordered first (no technician fallback exists for supervisor)", () => {
+      const TECH = person({ id: "p_tech", name: "טכנאי", isTechnician: true });
+      const REGULAR_SUP = person({ id: "p_regular_sup", name: "ת חובה אחמ״ש", personnelType: "חובה", isSupervisor: true });
+      const RESERVE_SUP = person({ id: "p_reserve_sup", name: "א מילואים אחמ״ש", personnelType: "מילואים", isSupervisor: true });
+      const events = [shiftEvent({ personId: TECH.id, role: "technician" })];
+      const people = [TECH, REGULAR_SUP, RESERVE_SUP];
+      const issue = findCoverageIssue(events, people);
+      const evidence = participation({ supervisorIds: [RESERVE_SUP.id] });
+      const recommendation = buildShiftCoverageRecommendation(issue, people, events, schedule, evidence);
+      expect(recommendation?.primaryCandidateIds).toEqual([REGULAR_SUP.id, RESERVE_SUP.id]);
+      expect(recommendation?.fallbackCandidateIds).toEqual([]);
+    });
   });
 });

@@ -33,3 +33,25 @@ export function fairnessPeriodLabel(period: FairnessPeriodKey, now: LocalNow): s
   const year = now.date.slice(0, 4);
   return period === "h1" ? `1–6/${year}` : `7–12/${year}`;
 }
+
+/**
+ * A specific half-year Fairness/Potential period -- WHICH half (`key`) AND
+ * WHICH year (`year`) it's for. `resolveFairnessPeriod` alone only answers
+ * "h1 or h2?" -- two dates a year apart (e.g. a 2026 issue and a 2027
+ * issue, both in January) resolve to the SAME `key` ("h1") but are NOT the
+ * same period. This pairs the two together so callers can tell those apart
+ * with exact equality (PR #39 §"year-safe Fairness evidence"), instead of
+ * every caller re-deriving/comparing years ad hoc.
+ */
+export interface FairnessPeriodIdentity {
+  key: FairnessPeriodKey;
+  year: number;
+}
+
+/** `resolveFairnessPeriod` plus the year `now` itself falls in -- the full identity of the period `now` (or an issue/event date wrapped as a `LocalNow`) belongs to. */
+export function resolveFairnessPeriodIdentity(
+  raw: string | null | undefined,
+  now: LocalNow,
+): FairnessPeriodIdentity {
+  return { key: resolveFairnessPeriod(raw, now), year: Number(now.date.slice(0, 4)) };
+}

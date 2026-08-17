@@ -20,3 +20,18 @@ export const ALL_SHEET_SOURCE_KEYS = Object.keys(
 export function toFullSheetA1Range(sheetName: string): string {
   return `'${sheetName.replace(/'/g, "''")}'`;
 }
+
+/**
+ * The calendar year a "...1-6/YYYY" / "...7-12/YYYY" Potential/Fairness
+ * source tab name represents -- structurally parsed from the tab name's own
+ * trailing "/YYYY", NEVER a hardcoded year anywhere in this codebase
+ * (`SHEET_SOURCES.potentialH1`/`potentialH2` above are the one place that
+ * year is written down at all). The real workbook tab name IS the source
+ * of truth for which year's data a fetched sheet actually holds -- when a
+ * `SHEET_SOURCES` name doesn't end in a 4-digit year (a future/renamed/
+ * misconfigured tab), this returns `null` rather than guessing one.
+ */
+export function parseSourcePeriodYear(sheetName: string): number | null {
+  const match = /\/(\d{4})$/.exec(sheetName.trim());
+  return match ? Number(match[1]) : null;
+}

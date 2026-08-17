@@ -3,7 +3,8 @@ import type { EventRole } from "@/lib/domain/event";
 import type { LocalNow } from "@/lib/domain/localNow";
 import { formatHebrewWeekdayAndDate } from "@/lib/presentation/hebrewDate";
 import { roleLabel } from "@/lib/presentation/labels";
-import { classifyPersonnelType, personnelTypeGroupLabel } from "@/lib/presentation/roster";
+import { classifyPersonnelType } from "@/lib/domain/personnelType";
+import { personnelTypeGroupLabel } from "@/lib/presentation/roster";
 import type { SearchReadModel, SearchRosterPerson, SearchShiftEvent } from "@/lib/readModels/searchTypes";
 import { findNextSharedShifts } from "./sharedShift";
 import type {
