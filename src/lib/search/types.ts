@@ -8,6 +8,14 @@ export type SearchDateSpec =
   | { kind: "weekday"; weekdayIndex: number };
 
 /**
+ * One side of a `shared_shift` question -- either the searching user
+ * themselves (grammatically אני/לי/שלי in the matched pattern) or a roster
+ * name query to resolve later. Never resolved at parse time -- see
+ * `resolveSearchIntent`.
+ */
+export type SearchPersonReference = { kind: "self" } | { kind: "query"; text: string };
+
+/**
  * The deterministic, rule-based parse of a normalized query -- never
  * inferred from fuzzy scoring. Exactly one intent per query; an explicit
  * structured pattern (with_me/shared_shift/shift/date) always wins over
@@ -19,7 +27,7 @@ export type SearchIntent =
   | { kind: "date"; date: SearchDateSpec; raw: string }
   | { kind: "shift"; date: SearchDateSpec; period: SearchShiftPeriod; raw: string }
   | { kind: "with_me"; date: SearchDateSpec | null; period: SearchShiftPeriod | null; raw: string }
-  | { kind: "shared_shift"; personQuery: string; raw: string };
+  | { kind: "shared_shift"; personA: SearchPersonReference; personB: SearchPersonReference; raw: string };
 
 /** A colleague appearing in a shift/with-me result -- never more than name/role/shadow, the same fields `PersonalCounterpart` already exposes. */
 export interface SearchResultPerson {
@@ -66,13 +74,50 @@ export interface ShiftSearchResult {
   href: string;
 }
 
+/** One resolved side of a shared-shift result -- `isSelf` drives self-aware copy ("ביחד איתך") vs. naming both people. */
+export interface SharedShiftPerson {
+  personId: string;
+  name: string;
+  isSelf: boolean;
+}
+
 export interface SharedShiftSearchResult {
   kind: "shared_shift";
   key: string;
-  personName: string;
+  personA: SharedShiftPerson;
+  personB: SharedShiftPerson;
   /** Next few shared shifts, soonest first -- never just one when more exist, but kept short (see `resolveSearchIntent`). */
   shifts: { date: string; period: SearchShiftPeriod }[];
+  /**
+   * Navigable only when one side is the searching user themselves -- that
+   * date is genuinely on the VIEWER's own `/schedule` calendar. An
+   * arbitrary other+other pair is never given this href: `/schedule` would
+   * misleadingly render the viewer's own unrelated calendar as if it
+   * represented that pair.
+   */
   href: string | null;
+}
+
+/**
+ * A single candidate shown when a `shared_shift` person reference matches
+ * more than one roster person -- selecting one refines the query in place
+ * (see `CommandPalette`), it never navigates. Ambiguity is decided purely
+ * from name-matching, independent of whether the candidate happens to
+ * share any shift with anyone -- the schedule itself is never used to
+ * disambiguate.
+ */
+export interface SharedShiftDisambiguationResult {
+  kind: "shared_shift_disambiguation";
+  key: string;
+  /** Which side of the pair this candidate resolves -- disambiguation always proceeds one side at a time, A before B. */
+  side: "A" | "B";
+  /** The original ambiguous query text this candidate matched, for the choice's own bookkeeping and refinement. */
+  query: string;
+  personId: string;
+  name: string;
+  roleLabel: string | null;
+  personnelTypeLabel: string;
+  href: null;
 }
 
 export interface WithMeSearchResult {
@@ -89,6 +134,7 @@ export type GlobalSearchResult =
   | DateSearchResult
   | ShiftSearchResult
   | SharedShiftSearchResult
+  | SharedShiftDisambiguationResult
   | WithMeSearchResult;
 
 export interface SearchResolution {

@@ -13,10 +13,12 @@ import type {
   PersonSearchResult,
   SearchDateSpec,
   SearchIntent,
+  SearchPersonReference,
   SearchResolution,
   SearchResultPerson,
   SearchShiftPeriod,
   ShiftSearchResult,
+  SharedShiftDisambiguationResult,
   SharedShiftSearchResult,
   WithMeSearchResult,
 } from "./types";
@@ -211,44 +213,139 @@ function resolveWithMeIntent(
   return { intent, results, emptyMessage: null };
 }
 
-function resolveSharedShiftIntent(model: SearchReadModel, personQuery: string, raw: string): SearchResolution {
-  const intent: SearchIntent = { kind: "shared_shift", personQuery, raw };
-  const matches = findMatchingPeople(model.roster, personQuery).filter((person) => person.id !== model.meId);
+/**
+ * Resolved personIds for one or both sides of a `shared_shift` question,
+ * set once the searching user picks a candidate out of an ambiguous-name
+ * disambiguation list (see `SharedShiftDisambiguationResult`). Keyed by
+ * side rather than by the raw query text -- the UI owns clearing this
+ * whenever the query itself changes, so a stale override can never survive
+ * into a new, unrelated question.
+ */
+export interface SharedShiftOverrides {
+  personA?: string;
+  personB?: string;
+}
 
-  if (matches.length === 0) {
-    return { intent, results: [], emptyMessage: `לא מצאנו איש/אשת צוות בשם "${personQuery}".` };
+type PersonSideResolution =
+  | { status: "resolved"; personId: string }
+  | { status: "ambiguous"; query: string; candidates: SearchRosterPerson[] }
+  | { status: "not_found"; query: string };
+
+/**
+ * Resolves one side of a `shared_shift` pair. `self` always resolves
+ * directly to the searching user -- it can never be ambiguous or
+ * not-found. A `query` reference prefers an explicit override (the
+ * personId the user already picked to resolve an earlier ambiguity) over
+ * re-matching the roster, so a disambiguation choice sticks even if it
+ * happens to still be a multi-match query text. Matching itself reuses
+ * `findMatchingPeople` -- the exact same exact/prefix/substring roster
+ * matching every other search intent uses; never a second matching
+ * strategy, never resolved by consulting shift data.
+ */
+function resolvePersonSide(
+  model: SearchReadModel,
+  ref: SearchPersonReference,
+  overridePersonId: string | undefined,
+): PersonSideResolution {
+  if (ref.kind === "self") return { status: "resolved", personId: model.meId };
+  if (overridePersonId) return { status: "resolved", personId: overridePersonId };
+
+  const matches = findMatchingPeople(model.roster, ref.text);
+  if (matches.length === 0) return { status: "not_found", query: ref.text };
+  if (matches.length === 1) return { status: "resolved", personId: matches[0].id };
+  return { status: "ambiguous", query: ref.text, candidates: matches.slice(0, MAX_PERSON_RESULTS) };
+}
+
+function buildDisambiguationResults(
+  side: "A" | "B",
+  resolution: { query: string; candidates: SearchRosterPerson[] },
+): SharedShiftDisambiguationResult[] {
+  return resolution.candidates.map((person) => ({
+    kind: "shared_shift_disambiguation",
+    key: `shared_shift_disambiguation:${side}:${person.id}`,
+    side,
+    query: resolution.query,
+    personId: person.id,
+    name: person.name,
+    roleLabel: roleLabel(roleFor(person)),
+    personnelTypeLabel: personnelTypeGroupLabel(classifyPersonnelType(person.personnelType)),
+    href: null,
+  }));
+}
+
+function resolveSharedShiftIntent(
+  model: SearchReadModel,
+  personARef: SearchPersonReference,
+  personBRef: SearchPersonReference,
+  raw: string,
+  overrides: SharedShiftOverrides,
+): SearchResolution {
+  const intent: SearchIntent = { kind: "shared_shift", personA: personARef, personB: personBRef, raw };
+
+  // Disambiguation always proceeds one side at a time, A before B -- never
+  // a combinatorial guess across two simultaneously-ambiguous references.
+  const sideA = resolvePersonSide(model, personARef, overrides.personA);
+  if (sideA.status === "ambiguous") {
+    return { intent, results: buildDisambiguationResults("A", sideA), emptyMessage: null };
+  }
+  if (sideA.status === "not_found") {
+    return { intent, results: [], emptyMessage: `לא מצאנו איש/אשת צוות בשם "${sideA.query}".` };
   }
 
-  // Ambiguous: several distinct people match -- resolve (and show) all of them, never silently pick one.
-  const candidates = matches.slice(0, MAX_PERSON_RESULTS).map((person) => ({
-    person,
-    shifts: findNextSharedShifts(model.shiftEvents, model.meId, person.id, MAX_SHARED_SHIFT_RESULTS),
-  }));
+  const sideB = resolvePersonSide(model, personBRef, overrides.personB);
+  if (sideB.status === "ambiguous") {
+    return { intent, results: buildDisambiguationResults("B", sideB), emptyMessage: null };
+  }
+  if (sideB.status === "not_found") {
+    return { intent, results: [], emptyMessage: `לא מצאנו איש/אשת צוות בשם "${sideB.query}".` };
+  }
 
-  const results: SharedShiftSearchResult[] = candidates
-    .filter((candidate) => candidate.shifts.length > 0)
-    .map((candidate) => ({
-      kind: "shared_shift",
-      key: `shared_shift:${candidate.person.id}`,
-      personName: candidate.person.name,
-      shifts: candidate.shifts,
-      href: scheduleHref(candidate.shifts[0].date),
-    }));
+  if (sideA.personId === sideB.personId) {
+    return { intent, results: [], emptyMessage: "לא ניתן לחפש משמרת משותפת של אותו אדם עם עצמו." };
+  }
 
-  if (results.length === 0) {
-    const message =
-      matches.length === 1
-        ? `אין לכם משמרת משותפת בתקופה הזמינה עם ${matches[0].name}.`
-        : "אין לכם משמרת משותפת בתקופה הזמינה עם אף אחד מהם.";
+  const rosterById = new Map(model.roster.map((person) => [person.id, person]));
+  const personA = rosterById.get(sideA.personId);
+  const personB = rosterById.get(sideB.personId);
+  if (!personA || !personB) {
+    return { intent, results: [], emptyMessage: "לא מצאנו את אחד/אחת מהם ברשימת הצוות." };
+  }
+
+  const isSelfA = sideA.personId === model.meId;
+  const isSelfB = sideB.personId === model.meId;
+  const involvesSelf = isSelfA || isSelfB;
+
+  const shifts = findNextSharedShifts(model.shiftEvents, sideA.personId, sideB.personId, MAX_SHARED_SHIFT_RESULTS);
+
+  if (shifts.length === 0) {
+    const message = involvesSelf
+      ? `אין לכם משמרת משותפת בתקופה הזמינה עם ${isSelfA ? personB.name : personA.name}.`
+      : `לא נמצאה משמרת משותפת בתקופה הזמינה עבור ${personA.name} ו${personB.name}.`;
     return { intent, results: [], emptyMessage: message };
   }
 
-  return { intent, results, emptyMessage: null };
+  // Navigable only when the searching user is one of the two -- that date
+  // is genuinely on THEIR /schedule calendar. An arbitrary other+other
+  // pair stays purely informational: `/schedule` always shows the
+  // viewer's own calendar, so sending them there for a pair that doesn't
+  // include them would misleadingly present it as if it did.
+  const result: SharedShiftSearchResult = {
+    kind: "shared_shift",
+    key: `shared_shift:${sideA.personId}:${sideB.personId}`,
+    personA: { personId: sideA.personId, name: personA.name, isSelf: isSelfA },
+    personB: { personId: sideB.personId, name: personB.name, isSelf: isSelfB },
+    shifts,
+    href: involvesSelf ? scheduleHref(shifts[0].date) : null,
+  };
+
+  return { intent, results: [result], emptyMessage: null };
 }
 
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
+
+const NO_OVERRIDES: SharedShiftOverrides = {};
 
 /**
  * Resolves a parsed `SearchIntent` against the safe `SearchReadModel`
@@ -256,8 +353,17 @@ function resolveSharedShiftIntent(model: SearchReadModel, personQuery: string, r
  * carries everything needed; no further server round trip). React renders
  * only the already-typed `GlobalSearchResult`s this returns, never a raw
  * domain object.
+ *
+ * `overrides` only ever affects `shared_shift` resolution -- the personIds
+ * the searching user has already picked to resolve an earlier ambiguous
+ * name, owned and cleared by the UI (see `CommandPalette`) whenever the
+ * query text itself changes.
  */
-export function resolveSearchIntent(intent: SearchIntent, model: SearchReadModel): SearchResolution {
+export function resolveSearchIntent(
+  intent: SearchIntent,
+  model: SearchReadModel,
+  overrides: SharedShiftOverrides = NO_OVERRIDES,
+): SearchResolution {
   switch (intent.kind) {
     case "empty":
       return { intent, results: [], emptyMessage: null };
@@ -270,6 +376,6 @@ export function resolveSearchIntent(intent: SearchIntent, model: SearchReadModel
     case "with_me":
       return resolveWithMeIntent(model, intent.date, intent.period, intent.raw);
     case "shared_shift":
-      return resolveSharedShiftIntent(model, intent.personQuery, intent.raw);
+      return resolveSharedShiftIntent(model, intent.personA, intent.personB, intent.raw, overrides);
   }
 }
