@@ -10,6 +10,17 @@ interface ManagerCommandBarProps {
   current: ManagerHrefParams;
   currentMonth: CalendarMonthKey | null;
   fetchedAt: string;
+  /**
+   * Whether the person-scope + date-range controls are shown at all --
+   * `true` everywhere except the "התחברויות והתראות" category (see
+   * `page.tsx`). That category is a current adoption/readiness snapshot,
+   * not filtered by an operational date range or scoped to one person, so
+   * showing "כולם"/"היום"/"7 ימים"/"30 יום"/"החודש" there would offer
+   * controls that do nothing. `DataFreshnessStatus` (the Google Sheets
+   * source/update status + refresh control) is NEVER gated by this --
+   * data freshness is meaningful for every category, including this one.
+   */
+  showFilters?: boolean;
 }
 
 /**
@@ -30,14 +41,23 @@ interface ManagerCommandBarProps {
  * dashboard's `Header`/`DataFreshnessStatus` pairing already uses) keeps
  * the controls grouped and readable without the extra visual weight.
  */
-export function ManagerCommandBar({ people, selectedPersonId, current, currentMonth, fetchedAt }: ManagerCommandBarProps) {
+export function ManagerCommandBar({
+  people,
+  selectedPersonId,
+  current,
+  currentMonth,
+  fetchedAt,
+  showFilters = true,
+}: ManagerCommandBarProps) {
   return (
     <div className="flex flex-col gap-2.5">
       <DataFreshnessStatus fetchedAt={fetchedAt} />
-      <div className="flex flex-wrap items-center gap-2">
-        <ManagerPersonSelector people={people} selectedId={selectedPersonId} />
-        <ManagerRangeSelector current={current} currentMonth={currentMonth} />
-      </div>
+      {showFilters ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <ManagerPersonSelector people={people} selectedId={selectedPersonId} />
+          <ManagerRangeSelector current={current} currentMonth={currentMonth} />
+        </div>
+      ) : null}
     </div>
   );
 }

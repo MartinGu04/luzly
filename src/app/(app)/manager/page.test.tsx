@@ -951,6 +951,53 @@ describe("ManagerPage — Logins & Notifications (התחברויות והתרא�
     expect(screen.queryByText("טרם נכנסו למערכת")).toBeNull();
     expect(screen.queryByText("סה״כ אנשי צוות")).toBeNull();
   });
+
+  it("hides the person/range filter controls -- this category is a current snapshot, not scoped by a date range or a person", async () => {
+    getRequestManagerOverview.mockResolvedValue(okResult(model()));
+    await renderPage({ category: "logins" });
+    expect(screen.queryByRole("button", { name: /כולם/ })).toBeNull();
+    expect(screen.queryByRole("navigation", { name: "טווח תאריכים" })).toBeNull();
+    expect(screen.queryByText("היום")).toBeNull();
+    expect(screen.queryByText("7 ימים")).toBeNull();
+    expect(screen.queryByText("30 יום")).toBeNull();
+    expect(screen.queryByText("החודש")).toBeNull();
+  });
+
+  it("still shows the Google Sheets freshness status and refresh control", async () => {
+    getRequestManagerOverview.mockResolvedValue(okResult(model()));
+    await renderPage({ category: "logins" });
+    expect(screen.getByTestId("freshness")).toBeInTheDocument();
+  });
+});
+
+describe("ManagerPage — filter controls restore when leaving Logins & Notifications", () => {
+  it("Overview shows the person/range filters", async () => {
+    getRequestManagerOverview.mockResolvedValue(okResult(model()));
+    await renderPage();
+    expect(screen.getByRole("button", { name: /כולם/ })).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "טווח תאריכים" })).toBeInTheDocument();
+  });
+
+  it("Shifts shows the person/range filters", async () => {
+    getRequestManagerOverview.mockResolvedValue(okResult(model()));
+    await renderPage({ category: "shifts" });
+    expect(screen.getByRole("button", { name: /כולם/ })).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "טווח תאריכים" })).toBeInTheDocument();
+  });
+
+  it("Personnel shows the person/range filters", async () => {
+    getRequestManagerOverview.mockResolvedValue(okResult(model()));
+    await renderPage({ category: "personnel" });
+    expect(screen.getByRole("button", { name: /כולם/ })).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "טווח תאריכים" })).toBeInTheDocument();
+  });
+
+  it("Duties & Absences shows the person/range filters", async () => {
+    getRequestManagerOverview.mockResolvedValue(okResult(model()));
+    await renderPage({ category: "duties" });
+    expect(screen.getByRole("button", { name: /כולם/ })).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "טווח תאריכים" })).toBeInTheDocument();
+  });
 });
 
 describe("ManagerPage — selected person view", () => {

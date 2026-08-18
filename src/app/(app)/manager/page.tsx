@@ -414,6 +414,7 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
         current={hrefParams}
         currentMonth={model.range.month}
         fetchedAt={model.fetchedAt}
+        showFilters={category !== "logins"}
       />
 
       {category === "overview" ? (

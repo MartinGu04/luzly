@@ -50,4 +50,26 @@ describe("ManagerCategoryNav", () => {
       "/manager?range=month&month=2026-08&category=shifts",
     );
   });
+
+  it("every tab never wraps its own label onto a second line -- whitespace-nowrap, so a long two-word label can never read as a detached row", () => {
+    render(<ManagerCategoryNav active="overview" current={BASE} />);
+    for (const name of ["סקירה", "משמרות", "כוח אדם", "תורנויות והיעדרויות", "התחברויות והתראות"]) {
+      expect(screen.getByRole("tab", { name })).toHaveClass("whitespace-nowrap");
+    }
+  });
+
+  it("the tablist itself never wraps onto multiple flex lines -- no shrinking, no wrap, so it scrolls as one strip instead", () => {
+    render(<ManagerCategoryNav active="overview" current={BASE} />);
+    const tablist = screen.getByRole("tablist");
+    expect(tablist).toHaveClass("inline-flex");
+    expect(tablist.className).not.toMatch(/\bflex-wrap\b/);
+    for (const name of ["סקירה", "משמרות", "כוח אדם", "תורנויות והיעדרויות", "התחברויות והתראות"]) {
+      expect(screen.getByRole("tab", { name })).toHaveClass("shrink-0");
+    }
+  });
+
+  it("the nav wrapper allows horizontal scrolling when the strip overflows", () => {
+    render(<ManagerCategoryNav active="overview" current={BASE} />);
+    expect(screen.getByRole("navigation", { name: "קטגוריות אזור מנהל" })).toHaveClass("overflow-x-auto");
+  });
 });
