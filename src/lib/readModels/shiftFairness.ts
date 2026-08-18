@@ -26,7 +26,7 @@ export type ShiftFairnessLoadResult =
   | { status: "missing_email" }
   | { status: "unmapped" }
   | { status: "ambiguous_identity" }
-  | { status: "ok"; model: ShiftFairnessReadModel; person: Person };
+  | { status: "ok"; model: ShiftFairnessReadModel; person: Person; people: Person[] };
 
 /** Same convention as `managerOverview.ts`'s own `reserveParticipationSource` -- one Potential sheet's Fairness-table participation evidence, tagged with the real year its own tab name represents. */
 function reserveParticipationSource(sheet: RawSheet, people: readonly Person[]): ReserveRoleParticipationSource {
@@ -47,6 +47,14 @@ function reserveParticipationSource(sheet: RawSheet, people: readonly Person[]):
  * modelability -- see `fairnessShiftEngine.ts`'s own docs), and delegating
  * every actual calculation to `buildShiftFairnessReadModel` UNCHANGED.
  * Never reproduces the shift engine here.
+ *
+ * `people` is returned alongside `model` (follow-up: service-type
+ * subgrouping) purely so the PAGE can classify each row's own
+ * `personnelType` (`lib/domain/personnelType.ts`'s `classifyPersonnelType`)
+ * for a PRESENTATION-only subdivision within each role section --
+ * `buildShiftFairnessReadModel`'s own read model is untouched by this, and
+ * the page only ever extracts `personnelType` from these records, never
+ * `email`.
  */
 export async function loadShiftFairnessReadModel(rawMonth: string | null): Promise<ShiftFairnessLoadResult> {
   const contextResult = await loadFairnessWorkbookContext();
@@ -74,5 +82,5 @@ export async function loadShiftFairnessReadModel(rawMonth: string | null): Promi
 
   const model = buildShiftFairnessReadModel(people, events, month, now, snapshot.fetchedAt, reserveParticipation);
 
-  return { status: "ok", model, person };
+  return { status: "ok", model, person, people };
 }

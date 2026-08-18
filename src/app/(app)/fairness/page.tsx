@@ -8,7 +8,7 @@ import { FairnessDutyPeriodNav } from "@/components/fairness/FairnessDutyPeriodN
 import { FairnessGroupSection } from "@/components/fairness/FairnessGroupSection";
 import { FairnessHeader } from "@/components/fairness/FairnessHeader";
 import { FairnessModeToggle } from "@/components/fairness/FairnessModeToggle";
-import { ShiftFairnessCard } from "@/components/fairness/ShiftFairnessCard";
+import { ShiftFairnessRoleSection } from "@/components/fairness/ShiftFairnessRoleSection";
 import { ShiftFairnessDetail } from "@/components/fairness/ShiftFairnessDetail";
 import { MonthNav } from "@/components/schedule/MonthNav";
 import { DataFreshnessStatus } from "@/components/ui/DataFreshnessStatus";
@@ -18,12 +18,15 @@ import {
   parseMonthParam,
   shiftCalendarMonth,
 } from "@/lib/domain/calendarMonth";
+import { classifyPersonnelType, type PersonnelServiceCategory } from "@/lib/domain/personnelType";
+import type { Person } from "@/lib/domain/types";
 import type { DutyFairnessGroupView, DutyFairnessReadModel } from "@/lib/readModels/dutyFairnessTypes";
 import type { ShiftFairnessGroupView, ShiftFairnessReadModel } from "@/lib/readModels/shiftFairnessTypes";
 import { formatFairnessScore } from "@/lib/presentation/fairness";
 import { buildDutyFairnessCardView, buildShiftFairnessCardView } from "@/lib/presentation/fairnessCards";
 import { fairnessDutiesHref, fairnessShiftsHref, parseFairnessMode } from "@/lib/presentation/fairnessUrl";
 import { formatHebrewMonthYear } from "@/lib/presentation/hebrewDate";
+import { groupShiftFairnessCardsByServiceType } from "@/lib/presentation/shiftFairnessServiceGroups";
 import { getRequestDutyFairness } from "@/lib/readModels/getRequestDutyFairness";
 import { getRequestShiftFairness } from "@/lib/readModels/getRequestShiftFairness";
 import { getJerusalemLocalNow } from "@/lib/time/jerusalemClock";
@@ -101,10 +104,10 @@ export default async function FairnessPage({ searchParams }: FairnessPageProps) 
 
   const result = await getRequestShiftFairness(firstParam(params.month) ?? null);
   if (result.status !== "ok") return renderAuthFailure(result.status);
-  return renderShiftFairnessView(result.model, rawPersonId);
+  return renderShiftFairnessView(result.model, result.people, rawPersonId);
 }
 
-function renderShiftFairnessView(model: ShiftFairnessReadModel, rawPersonId: string | null): ReactNode {
+function renderShiftFairnessView(model: ShiftFairnessReadModel, people: readonly Person[], rawPersonId: string | null): ReactNode {
   const now = getJerusalemLocalNow();
   // `model.month` is already the loader's own resolved (never invalid) month -- an absent/invalid `?month=` already fell back to the current Jerusalem-local month inside `loadShiftFairnessReadModel`, so this always parses.
   const displayMonthKey = parseMonthParam(model.month) ?? calendarMonthOfLocalNow(now);
@@ -120,13 +123,24 @@ function renderShiftFairnessView(model: ShiftFairnessReadModel, rawPersonId: str
   const selectedRow = rawPersonId ? (allRows.find((row) => row.personId === rawPersonId) ?? null) : null;
   const selectedGroupRole = model.groups.find((group) => group.rows.some((row) => row.personId === rawPersonId))?.role;
 
-  const groupsView = model.groups.map((group) => ({
-    role: group.role,
-    label: SHIFT_GROUP_LABEL[group.role],
-    cards: group.rows.map((row) =>
+  // PRESENTATION-only subdivision within each role section, by service
+  // type -- the Fairness comparison itself stays role-based (unchanged
+  // above); this never feeds back into target/status/deviation.
+  const serviceCategoryByPersonId = new Map<string, PersonnelServiceCategory>(
+    people.map((candidate) => [candidate.id, classifyPersonnelType(candidate.personnelType)]),
+  );
+
+  const groupsView = model.groups.map((group) => {
+    const cards = group.rows.map((row) =>
       buildShiftFairnessCardView(row, fairnessShiftsHref({ monthKey: displayMonthKey, personId: row.personId })),
-    ),
-  }));
+    );
+    return {
+      role: group.role,
+      label: SHIFT_GROUP_LABEL[group.role],
+      cards,
+      subgroups: groupShiftFairnessCardsByServiceType(cards, serviceCategoryByPersonId),
+    };
+  });
   const hasAnyRows = groupsView.some((group) => group.cards.length > 0);
 
   return (
@@ -149,11 +163,7 @@ function renderShiftFairnessView(model: ShiftFairnessReadModel, rawPersonId: str
         <div className="flex flex-col gap-6">
           {groupsView.map((group) =>
             group.cards.length > 0 ? (
-              <FairnessGroupSection key={group.role} label={group.label} count={group.cards.length}>
-                {group.cards.map((card) => (
-                  <ShiftFairnessCard key={card.key} view={card} />
-                ))}
-              </FairnessGroupSection>
+              <ShiftFairnessRoleSection key={group.role} label={group.label} count={group.cards.length} subgroups={group.subgroups} />
             ) : null,
           )}
         </div>
