@@ -12,6 +12,7 @@ const CATEGORY_OPTIONS: { key: ManagerCategory; label: string }[] = [
   { key: "shifts", label: "משמרות" },
   { key: "personnel", label: "כוח אדם" },
   { key: "duties", label: "תורנויות והיעדרויות" },
+  { key: "logins", label: "התחברויות והתראות" },
 ];
 
 const TAB_BASE =

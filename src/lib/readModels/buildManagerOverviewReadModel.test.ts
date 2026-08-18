@@ -114,7 +114,7 @@ function buildModel(overrides: Partial<Parameters<typeof buildManagerOverviewRea
     range: range7d(),
     selectedPersonId: null,
     managerAvatarUrl: null,
-    notificationReadiness: { status: "skipped" },
+    adoption: { status: "skipped" },
     ...overrides,
   });
 }
@@ -960,83 +960,144 @@ describe("buildManagerOverviewReadModel — PR #16 manager Potential scope", () 
   });
 });
 
-describe("buildManagerOverviewReadModel — PR #40 notification readiness projection", () => {
+describe("buildManagerOverviewReadModel — adoption (התחברויות והתראות) projection", () => {
   it("status: skipped -- the caller never attempted the lookup (a person is selected)", () => {
-    const model = buildModel({ notificationReadiness: { status: "skipped" } });
-    expect(model.notificationReadiness).toEqual({ status: "skipped" });
+    const model = buildModel({ adoption: { status: "skipped" } });
+    expect(model.adoption).toEqual({ status: "skipped" });
   });
 
   it("status: unavailable -- the caller attempted the lookup and it failed, distinct from skipped", () => {
-    const model = buildModel({ notificationReadiness: { status: "unavailable" } });
-    expect(model.notificationReadiness).toEqual({ status: "unavailable" });
+    const model = buildModel({ adoption: { status: "unavailable" } });
+    expect(model.adoption).toEqual({ status: "unavailable" });
   });
 
-  it("status: available -- excludes ready people from blockers, but still counts them in readyCount/totalCount", () => {
+  it("status: available -- every person survives (unlike the old blockers-only view), split into loginStatus/notificationStatus", () => {
     const model = buildModel({
-      notificationReadiness: {
+      adoption: {
         status: "ok",
         results: [
-          { personId: MANAGER.id, status: "ready" },
-          { personId: MARTIN.id, status: "no_push_subscription" },
-          { personId: EITAN.id, status: "ready" },
-          { personId: NOA.id, status: "unmapped_account" },
+          { personId: MANAGER.id, status: "ready", avatarUrl: "https://example.invalid/manager.jpg" },
+          { personId: MARTIN.id, status: "no_push_subscription", avatarUrl: "https://example.invalid/martin.jpg" },
+          { personId: EITAN.id, status: "ready", avatarUrl: null },
+          { personId: NOA.id, status: "unmapped_account", avatarUrl: null },
         ],
       },
     });
 
-    expect(model.notificationReadiness.status).toBe("available");
-    if (model.notificationReadiness.status !== "available") return;
-    expect(model.notificationReadiness.view.readyCount).toBe(2);
-    expect(model.notificationReadiness.view.totalCount).toBe(4);
-    expect(model.notificationReadiness.view.blockers.map((b) => b.personId)).toEqual([MARTIN.id, NOA.id]);
-    expect(model.notificationReadiness.view.blockers).toHaveLength(2);
-  });
+    expect(model.adoption.status).toBe("available");
+    if (model.adoption.status !== "available") return;
+    expect(model.adoption.view.summary).toEqual({
+      totalCount: 4,
+      loggedInCount: 3,
+      notLoggedInCount: 1,
+      notificationReadyCount: 2,
+      loggedInNotReadyCount: 1,
+      dataIssueCount: 0,
+    });
+    expect(model.adoption.view.people).toHaveLength(4);
 
-  it("carries only personId/personName/status per blocker -- no email, no auth/subscription internals", () => {
-    const model = buildModel({
-      notificationReadiness: { status: "ok", results: [{ personId: MARTIN.id, status: "missing_email" }] },
+    const martin = model.adoption.view.people.find((p) => p.personId === MARTIN.id);
+    expect(martin).toEqual({
+      personId: MARTIN.id,
+      personName: MARTIN.name,
+      avatarUrl: "https://example.invalid/martin.jpg",
+      loginStatus: "logged_in",
+      notificationStatus: "not_enabled",
+      dataIssue: null,
+      needsNudge: true,
     });
 
-    expect(model.notificationReadiness.status).toBe("available");
-    if (model.notificationReadiness.status !== "available") return;
-    expect(model.notificationReadiness.view.blockers).toEqual([
-      { personId: MARTIN.id, personName: MARTIN.name, status: "missing_email" },
-    ]);
+    const noa = model.adoption.view.people.find((p) => p.personId === NOA.id);
+    expect(noa).toEqual({
+      personId: NOA.id,
+      personName: NOA.name,
+      avatarUrl: null,
+      loginStatus: "not_logged_in",
+      notificationStatus: null,
+      dataIssue: null,
+      needsNudge: true,
+    });
+
+    const manager = model.adoption.view.people.find((p) => p.personId === MANAGER.id);
+    expect(manager).toEqual({
+      personId: MANAGER.id,
+      personName: MANAGER.name,
+      avatarUrl: "https://example.invalid/manager.jpg",
+      loginStatus: "logged_in",
+      notificationStatus: "ready",
+      dataIssue: null,
+      needsNudge: false,
+    });
   });
 
-  it("orders blockers by name then id, same tiebreak convention as the roster", () => {
+  it("missing/ambiguous email resolve to a dataIssue row -- null loginStatus/notificationStatus/avatarUrl, never needsNudge", () => {
+    const model = buildModel({
+      adoption: {
+        status: "ok",
+        results: [
+          { personId: MARTIN.id, status: "missing_email", avatarUrl: null },
+          { personId: EITAN.id, status: "ambiguous_email", avatarUrl: null },
+        ],
+      },
+    });
+
+    expect(model.adoption.status).toBe("available");
+    if (model.adoption.status !== "available") return;
+    expect(model.adoption.view.summary.dataIssueCount).toBe(2);
+
+    const martin = model.adoption.view.people.find((p) => p.personId === MARTIN.id);
+    expect(martin).toEqual({
+      personId: MARTIN.id,
+      personName: MARTIN.name,
+      avatarUrl: null,
+      loginStatus: null,
+      notificationStatus: null,
+      dataIssue: "missing_email",
+      needsNudge: false,
+    });
+    const eitan = model.adoption.view.people.find((p) => p.personId === EITAN.id);
+    expect(eitan?.dataIssue).toBe("ambiguous_email");
+  });
+
+  it("orders people by name then id, same tiebreak convention as the roster", () => {
     const bDup = person({ id: "p_b2", name: "ב", isTechnician: true });
     const aDup = person({ id: "p_a1", name: "א", isTechnician: true });
     const model = buildModel({
-      people: [MANAGER, MARTIN, EITAN, NOA, bDup, aDup],
-      notificationReadiness: {
+      people: [aDup, bDup],
+      adoption: {
         status: "ok",
         results: [
-          { personId: bDup.id, status: "no_push_subscription" },
-          { personId: aDup.id, status: "no_push_subscription" },
+          { personId: bDup.id, status: "no_push_subscription", avatarUrl: null },
+          { personId: aDup.id, status: "no_push_subscription", avatarUrl: null },
         ],
       },
     });
 
-    expect(model.notificationReadiness.status).toBe("available");
-    if (model.notificationReadiness.status !== "available") return;
-    expect(model.notificationReadiness.view.blockers.map((b) => b.personId)).toEqual([aDup.id, bDup.id]);
+    expect(model.adoption.status).toBe("available");
+    if (model.adoption.status !== "available") return;
+    expect(model.adoption.view.people.map((p) => p.personId)).toEqual([aDup.id, bDup.id]);
   });
 
-  it("when everyone is ready, blockers is empty and readyCount equals totalCount", () => {
+  it("when everyone is ready, notLoggedInCount/loggedInNotReadyCount/dataIssueCount are all zero", () => {
     const model = buildModel({
-      notificationReadiness: {
+      adoption: {
         status: "ok",
         results: [
-          { personId: MANAGER.id, status: "ready" },
-          { personId: MARTIN.id, status: "ready" },
+          { personId: MANAGER.id, status: "ready", avatarUrl: null },
+          { personId: MARTIN.id, status: "ready", avatarUrl: null },
         ],
       },
     });
 
-    expect(model.notificationReadiness.status).toBe("available");
-    if (model.notificationReadiness.status !== "available") return;
-    expect(model.notificationReadiness.view.blockers).toEqual([]);
-    expect(model.notificationReadiness.view.readyCount).toBe(model.notificationReadiness.view.totalCount);
+    expect(model.adoption.status).toBe("available");
+    if (model.adoption.status !== "available") return;
+    expect(model.adoption.view.summary).toEqual({
+      totalCount: 2,
+      loggedInCount: 2,
+      notLoggedInCount: 0,
+      notificationReadyCount: 2,
+      loggedInNotReadyCount: 0,
+      dataIssueCount: 0,
+    });
   });
 });

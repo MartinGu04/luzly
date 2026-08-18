@@ -5,7 +5,10 @@ function person(overrides: Partial<Person> & Pick<Person, "id" | "name">): Perso
   return { email: null, isManager: false, isTechnician: false, isSupervisor: false, personnelType: null, ...overrides };
 }
 
-function makeFakeSupabase(users: { id: string; email: string }[], subscriptionUserIds: string[] = []) {
+function makeFakeSupabase(
+  users: { id: string; email: string; user_metadata?: Record<string, unknown> }[],
+  subscriptionUserIds: string[] = [],
+) {
   return {
     auth: {
       admin: {
@@ -18,7 +21,10 @@ function makeFakeSupabase(users: { id: string; email: string }[], subscriptionUs
   };
 }
 
-async function loadWithFakeSupabase(users: { id: string; email: string }[], subscriptionUserIds: string[] = []) {
+async function loadWithFakeSupabase(
+  users: { id: string; email: string; user_metadata?: Record<string, unknown> }[],
+  subscriptionUserIds: string[] = [],
+) {
   vi.resetModules();
   const fakeSupabase = makeFakeSupabase(users, subscriptionUserIds);
   vi.doMock("./serviceClient", () => ({ getNotificationServiceClient: () => fakeSupabase }));
@@ -27,6 +33,10 @@ async function loadWithFakeSupabase(users: { id: string; email: string }[], subs
 
 function statusFor(results: { personId: string; status: string }[], personId: string): string | undefined {
   return results.find((result) => result.personId === personId)?.status;
+}
+
+function avatarFor(results: { personId: string; avatarUrl: string | null }[], personId: string): string | null | undefined {
+  return results.find((result) => result.personId === personId)?.avatarUrl;
 }
 
 describe("computeNotificationReadiness", () => {
@@ -112,6 +122,43 @@ describe("computeNotificationReadiness", () => {
 
     expect(results).toHaveLength(1);
     expect(statusFor(results, "p1")).toBe("ready");
+  });
+
+  it("ready -- carries the account's avatarUrl through, reusing the same bulk listUsers() response (never a second Admin API call)", async () => {
+    const { computeNotificationReadiness } = await loadWithFakeSupabase(
+      [{ id: "user-1", email: "dana@example.com", user_metadata: { avatar_url: "https://example.invalid/dana.jpg" } }],
+      ["user-1"],
+    );
+    const people = [person({ id: "p1", name: "Dana", email: "dana@example.com" })];
+
+    const results = await computeNotificationReadiness(people);
+
+    expect(avatarFor(results, "p1")).toBe("https://example.invalid/dana.jpg");
+  });
+
+  it("no_push_subscription -- still carries the account's avatarUrl (a mapped account, just not push-ready)", async () => {
+    const { computeNotificationReadiness } = await loadWithFakeSupabase(
+      [{ id: "user-1", email: "dana@example.com", user_metadata: { avatar_url: "https://example.invalid/dana.jpg" } }],
+      [],
+    );
+    const people = [person({ id: "p1", name: "Dana", email: "dana@example.com" })];
+
+    const results = await computeNotificationReadiness(people);
+
+    expect(avatarFor(results, "p1")).toBe("https://example.invalid/dana.jpg");
+  });
+
+  it("unmapped_account/missing_email/ambiguous_email -- avatarUrl is always null (no account to read a photo from)", async () => {
+    const { computeNotificationReadiness } = await loadWithFakeSupabase([]);
+    const people = [
+      person({ id: "p-unmapped", name: "Ghost", email: "ghost@example.com" }),
+      person({ id: "p-no-email", name: "NoEmail" }),
+    ];
+
+    const results = await computeNotificationReadiness(people);
+
+    expect(avatarFor(results, "p-unmapped")).toBeNull();
+    expect(avatarFor(results, "p-no-email")).toBeNull();
   });
 
   it("every person lands in exactly one status across a mixed roster, deterministic precedence", async () => {

@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { ConfigurationErrorState } from "@/components/dashboard/ConfigurationErrorState";
 import type { IssueRowView } from "@/components/issues/types";
+import { ManagerAdoptionSection } from "@/components/manager/ManagerAdoptionSection";
+import { ManagerAdoptionSummary } from "@/components/manager/ManagerAdoptionSummary";
 import { ManagerAttentionSection } from "@/components/manager/ManagerAttentionSection";
 import { ManagerCategoryNav } from "@/components/manager/ManagerCategoryNav";
 import { ManagerCommandBar } from "@/components/manager/ManagerCommandBar";
@@ -8,7 +10,6 @@ import { ManagerCoverageSection } from "@/components/manager/ManagerCoverageSect
 import { ManagerDutiesAbsencesSection } from "@/components/manager/ManagerDutiesAbsencesSection";
 import { ManagerForbiddenState } from "@/components/manager/ManagerForbiddenState";
 import { ManagerHeader } from "@/components/manager/ManagerHeader";
-import { ManagerNotificationReadinessSection } from "@/components/manager/ManagerNotificationReadinessSection";
 import { ManagerPotentialSection } from "@/components/manager/ManagerPotentialSection";
 import { ManagerRosterSection } from "@/components/manager/ManagerRosterSection";
 import {
@@ -44,9 +45,9 @@ import {
   roleLabel,
 } from "@/lib/presentation/labels";
 import { parseManagerCategoryParam, type ManagerHrefParams } from "@/lib/presentation/managerUrl";
+import { buildManagerAdoptionSectionView } from "@/lib/presentation/managerAdoption";
 import { managerIssueCoverageReasonLabel } from "@/lib/presentation/managerIssueCoverage";
 import { managerSummaryLabel } from "@/lib/presentation/managerSummary";
-import { buildNotificationReadinessSummary } from "@/lib/presentation/notificationReadiness";
 import { roleCoverageMessage } from "@/lib/presentation/roleCoverage";
 import { scheduleEveryoneHref } from "@/lib/presentation/scheduleUrl";
 import { formatMissingIntervals } from "@/lib/presentation/scheduleTime";
@@ -284,9 +285,14 @@ function toHrefParams(model: ManagerOverviewReadModel, category: ManagerHrefPara
 
 /**
  * "אזור מנהל" -- the manager's full operational picture (redesign): a
- * command-center Overview by default, plus three focused categories
- * (Shifts / Personnel / Duties & Absences), or one selected person's
- * drill-down. Entirely driven by `ManagerOverviewReadModel` (see
+ * command-center Overview by default, plus four focused categories
+ * (Shifts / Personnel / Duties & Absences / Logins & Notifications), or
+ * one selected person's drill-down. "התחברויות והתראות" is the one
+ * management-visibility category among these -- it never touches
+ * Google Sheets beyond the roster already loaded; it reconciles that
+ * roster against Supabase auth + push-subscription state (see
+ * `ManagerAdoptionView`, `model.adoption`). Entirely driven by
+ * `ManagerOverviewReadModel` (see
  * `getRequestManagerOverview`/`loadManagerOverviewReadModel`) -- this page
  * never fetches Google itself, never re-runs `detectOperationalIssues()`,
  * and never receives more than safe roster ids/names on the client (see
@@ -365,7 +371,7 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
   }
 
   const summary = managerSummaryLabel(model);
-  const notificationReadiness = buildNotificationReadinessSummary(model.notificationReadiness);
+  const adoptionView = buildManagerAdoptionSectionView(model.adoption);
 
   const coverageByDatePeriod = new Map(
     model.coverageOverview.map((group) => [`${group.date}|${group.period}`, group]),
@@ -414,7 +420,6 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
         <>
           {summary ? <ManagerSummaryStrip summary={summary} /> : null}
           <ManagerAttentionSection criticalItems={criticalItems} reviewItems={reviewItems} current={hrefParams} />
-          <ManagerNotificationReadinessSection readiness={notificationReadiness} />
         </>
       ) : null}
 
@@ -448,6 +453,13 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
           duties={model.duties.map((duty) => buildManagerDutyRowView(duty, todayDate))}
           absences={model.absences.map((absence) => buildManagerAbsenceRowView(absence, todayDate))}
         />
+      ) : null}
+
+      {category === "logins" ? (
+        <div className="flex flex-col gap-4">
+          <ManagerAdoptionSummary view={adoptionView} />
+          <ManagerAdoptionSection view={adoptionView} />
+        </div>
       ) : null}
 
       <ManagerSourceOfTruthNote />

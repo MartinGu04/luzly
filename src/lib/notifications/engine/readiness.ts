@@ -1,6 +1,11 @@
 import "server-only";
 import type { Person } from "@/lib/domain/types";
-import { fetchAllSubscribedUserIds, fetchAllUserIdsByEmail, resolvePersonIdentity } from "./recipients";
+import {
+  fetchAllSubscribedUserIds,
+  fetchAllUserIdsByEmail,
+  resolvePersonIdentity,
+  type AuthAccountLookup,
+} from "./recipients";
 
 /**
  * PR #40 -- every deterministic state a roster person can resolve to when
@@ -29,6 +34,14 @@ export type PersonNotificationReadiness =
 export interface PersonReadinessResult {
   personId: string;
   status: PersonNotificationReadiness;
+  /**
+   * The SAME presentation-only Google avatar `resolvePersonIdentity` already
+   * carries for a `mapped` identity (see `recipients.ts`) -- set only for
+   * `ready`/`no_push_subscription` (a real matched account), always `null`
+   * otherwise. Never a new lookup: it rides along on the exact same bulk
+   * `fetchAllUserIdsByEmail()` call this function already makes.
+   */
+  avatarUrl: string | null;
 }
 
 /**
@@ -52,7 +65,7 @@ export interface PersonReadinessResult {
 export async function computeNotificationReadiness(
   people: readonly Person[],
 ): Promise<PersonReadinessResult[]> {
-  const [emailToUserId, subscribedUserIds] = await Promise.all([
+  const [emailToAccount, subscribedUserIds] = await Promise.all([
     fetchAllUserIdsByEmail(),
     fetchAllSubscribedUserIds(),
   ]);
@@ -60,21 +73,24 @@ export async function computeNotificationReadiness(
 
   return people.map((person) => ({
     personId: person.id,
-    status: resolvePersonReadiness(person, people, emailToUserId, subscribed),
+    ...resolvePersonReadiness(person, people, emailToAccount, subscribed),
   }));
 }
 
 function resolvePersonReadiness(
   person: Person,
   people: readonly Person[],
-  emailToUserId: ReadonlyMap<string, string>,
+  emailToAccount: ReadonlyMap<string, AuthAccountLookup>,
   subscribedUserIds: ReadonlySet<string>,
-): PersonNotificationReadiness {
-  const identity = resolvePersonIdentity(person, people, emailToUserId);
+): { status: PersonNotificationReadiness; avatarUrl: string | null } {
+  const identity = resolvePersonIdentity(person, people, emailToAccount);
 
-  if (identity.status === "no_email" || identity.status === "not_found") return "missing_email"; // not_found is unreachable: person.email is itself a member of `people`
-  if (identity.status === "ambiguous") return "ambiguous_email";
-  if (identity.status === "unmapped") return "unmapped_account";
+  if (identity.status === "no_email" || identity.status === "not_found") {
+    return { status: "missing_email", avatarUrl: null }; // not_found is unreachable: person.email is itself a member of `people`
+  }
+  if (identity.status === "ambiguous") return { status: "ambiguous_email", avatarUrl: null };
+  if (identity.status === "unmapped") return { status: "unmapped_account", avatarUrl: null };
 
-  return subscribedUserIds.has(identity.userId) ? "ready" : "no_push_subscription";
+  const status = subscribedUserIds.has(identity.userId) ? "ready" : "no_push_subscription";
+  return { status, avatarUrl: identity.avatarUrl };
 }

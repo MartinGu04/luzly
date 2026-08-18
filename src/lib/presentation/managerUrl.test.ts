@@ -35,6 +35,7 @@ describe("buildManagerHref", () => {
     expect(buildManagerHref({ ...BASE, category: "shifts" })).toBe("/manager?category=shifts");
     expect(buildManagerHref({ ...BASE, category: "personnel" })).toBe("/manager?category=personnel");
     expect(buildManagerHref({ ...BASE, category: "duties" })).toBe("/manager?category=duties");
+    expect(buildManagerHref({ ...BASE, category: "logins" })).toBe("/manager?category=logins");
   });
 
   it("combines every non-default param", () => {
@@ -52,9 +53,10 @@ describe("parseManagerCategoryParam", () => {
     expect(parseManagerCategoryParam("overview")).toBe("overview");
   });
 
-  it("accepts the three other real categories", () => {
+  it("accepts the four other real categories", () => {
     expect(parseManagerCategoryParam("shifts")).toBe("shifts");
     expect(parseManagerCategoryParam("personnel")).toBe("personnel");
     expect(parseManagerCategoryParam("duties")).toBe("duties");
+    expect(parseManagerCategoryParam("logins")).toBe("logins");
   });
 });

@@ -252,7 +252,7 @@ describe("loadManagerOverviewReadModel — success", () => {
   });
 });
 
-describe("loadManagerOverviewReadModel — PR #40 notification readiness wiring", () => {
+describe("loadManagerOverviewReadModel — adoption (התחברויות והתראות) readiness wiring", () => {
   it("everyone scope: calls computeNotificationReadiness exactly once, with the full roster", async () => {
     getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(true));
     await loadManagerOverviewReadModel(DEFAULT_PARAMS);
@@ -270,7 +270,7 @@ describe("loadManagerOverviewReadModel — PR #40 notification readiness wiring"
     expect(computeNotificationReadiness).not.toHaveBeenCalled();
     expect(result.status).toBe("ok");
     if (result.status === "ok") {
-      expect(result.model.notificationReadiness).toEqual({ status: "skipped" });
+      expect(result.model.adoption).toEqual({ status: "skipped" });
     }
   });
 
@@ -280,25 +280,28 @@ describe("loadManagerOverviewReadModel — PR #40 notification readiness wiring"
     const result = await loadManagerOverviewReadModel(DEFAULT_PARAMS);
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
-    const [firstPersonId] = result.model.roster.map((p) => p.id);
+    const [firstPersonId, secondPersonId] = result.model.roster.map((p) => p.id);
     computeNotificationReadiness.mockResolvedValueOnce([
-      { personId: firstPersonId, status: "no_push_subscription" },
+      { personId: firstPersonId, status: "no_push_subscription", avatarUrl: null },
+      { personId: secondPersonId, status: "ready", avatarUrl: null },
     ]);
 
     const second = await loadManagerOverviewReadModel(DEFAULT_PARAMS);
     expect(second.status).toBe("ok");
     if (second.status !== "ok") return;
-    expect(second.model.notificationReadiness).toEqual({
-      status: "available",
-      view: {
-        readyCount: 0,
-        totalCount: 1,
-        blockers: [{ personId: firstPersonId, personName: result.model.roster[0].name, status: "no_push_subscription" }],
-      },
+    expect(second.model.adoption.status).toBe("available");
+    if (second.model.adoption.status !== "available") return;
+    expect(second.model.adoption.view.summary).toEqual({
+      totalCount: 2,
+      loggedInCount: 2,
+      notLoggedInCount: 0,
+      notificationReadyCount: 1,
+      loggedInNotReadyCount: 1,
+      dataIssueCount: 0,
     });
   });
 
-  it("degrades to notificationReadiness: { status: 'unavailable' } (never throws, and never conflated with skipped) when the readiness lookup itself fails", async () => {
+  it("degrades to adoption: { status: 'unavailable' } (never throws, and never conflated with skipped) when the readiness lookup itself fails", async () => {
     getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(true));
     computeNotificationReadiness.mockRejectedValue(new Error("supabase unreachable"));
 
@@ -306,7 +309,7 @@ describe("loadManagerOverviewReadModel — PR #40 notification readiness wiring"
 
     expect(result.status).toBe("ok");
     if (result.status === "ok") {
-      expect(result.model.notificationReadiness).toEqual({ status: "unavailable" });
+      expect(result.model.adoption).toEqual({ status: "unavailable" });
     }
   });
 });

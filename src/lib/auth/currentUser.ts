@@ -32,8 +32,14 @@ export type AuthIdentityResult =
  * treated as absent rather than trusted as-is: `user_metadata` is OAuth-provider-
  * supplied data, not server-verified the way `email` is, so this is
  * presentation-only and deliberately conservative about what it accepts.
+ *
+ * Exported so `lib/notifications/engine/recipients.ts` can apply the exact
+ * SAME extraction to the Admin API's bulk `listUsers()` response (every
+ * entry is a full `User`, `user_metadata` included) -- the manager-facing
+ * adoption view reuses this rather than a second URL-validation rule, and
+ * never triggers a new Google/Supabase call to get it.
  */
-function extractAvatarUrl(user: User): string | null {
+export function extractAvatarUrl(user: User): string | null {
   const metadata = user.user_metadata;
   const candidate = metadata?.avatar_url ?? metadata?.picture;
   if (typeof candidate !== "string") return null;

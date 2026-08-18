@@ -9,12 +9,13 @@ afterEach(() => {
 const BASE = { range: "7d" as const, month: null };
 
 describe("ManagerCategoryNav", () => {
-  it("renders all four categories", () => {
+  it("renders all five categories", () => {
     render(<ManagerCategoryNav active="overview" current={BASE} />);
     expect(screen.getByRole("tab", { name: "סקירה" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "משמרות" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "כוח אדם" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "תורנויות והיעדרויות" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "התחברויות והתראות" })).toBeInTheDocument();
   });
 
   it("overview is the omitted default -- its href is the bare /manager", () => {
@@ -29,6 +30,10 @@ describe("ManagerCategoryNav", () => {
     expect(screen.getByRole("tab", { name: "תורנויות והיעדרויות" })).toHaveAttribute(
       "href",
       "/manager?category=duties",
+    );
+    expect(screen.getByRole("tab", { name: "התחברויות והתראות" })).toHaveAttribute(
+      "href",
+      "/manager?category=logins",
     );
   });
 
