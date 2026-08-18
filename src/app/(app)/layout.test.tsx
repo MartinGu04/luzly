@@ -2,6 +2,7 @@ import type { ComponentProps, ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { ThemeProvider } from "@/lib/theme/ThemeProvider";
+import { formatHebrewWeekdayAndDate } from "@/lib/presentation/hebrewDate";
 import type { PersonalProfile } from "@/lib/readModels/types";
 
 function renderWithTheme(ui: ReactElement) {
@@ -233,6 +234,30 @@ describe("(app) layout — server-side auth gating", () => {
     expect(appShellElement.type).toBe(AppShell);
     expect(appShellElement.props.initialClockTime).toBeNull();
     expect(() => renderWithTheme(element)).not.toThrow();
+  });
+
+  it("derives the shell's date label from the SAME already-resolved localNow.date, pre-formatted server-side", async () => {
+    // localNow.date: "2026-08-12", per okResult()'s fixture.
+    getRequestPersonalSchedule.mockResolvedValue(okResult(profile()));
+
+    const element = await ProtectedLayout({ children: <div>x</div> });
+    const appShellElement = findAppShellElement(element);
+
+    expect(appShellElement.props.dateLabel).toBe(formatHebrewWeekdayAndDate("2026-08-12"));
+    expect(appShellElement.props.dateLabel).not.toBeNull();
+  });
+
+  it("a configuration_error render has no localNow to derive a date label from either -- passes null, never throws", async () => {
+    getRequestPersonalSchedule.mockResolvedValue({
+      status: "configuration_error",
+      message: "Missing shift start time configuration.",
+      person: profile(),
+    });
+
+    const element = await ProtectedLayout({ children: <div>x</div> });
+    const appShellElement = findAppShellElement(element);
+
+    expect(appShellElement.props.dateLabel).toBeNull();
   });
 
   it("never renders the raw configuration_error message text", async () => {

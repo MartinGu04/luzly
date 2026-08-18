@@ -5,8 +5,8 @@ import { Bell, BellOff, BellRing, Loader2, RefreshCw } from "lucide-react";
 import { usePushSubscription } from "./usePushSubscription";
 
 interface NotificationBellProps {
-  /** Only affects the trigger button's own visual treatment -- the popover panel itself looks identical in both contexts. */
-  variant: "sidebar" | "mobile";
+  /** Only affects the trigger button's own visual treatment -- the popover panel's CONTENT looks identical in every context; only its anchor side (see `PANEL_POSITION_CLASSES`) varies by variant. */
+  variant: "sidebar" | "mobile" | "shell";
 }
 
 const TRIGGER_CLASSES: Record<NotificationBellProps["variant"], string> = {
@@ -14,13 +14,39 @@ const TRIGGER_CLASSES: Record<NotificationBellProps["variant"], string> = {
     "flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sidebar-muted transition-colors duration-150 hover:bg-sidebar-hover hover:text-sidebar-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary",
   mobile:
     "flex h-9 w-9 items-center justify-center rounded-lg text-muted transition-colors duration-150 hover:bg-overlay-soft hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary",
+  /** The global `ShellUtilityBar` top bar (header polish pass) -- same light-surface treatment as `mobile` (this bar sits on the ordinary theme background, never the dark sidebar), but the smaller `rounded-full` circle shape `sidebar` already established, since it sits directly on the header's own generous vertical padding rather than needing a larger square tap target of its own. */
+  shell:
+    "flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted transition-colors duration-150 hover:bg-overlay-soft hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary",
 };
 
 /**
- * The real notification control (PR #29), replacing the "בקרוב"
+ * The popover's anchor side, as a LOGICAL `inset-inline-*` side -- under
+ * `dir="rtl"`, `inset-inline-end` maps to physical `left` (pins the panel's
+ * LEFT edge, growing further RIGHT/inward from there) and
+ * `inset-inline-start` maps to physical `right` (pins the RIGHT edge,
+ * growing further LEFT/outward). `sidebar`/`mobile` use `end-0` -- their
+ * trigger never sits at the true physical left edge, so growing rightward
+ * from a pinned left edge stays safely inside the viewport. `shell` sits
+ * at the header's own physical LEFT edge (header polish pass): it also
+ * needs `end-0` (pin left, grow right/inward) for the same reason -- an
+ * earlier version of this used `start-0` here on the (incorrect) belief
+ * that it would grow back into the bar; verified in a real browser that it
+ * actually did the opposite (grew further left, off-screen, clipping the
+ * panel entirely). Kept as its own map (rather than collapsing to one
+ * constant) so a future variant anchored elsewhere can still differ.
+ */
+const PANEL_POSITION_CLASSES: Record<NotificationBellProps["variant"], string> = {
+  sidebar: "end-0",
+  mobile: "end-0",
+  shell: "end-0",
+};
+
+/**
+ * The real notification control (PR #29), originally replacing the "בקרוב"
  * placeholder bell from PR #28 in both `Sidebar` (desktop) and
- * `MobileIdentityBar` (mobile) -- the exact spot both already reserved
- * for this feature. A compact popover, matching `MobileProfileMenu`'s
+ * `MobileIdentityBar` (mobile). Header polish pass: the desktop instance
+ * moved from `Sidebar` into `ShellUtilityBar` (`variant="shell"`) -- the
+ * mobile one is unchanged. A compact popover, matching `MobileProfileMenu`'s
  * existing click-outside/Escape-to-dismiss pattern, rather than a new
  * main navigation entry.
  *
@@ -81,7 +107,7 @@ export function NotificationBell({ variant }: NotificationBellProps) {
           id={panelId}
           role="dialog"
           aria-label="הגדרות התראות"
-          className="absolute end-0 top-full z-50 mt-2 w-72 rounded-2xl bg-surface-1 p-4 text-foreground shadow-[var(--shadow-hero)] ring-1 ring-border-strong"
+          className={`absolute ${PANEL_POSITION_CLASSES[variant]} top-full z-50 mt-2 w-72 max-w-[calc(100vw-2.5rem)] rounded-2xl bg-surface-1 p-4 text-foreground shadow-[var(--shadow-hero)] ring-1 ring-border-strong`}
         >
           {state === "checking" ? <CheckingPanel /> : null}
           {state === "unsupported" ? <UnsupportedPanel /> : null}

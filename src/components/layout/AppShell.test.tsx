@@ -152,6 +152,50 @@ describe("AppShell — shell utility bar / live clock (Design Pass PR #19)", () 
       ),
     ).not.toThrow();
   });
+
+  it("passes dateLabel through to the shell utility bar's clock pill", () => {
+    renderWithTheme(
+      <AppShell
+        person={{ name: "דני בדיקה", isManager: false, avatarUrl: null }}
+        initialClockTime="10:00:00"
+        dateLabel="יום רביעי · 12 באוגוסט"
+      >
+        <div>content</div>
+      </AppShell>,
+    );
+    expect(screen.getByText("יום רביעי · 12 באוגוסט")).toBeInTheDocument();
+  });
+
+  it("omitting dateLabel entirely behaves the same as null -- no crash, no date line", () => {
+    expect(() =>
+      renderWithTheme(
+        <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null }} initialClockTime="10:00:00">
+          <div>content</div>
+        </AppShell>,
+      ),
+    ).not.toThrow();
+  });
+});
+
+describe("AppShell — header polish (organizational logos + relocated bell)", () => {
+  it("renders both organizational logos in the shell utility bar", () => {
+    renderWithTheme(
+      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null }}>
+        <div>content</div>
+      </AppShell>,
+    );
+    expect(screen.getByAltText('תקש"ל')).toBeInTheDocument();
+    expect(screen.getByAltText("תקשורת אסטרטגית")).toBeInTheDocument();
+  });
+
+  it("exactly two notification bell instances exist -- desktop shell + mobile -- never a third left behind in the sidebar", () => {
+    renderWithTheme(
+      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null }}>
+        <div>content</div>
+      </AppShell>,
+    );
+    expect(screen.getAllByRole("button", { name: /התראות/ })).toHaveLength(2);
+  });
 });
 
 describe("AppShell — theme control", () => {

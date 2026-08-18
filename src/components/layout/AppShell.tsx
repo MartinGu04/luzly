@@ -20,6 +20,8 @@ interface AppShellProps {
    * render), never a client-only `Date.now()` guess.
    */
   initialClockTime?: string | null;
+  /** Pre-formatted Hebrew weekday+date for `ShellUtilityBar`'s clock pill -- see there. `null`/omitted alongside `initialClockTime` for the same reason. */
+  dateLabel?: string | null;
 }
 
 /**
@@ -52,9 +54,11 @@ interface AppShellProps {
  *
  * `ShellUtilityBar` (desktop-only, above `main`) is the app shell's ONE
  * live clock -- see there and `LiveClock` for why individual pages
- * (the dashboard included) must never render a second one.
+ * (the dashboard included) must never render a second one. Header polish
+ * pass: it also now carries the desktop notification bell (moved out of
+ * `Sidebar`) and the two organizational logos, framing the clock/date.
  */
-export function AppShell({ children, person, initialClockTime = null }: AppShellProps) {
+export function AppShell({ children, person, initialClockTime = null, dateLabel = null }: AppShellProps) {
   return (
     <div className="flex min-h-dvh bg-background text-foreground">
       <Sidebar person={person} />
@@ -62,7 +66,7 @@ export function AppShell({ children, person, initialClockTime = null }: AppShell
         {person ? (
           <MobileIdentityBar name={person.name} isManager={person.isManager} avatarUrl={person.avatarUrl} />
         ) : null}
-        <ShellUtilityBar initialClockTime={initialClockTime} />
+        <ShellUtilityBar initialClockTime={initialClockTime} dateLabel={dateLabel} />
         <main className="flex-1 px-4 pt-6 pb-28 sm:px-6 lg:px-10 lg:pt-10 lg:pb-10">
           <div className="mx-auto w-full max-w-[1440px]">{children}</div>
         </main>
