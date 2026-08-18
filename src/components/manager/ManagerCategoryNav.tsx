@@ -12,25 +12,34 @@ const CATEGORY_OPTIONS: { key: ManagerCategory; label: string }[] = [
   { key: "shifts", label: "משמרות" },
   { key: "personnel", label: "כוח אדם" },
   { key: "duties", label: "תורנויות והיעדרויות" },
+  { key: "logins", label: "התחברויות והתראות" },
 ];
 
 const TAB_BASE =
-  "shrink-0 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary";
+  "shrink-0 whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary";
 
 /**
  * The Manager Area's top-level category switch (redesign) -- "סקירה"
  * (Overview, the default command-center view), "משמרות" (coverage +
  * Potential reconciliation), "כוח אדם" (roster + person drill-down),
- * "תורנויות והיעדרויות" (cross-team duties/absences). Real, server-rendered
- * `Link`s (same idiom `FairnessModeToggle`/`DutyViewToggle` already use),
- * never client-only tab state, so every category stays directly linkable/
- * shareable/back-button-safe. `role="tablist"` gives the selected state an
- * accessible name beyond color alone.
+ * "תורנויות והיעדרויות" (cross-team duties/absences), "התחברויות והתראות"
+ * (login/notification adoption). Real, server-rendered `Link`s (same idiom
+ * `FairnessModeToggle`/`DutyViewToggle` already use), never client-only tab
+ * state, so every category stays directly linkable/shareable/back-button-
+ * safe. `role="tablist"` gives the selected state an accessible name beyond
+ * color alone.
  *
- * Always leaves a person drill-down when navigating (`personId` is never
- * threaded through) -- a category is a whole-team view, so "switch
- * category while inspecting one person" reads as "go look at the team's
- * X instead", never as "filter this person's own view by X".
+ * All five tabs stay on ONE row, always -- `whitespace-nowrap` on each tab
+ * (a two-word Hebrew label like "תורנויות והיעדרויות"/"התחברויות והתראות"
+ * would otherwise be free to break at its internal space once squeezed,
+ * which reads as that tab detaching onto its own row rather than staying
+ * part of the strip) combined with `shrink-0` means no tab can shrink below
+ * its own full label width, so the `inline-flex` tablist's shrink-to-fit
+ * width is always its natural full content width -- on a narrow viewport
+ * that exceeds the `nav`'s own width, which is exactly what makes
+ * `overflow-x-auto` on the `nav` kick in as horizontal scroll instead of a
+ * wrapped second row. Desktop is unaffected: the strip already fits on one
+ * row there with no scrolling needed.
  */
 export function ManagerCategoryNav({ active, current }: ManagerCategoryNavProps) {
   return (

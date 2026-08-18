@@ -250,3 +250,59 @@ chart — implemented as plain server-rendered SVG (no chart library, no
 client component at all). PR #15 never recommends who should be assigned
 next ("הבא בתור") — that is explicitly out of scope, reserved for a
 future PR #16 that adds assignment-specific eligibility.
+
+## Manager adoption — "התחברויות והתראות"
+
+A management-visibility category, not an operational one: it reconciles
+the SAME כ"א roster every other manager category uses against Supabase
+auth + push-subscription state, so a manager can see who has logged into
+מי-מה-מו, who hasn't, and who can currently receive push notifications.
+Formerly a small aside inside Overview (מצב התראות, PR #40); now its own
+top-level `ManagerCategory` (`"logins"`) so Overview stays focused on
+operational shift/duty issues. No new database schema and no parallel
+personnel list — every fact here already existed, just split into the two
+questions a manager actually asks instead of one collapsed engine enum.
+
+- **Engine reuse.** `lib/notifications/engine/readiness.ts`'s
+  `computeNotificationReadiness()` (the SAME bulk Supabase Admin API +
+  `push_subscriptions` lookup PR #40's aside already used) is still the
+  ONLY place identity/subscription state is computed — this read model
+  never re-queries Supabase itself. `PersonReadinessResult` now also
+  carries `avatarUrl` (the person's Google profile photo), read from the
+  SAME already-fetched bulk `listUsers()` page via
+  `lib/auth/currentUser.ts`'s `extractAvatarUrl` (exported for this reuse)
+  — never a new per-user Admin API call, and never a login timestamp
+  (`last_sign_in_at`/`created_at` exist on the Admin API response but
+  nothing here reads them; login recency stays a possible future
+  enhancement, not a fabricated approximation).
+- **`managerTypes.ts`** — `ManagerAdoptionPersonView` splits each person's
+  single `PersonNotificationReadiness` into `loginStatus`
+  (`logged_in`/`not_logged_in`, `null` when a `dataIssue` makes the
+  question unanswerable), `notificationStatus` (`ready`/`not_enabled`,
+  `null` before `logged_in`), and `dataIssue`
+  (`missing_email`/`ambiguous_email` — a roster problem to fix in כ"א, not
+  a person to remind). `needsNudge` is true exactly for
+  `not_logged_in`/`not_enabled`. `ManagerAdoptionSummary` carries only the
+  counts the product spec actually asks for (total/logged-in/not-logged-
+  in/notification-ready/logged-in-not-ready/data-issue) — never a
+  decorative statistic. `ManagerAdoptionState` mirrors the same
+  skipped/unavailable/available three-way the old aside used, except
+  `available` is shown even when every count but the total is calm — this
+  is a full category page a manager navigates to on purpose, not a
+  transient note.
+- **`buildManagerOverviewReadModel.ts`** — `toManagerAdoptionPerson()` is
+  the one exhaustive switch over `PersonNotificationReadiness` that
+  performs the split above; `toManagerAdoptionView()` derives every
+  summary count from that SAME single pass, so they can never drift out
+  of agreement with `people` by construction. Every roster person survives
+  into `ManagerAdoptionView.people` (unlike the old aside, which dropped
+  every `ready` person).
+- **`lib/presentation/managerAdoption.ts`** — `buildManagerAdoptionSectionView()`
+  groups people into the four buckets the "התחברויות והתראות" UI actually
+  renders (`notLoggedInGroup`/`notificationsOffGroup` — always visible,
+  actionable; `readyGroup` — quiet, collapsed by default;
+  `dataIssueGroup` — visually distinct roster-data framing), plus a
+  headline sentence and the stat list for `ManagerAdoptionSummary`.
+- **UI** — `ManagerAdoptionSummary`/`ManagerAdoptionSection`
+  (`components/manager/`), rendered only for `category === "logins"` in
+  `app/(app)/manager/page.tsx`.

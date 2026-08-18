@@ -149,7 +149,7 @@ function model(overrides: Partial<ManagerOverviewReadModel> = {}): ManagerOvervi
     potentialRequirements: [],
     selectedPerson: null,
     selectedPersonRangeAbsences: [],
-    notificationReadiness: { status: "skipped" },
+    adoption: { status: "skipped" },
     ...overrides,
   };
 }
@@ -193,13 +193,14 @@ describe("ManagerPage — request scope", () => {
 });
 
 describe("ManagerPage — category navigation", () => {
-  it("renders all four category tabs, Overview active by default", async () => {
+  it("renders all five category tabs, Overview active by default", async () => {
     getRequestManagerOverview.mockResolvedValue(okResult(model()));
     await renderPage();
     expect(screen.getByRole("tab", { name: "סקירה" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tab", { name: "משמרות" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "כוח אדם" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "תורנויות והיעדרויות" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "התחברויות והתראות" })).toBeInTheDocument();
   });
 
   it("Overview (default): shows דורש טיפול, never the other categories' sections", async () => {
@@ -241,6 +242,48 @@ describe("ManagerPage — category navigation", () => {
     expect(screen.getByText("תורנויות")).toBeInTheDocument();
     expect(screen.queryByText("דורש טיפול")).toBeNull();
     expect(screen.queryByText("כיסוי משמרות")).toBeNull();
+    expect(screen.queryByText("צוות")).toBeNull();
+  });
+
+  it("Logins & Notifications category: shows the adoption summary + section, never the Overview/Shifts/Personnel/Duties sections", async () => {
+    getRequestManagerOverview.mockResolvedValue(
+      okResult(
+        model({
+          issues: [issue()],
+          coverageOverview: [shiftGroup()],
+          duties: [duty()],
+          adoption: {
+            status: "available",
+            view: {
+              summary: {
+                totalCount: 1,
+                loggedInCount: 0,
+                notLoggedInCount: 1,
+                notificationReadyCount: 0,
+                loggedInNotReadyCount: 0,
+                dataIssueCount: 0,
+              },
+              people: [
+                {
+                  personId: "p_martin",
+                  personName: "מרטין בדיקה",
+                  avatarUrl: null,
+                  loginStatus: "not_logged_in",
+                  notificationStatus: null,
+                  dataIssue: null,
+                  needsNudge: true,
+                },
+              ],
+            },
+          },
+        }),
+      ),
+    );
+    await renderPage({ category: "logins" });
+    expect(screen.getByText("טרם נכנסו למערכת")).toBeInTheDocument();
+    expect(screen.queryByText("דורש טיפול")).toBeNull();
+    expect(screen.queryByText("כיסוי משמרות")).toBeNull();
+    expect(screen.queryByText("תורנויות")).toBeNull();
     expect(screen.queryByText("צוות")).toBeNull();
   });
 
@@ -764,81 +807,108 @@ describe("ManagerPage — Overview issue wording matches the domain's own role-c
   });
 });
 
-describe("ManagerPage — PR #40 מצב התראות section", () => {
-  it("skipped: renders nothing (lookup never attempted)", async () => {
-    getRequestManagerOverview.mockResolvedValue(okResult(model({ notificationReadiness: { status: "skipped" } })));
-    await renderPage();
-    expect(screen.queryByText("הצג פרטים")).toBeNull();
-    expect(screen.queryByText("לא ניתן לבדוק כרגע את מצב ההתראות")).toBeNull();
+describe("ManagerPage — Logins & Notifications (התחברויות והתראות) category", () => {
+  function adoptionState(overrides: {
+    loggedIn?: number;
+    notLoggedIn?: number;
+    ready?: number;
+    notReady?: number;
+    dataIssue?: number;
+    people?: Array<{
+      personId: string;
+      personName: string;
+      loginStatus: "logged_in" | "not_logged_in" | null;
+      notificationStatus: "ready" | "not_enabled" | null;
+      dataIssue: "missing_email" | "ambiguous_email" | null;
+    }>;
+  } = {}) {
+    const people = overrides.people ?? [];
+    return {
+      status: "available" as const,
+      view: {
+        summary: {
+          totalCount: (overrides.loggedIn ?? 0) + (overrides.notLoggedIn ?? 0) + (overrides.dataIssue ?? 0),
+          loggedInCount: overrides.loggedIn ?? 0,
+          notLoggedInCount: overrides.notLoggedIn ?? 0,
+          notificationReadyCount: overrides.ready ?? 0,
+          loggedInNotReadyCount: overrides.notReady ?? 0,
+          dataIssueCount: overrides.dataIssue ?? 0,
+        },
+        people: people.map((p) => ({ avatarUrl: null, needsNudge: p.loginStatus !== "logged_in" || p.notificationStatus === "not_enabled", ...p })),
+      },
+    };
+  }
+
+  it("skipped: renders nothing", async () => {
+    getRequestManagerOverview.mockResolvedValue(okResult(model({ adoption: { status: "skipped" } })));
+    await renderPage({ category: "logins" });
+    expect(screen.queryByText("סה״כ אנשי צוות")).toBeNull();
   });
 
-  it("available, everyone ready: renders nothing -- no permanent success card", async () => {
+  it("unavailable: shows the small neutral notice", async () => {
+    getRequestManagerOverview.mockResolvedValue(okResult(model({ adoption: { status: "unavailable" } })));
+    await renderPage({ category: "logins" });
+    expect(screen.getByText("לא ניתן לבדוק כרגע את מצב ההתחברויות וההתראות")).toBeInTheDocument();
+  });
+
+  it("available, everyone ready: STILL renders the summary (unlike the old inline aside, this is a full category page)", async () => {
     getRequestManagerOverview.mockResolvedValue(
       okResult(
         model({
-          notificationReadiness: { status: "available", view: { readyCount: 2, totalCount: 2, blockers: [] } },
+          adoption: adoptionState({
+            loggedIn: 2,
+            ready: 2,
+            people: [
+              { personId: "p_martin", personName: "מרטין בדיקה", loginStatus: "logged_in", notificationStatus: "ready", dataIssue: null },
+              { personId: "p_eitan", personName: "איתן דוגמה", loginStatus: "logged_in", notificationStatus: "ready", dataIssue: null },
+            ],
+          }),
         }),
       ),
     );
-    await renderPage();
-    expect(screen.queryByText("הצג פרטים")).toBeNull();
-    expect(screen.queryByText(/לא יכולים לקבל התראות אישיות/)).toBeNull();
-    expect(screen.queryByText("לא ניתן לבדוק כרגע את מצב ההתראות")).toBeNull();
+    await renderPage({ category: "logins" });
+    expect(screen.getByText("סה״כ אנשי צוות")).toBeInTheDocument();
   });
 
-  it("unavailable: shows the small neutral notice, distinct from both skipped and all-ready", async () => {
-    getRequestManagerOverview.mockResolvedValue(
-      okResult(model({ notificationReadiness: { status: "unavailable" } })),
-    );
-    await renderPage();
-    expect(screen.getByText("לא ניתן לבדוק כרגע את מצב ההתראות")).toBeInTheDocument();
-    expect(screen.queryByText("הצג פרטים")).toBeNull();
-  });
-
-  it("available with blockers: shows the compact summary and grouped names/labels", async () => {
+  it("shows the two nudge groups (not logged in / notifications off) grouped separately", async () => {
     getRequestManagerOverview.mockResolvedValue(
       okResult(
         model({
-          notificationReadiness: {
-            status: "available",
-            view: {
-              readyCount: 0,
-              totalCount: 2,
-              blockers: [
-                { personId: "p_martin", personName: "מרטין בדיקה", status: "missing_email" },
-                { personId: "p_eitan", personName: "איתן דוגמה", status: "no_push_subscription" },
-              ],
-            },
-          },
+          adoption: adoptionState({
+            notLoggedIn: 1,
+            loggedIn: 1,
+            notReady: 1,
+            people: [
+              { personId: "p_martin", personName: "מרטין בדיקה", loginStatus: "not_logged_in", notificationStatus: null, dataIssue: null },
+              { personId: "p_eitan", personName: "איתן דוגמה", loginStatus: "logged_in", notificationStatus: "not_enabled", dataIssue: null },
+            ],
+          }),
         }),
       ),
     );
-    await renderPage();
-    expect(screen.getByText("2 אנשים עדיין לא יכולים לקבל התראות אישיות")).toBeInTheDocument();
-    expect(screen.getByText("הצג פרטים")).toBeInTheDocument();
-    expect(screen.getByText("חסר מייל בכ״א")).toBeInTheDocument();
-    expect(screen.getByText("אין מכשיר רשום להתראות")).toBeInTheDocument();
+    await renderPage({ category: "logins" });
+    expect(screen.getByText("טרם נכנסו למערכת")).toBeInTheDocument();
+    expect(screen.getByText("מרטין בדיקה")).toBeInTheDocument();
+    expect(screen.getByText("נכנסו למערכת אך לא הפעילו התראות")).toBeInTheDocument();
+    expect(screen.getByText("איתן דוגמה")).toBeInTheDocument();
   });
 
-  it("lives in Overview alongside דורש טיפול -- data-quality context, not a shift conflict", async () => {
+  it("frames a missing/ambiguous email as a roster data issue, distinct from 'hasn't logged in'", async () => {
     getRequestManagerOverview.mockResolvedValue(
       okResult(
         model({
-          issues: [issue()],
-          notificationReadiness: {
-            status: "available",
-            view: {
-              readyCount: 0,
-              totalCount: 1,
-              blockers: [{ personId: "p_martin", personName: "מרטין בדיקה", status: "unmapped_account" }],
-            },
-          },
+          adoption: adoptionState({
+            dataIssue: 1,
+            people: [
+              { personId: "p_martin", personName: "מרטין בדיקה", loginStatus: null, notificationStatus: null, dataIssue: "missing_email" },
+            ],
+          }),
         }),
       ),
     );
-    await renderPage();
-    expect(screen.getByText("דורש טיפול")).toBeInTheDocument();
-    expect(screen.getByText("אדם אחד עדיין לא יכול לקבל התראות אישיות")).toBeInTheDocument();
+    await renderPage({ category: "logins" });
+    expect(screen.getAllByText("בעיית נתונים בכ״א").length).toBeGreaterThan(0);
+    expect(screen.queryByText("טרם נכנסו למערכת")).toBeNull();
   });
 
   it("never appears in the selected-person drilldown", async () => {
@@ -847,21 +917,86 @@ describe("ManagerPage — PR #40 מצב התראות section", () => {
         model({
           selectedPersonId: "p_martin",
           selectedPerson: personalModel(),
-          notificationReadiness: { status: "skipped" },
+          adoption: { status: "skipped" },
         }),
       ),
     );
     await renderPage({ person: "p_martin" });
-    expect(screen.queryByText("הצג פרטים")).toBeNull();
-    expect(screen.queryByText("לא ניתן לבדוק כרגע את מצב ההתראות")).toBeNull();
+    expect(screen.queryByText("סה״כ אנשי צוות")).toBeNull();
+    expect(screen.queryByText("לא ניתן לבדוק כרגע את מצב ההתחברויות וההתראות")).toBeNull();
   });
 
-  it("never appears outside Overview", async () => {
-    getRequestManagerOverview.mockResolvedValue(
-      okResult(model({ notificationReadiness: { status: "unavailable" } })),
-    );
+  it("never appears outside its own category", async () => {
+    getRequestManagerOverview.mockResolvedValue(okResult(model({ adoption: { status: "unavailable" } })));
     await renderPage({ category: "shifts" });
-    expect(screen.queryByText("לא ניתן לבדוק כרגע את מצב ההתראות")).toBeNull();
+    expect(screen.queryByText("לא ניתן לבדוק כרגע את מצב ההתחברויות וההתראות")).toBeNull();
+  });
+
+  it("no longer lives in Overview -- the old מצב התראות aside is gone from there", async () => {
+    getRequestManagerOverview.mockResolvedValue(
+      okResult(
+        model({
+          issues: [issue()],
+          adoption: adoptionState({
+            notLoggedIn: 1,
+            people: [
+              { personId: "p_martin", personName: "מרטין בדיקה", loginStatus: "not_logged_in", notificationStatus: null, dataIssue: null },
+            ],
+          }),
+        }),
+      ),
+    );
+    await renderPage();
+    expect(screen.getByText("דורש טיפול")).toBeInTheDocument();
+    expect(screen.queryByText("טרם נכנסו למערכת")).toBeNull();
+    expect(screen.queryByText("סה״כ אנשי צוות")).toBeNull();
+  });
+
+  it("hides the person/range filter controls -- this category is a current snapshot, not scoped by a date range or a person", async () => {
+    getRequestManagerOverview.mockResolvedValue(okResult(model()));
+    await renderPage({ category: "logins" });
+    expect(screen.queryByRole("button", { name: /כולם/ })).toBeNull();
+    expect(screen.queryByRole("navigation", { name: "טווח תאריכים" })).toBeNull();
+    expect(screen.queryByText("היום")).toBeNull();
+    expect(screen.queryByText("7 ימים")).toBeNull();
+    expect(screen.queryByText("30 יום")).toBeNull();
+    expect(screen.queryByText("החודש")).toBeNull();
+  });
+
+  it("still shows the Google Sheets freshness status and refresh control", async () => {
+    getRequestManagerOverview.mockResolvedValue(okResult(model()));
+    await renderPage({ category: "logins" });
+    expect(screen.getByTestId("freshness")).toBeInTheDocument();
+  });
+});
+
+describe("ManagerPage — filter controls restore when leaving Logins & Notifications", () => {
+  it("Overview shows the person/range filters", async () => {
+    getRequestManagerOverview.mockResolvedValue(okResult(model()));
+    await renderPage();
+    expect(screen.getByRole("button", { name: /כולם/ })).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "טווח תאריכים" })).toBeInTheDocument();
+  });
+
+  it("Shifts shows the person/range filters", async () => {
+    getRequestManagerOverview.mockResolvedValue(okResult(model()));
+    await renderPage({ category: "shifts" });
+    expect(screen.getByRole("button", { name: /כולם/ })).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "טווח תאריכים" })).toBeInTheDocument();
+  });
+
+  it("Personnel shows the person/range filters", async () => {
+    getRequestManagerOverview.mockResolvedValue(okResult(model()));
+    await renderPage({ category: "personnel" });
+    expect(screen.getByRole("button", { name: /כולם/ })).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "טווח תאריכים" })).toBeInTheDocument();
+  });
+
+  it("Duties & Absences shows the person/range filters", async () => {
+    getRequestManagerOverview.mockResolvedValue(okResult(model()));
+    await renderPage({ category: "duties" });
+    expect(screen.getByRole("button", { name: /כולם/ })).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "טווח תאריכים" })).toBeInTheDocument();
   });
 });
 
@@ -1027,23 +1162,41 @@ describe("ManagerPage — privacy", () => {
     expect(container.textContent).not.toContain("spreadsheetId");
   });
 
-  it("never leaks a blocker's personId or raw status string from the מצב התראות section", async () => {
+  it("never leaks a person's internal id or raw status string from the התחברויות והתראות category", async () => {
     getRequestManagerOverview.mockResolvedValue(
       okResult(
         model({
-          notificationReadiness: {
+          adoption: {
             status: "available",
             view: {
-              readyCount: 0,
-              totalCount: 1,
-              blockers: [{ personId: "p_martin_internal_id", personName: "מרטין בדיקה", status: "no_push_subscription" }],
+              summary: {
+                totalCount: 1,
+                loggedInCount: 1,
+                notLoggedInCount: 0,
+                notificationReadyCount: 0,
+                loggedInNotReadyCount: 1,
+                dataIssueCount: 0,
+              },
+              people: [
+                {
+                  personId: "p_martin_internal_id",
+                  personName: "מרטין בדיקה",
+                  avatarUrl: null,
+                  loginStatus: "logged_in",
+                  notificationStatus: "not_enabled",
+                  dataIssue: null,
+                  needsNudge: true,
+                },
+              ],
             },
           },
         }),
       ),
     );
-    const { container } = await renderPage();
+    const { container } = await renderPage({ category: "logins" });
     expect(container.textContent).not.toContain("p_martin_internal_id");
     expect(container.textContent).not.toContain("no_push_subscription");
+    expect(container.textContent).not.toContain("not_enabled");
+    expect(container.textContent).not.toContain("logged_in");
   });
 });

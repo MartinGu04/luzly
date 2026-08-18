@@ -103,12 +103,29 @@ describe("resolvePersonIdentity", () => {
     vi.resetModules();
     const { resolvePersonIdentity } = await import("./recipients");
     const people = [person({ id: "p1", name: "Dana", email: "dana@example.com" })];
-    const emailToUserId = new Map([["dana@example.com", "user-1"]]);
+    const emailToAccount = new Map([["dana@example.com", { userId: "user-1", avatarUrl: null }]]);
 
-    expect(resolvePersonIdentity(people[0], people, emailToUserId)).toEqual({
+    expect(resolvePersonIdentity(people[0], people, emailToAccount)).toEqual({
       status: "mapped",
       normalizedEmail: "dana@example.com",
       userId: "user-1",
+      avatarUrl: null,
+    });
+  });
+
+  it("mapped: carries the account's avatarUrl through unchanged", async () => {
+    vi.resetModules();
+    const { resolvePersonIdentity } = await import("./recipients");
+    const people = [person({ id: "p1", name: "Dana", email: "dana@example.com" })];
+    const emailToAccount = new Map([
+      ["dana@example.com", { userId: "user-1", avatarUrl: "https://example.invalid/photo.jpg" }],
+    ]);
+
+    expect(resolvePersonIdentity(people[0], people, emailToAccount)).toEqual({
+      status: "mapped",
+      normalizedEmail: "dana@example.com",
+      userId: "user-1",
+      avatarUrl: "https://example.invalid/photo.jpg",
     });
   });
 
@@ -141,6 +158,39 @@ describe("resolvePersonIdentity", () => {
       status: "unmapped",
       normalizedEmail: "ghost@example.com",
     });
+  });
+});
+
+describe("fetchAllUserIdsByEmail", () => {
+  it("carries each account's avatar through from the SAME bulk listUsers() response, never a second Admin API call", async () => {
+    vi.resetModules();
+    const fakeListUsers = vi.fn(async () => ({
+      data: {
+        users: [
+          { id: "user-1", email: "dana@example.com", user_metadata: { avatar_url: "https://example.invalid/dana.jpg" } },
+        ],
+      },
+      error: null,
+    }));
+    const fakeSupabase = { auth: { admin: { listUsers: fakeListUsers } } };
+    vi.doMock("./serviceClient", () => ({ getNotificationServiceClient: () => fakeSupabase }));
+
+    const { fetchAllUserIdsByEmail } = await import("./recipients");
+    const accounts = await fetchAllUserIdsByEmail();
+
+    expect(accounts.get("dana@example.com")).toEqual({ userId: "user-1", avatarUrl: "https://example.invalid/dana.jpg" });
+    expect(fakeListUsers).toHaveBeenCalledTimes(1);
+  });
+
+  it("a user with no usable avatar metadata resolves to avatarUrl: null, never a crash", async () => {
+    vi.resetModules();
+    const fakeSupabase = makeFakeSupabase([{ id: "user-1", email: "dana@example.com" }]);
+    vi.doMock("./serviceClient", () => ({ getNotificationServiceClient: () => fakeSupabase }));
+
+    const { fetchAllUserIdsByEmail } = await import("./recipients");
+    const accounts = await fetchAllUserIdsByEmail();
+
+    expect(accounts.get("dana@example.com")).toEqual({ userId: "user-1", avatarUrl: null });
   });
 });
 

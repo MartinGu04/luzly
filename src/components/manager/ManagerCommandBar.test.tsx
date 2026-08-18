@@ -50,4 +50,28 @@ describe("ManagerCommandBar", () => {
     );
     expect(screen.getByRole("navigation", { name: "טווח תאריכים" })).toBeInTheDocument();
   });
+
+  it("showFilters defaults to true when omitted", () => {
+    render(
+      <ManagerCommandBar people={PEOPLE} selectedPersonId={null} current={CURRENT} currentMonth={null} fetchedAt="2026-08-14T08:00:00.000Z" />,
+    );
+    expect(screen.getByRole("button")).toHaveTextContent("כולם");
+    expect(screen.getByRole("navigation", { name: "טווח תאריכים" })).toBeInTheDocument();
+  });
+
+  it("showFilters=false hides the person selector and range selector, but never the freshness status", () => {
+    render(
+      <ManagerCommandBar
+        people={PEOPLE}
+        selectedPersonId={null}
+        current={CURRENT}
+        currentMonth={null}
+        fetchedAt="2026-08-14T08:00:00.000Z"
+        showFilters={false}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /כולם/ })).toBeNull();
+    expect(screen.queryByRole("navigation", { name: "טווח תאריכים" })).toBeNull();
+    expect(screen.getByTestId("freshness")).toHaveTextContent("2026-08-14T08:00:00.000Z");
+  });
 });

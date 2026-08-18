@@ -1,5 +1,6 @@
 import "server-only";
 import type { Person } from "@/lib/domain/types";
+import { extractAvatarUrl } from "@/lib/auth/currentUser";
 import { findPersonByEmail } from "@/lib/auth/resolveCurrentPerson";
 import { getNotificationServiceClient } from "./serviceClient";
 
@@ -30,27 +31,36 @@ export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
+/** One Supabase auth account, as much of it as any caller here is allowed to touch -- the id for identity mapping, plus the SAME presentation-only avatar `lib/auth/currentUser.ts` already extracts for the current session (never a login timestamp -- `listUsers()` returns `last_sign_in_at`/`created_at` too, but nothing here reads them; login recency stays a possible future enhancement). */
+export interface AuthAccountLookup {
+  userId: string;
+  avatarUrl: string | null;
+}
+
 /**
- * Every Supabase auth user's normalized email -> user id, via the Admin
+ * Every Supabase auth user's normalized email -> account, via the Admin
  * API (service-role only). Exported (PR #40) so `readiness.ts` can reuse
  * the exact same live account lookup for the manager notification-
  * readiness view instead of re-querying/re-implementing it -- one shared
- * identity source of truth, never two.
+ * identity source of truth, never two. The avatar is read from the SAME
+ * already-fetched page of `listUsers()` results (every entry is a full
+ * `User`, `user_metadata` included) -- never a second, per-user Admin API
+ * call just to get a photo.
  */
-export async function fetchAllUserIdsByEmail(): Promise<Map<string, string>> {
+export async function fetchAllUserIdsByEmail(): Promise<Map<string, AuthAccountLookup>> {
   const supabase = getNotificationServiceClient();
-  const emailToUserId = new Map<string, string>();
+  const emailToAccount = new Map<string, AuthAccountLookup>();
 
   for (let page = 1; page <= MAX_LIST_USERS_PAGES; page++) {
     const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: LIST_USERS_PER_PAGE });
     if (error) throw error;
     for (const user of data.users) {
-      if (user.email) emailToUserId.set(normalizeEmail(user.email), user.id);
+      if (user.email) emailToAccount.set(normalizeEmail(user.email), { userId: user.id, avatarUrl: extractAvatarUrl(user) });
     }
     if (data.users.length < LIST_USERS_PER_PAGE) break;
   }
 
-  return emailToUserId;
+  return emailToAccount;
 }
 
 /**
@@ -64,7 +74,7 @@ export type PersonIdentityLookup =
   | { status: "ambiguous" }
   | { status: "not_found" }
   | { status: "unmapped"; normalizedEmail: string }
-  | { status: "mapped"; normalizedEmail: string; userId: string };
+  | { status: "mapped"; normalizedEmail: string; userId: string; avatarUrl: string | null };
 
 /**
  * The ONE per-person identity resolution step `resolveNotificationRecipients`
@@ -73,7 +83,7 @@ export type PersonIdentityLookup =
  * "does this person have a usable email, is it unambiguous within this
  * roster (`findPersonByEmail`, fail-closed-on-ambiguity, no fuzzy/display-
  * name matching), and if so does it match a real Supabase auth user
- * (`emailToUserId`, from `fetchAllUserIdsByEmail`)?". A person whose email
+ * (`emailToAccount`, from `fetchAllUserIdsByEmail`)?". A person whose email
  * collides (case/whitespace aside) with another כ"א record resolves
  * `ambiguous` for BOTH, never a silent first-match.
  *
@@ -86,7 +96,7 @@ export type PersonIdentityLookup =
 export function resolvePersonIdentity(
   person: Person,
   people: readonly Person[],
-  emailToUserId: ReadonlyMap<string, string>,
+  emailToAccount: ReadonlyMap<string, AuthAccountLookup>,
 ): PersonIdentityLookup {
   if (!person.email) return { status: "no_email" };
 
@@ -95,10 +105,10 @@ export function resolvePersonIdentity(
   if (lookup.status === "not_found") return { status: "not_found" }; // unreachable: person.email is itself a member of `people`
 
   const normalizedEmail = normalizeEmail(person.email);
-  const userId = emailToUserId.get(normalizedEmail);
-  if (!userId) return { status: "unmapped", normalizedEmail };
+  const account = emailToAccount.get(normalizedEmail);
+  if (!account) return { status: "unmapped", normalizedEmail };
 
-  return { status: "mapped", normalizedEmail, userId };
+  return { status: "mapped", normalizedEmail, userId: account.userId, avatarUrl: account.avatarUrl };
 }
 
 /**
@@ -117,7 +127,7 @@ export function resolvePersonIdentity(
 export async function resolveNotificationRecipients(
   people: readonly Person[],
 ): Promise<RecipientResolution> {
-  const emailToUserId = await fetchAllUserIdsByEmail();
+  const emailToAccount = await fetchAllUserIdsByEmail();
 
   const resolved = new Map<string, ResolvedRecipient>();
   let unmappedCount = 0;
@@ -135,7 +145,7 @@ export async function resolveNotificationRecipients(
     if (consideredEmails.has(normalized)) continue;
     consideredEmails.add(normalized);
 
-    const identity = resolvePersonIdentity(person, people, emailToUserId);
+    const identity = resolvePersonIdentity(person, people, emailToAccount);
     if (identity.status === "no_email" || identity.status === "not_found") continue; // unreachable here: person.email already checked above / self-match guaranteed
     if (identity.status === "ambiguous") {
       ambiguousEmailCount++;

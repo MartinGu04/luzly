@@ -6,7 +6,6 @@ import type { ManagerRequirementStatus, ManagerSourceConflict } from "@/lib/doma
 import type { MissingCoverageRole } from "@/lib/domain/shiftCoverageRecommendation";
 import type { CoverageStatus } from "@/lib/domain/shiftCoverage";
 import type { MinuteInterval } from "@/lib/domain/shiftSchedule";
-import type { PersonNotificationReadiness } from "@/lib/notifications/engine/readiness";
 import type { PersonalIssueTargetSummary, PersonalScheduleReadModel } from "./types";
 
 /**
@@ -182,55 +181,86 @@ export interface ManagerPotentialRequirementView {
   sourceConflict: ManagerSourceConflict | null;
 }
 
+/** Whether this roster person has ever completed a Google sign-in -- derived from `PersonNotificationReadiness` (`unmapped_account` -> `not_logged_in`, `no_push_subscription`/`ready` -> `logged_in`), `null` when a personnel-data issue (`dataIssue`) means the question can't even be asked yet. */
+export type ManagerAdoptionLoginStatus = "logged_in" | "not_logged_in";
+
+/** Whether a logged-in person can currently receive a personal push notification -- meaningless (`null`) before `loginStatus === "logged_in"`. */
+export type ManagerAdoptionNotificationStatus = "ready" | "not_enabled";
+
+/** A כ"א roster problem, not a person's own failing -- see `lib/notifications/engine/readiness.ts`'s `missing_email`/`ambiguous_email`. Kept separate from `loginStatus`/`notificationStatus` (both `null` when this is set) so the UI never reads "no account" as "hasn't logged in" for someone the system could never have matched in the first place. */
+export type ManagerAdoptionDataIssue = "missing_email" | "ambiguous_email";
+
 /**
- * One roster person who currently CANNOT receive a personal push
- * notification, and the single actionable reason why -- see
- * `lib/notifications/engine/readiness.ts` for what each status actually
- * proves/doesn't prove. Never includes a `ready` person (see
- * `ManagerNotificationReadinessView.blockers`). Carries only `personId`/
- * `personName`/`status` -- no email, no auth user id, no push
- * endpoint/keys.
+ * One roster person's adoption picture -- "התחברויות והתראות" (the manager
+ * category this feeds). Built from `computeNotificationReadiness()`'s
+ * single per-person `PersonNotificationReadiness` (see
+ * `buildManagerOverviewReadModel.ts`'s `toManagerAdoptionPerson`), just
+ * split into the two orthogonal questions a manager actually asks --
+ * "has this person logged in?" and "can they receive notifications?" --
+ * instead of one collapsed internal enum. `avatarUrl` is the SAME
+ * presentation-only Google photo already available from the bulk Admin
+ * API account lookup (`recipients.ts`'s `fetchAllUserIdsByEmail`) -- never
+ * a new per-user fetch, and only ever set for a `logged_in` person (no
+ * account, no photo). `needsNudge` is true exactly when a manager should
+ * reach out: not yet logged in, or logged in but notifications aren't on
+ * -- never true for a `ready` person or a `dataIssue` row (that's a roster
+ * problem to fix, not a person to remind). Carries only
+ * `personId`/`personName`/`avatarUrl` -- no email, no auth user id, no
+ * push endpoint/keys.
  */
-export interface ManagerNotificationReadinessBlocker {
+export interface ManagerAdoptionPersonView {
   personId: string;
   personName: string;
-  status: Exclude<PersonNotificationReadiness, "ready">;
+  avatarUrl: string | null;
+  loginStatus: ManagerAdoptionLoginStatus | null;
+  notificationStatus: ManagerAdoptionNotificationStatus | null;
+  dataIssue: ManagerAdoptionDataIssue | null;
+  needsNudge: boolean;
 }
 
 /**
- * PR #40 -- the smallest safe manager-facing projection of
- * `computeNotificationReadiness()`'s per-person result: everyone who is
- * NOT `ready`, grouped by reason at the presentation layer
- * (`lib/presentation/notificationReadiness.ts`), plus the two counts
- * needed for the compact "5 אנשים עדיין לא יכולים לקבל התראות אישיות"
- * summary. Deliberately excludes every `ready` person from `blockers` --
- * "smallest server-side read model", not a full roster echo.
+ * The only counts the "התחברויות והתראות" category surfaces -- every one
+ * answers a real management question (see `ManagerAdoptionPersonView`'s
+ * docstring), never a decorative statistic. `totalCount` is the full
+ * roster scope this was computed over; every other count is a subset of
+ * it, derived from the SAME per-person pass (`toManagerAdoptionView`), so
+ * they can never drift out of agreement with each other by construction.
  */
-export interface ManagerNotificationReadinessView {
-  readyCount: number;
+export interface ManagerAdoptionSummary {
   totalCount: number;
-  blockers: ManagerNotificationReadinessBlocker[];
+  loggedInCount: number;
+  notLoggedInCount: number;
+  notificationReadyCount: number;
+  loggedInNotReadyCount: number;
+  dataIssueCount: number;
+}
+
+/** The full "התחברויות והתראות" category payload -- every roster person's adoption state, plus the summary counts derived from the same pass. */
+export interface ManagerAdoptionView {
+  summary: ManagerAdoptionSummary;
+  people: ManagerAdoptionPersonView[];
 }
 
 /**
- * PR #40 follow-up -- the manager overview must distinguish "the privileged
- * lookup was never attempted" from "it was attempted and failed", never
- * collapse both into the same silent absence a viewer could mistake for
- * "everyone is ready":
- * - `skipped` -- a person is selected (`ManagerNotificationReadinessSection`
- *   never renders on that drilldown), so `computeNotificationReadiness()`
- *   was never called at all.
+ * The manager overview must distinguish "the privileged lookup was never
+ * attempted" from "it was attempted and failed", never collapse both into
+ * the same silent absence a viewer could mistake for "everyone is ready":
+ * - `skipped` -- a person is selected (every category, including
+ *   "התחברויות והתראות", only renders in the "everyone" scope), so
+ *   `computeNotificationReadiness()` was never called at all.
  * - `unavailable` -- it WAS called, for the "everyone" scope, and the
  *   Supabase Admin API / `push_subscriptions` lookup itself failed (see
  *   `managerOverview.ts`). The manager sees a small neutral notice, not a
- *   silently missing section.
- * - `available` -- it succeeded; `view` is the safe projection (may still
- *   have zero `blockers` when everyone is ready).
+ *   silently missing category.
+ * - `available` -- it succeeded; `view` is the safe projection (unlike the
+ *   old מצב התראות aside, this is shown even when everyone is ready --
+ *   "התחברויות והתראות" is a full category page, not an inline note that
+ *   should disappear on a calm day).
  */
-export type ManagerNotificationReadinessState =
+export type ManagerAdoptionState =
   | { status: "skipped" }
   | { status: "unavailable" }
-  | { status: "available"; view: ManagerNotificationReadinessView };
+  | { status: "available"; view: ManagerAdoptionView };
 
 /**
  * The manager-only, broader-scope read model. Separate from
@@ -270,14 +300,15 @@ export interface ManagerOverviewReadModel {
   potentialRequirements: ManagerPotentialRequirementView[];
 
   /**
-   * PR #40 -- push-notification readiness across the whole roster. Always
-   * one of three explicit states (`ManagerNotificationReadinessState`) --
-   * never a bare `null` conflating "skipped" with "the lookup failed". See
-   * `managerOverview.ts`, which skips the Supabase Admin API + bulk
-   * `push_subscriptions` calls entirely on person-drilldown navigations,
-   * since `ManagerNotificationReadinessSection` never renders there.
+   * Login + push-notification adoption across the whole roster -- feeds
+   * the "התחברויות והתראות" manager category. Always one of three explicit
+   * states (`ManagerAdoptionState`) -- never a bare `null` conflating
+   * "skipped" with "the lookup failed". See `managerOverview.ts`, which
+   * skips the Supabase Admin API + bulk `push_subscriptions` calls
+   * entirely on person-drilldown navigations, since no category (this one
+   * included) renders there.
    */
-  notificationReadiness: ManagerNotificationReadinessState;
+  adoption: ManagerAdoptionState;
 
   /**
    * The selected person's OWN full personal read model, reused as-is from
