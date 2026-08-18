@@ -54,3 +54,28 @@ export function classifyRoleGroup(person: RoleGroupable): FairnessRoleGroupKey {
   if (person.isTechnician) return "technician";
   return "other";
 }
+
+/** A shift-staffed role -- the two roles a shift Event's own `role` field (and `MissingCoverageRole`/`FairnessEligibilityRole`, both structurally this same union) can ever be. */
+export type ShiftRole = "technician" | "supervisor";
+
+/**
+ * The ONE canonical "does this person's כ"א capability flag make them
+ * eligible for shift role R" predicate -- reused by shift-coverage
+ * recommendation eligibility (`shiftCoverageRecommendation.ts`) and
+ * Fairness role eligibility (`fairnessParticipation.ts`), which both used
+ * to carry their own identical inline `role === "technician" ?
+ * person.isTechnician : person.isSupervisor` ternary. Consolidated here so
+ * the two can never independently drift into two different definitions of
+ * "shift worker" for the same role.
+ *
+ * Purely the capability flag -- no personnelType, no Event/participation
+ * evidence, no absence/conflict checking; each caller layers its own
+ * further eligibility rules on TOP of this, never instead of it. A person
+ * with `isTechnician: false` and `isSupervisor: false` (duties/personnel
+ * roster membership only, not a shift worker) is never eligible for
+ * either role here, by construction -- this is what keeps such a person
+ * out of every shift-role candidate pool without a name-based exclusion.
+ */
+export function hasShiftRoleCapability(person: RoleGroupable, role: ShiftRole): boolean {
+  return role === "technician" ? person.isTechnician : person.isSupervisor;
+}

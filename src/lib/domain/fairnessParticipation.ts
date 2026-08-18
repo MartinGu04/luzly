@@ -5,7 +5,7 @@ import {
   fairnessDataCompleteness,
   type FairnessDataCompleteness,
 } from "./fairnessFoundation";
-import { classifyPersonnelType } from "./personnelType";
+import { classifyPersonnelType, hasShiftRoleCapability } from "./personnelType";
 import { EMPTY_RESERVE_ROLE_PARTICIPATION, type ReserveRoleParticipation } from "./reserveParticipation";
 import type { Person } from "./types";
 
@@ -238,9 +238,8 @@ export function resolveFairnessRoleEligibility(
   reserveParticipation: ReserveRoleParticipation = EMPTY_RESERVE_ROLE_PARTICIPATION,
 ): FairnessRoleEligibility {
   const dataCompleteness = fairnessDataCompleteness(["eligibility_undated"]);
-  const hasCapability = role === "technician" ? person.isTechnician : person.isSupervisor;
 
-  if (!hasCapability) {
+  if (!hasShiftRoleCapability(person, role)) {
     return { personId: person.id, role, eligible: false, basis: "not_capable", dataCompleteness };
   }
 

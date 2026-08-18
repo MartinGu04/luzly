@@ -253,7 +253,18 @@ shift-fairness period without collision.
   string) — co-located with `classifyPersonnelType` for the same reason
   that function lives here: `lib/presentation/roster.ts`'s
   `classifyRegularRole` and this PR's `fairnessGroups.ts` both need the
-  EXACT same rule, defined once.
+  EXACT same rule, defined once. Also `hasShiftRoleCapability(person,
+  role)` — the ONE canonical "does this person's capability flag make
+  them eligible for shift role R" predicate, consolidating what used to
+  be an identical inline `role === "technician" ? person.isTechnician :
+  person.isSupervisor` ternary duplicated in BOTH
+  `shiftCoverageRecommendation.ts` (candidate-pool construction and
+  `participatesInRoleRotation`) and `fairnessParticipation.ts`
+  (`resolveFairnessRoleEligibility`) — now both reuse this ONE function,
+  so a person with neither flag set (valid personnel, possibly with
+  duties, but not a shift worker) is structurally excluded from every
+  shift-role candidate pool by ONE predicate that can't independently
+  drift between the two call sites.
 - `fairnessFoundation.ts` — the foundation-wide primitives: `FAIRNESS_MODEL_VERSION`
   (for a future stored historical snapshot to trust without recalculating);
   `resolveFairnessPeriodStatus` (`"current"` vs `"closed"`, from a plain

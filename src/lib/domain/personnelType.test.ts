@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyPersonnelType, classifyRoleGroup } from "./personnelType";
+import { classifyPersonnelType, classifyRoleGroup, hasShiftRoleCapability } from "./personnelType";
 
 describe("classifyPersonnelType", () => {
   it("קבע -> permanent", () => {
@@ -45,5 +45,25 @@ describe("classifyRoleGroup", () => {
 
   it("neither flag resolves to other", () => {
     expect(classifyRoleGroup({ isSupervisor: false, isTechnician: false })).toBe("other");
+  });
+});
+
+describe("hasShiftRoleCapability", () => {
+  it("technician role requires isTechnician, ignores isSupervisor", () => {
+    expect(hasShiftRoleCapability({ isTechnician: true, isSupervisor: false }, "technician")).toBe(true);
+    expect(hasShiftRoleCapability({ isTechnician: true, isSupervisor: true }, "technician")).toBe(true);
+    expect(hasShiftRoleCapability({ isTechnician: false, isSupervisor: true }, "technician")).toBe(false);
+  });
+
+  it("supervisor role requires isSupervisor, ignores isTechnician", () => {
+    expect(hasShiftRoleCapability({ isTechnician: false, isSupervisor: true }, "supervisor")).toBe(true);
+    expect(hasShiftRoleCapability({ isTechnician: true, isSupervisor: true }, "supervisor")).toBe(true);
+    expect(hasShiftRoleCapability({ isTechnician: true, isSupervisor: false }, "supervisor")).toBe(false);
+  });
+
+  it("a person with neither flag is never capable for either role", () => {
+    const nonShiftPerson = { isTechnician: false, isSupervisor: false };
+    expect(hasShiftRoleCapability(nonShiftPerson, "technician")).toBe(false);
+    expect(hasShiftRoleCapability(nonShiftPerson, "supervisor")).toBe(false);
   });
 });

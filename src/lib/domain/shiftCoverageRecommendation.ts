@@ -2,7 +2,7 @@ import { addCalendarDays, formatCalendarDate, subtractCalendarDays } from "./dat
 import { isNextCalendarDay, parseCalendarDate } from "./dutyBlocks";
 import type { Event, EventRole } from "./event";
 import { BLOCKING_ABSENCE_KINDS, type OperationalIssue } from "./operationalIssues";
-import { classifyPersonnelType } from "./personnelType";
+import { classifyPersonnelType, hasShiftRoleCapability } from "./personnelType";
 import { EMPTY_RESERVE_ROLE_PARTICIPATION, type ReserveRoleParticipation } from "./reserveParticipation";
 import { findShiftGroupEvents } from "./shiftCoverage";
 import { MINUTES_PER_DAY, resolveEventShiftInterval, type MinuteInterval, type ShiftSchedule } from "./shiftSchedule";
@@ -340,8 +340,7 @@ function participatesInRoleRotation(
   issueDate: string,
   reserveParticipation: ReserveRoleParticipation,
 ): boolean {
-  const hasCapability = role === "technician" ? candidate.isTechnician : candidate.isSupervisor;
-  if (!hasCapability) return false;
+  if (!hasShiftRoleCapability(candidate, role)) return false;
 
   const category = classifyPersonnelType(candidate.personnelType);
   if (category === "permanent") return false;
@@ -442,14 +441,19 @@ export function buildShiftCoverageRecommendation(
       );
 
   if (missingRole === "supervisor") {
-    const eligible = eligiblePool(people.filter((person) => person.isSupervisor), "supervisor");
+    const eligible = eligiblePool(
+      people.filter((person) => hasShiftRoleCapability(person, "supervisor")),
+      "supervisor",
+    );
     if (eligible.length === 0) return null;
     const { regular, reserve } = splitByServiceCategory(eligible);
     return { missingRole, primaryCandidateIds: combineRegularThenReserve(regular, reserve), fallbackCandidateIds: [] };
   }
 
   const primaryEligible = eligiblePool(
-    people.filter((person) => person.isTechnician && !person.isSupervisor),
+    people.filter(
+      (person) => hasShiftRoleCapability(person, "technician") && !hasShiftRoleCapability(person, "supervisor"),
+    ),
     "technician",
   );
   if (primaryEligible.length > 0) {
@@ -462,7 +466,9 @@ export function buildShiftCoverageRecommendation(
   // shift evidence never qualifies them here, only technician evidence
   // does (spec: "Supervisor evidence alone is insufficient").
   const fallbackEligible = eligiblePool(
-    people.filter((person) => person.isTechnician && person.isSupervisor),
+    people.filter(
+      (person) => hasShiftRoleCapability(person, "technician") && hasShiftRoleCapability(person, "supervisor"),
+    ),
     "technician",
   );
   if (fallbackEligible.length === 0) return null;

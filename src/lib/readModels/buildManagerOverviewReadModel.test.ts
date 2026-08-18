@@ -239,6 +239,93 @@ describe("buildManagerOverviewReadModel — coverage recommendation (PR #37)", (
     const [candidate] = issue.recommendation?.primaryCandidates ?? [];
     expect(candidate && Object.keys(candidate).sort()).toEqual(["personId", "personName"]);
   });
+
+  it("a valid, duty-having non-shift person (isTechnician/isSupervisor both false) is NEVER offered as a missing-technician candidate, even though they remain visible in the broader roster and duties list", () => {
+    const nonShiftPerson = person({
+      id: "p_nonshift",
+      name: "אלון תורנויות",
+      isTechnician: false,
+      isSupervisor: false,
+    });
+    const events: Event[] = [
+      event({ personId: EITAN.id, personName: EITAN.name, date: "2026-08-13", category: "shift", role: "supervisor", period: "day" }),
+    ];
+    // Their only duty comes from a תקשא"ס period source (PR #60/#61's own
+    // attribution/dedup machinery), never a shift Event -- exactly the
+    // "valid personnel, has duties, not a shift worker" shape reported.
+    const model = buildModel({
+      events,
+      people: [MANAGER, EITAN, nonShiftPerson],
+      potentialAllocations: [
+        allocation({ date: "2026-08-13", dutyFamily: "guard", slot: 1, sourceAllocationLabel: nonShiftPerson.name }),
+      ],
+    });
+
+    // Still a normal member of the broader roster.
+    expect(model.roster.some((p) => p.id === nonShiftPerson.id)).toBe(true);
+    // Still shows up with their own duty.
+    expect(model.duties.some((d) => d.personId === nonShiftPerson.id && d.dutyFamily === "guard")).toBe(true);
+
+    // No technician-capable person exists at all -> correctly no
+    // recommendation, and specifically never one naming the non-shift person.
+    const issue = model.issues.find((i) => i.reason === "shift_coverage_missing")!;
+    expect(issue).toBeDefined();
+    expect(issue.recommendation).toBeNull();
+  });
+
+  it("technician-capable candidates still appear for a technician gap, and supervisor-capable candidates still appear for a supervisor gap, alongside a non-shift person who never does", () => {
+    const nonShiftPerson = person({
+      id: "p_nonshift",
+      name: "אלון תורנויות",
+      isTechnician: false,
+      isSupervisor: false,
+    });
+
+    const technicianGapEvents: Event[] = [
+      event({ personId: EITAN.id, personName: EITAN.name, date: "2026-08-13", category: "shift", role: "supervisor", period: "day" }),
+    ];
+    const technicianGapModel = buildModel({
+      events: technicianGapEvents,
+      people: [MANAGER, EITAN, NOA, nonShiftPerson],
+    });
+    const technicianIssue = technicianGapModel.issues.find((i) => i.reason === "shift_coverage_missing")!;
+    expect(technicianIssue.recommendation?.primaryCandidates).toEqual([{ personId: NOA.id, personName: NOA.name }]);
+
+    const supervisorGapEvents: Event[] = [
+      event({ personId: NOA.id, personName: NOA.name, date: "2026-08-13", category: "shift", role: "technician", period: "day" }),
+    ];
+    const supervisorGapModel = buildModel({
+      events: supervisorGapEvents,
+      people: [MANAGER, EITAN, NOA, nonShiftPerson],
+    });
+    const supervisorIssue = supervisorGapModel.issues.find((i) => i.reason === "shift_coverage_missing")!;
+    expect(supervisorIssue.recommendation?.primaryCandidates).toEqual([{ personId: EITAN.id, personName: EITAN.name }]);
+  });
+
+  it("existing availability/absence filtering still applies on top of capability filtering -- a technician-capable candidate on a blocking absence is excluded while another available technician-capable candidate is still recommended", () => {
+    const absentTech = person({ id: "p_absent_tech", name: "גדי חופשה", isTechnician: true });
+    const events: Event[] = [
+      event({ personId: EITAN.id, personName: EITAN.name, date: "2026-08-13", category: "shift", role: "supervisor", period: "day" }),
+      event({
+        personId: absentTech.id,
+        personName: absentTech.name,
+        date: "2026-08-13",
+        category: "absence",
+        role: null,
+        period: "unspecified",
+        absenceKind: "vacation",
+        rawValue: "חופש",
+        title: "חופש",
+        sourceCell: nextCell(),
+      }),
+    ];
+    const model = buildModel({ events, people: [MANAGER, EITAN, NOA, absentTech] });
+    const issue = model.issues.find((i) => i.reason === "shift_coverage_missing")!;
+    expect(issue.recommendation?.primaryCandidates).toEqual([{ personId: NOA.id, personName: NOA.name }]);
+    expect(issue.recommendation?.primaryCandidates).not.toContainEqual(
+      expect.objectContaining({ personId: absentTech.id }),
+    );
+  });
 });
 
 describe("buildManagerOverviewReadModel — PR #39 reserve participation wired end-to-end", () => {

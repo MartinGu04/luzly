@@ -729,6 +729,104 @@ describe("buildShiftCoverageRecommendation — missing supervisor coverage", () 
   });
 });
 
+describe("buildShiftCoverageRecommendation — a non-shift person (valid personnel, has duties, no shift capability) is never a candidate", () => {
+  it("never recommended for a missing technician, even with a duty on the exact issue date and no other disqualifier", () => {
+    const nonShiftPerson = person({
+      id: "p_nonshift",
+      name: "אלון תורנויות",
+      isTechnician: false,
+      isSupervisor: false,
+    });
+    const events = [
+      shiftEvent({ personId: SUP.id, role: "supervisor" }),
+      dutyEvent({ personId: nonShiftPerson.id, date: DATE }),
+    ];
+    const people = [SUP, nonShiftPerson];
+    const issue = findCoverageIssue(events, people);
+
+    expect(issue.reason === "shift_coverage_missing" || issue.reason === "shift_coverage_partial").toBe(true);
+    const recommendation = buildShiftCoverageRecommendation(issue, people, events, schedule);
+    // No technician-capable person exists at all -> correctly no recommendation,
+    // and specifically never one that names the non-shift person.
+    expect(recommendation).toBeNull();
+  });
+
+  it("never recommended for a missing supervisor either, in the same circumstances", () => {
+    const nonShiftPerson = person({
+      id: "p_nonshift",
+      name: "אלון תורנויות",
+      isTechnician: false,
+      isSupervisor: false,
+    });
+    const TECH = person({ id: "p_tech", name: "איתי טכנאי", isTechnician: true });
+    const events = [
+      shiftEvent({ personId: TECH.id, role: "technician" }),
+      dutyEvent({ personId: nonShiftPerson.id, date: DATE }),
+    ];
+    const people = [TECH, nonShiftPerson];
+    const issue = findCoverageIssue(events, people);
+
+    expect(buildShiftCoverageRecommendation(issue, people, events, schedule)).toBeNull();
+  });
+
+  it("still excluded even when a real technician-capable candidate ALSO exists -- never appended alongside eligible candidates", () => {
+    const nonShiftPerson = person({
+      id: "p_nonshift",
+      name: "אלון תורנויות",
+      isTechnician: false,
+      isSupervisor: false,
+    });
+    const TECH_A = person({ id: "p_tech_a", name: "איתי טכנאי", isTechnician: true });
+    const events = [
+      shiftEvent({ personId: SUP.id, role: "supervisor" }),
+      dutyEvent({ personId: nonShiftPerson.id, date: DATE }),
+    ];
+    const people = [SUP, TECH_A, nonShiftPerson];
+    const issue = findCoverageIssue(events, people);
+
+    const recommendation = buildShiftCoverageRecommendation(issue, people, events, schedule);
+    expect(recommendation?.primaryCandidateIds).toEqual([TECH_A.id]);
+    expect(recommendation?.primaryCandidateIds).not.toContain(nonShiftPerson.id);
+    expect(recommendation?.fallbackCandidateIds).not.toContain(nonShiftPerson.id);
+  });
+
+  it("still excluded once BOTH the primary and dual-role last-resort technician pools are actually evaluated (both end up empty, not fabricated)", () => {
+    const nonShiftPerson = person({
+      id: "p_nonshift",
+      name: "אלון תורנויות",
+      isTechnician: false,
+      isSupervisor: false,
+    });
+    // Only SUP (supervisor-only) and the non-shift person exist -- neither
+    // technician pool (primary: technician-only; fallback: technician+supervisor)
+    // has ANY member, so buildShiftCoverageRecommendation must fall through
+    // both and still return null, never surfacing the non-shift person.
+    const events = [shiftEvent({ personId: SUP.id, role: "supervisor" })];
+    const people = [SUP, nonShiftPerson];
+    const issue = findCoverageIssue(events, people);
+
+    expect(buildShiftCoverageRecommendation(issue, people, events, schedule)).toBeNull();
+  });
+
+  it("personnelType/availability being otherwise perfect never substitutes for missing capability", () => {
+    // "חובה" (regular) is the normally-auto-eligible category, no absence, no
+    // constraint, no conflicting shift -- capability is the ONLY reason this
+    // person must be excluded.
+    const nonShiftPerson = person({
+      id: "p_nonshift",
+      name: "אלון תורנויות",
+      isTechnician: false,
+      isSupervisor: false,
+      personnelType: "חובה",
+    });
+    const events = [shiftEvent({ personId: SUP.id, role: "supervisor" })];
+    const people = [SUP, nonShiftPerson];
+    const issue = findCoverageIssue(events, people);
+
+    expect(buildShiftCoverageRecommendation(issue, people, events, schedule)).toBeNull();
+  });
+});
+
 describe("buildShiftCoverageRecommendation — ranking / limits", () => {
   it("28. more than 3 eligible candidates -> only 3 are ever returned", () => {
     const candidates = ["a", "b", "c", "d", "e"].map((suffix, index) =>
