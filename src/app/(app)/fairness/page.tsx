@@ -114,7 +114,7 @@ function renderShiftFairnessView(model: ShiftFairnessReadModel, rawPersonId: str
   const currentMonthKey = calendarMonthOfLocalNow(now);
   const isOnCurrentMonth = displayMonthKey.year === currentMonthKey.year && displayMonthKey.month === currentMonthKey.month;
   const monthLabel = formatHebrewMonthYear(displayMonthKey.year, displayMonthKey.month) ?? "";
-  const periodLabel = shiftFairnessPeriodLabel(monthLabel, model.periodStatus);
+  const periodLabel = shiftFairnessPeriodLabel(monthLabel, isOnCurrentMonth);
 
   const prevHref = fairnessShiftsHref({ monthKey: shiftCalendarMonth(displayMonthKey, -1) });
   const nextHref = fairnessShiftsHref({ monthKey: shiftCalendarMonth(displayMonthKey, 1) });

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { COMPLETE_FAIRNESS_DATA, fairnessDataCompleteness } from "@/lib/domain/fairnessFoundation";
 import type { DutyFairnessPersonRowView, DutyFairnessReadModel } from "@/lib/readModels/dutyFairnessTypes";
 import type { ShiftFairnessPersonRowView, ShiftFairnessReadModel } from "@/lib/readModels/shiftFairnessTypes";
@@ -174,6 +174,20 @@ describe("/fairness — Shift calculation-period label", () => {
     expect(screen.getByText("תקופת החישוב: יולי 2026")).toBeInTheDocument();
     expect(screen.queryByText(/עד היום/)).toBeNull();
   });
+
+  it("a FUTURE month's label does NOT include 'עד היום', even though the Shift Fairness domain also classifies a future month's periodStatus as \"current\" (meaning only \"not closed yet\", not \"is today's month\")", async () => {
+    getRequestShiftFairness.mockResolvedValue({
+      status: "ok",
+      // A far-future month: `periodStatus: "current"` here mirrors the real
+      // engine's own classification for any not-yet-closed month -- the
+      // page must still tell it apart from the ACTUAL current month via
+      // `isOnCurrentMonth`, never `periodStatus` alone.
+      model: shiftModel({ month: "2027-07", periodStatus: "current" }),
+    });
+    await renderFairnessPage();
+    expect(screen.getByText("תקופת החישוב: יולי 2027")).toBeInTheDocument();
+    expect(screen.queryByText(/עד היום/)).toBeNull();
+  });
 });
 
 describe("/fairness — F. Shift cards", () => {
@@ -187,6 +201,15 @@ describe("/fairness — F. Shift cards", () => {
     expect(screen.getByTestId("metric-shift-target").textContent).toContain("4.3");
     expect(screen.getByTestId("metric-shift-gap").textContent).toContain("פער מהיעד");
     expect(screen.getByText("מאוזן")).toBeInTheDocument();
+  });
+
+  it("weekend wording unambiguously distinguishes performed weekend shifts from the weekend target", async () => {
+    getRequestShiftFairness.mockResolvedValue({ status: "ok", model: shiftModel() });
+    await renderFairnessPage();
+    expect(screen.getByTestId("metric-shift-weekend-actual").textContent).toContain('משמרות סופ"ש שבוצעו');
+    expect(screen.getByTestId("metric-shift-weekend-actual").textContent).toContain("1");
+    expect(screen.getByTestId("metric-shift-weekend-target").textContent).toContain('יעד סופ"ש');
+    expect(screen.getByTestId("metric-shift-weekend-target").textContent).toContain("1.2");
   });
 
   it("C. an unmodelable target never renders 0/מאוזן -- shows the honest target-specific note plus the generic status badge, actual work stays visible", async () => {
@@ -225,6 +248,51 @@ describe("/fairness — F. Shift cards", () => {
     await renderFairnessPage();
     expect(screen.queryByText(/אחמ״שים/)).toBeNull();
     expect(screen.getByText(/טכנאים/)).toBeInTheDocument();
+  });
+});
+
+describe("/fairness — Shift card-level info control", () => {
+  it("exactly one info/help affordance exists per Shift card, even with multiple cards on the page", async () => {
+    getRequestShiftFairness.mockResolvedValue({
+      status: "ok",
+      model: shiftModel({
+        groups: [
+          { role: "supervisor", rows: [] },
+          {
+            role: "technician",
+            rows: [
+              shiftRow({ personId: "p_a", personName: "אדם א" }),
+              shiftRow({ personId: "p_b", personName: "אדם ב" }),
+            ],
+          },
+        ],
+      }),
+    });
+    await renderFairnessPage();
+    expect(screen.getAllByRole("button", { name: "הסבר על מדדי הכרטיס" })).toHaveLength(2);
+  });
+
+  it("opening the info explanation never triggers the card's own person-detail navigation", async () => {
+    getRequestShiftFairness.mockResolvedValue({ status: "ok", model: shiftModel() });
+    await renderFairnessPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "הסבר על מדדי הכרטיס" }));
+
+    // The explanation popover itself opened...
+    expect(screen.getByRole("dialog", { name: "הסבר על מדדי הכרטיס" })).toBeInTheDocument();
+    // ...but the person-detail overlay (a differently-named dialog) did NOT.
+    expect(screen.queryByRole("dialog", { name: "טל טכנאי" })).toBeNull();
+  });
+
+  it("the info control is keyboard-focusable and its content is reachable without a pointer", async () => {
+    getRequestShiftFairness.mockResolvedValue({ status: "ok", model: shiftModel() });
+    await renderFairnessPage();
+
+    const trigger = screen.getByRole("button", { name: "הסבר על מדדי הכרטיס" });
+    trigger.focus();
+    expect(trigger).toHaveFocus();
+    fireEvent.click(trigger); // native <button> semantics fire the same click handler for Enter/Space activation
+    expect(screen.getByRole("dialog", { name: "הסבר על מדדי הכרטיס" })).toBeInTheDocument();
   });
 });
 

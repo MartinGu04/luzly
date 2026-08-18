@@ -2,18 +2,22 @@ import Link from "next/link";
 import type { ShiftFairnessCardView } from "@/lib/presentation/fairnessCards";
 import { FairnessMetric } from "./FairnessMetric";
 import { FairnessStatusBadge, fairnessStatusTintTextClass } from "./FairnessStatusBadge";
+import { ShiftFairnessCardInfo } from "./ShiftFairnessCardInfo";
 
 /**
  * One Shift Fairness person card (PR #4 §11, redesigned PR #51 follow-up)
- * -- name + status, then a compact self-explanatory metric grid (משמרות
- * שבוצעו / יעד אישי / פער מהיעד, the gap tinted with the same restrained
- * status color as the badge), then a smaller secondary weekend-context
- * row, in that hierarchy. A `null` target/status never renders as "0"/
- * "מאוזן" -- `unavailableNote` replaces the whole metric grid with a calm,
- * honest sentence instead, while `actualLabel` (always a real, confirmed
- * number) stays visible regardless. No generic "partial data" badge -- the
- * note IS the only incompleteness signal, shown only when it materially
- * matters.
+ * -- name + status + ONE card-level info control, then a compact self-
+ * explanatory metric grid (משמרות שבוצעו / יעד אישי / פער מהיעד, the gap
+ * tinted with the same restrained status color as the badge), then a
+ * smaller secondary weekend-context row, in that hierarchy. A `null`
+ * target/status never renders as "0"/"מאוזן" -- `unavailableNote` replaces
+ * the whole metric grid with a calm, honest sentence instead, while
+ * `actualLabel` (always a real, confirmed number) stays visible
+ * regardless. No generic "partial data" badge -- the note IS the only
+ * incompleteness signal, shown only when it materially matters.
+ *
+ * `ShiftFairnessCardInfo` is the single explanatory affordance for every
+ * metric on this card -- deliberately not one info icon per metric.
  */
 export function ShiftFairnessCard({ view }: { view: ShiftFairnessCardView }) {
   return (
@@ -23,7 +27,10 @@ export function ShiftFairnessCard({ view }: { view: ShiftFairnessCardView }) {
         className="block rounded-2xl bg-surface-1 p-4 ring-1 ring-border transition-colors duration-200 hover:bg-overlay-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
       >
         <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1.5">
-          <p className="min-w-0 truncate text-sm font-semibold text-foreground">{view.personName}</p>
+          <div className="flex min-w-0 items-center gap-1.5">
+            <p className="min-w-0 truncate text-sm font-semibold text-foreground">{view.personName}</p>
+            <ShiftFairnessCardInfo />
+          </div>
           <FairnessStatusBadge status={view.status} />
         </div>
 
@@ -46,7 +53,7 @@ export function ShiftFairnessCard({ view }: { view: ShiftFairnessCardView }) {
 
         <div className="mt-2 flex items-center gap-4 border-t border-border pt-2 text-xs text-muted-2">
           <span data-testid="metric-shift-weekend-actual">
-            משמרות סופ&quot;ש <span className="font-medium text-muted">{view.weekendActualLabel}</span>
+            משמרות סופ&quot;ש שבוצעו <span className="font-medium text-muted">{view.weekendActualLabel}</span>
           </span>
           {view.weekendTargetLabel ? (
             <span data-testid="metric-shift-weekend-target">
