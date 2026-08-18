@@ -33,7 +33,10 @@ interface ShellUtilityBarProps {
  * Follow-up visual pass: both marks read as too small/icon-like at their
  * original sizes, so both grew ~50% (60px/78px, up from 40px/52px) while
  * keeping the SAME measured ratio (≈1.3) between them, so the calibration
- * itself is unchanged -- only the overall scale.
+ * itself is unchanged -- only the overall scale. Release-polish pass:
+ * scaled back down slightly (49px/64px) purely to shave real height off
+ * the bar (see `ShellUtilityBar`'s own docstring) -- the ≈1.3 ratio is
+ * still preserved.
  */
 function OrgLogoImage({ logo, heightClassName }: { logo: OrgLogo; heightClassName: string }) {
   return (
@@ -61,7 +64,10 @@ function OrgLogoImage({ logo, heightClassName }: { logo: OrgLogo; heightClassNam
  * The clock is the one deliberate FOCAL element -- its own bordered pill
  * (bigger digits than the old bare "sm" readout, plus the date as a clear
  * secondary line underneath) so it reads as real shell chrome instead of
- * a loose timestamp. The two logos are real supplied institutional marks
+ * a loose timestamp. Release-polish pass: the bar's own vertical padding
+ * and the pill's padding were both trimmed down -- the bar was taller than
+ * it needed to be, tall enough to force a small unnecessary page scroll at
+ * normal desktop viewport heights. The two logos are real supplied institutional marks
  * (`lib/config/brandAssets.ts`), used exactly as provided -- deliberately
  * smaller/quieter than the clock pill so they frame it rather than compete
  * with it. The bell (`NotificationBell` `variant="shell"`) sits at the
@@ -71,7 +77,7 @@ function OrgLogoImage({ logo, heightClassName }: { logo: OrgLogo; heightClassNam
 export function ShellUtilityBar({ initialClockTime, dateLabel }: ShellUtilityBarProps) {
   return (
     <div className="hidden shrink-0 border-b border-border lg:block">
-      <div className="mx-auto grid w-full max-w-[1440px] grid-cols-[1fr_auto_1fr] items-center gap-4 px-10 py-3">
+      <div className="mx-auto grid w-full max-w-[1440px] grid-cols-[1fr_auto_1fr] items-center gap-4 px-10 py-2">
         {/* CSS Grid columns mirror under RTL exactly like a flex row does --
             the FIRST-defined column ends up on the PHYSICAL right, the LAST
             on the physical left. The bell is therefore the LAST grid child
@@ -81,9 +87,9 @@ export function ShellUtilityBar({ initialClockTime, dateLabel }: ShellUtilityBar
         <div aria-hidden="true" />
 
         <div className="flex items-center justify-center gap-5 sm:gap-8">
-          <OrgLogoImage logo={ORG_LOGO_TAKSHAL} heightClassName="h-[78px]" />
+          <OrgLogoImage logo={ORG_LOGO_TAKSHAL} heightClassName="h-[64px]" />
 
-          <div className="flex flex-col items-center gap-1 rounded-xl bg-surface-1 px-6 py-2.5 ring-1 ring-border">
+          <div className="flex flex-col items-center gap-1 rounded-xl bg-surface-1 px-5 py-2 ring-1 ring-border">
             <div className="flex items-center gap-2">
               <Clock className="h-4 w-4 text-primary" aria-hidden="true" strokeWidth={1.75} />
               <LiveClock initialTime={initialClockTime} size="md" />
@@ -91,7 +97,7 @@ export function ShellUtilityBar({ initialClockTime, dateLabel }: ShellUtilityBar
             {dateLabel ? <span className="text-xs font-medium text-muted">{dateLabel}</span> : null}
           </div>
 
-          <OrgLogoImage logo={ORG_LOGO_STRATEGIC_COMMUNICATION} heightClassName="h-[60px]" />
+          <OrgLogoImage logo={ORG_LOGO_STRATEGIC_COMMUNICATION} heightClassName="h-[49px]" />
         </div>
 
         <div className="flex items-center justify-self-end">

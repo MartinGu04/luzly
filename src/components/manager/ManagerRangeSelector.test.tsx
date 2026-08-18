@@ -15,7 +15,7 @@ describe("ManagerRangeSelector", () => {
     expect(screen.getByRole("link", { name: "היום" })).toHaveAttribute("href", "/manager?range=today");
     expect(screen.getByRole("link", { name: "7 ימים" })).toHaveAttribute("href", "/manager");
     expect(screen.getByRole("link", { name: "30 יום" })).toHaveAttribute("href", "/manager?range=30d");
-    expect(screen.getByRole("link", { name: "חודש" })).toHaveAttribute("href", "/manager?range=month");
+    expect(screen.getByRole("link", { name: "החודש" })).toHaveAttribute("href", "/manager?range=month");
   });
 
   it("marks the active range with aria-current", () => {

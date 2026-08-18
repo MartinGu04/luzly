@@ -13,7 +13,7 @@ const RANGE_OPTIONS: { key: ManagerRangeKey; label: string }[] = [
   { key: "today", label: "היום" },
   { key: "7d", label: "7 ימים" },
   { key: "30d", label: "30 יום" },
-  { key: "month", label: "חודש" },
+  { key: "month", label: "החודש" },
 ];
 
 const TAB_BASE =

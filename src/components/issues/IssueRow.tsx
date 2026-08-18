@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Lightbulb } from "lucide-react";
+import { ChevronDown, Lightbulb } from "lucide-react";
 import type { ReactNode } from "react";
 import { ISSUE_SEVERITY_BG_CLASS, ISSUE_SEVERITY_TEXT_CLASS, IssueSeverityBadge } from "@/components/ui/IssueSeverityBadge";
 import type { IssueRecommendationTextPart, IssueRecommendationView } from "@/lib/presentation/issueRecommendation";
@@ -79,15 +79,30 @@ function renderTextParts(parts: readonly IssueRecommendationTextPart[], current?
  * outer disclosure alone never reveals it. No alarming styling anywhere:
  * same quiet muted-text language as the rest of this row, except each
  * candidate's own name, which links to their manager drill-down.
+ *
+ * Release-polish pass: the trigger reads as an actual disclosure control
+ * now (a small warning-tinted chip, same `bg-warning/[0.06]` tint family
+ * `ISSUE_SEVERITY_BG_CLASS` already uses for a "review"-severity pill --
+ * still clearly distinct from a critical/red finding, never competing with
+ * it) instead of bare text, with a chevron that rotates open via the
+ * native `<details>` `group-open:` state -- no JS, no listeners. The
+ * rotation is a CSS transition, so it's already covered by this app's
+ * global `prefers-reduced-motion` rule (`globals.css`), same as every
+ * other transition in the app -- nothing bespoke needed here.
  */
 function RecommendationDisclosure({ view, current }: { view: IssueRecommendationView; current?: ManagerHrefParams }) {
   return (
-    <details className="mt-1.5 text-xs">
-      <summary className="inline-flex cursor-pointer items-center gap-1 font-medium text-warning">
+    <details className="group mt-1.5 text-xs">
+      <summary className="inline-flex w-fit cursor-pointer list-none items-center gap-1.5 rounded-lg bg-warning/[0.06] px-2 py-1 font-medium text-warning transition-colors duration-200 [&::-webkit-details-marker]:hidden hover:bg-warning/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-warning">
         <Lightbulb className="h-3.5 w-3.5 shrink-0" aria-hidden="true" strokeWidth={1.75} />
         פעולה מומלצת
+        <ChevronDown
+          className="h-3 w-3 shrink-0 text-warning/70 transition-transform duration-200 group-open:rotate-180"
+          aria-hidden="true"
+          strokeWidth={2}
+        />
       </summary>
-      <div className="mt-1 space-y-1 text-muted">
+      <div className="mt-1.5 space-y-1 px-0.5 text-muted">
         <p>{renderTextParts(view.primaryText, current)}</p>
         {view.disclaimer ? <p className="text-muted-2">{view.disclaimer}</p> : null}
         {view.lastResort ? (
