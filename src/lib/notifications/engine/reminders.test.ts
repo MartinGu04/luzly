@@ -38,6 +38,7 @@ const store = {
 };
 
 const fetchAllSubscribedUserIds = vi.fn(async () => [] as string[]);
+const fetchAllAuthUserIds = vi.fn(async () => [] as string[]);
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -48,7 +49,7 @@ async function loadModule() {
   vi.doMock("./store", () => store);
   vi.doMock("./recipients", async (importOriginal) => {
     const actual = await importOriginal<typeof import("./recipients")>();
-    return { ...actual, fetchAllSubscribedUserIds };
+    return { ...actual, fetchAllSubscribedUserIds, fetchAllAuthUserIds };
   });
   return import("./reminders");
 }
@@ -144,6 +145,30 @@ describe("runReminders -- tomorrow shift reminder", () => {
 
     expect(store.cancelPendingReminderJob).toHaveBeenCalledWith("tomorrow_shift:2026-08-19:user-p1:day");
   });
+
+  it("two same-day shifts for one person (different periods) get distinct dedupe keys AND distinct Push tags", async () => {
+    const { runReminders } = await loadModule();
+    const now: LocalNow = { date: "2026-08-18", minuteOfDay: 1200 };
+    const week = getOperationalWeek(now);
+
+    await runReminders({
+      events: [
+        event({ personId: "p1", date: "2026-08-19", category: "shift", period: "day" }),
+        event({ personId: "p1", date: "2026-08-19", category: "shift", period: "night" }),
+      ],
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: resolutionWith("p1", "user-p1"),
+    });
+
+    const jobs = store.upsertPendingReminderJob.mock.calls.map((call) => call[0]);
+    expect(jobs).toHaveLength(2);
+    expect(new Set(jobs.map((job) => job.dedupeKey)).size).toBe(2);
+    expect(new Set(jobs.map((job) => job.tag)).size).toBe(2);
+  });
 });
 
 describe("runReminders -- tomorrow duty reminder", () => {
@@ -165,6 +190,32 @@ describe("runReminders -- tomorrow duty reminder", () => {
     expect(store.upsertPendingReminderJob).toHaveBeenCalledWith(
       expect.objectContaining({ category: "tomorrow_duty", body: expect.stringContaining("כונן פינויים") }),
     );
+  });
+
+  it("two concurrent tomorrow-duty families for one person get distinct dedupe keys AND distinct Push tags", async () => {
+    const { runReminders } = await loadModule();
+    const now: LocalNow = { date: "2026-08-18", minuteOfDay: 1200 };
+    const week = getOperationalWeek(now);
+
+    await runReminders({
+      events: [
+        event({ personId: "p1", date: "2026-08-19", category: "duty", dutyFamily: "guard" }),
+        event({ personId: "p1", date: "2026-08-19", category: "duty", dutyFamily: "oxid" }),
+      ],
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: resolutionWith("p1", "user-p1"),
+    });
+
+    const jobs = store.upsertPendingReminderJob.mock.calls
+      .map((call) => call[0])
+      .filter((job) => job.category === "tomorrow_duty");
+    expect(jobs).toHaveLength(2);
+    expect(new Set(jobs.map((job) => job.dedupeKey)).size).toBe(2);
+    expect(new Set(jobs.map((job) => job.tag)).size).toBe(2);
   });
 });
 
@@ -350,8 +401,8 @@ describe("runReminders -- tomorrow logistics-withdrawal reminder (משיכות �
 });
 
 describe("runReminders -- weekly constraints reminders", () => {
-  it("creates a Sunday reminder for every push-enabled user, only on Sunday", async () => {
-    fetchAllSubscribedUserIds.mockResolvedValue(["user-a", "user-b"]);
+  it("creates a Sunday reminder for every real auth account, only on Sunday", async () => {
+    fetchAllAuthUserIds.mockResolvedValue(["user-a", "user-b"]);
     const { runReminders } = await loadModule();
     const now: LocalNow = { date: "2026-08-16", minuteOfDay: 1080 }; // Sunday
     const week = getOperationalWeek(now);
@@ -373,7 +424,7 @@ describe("runReminders -- weekly constraints reminders", () => {
   });
 
   it("creates a Monday reminder, and never on any other weekday", async () => {
-    fetchAllSubscribedUserIds.mockResolvedValue(["user-a"]);
+    fetchAllAuthUserIds.mockResolvedValue(["user-a"]);
     const { runReminders } = await loadModule();
     const now: LocalNow = { date: "2026-08-17", minuteOfDay: 600 }; // Monday
     const week = getOperationalWeek(now);
@@ -392,7 +443,7 @@ describe("runReminders -- weekly constraints reminders", () => {
   });
 
   it("creates no constraints jobs on a Tuesday", async () => {
-    fetchAllSubscribedUserIds.mockResolvedValue(["user-a"]);
+    fetchAllAuthUserIds.mockResolvedValue(["user-a"]);
     const { runReminders } = await loadModule();
     const now: LocalNow = { date: "2026-08-18", minuteOfDay: 600 }; // Tuesday
     const week = getOperationalWeek(now);
@@ -408,6 +459,76 @@ describe("runReminders -- weekly constraints reminders", () => {
     });
 
     expect(summary.constraintsJobs).toBe(0);
+    expect(fetchAllAuthUserIds).not.toHaveBeenCalled();
+  });
+
+  it("Sunday/Monday titles, bodies, timing, and path are unchanged by the audience-source fix", async () => {
+    fetchAllAuthUserIds.mockResolvedValue(["user-a"]);
+    let { runReminders } = await loadModule();
+    let now: LocalNow = { date: "2026-08-16", minuteOfDay: 1080 }; // Sunday
+    let week = getOperationalWeek(now);
+
+    await runReminders({
+      events: [],
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: { resolved: new Map(), unmappedCount: 0, ambiguousEmailCount: 0, noEmailCount: 0 },
+    });
+
+    expect(store.insertNotificationJobIfAbsent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "📌 תזכורת לאילוצים",
+        body: "יש אילוץ לשבוע הבא? אפשר לשלוח עד מחר.",
+        path: "/",
+        scheduledFor: jerusalemLocalTimeToInstant("2026-08-16", 18, 0).toISOString(),
+      }),
+    );
+
+    store.insertNotificationJobIfAbsent.mockClear();
+    fetchAllAuthUserIds.mockResolvedValue(["user-a"]);
+    ({ runReminders } = await loadModule());
+    now = { date: "2026-08-17", minuteOfDay: 600 }; // Monday
+    week = getOperationalWeek(now);
+
+    await runReminders({
+      events: [],
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: { resolved: new Map(), unmappedCount: 0, ambiguousEmailCount: 0, noEmailCount: 0 },
+    });
+
+    expect(store.insertNotificationJobIfAbsent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "⏳ היום האחרון לאילוצים",
+        body: "אפשר לשלוח אילוצים לשבוע הבא עד סוף היום.",
+        path: "/",
+        scheduledFor: jerusalemLocalTimeToInstant("2026-08-17", 9, 0).toISOString(),
+      }),
+    );
+  });
+
+  it("never queries push-subscription state for recipient targeting -- fetchAllSubscribedUserIds is untouched by this category", async () => {
+    fetchAllAuthUserIds.mockResolvedValue(["user-a"]);
+    const { runReminders } = await loadModule();
+    const now: LocalNow = { date: "2026-08-16", minuteOfDay: 1080 }; // Sunday
+    const week = getOperationalWeek(now);
+
+    await runReminders({
+      events: [],
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: { resolved: new Map(), unmappedCount: 0, ambiguousEmailCount: 0, noEmailCount: 0 },
+    });
+
     expect(fetchAllSubscribedUserIds).not.toHaveBeenCalled();
   });
 });

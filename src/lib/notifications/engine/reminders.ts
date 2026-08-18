@@ -29,7 +29,7 @@ import {
   resolveRelevantSupervisors,
 } from "./logisticsCoordination";
 import { isLogisticsWithdrawalEvent } from "./logisticsWithdrawal";
-import { fetchAllSubscribedUserIds, type RecipientResolution } from "./recipients";
+import { fetchAllAuthUserIds, type RecipientResolution } from "./recipients";
 import {
   cancelPendingReminderJob,
   insertNotificationJobIfAbsent,
@@ -153,7 +153,13 @@ async function runTomorrowShiftReminders(input: RemindersInput): Promise<{ creat
       title: "⏰ המשמרת שלך מחר",
       body,
       path: "/",
-      tag: `tomorrow-shift-${tomorrowDate}-${recipient.userId}`,
+      // Includes `event.period`, same as `dedupeKey` below -- a person
+      // can structurally have two distinct shift Events on the same
+      // date with different periods (e.g. day + night); without period
+      // here the second push would silently replace the first at the
+      // OS/Notifications-API level (the tag collision class PR #62
+      // found for almash_check_in) even though both stay distinct jobs.
+      tag: `tomorrow-shift-${tomorrowDate}-${recipient.userId}-${event.period}`,
       dedupeKey: `tomorrow_shift:${tomorrowDate}:${recipient.userId}:${event.period}`,
       scheduledFor,
       sourceRef: `shift:${event.personId}:${event.date}`,
@@ -189,7 +195,12 @@ async function runTomorrowDutyReminders(input: RemindersInput): Promise<{ create
       title: "🪖 תורנות מתקרבת",
       body: `מחר אתה ${label} — כדאי לבדוק את הפרטים`,
       path: "/duties",
-      tag: `tomorrow-duty-${tomorrowDate}-${recipient.userId}`,
+      // Includes dutyFamily/slot, same as `dedupeKey` -- confirmed the
+      // same tag-collision class PR #62 found for almash_check_in: a
+      // person can have two concurrent tomorrow-duty Events on the same
+      // date (different family/slot), which stay distinct jobs but would
+      // otherwise collapse to one OS-level notification.
+      tag: `tomorrow-duty-${tomorrowDate}-${recipient.userId}-${event.dutyFamily}-${event.slot ?? ""}`,
       dedupeKey: `tomorrow_duty:${tomorrowDate}:${recipient.userId}:${event.dutyFamily}:${event.slot ?? ""}`,
       scheduledFor,
       sourceRef: `duty:${event.personId}:${event.date}`,
@@ -635,13 +646,25 @@ async function runConstraintsReminders(input: RemindersInput): Promise<number> {
   return created;
 }
 
+/**
+ * Recipient source is EVERY real auth account (`fetchAllAuthUserIds`) --
+ * account-wide by product intent, same as before, but no longer gated on
+ * push-subscription state (that was the constraints-reminder exception
+ * to the "Push is a delivery channel, not inbox eligibility" invariant
+ * every other category already follows -- a user with Push disabled must
+ * still see this in their Notification Center; `runDelivery` already
+ * correctly no-ops Push for a recipient with zero subscriptions without
+ * affecting the job/inbox item itself). Deliberately still NEVER filtered
+ * through כ"א/roster/email mapping -- that would narrow the audience,
+ * not just its delivery channel, which is a different, unrequested change.
+ */
 async function buildConstraintsJobs(
   input: RemindersInput,
   category: "constraints_sunday" | "constraints_monday",
   time: LocalClockTime,
   copy: { title: string; body: string },
 ): Promise<NewNotificationJob[]> {
-  const userIds = await fetchAllSubscribedUserIds();
+  const userIds = await fetchAllAuthUserIds();
   const scheduledFor = toIso(input.now.date, time);
 
   return userIds.map((userId) => ({

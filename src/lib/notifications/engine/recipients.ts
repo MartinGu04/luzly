@@ -178,11 +178,14 @@ export function filterManagerRecipients(
 
 /**
  * Every distinct Supabase user id with at least one active push
- * subscription. Originally added for weekly constraints reminders (spec
- * section 18), which target "all push-enabled users" independent of any
- * כ"א/email mapping -- also reused (PR #40) as the ONE bulk subscription
- * query the manager notification-readiness view needs, instead of calling
+ * subscription. Reused (PR #40) as the ONE bulk subscription query the
+ * manager notification-readiness view needs, instead of calling
  * `getActiveSubscriptionsForUser()` once per roster person.
+ *
+ * NEVER the recipient source for a logical `notification_job` -- push
+ * subscription state is a DELIVERY-channel concern only (see
+ * `fetchAllAuthUserIds` below for why weekly constraints reminders no
+ * longer use this).
  */
 export async function fetchAllSubscribedUserIds(): Promise<string[]> {
   const supabase = getNotificationServiceClient();
@@ -192,6 +195,31 @@ export async function fetchAllSubscribedUserIds(): Promise<string[]> {
   const userIds = new Set<string>();
   for (const row of (data ?? []) as { user_id: string }[]) {
     userIds.add(row.user_id);
+  }
+  return [...userIds];
+}
+
+/**
+ * Every real Supabase auth account id, account-wide -- never filtered by
+ * כ"א/roster/email mapping (unlike `resolveNotificationRecipients`) and
+ * never filtered by push-subscription state (unlike
+ * `fetchAllSubscribedUserIds`). The canonical recipient source for a
+ * reminder category that is intentionally "every app user", such as the
+ * weekly constraints reminders (spec section 18) -- a logical
+ * `notification_job`/inbox item must exist for EVERY account regardless
+ * of whether that account currently has Push enabled; Push is only ever
+ * an optional delivery channel on top.
+ *
+ * Reuses the SAME Admin API listing `fetchAllUserIdsByEmail` already
+ * does -- never a second identity source -- and dedupes by `userId`
+ * (not email) so a caller never has to reason about whether one account
+ * could appear under two normalized-identical emails.
+ */
+export async function fetchAllAuthUserIds(): Promise<string[]> {
+  const emailToAccount = await fetchAllUserIdsByEmail();
+  const userIds = new Set<string>();
+  for (const account of emailToAccount.values()) {
+    userIds.add(account.userId);
   }
   return [...userIds];
 }
