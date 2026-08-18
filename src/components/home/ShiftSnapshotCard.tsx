@@ -56,20 +56,16 @@ export function ShiftSnapshotCard({ label, shift, todayDate, current }: ShiftSna
   const hasCoverageProblem = shift.coverageStatus !== "full" && shift.coverageStatus !== "not_evaluable";
 
   return (
-    <Panel variant={isCurrent ? "hero" : "panel"} className={isCurrent ? "relative overflow-hidden" : undefined}>
-      {isCurrent ? (
-        <div
-          aria-hidden="true"
-          className="animate-ambient-glow pointer-events-none absolute -top-24 -right-16 h-64 w-64 rounded-full bg-primary/20 blur-3xl"
-        />
-      ) : null}
-
+    <Panel
+      variant={isCurrent ? "hero" : "panel"}
+      className={isCurrent ? "relative overflow-hidden border-s-2 border-s-primary" : undefined}
+    >
       <div className="relative flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h3 className={isCurrent ? "text-sm font-semibold text-primary" : "text-xs font-semibold text-muted-2"}>
             {label}
           </h3>
-          <p className={isCurrent ? "mt-1 text-2xl font-bold text-foreground sm:text-3xl" : "mt-0.5 text-base font-bold text-foreground"}>
+          <p className={isCurrent ? "mt-1 text-2xl font-semibold text-foreground sm:text-3xl" : "mt-0.5 text-base font-semibold text-foreground"}>
             {period}
           </p>
           {isCurrent ? (

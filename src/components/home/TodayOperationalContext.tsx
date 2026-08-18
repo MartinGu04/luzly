@@ -50,7 +50,7 @@ export function TodayOperationalContext({ duties, absences }: TodayOperationalCo
   return (
     <div className="grid gap-4 sm:grid-cols-2">
       <Panel variant="compact">
-        <h3 className="text-sm font-bold text-foreground">תורנויות היום</h3>
+        <h3 className="text-sm font-semibold text-foreground">תורנויות היום</h3>
         {duties.length === 0 ? (
           <p className="mt-2 text-sm text-muted">אין תורנויות היום.</p>
         ) : (
@@ -63,7 +63,7 @@ export function TodayOperationalContext({ duties, absences }: TodayOperationalCo
       </Panel>
 
       <Panel variant="compact">
-        <h3 className="text-sm font-bold text-foreground">היעדרויות היום</h3>
+        <h3 className="text-sm font-semibold text-foreground">היעדרויות היום</h3>
         {absences.length === 0 ? (
           <p className="mt-2 text-sm text-muted">אין היעדרויות היום.</p>
         ) : (

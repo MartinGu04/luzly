@@ -23,7 +23,7 @@ export default function ScheduleLoading() {
 
       <div className="skeleton h-4 w-40 rounded-lg" />
 
-      <div className="skeleton h-[28rem] rounded-3xl" />
+      <div className="skeleton h-[28rem] rounded-xl" />
     </div>
   );
 }

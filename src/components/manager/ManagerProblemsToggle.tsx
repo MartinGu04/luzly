@@ -23,7 +23,7 @@ export function ManagerProblemsToggle({ current }: ManagerProblemsToggleProps) {
       <Link
         href={href}
         aria-pressed="true"
-        className="inline-flex items-center gap-2 rounded-full bg-critical px-3.5 py-1.5 text-sm font-semibold text-critical-foreground shadow-sm ring-1 ring-critical transition-colors duration-200 hover:bg-critical/90"
+        className="inline-flex items-center gap-2 rounded-full bg-critical px-3.5 py-1.5 text-sm font-semibold text-critical-foreground ring-1 ring-critical transition-colors duration-200 hover:bg-critical/90"
       >
         <TriangleAlert className="h-4 w-4 shrink-0" aria-hidden="true" strokeWidth={2} />
         <span>מציג רק בעיות</span>

@@ -11,7 +11,7 @@
 export function ManagerHeader() {
   return (
     <div className="min-w-0">
-      <h1 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">אזור מנהל</h1>
+      <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-[28px]">אזור מנהל</h1>
       <p className="mt-1.5 text-sm text-muted">תמונת מצב של הסידור, הכיסוי והצוות.</p>
     </div>
   );

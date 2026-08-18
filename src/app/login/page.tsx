@@ -52,11 +52,11 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
     >
       <div aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10">
-        <div className="absolute -top-24 -start-20 h-[26rem] w-[26rem] rounded-full bg-[#241a45]/50 blur-3xl animate-ambient-glow" />
-        <div
-          className="absolute -bottom-28 -end-16 h-[24rem] w-[24rem] rounded-full bg-[#0d2233]/60 blur-3xl animate-ambient-glow"
-          style={{ animationDelay: "2.5s" }}
-        />
+        {/* A quiet, neutral (never brand-colored) vignette for depth --
+            replaces the old purple/teal glow blobs. Static, not animated:
+            depth here, not a decorative attention loop. */}
+        <div className="absolute -top-24 -start-20 h-[26rem] w-[26rem] rounded-full bg-white/[0.04] blur-3xl" />
+        <div className="absolute -bottom-28 -end-16 h-[24rem] w-[24rem] rounded-full bg-white/[0.03] blur-3xl" />
         <div
           className="absolute inset-0 opacity-[0.05]"
           style={{

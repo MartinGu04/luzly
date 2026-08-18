@@ -9,7 +9,7 @@ const ICONS: Record<string, typeof Bell> = {
 };
 
 const ICON_TONE: Record<string, string> = {
-  alerts: "text-[#b39bfa]",
+  alerts: "text-[#d98a9c]",
   planning: "text-[#6fc3f7]",
   transparency: "text-[#57cc8a]",
   insights: "text-[#f0a35f]",

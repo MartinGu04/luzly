@@ -215,7 +215,7 @@ export function CommandPalette({ open, onClose, model }: CommandPaletteProps) {
         role="dialog"
         aria-modal="true"
         aria-label="חיפוש"
-        className="relative flex h-dvh w-full flex-col bg-surface-1 sm:h-auto sm:max-h-[70vh] sm:max-w-xl sm:rounded-2xl sm:shadow-[var(--shadow-hero)] sm:ring-1 sm:ring-border-strong"
+        className="relative flex h-dvh w-full flex-col bg-surface-1 sm:h-auto sm:max-h-[70vh] sm:max-w-xl sm:rounded-xl sm:shadow-[var(--shadow-elevated)] sm:ring-1 sm:ring-border-strong"
       >
         <div className="flex items-center gap-2 border-b border-border px-4 py-3">
           <Search className="h-4 w-4 shrink-0 text-muted" aria-hidden="true" strokeWidth={1.75} />

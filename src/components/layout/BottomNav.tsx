@@ -53,21 +53,21 @@ function BottomNavLink({ item, isActive }: BottomNavLinkProps) {
       <LinkPendingWatcher onPendingChange={setPending} />
       <span
         aria-hidden="true"
-        className={`absolute top-1 h-1 w-6 rounded-full bg-primary transition-all duration-300 ${
+        className={`absolute top-1 h-1 w-6 rounded-full bg-sidebar-accent transition-all duration-300 ${
           isActive ? "opacity-100" : "opacity-0"
         }`}
       />
       {pending ? (
-        <Loader2 className="h-[21px] w-[21px] animate-spin text-primary" aria-hidden="true" strokeWidth={2} />
+        <Loader2 className="h-[21px] w-[21px] animate-spin text-sidebar-accent" aria-hidden="true" strokeWidth={2} />
       ) : (
         <Icon
-          className={`h-[21px] w-[21px] transition-colors duration-200 ${isActive ? "text-primary" : ""}`}
+          className={`h-[21px] w-[21px] transition-colors duration-200 ${isActive ? "text-sidebar-accent" : ""}`}
           aria-hidden="true"
           strokeWidth={isActive ? 2 : 1.75}
         />
       )}
       <span
-        className={`text-[10.5px] font-medium leading-none transition-colors duration-200 ${
+        className={`text-[11px] font-medium leading-none transition-colors duration-200 ${
           isActive ? "text-sidebar-foreground" : ""
         }`}
       >
@@ -90,7 +90,7 @@ export function BottomNav() {
   return (
     <nav
       aria-label="ניווט תחתון"
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-sidebar-border bg-sidebar/85 backdrop-blur-lg lg:hidden"
+      className="fixed inset-x-0 bottom-0 z-40 border-t border-sidebar-border bg-sidebar lg:hidden"
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
     >
       <ul className="mx-auto flex max-w-lg items-stretch justify-around px-1">

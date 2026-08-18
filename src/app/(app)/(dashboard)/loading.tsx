@@ -29,12 +29,12 @@ export default function DashboardLoading() {
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="flex flex-col gap-6">
-          <div className="skeleton h-56 rounded-3xl" />
-          <div className="skeleton h-64 rounded-2xl" />
+          <div className="skeleton h-56 rounded-xl" />
+          <div className="skeleton h-64 rounded-xl" />
         </div>
         <div className="flex flex-col gap-6">
-          <div className="skeleton h-16 rounded-2xl" />
-          <div className="skeleton h-72 rounded-2xl" />
+          <div className="skeleton h-16 rounded-xl" />
+          <div className="skeleton h-72 rounded-xl" />
         </div>
       </div>
     </div>

@@ -14,7 +14,7 @@ export function ManagerForbiddenState() {
   return (
     <Panel variant="hero" className="text-center sm:text-start">
       <ShieldOff className="mx-auto h-6 w-6 text-muted sm:mx-0" aria-hidden="true" strokeWidth={1.75} />
-      <h2 className="mt-3 text-xl font-bold text-foreground">המסך הזה מיועד למנהלים בלבד</h2>
+      <h2 className="mt-3 text-xl font-semibold text-foreground">המסך הזה מיועד למנהלים בלבד</h2>
       <p className="mt-1.5 text-sm text-muted">אין לך הרשאת ניהול ב-{APP_NAME}. פנה/י למנהל המערכת אם לדעתך זו טעות.</p>
     </Panel>
   );

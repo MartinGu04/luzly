@@ -136,11 +136,11 @@ export function FairnessDetailOverlay({ closeHref, title, children }: FairnessDe
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="relative flex max-h-[85vh] w-full flex-col rounded-t-3xl bg-surface-1 shadow-[var(--shadow-hero)] ring-1 ring-border-strong lg:h-dvh lg:max-h-none lg:w-[420px] lg:max-w-[90vw] lg:rounded-none lg:border-s lg:border-border lg:ring-0"
+        className="relative flex max-h-[85vh] w-full flex-col rounded-t-xl bg-surface-1 shadow-[var(--shadow-elevated)] ring-1 ring-border-strong lg:h-dvh lg:max-h-none lg:w-[420px] lg:max-w-[90vw] lg:rounded-none lg:border-s lg:border-border lg:ring-0"
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
         <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-5 py-4">
-          <h2 className="truncate text-base font-bold text-foreground">{title}</h2>
+          <h2 className="truncate text-base font-semibold text-foreground">{title}</h2>
           <Link
             ref={closeButtonRef}
             href={closeHref}

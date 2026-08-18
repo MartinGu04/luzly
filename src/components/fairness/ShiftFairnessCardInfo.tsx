@@ -99,7 +99,7 @@ export function ShiftFairnessCardInfo() {
           id={panelId}
           role="dialog"
           aria-label="הסבר על מדדי הכרטיס"
-          className="absolute start-0 top-full z-50 mt-2 w-72 max-w-[calc(100vw-2.5rem)] rounded-2xl bg-surface-1 p-4 text-start shadow-[var(--shadow-hero)] ring-1 ring-border-strong"
+          className="absolute start-0 top-full z-50 mt-2 w-72 max-w-[calc(100vw-2.5rem)] rounded-xl bg-surface-1 p-4 text-start shadow-[var(--shadow-elevated)] ring-1 ring-border-strong"
         >
           <dl className="flex flex-col gap-2.5">
             {METRIC_EXPLANATIONS.map(({ term, meaning }) => (

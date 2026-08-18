@@ -66,13 +66,13 @@ function SidebarLink({ item, isActive }: SidebarLinkProps) {
     >
       <LinkPendingWatcher onPendingChange={setPending} />
       {isActive ? (
-        <span aria-hidden="true" className="absolute inset-y-1.5 end-0 w-[3px] rounded-full bg-primary" />
+        <span aria-hidden="true" className="absolute inset-y-1.5 end-0 w-[3px] rounded-full bg-sidebar-accent" />
       ) : null}
       {pending ? (
-        <Loader2 className="h-[20px] w-[20px] shrink-0 animate-spin text-primary" aria-hidden="true" strokeWidth={1.75} />
+        <Loader2 className="h-[20px] w-[20px] shrink-0 animate-spin text-sidebar-accent" aria-hidden="true" strokeWidth={1.75} />
       ) : (
         <Icon
-          className={`h-[20px] w-[20px] shrink-0 ${isActive ? "text-primary" : "opacity-80"}`}
+          className={`h-[20px] w-[20px] shrink-0 ${isActive ? "text-sidebar-accent" : "opacity-80"}`}
           aria-hidden="true"
           strokeWidth={1.75}
         />

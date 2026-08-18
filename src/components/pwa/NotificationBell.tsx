@@ -107,7 +107,7 @@ export function NotificationBell({ variant }: NotificationBellProps) {
           id={panelId}
           role="dialog"
           aria-label="הגדרות התראות"
-          className={`absolute ${PANEL_POSITION_CLASSES[variant]} top-full z-50 mt-2 w-72 max-w-[calc(100vw-2.5rem)] rounded-2xl bg-surface-1 p-4 text-foreground shadow-[var(--shadow-hero)] ring-1 ring-border-strong`}
+          className={`absolute ${PANEL_POSITION_CLASSES[variant]} top-full z-50 mt-2 w-72 max-w-[calc(100vw-2.5rem)] rounded-xl bg-surface-1 p-4 text-foreground shadow-[var(--shadow-elevated)] ring-1 ring-border-strong`}
         >
           {state === "checking" ? <CheckingPanel /> : null}
           {state === "unsupported" ? <UnsupportedPanel /> : null}

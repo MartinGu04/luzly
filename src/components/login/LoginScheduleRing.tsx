@@ -25,8 +25,8 @@ const FLOATING_CARDS: FloatingCardSpec[] = [
     title: "משמרת ערב",
     time: "17:00 - 23:00",
     Icon: Calendar,
-    dotClass: "bg-[#b39bfa]",
-    badgeClass: "bg-[#4a3a86]",
+    dotClass: "bg-[#d98a9c]",
+    badgeClass: "bg-[#4a2530]",
     positionClassName: "top-[-4%] left-[0%] sm:top-[-2%] sm:left-[4%] lg:top-[6%] lg:left-[30%]",
   },
   {
@@ -61,8 +61,8 @@ const FLOATING_CARDS: FloatingCardSpec[] = [
     title: "משמרת לילה",
     time: "23:00 - 07:00",
     Icon: Moon,
-    dotClass: "bg-[#b39bfa]",
-    badgeClass: "bg-[#382a63]",
+    dotClass: "bg-[#7fb0c2]",
+    badgeClass: "bg-[#1f3540]",
     positionClassName: "top-[96%] left-[16%] sm:top-[92%] sm:left-[18%] lg:top-[82%] lg:left-[28%]",
   },
 ];
@@ -77,7 +77,7 @@ function FloatingCard({ card }: { card: FloatingCardSpec }) {
   const displayClassName = card.key === "night" ? "hidden sm:flex" : "flex";
   return (
     <div
-      className={`absolute ${displayClassName} w-max max-w-[8.25rem] items-center gap-1.5 rounded-2xl bg-[#161227]/90 px-2 py-1.5 shadow-[0_16px_32px_-14px_rgba(0,0,0,0.6)] ring-1 ring-white/10 backdrop-blur-sm sm:max-w-[9.5rem] sm:gap-2 sm:px-2.5 sm:py-2 lg:max-w-[10rem] lg:gap-2 lg:px-3 lg:py-2 xl:max-w-[13rem] xl:gap-3 xl:rounded-3xl xl:px-4 xl:py-3 ${card.positionClassName}`}
+      className={`absolute ${displayClassName} w-max max-w-[8.25rem] items-center gap-1.5 rounded-2xl bg-[#141a22]/90 px-2 py-1.5 shadow-[0_16px_32px_-14px_rgba(0,0,0,0.6)] ring-1 ring-white/10 backdrop-blur-sm sm:max-w-[9.5rem] sm:gap-2 sm:px-2.5 sm:py-2 lg:max-w-[10rem] lg:gap-2 lg:px-3 lg:py-2 xl:max-w-[13rem] xl:gap-3 xl:rounded-3xl xl:px-4 xl:py-3 ${card.positionClassName}`}
     >
       <span
         className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-xl sm:h-8 sm:w-8 lg:h-9 lg:w-9 xl:h-11 xl:w-11 xl:rounded-2xl ${card.badgeClass}`}
@@ -116,14 +116,6 @@ const TICKS = Array.from({ length: TICK_COUNT }, (_, index) => {
   };
 });
 
-const SPARKLES = [
-  { key: 1, className: "top-[6%] left-[8%] h-1 w-1" },
-  { key: 2, className: "top-[16%] right-[10%] h-1.5 w-1.5" },
-  { key: 3, className: "bottom-[20%] left-[4%] h-1 w-1" },
-  { key: 4, className: "bottom-[8%] right-[14%] h-1.5 w-1.5" },
-  { key: 5, className: "top-[40%] right-[-2%] h-1 w-1" },
-];
-
 interface LoginScheduleRingProps {
   /** The mobile-only centered content (the stacked `LoginClockReadout`) -- desktop shows the glowing brand mark instead, since the desktop clock readout already lives in the text column. */
   children: ReactNode;
@@ -146,7 +138,7 @@ export function LoginScheduleRing({ children }: LoginScheduleRingProps) {
         <div
           aria-hidden="true"
           className="pointer-events-none absolute inset-0 -z-10 rounded-full opacity-70 blur-2xl"
-          style={{ background: "radial-gradient(closest-side, rgba(139,123,245,0.28), transparent 72%)" }}
+          style={{ background: "radial-gradient(closest-side, rgba(120,169,204,0.18), transparent 72%)" }}
         />
 
         <svg viewBox="0 0 200 200" aria-hidden="true" className="absolute inset-0 hidden h-full w-full lg:block">
@@ -166,20 +158,12 @@ export function LoginScheduleRing({ children }: LoginScheduleRingProps) {
           ))}
         </svg>
 
-        {SPARKLES.map((sparkle) => (
-          <span
-            key={sparkle.key}
-            aria-hidden="true"
-            className={`absolute rounded-full bg-white/50 animate-breathe ${sparkle.className}`}
-          />
-        ))}
-
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="relative hidden h-[38%] w-[38%] items-center justify-center lg:flex">
             <div
               aria-hidden="true"
-              className="absolute inset-0 rounded-full opacity-80 blur-xl animate-ambient-glow"
-              style={{ background: "radial-gradient(closest-side, rgba(139,123,245,0.55), transparent 75%)" }}
+              className="absolute inset-0 rounded-full opacity-60 blur-xl"
+              style={{ background: "radial-gradient(closest-side, rgba(120,169,204,0.3), transparent 75%)" }}
             />
             <Image
               src={BRAND_SYMBOL.src}

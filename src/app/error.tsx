@@ -17,7 +17,7 @@ export default function GlobalError({ reset }: { error: Error & { digest?: strin
   return (
     <div className="flex min-h-dvh items-center justify-center bg-background px-4 text-foreground">
       <Panel variant="hero" className="w-full max-w-sm text-center">
-        <h1 className="text-xl font-bold text-foreground">לא הצלחנו לטעון את הסידור כרגע</h1>
+        <h1 className="text-xl font-semibold text-foreground">לא הצלחנו לטעון את הסידור כרגע</h1>
         <p className="mt-2 text-sm text-muted">אפשר לנסות שוב בעוד רגע.</p>
         <button
           type="button"

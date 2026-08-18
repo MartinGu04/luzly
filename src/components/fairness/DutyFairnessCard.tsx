@@ -31,7 +31,7 @@ export function DutyFairnessCard({ view }: { view: DutyFairnessCardView }) {
         <FairnessStatusBadge status={view.status} />
       </div>
 
-      <div className="mt-3 grid grid-cols-3 gap-x-2 gap-y-1 rounded-xl bg-overlay-faint px-3 py-2.5">
+      <div className="mt-3 grid grid-cols-3 gap-x-2 gap-y-1 rounded-lg bg-overlay-faint px-3 py-2.5">
         <FairnessMetric testId="metric-duty-current" label="ניקוד נוכחי" value={view.currentLabel} />
         <FairnessMetric testId="metric-duty-target" label="יעד השוואה" value={view.targetLabel ?? "—"} />
         <FairnessMetric
@@ -68,7 +68,7 @@ export function DutyFairnessCard({ view }: { view: DutyFairnessCardView }) {
   );
 
   const className =
-    "block rounded-2xl bg-surface-1 p-4 ring-1 ring-border transition-colors duration-200" +
+    "block rounded-xl bg-surface-1 p-4 ring-1 ring-border transition-colors duration-200" +
     (view.href ? " hover:bg-overlay-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary" : "");
 
   if (view.href) {

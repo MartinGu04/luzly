@@ -135,18 +135,13 @@ function CurrentHero({
   const emoji = assignmentEmoji(lead);
 
   return (
-    <Panel variant="hero" className="animate-fade-up relative overflow-hidden">
-      <div
-        aria-hidden="true"
-        className="animate-ambient-glow pointer-events-none absolute -top-28 -right-20 h-72 w-72 rounded-full bg-primary/25 blur-3xl"
-      />
-
+    <Panel variant="hero" className="animate-fade-up relative overflow-hidden border-s-2 border-s-primary">
       <div className="relative flex items-center gap-2 text-sm font-semibold text-primary">
         <PulseIndicator />
         <span>פעיל עכשיו</span>
       </div>
 
-      <h2 className="relative mt-3 text-2xl font-bold text-balance text-foreground sm:text-3xl">
+      <h2 className="relative mt-3 text-2xl font-semibold text-balance text-foreground sm:text-3xl">
         <EmojiAnchor emoji={emoji} />
         {lead.title}
       </h2>
@@ -208,7 +203,7 @@ function VacationHero({
       <span aria-hidden="true" className="text-3xl">
         {emoji}
       </span>
-      <h2 className="mt-3 text-xl font-bold text-foreground sm:text-2xl">{vacationEvent.title}</h2>
+      <h2 className="mt-3 text-xl font-semibold text-foreground sm:text-2xl">{vacationEvent.title}</h2>
       <p className="mt-1.5 text-sm text-muted">{hasOtherItems ? "אין לך שיבוץ פעיל כרגע" : "היום שלך פנוי"}</p>
 
       {hasOtherItems ? (
@@ -255,7 +250,7 @@ function NextHero({
         <span>הבא שלך</span>
       </div>
 
-      <h2 className="mt-3 text-2xl font-bold text-balance text-foreground sm:text-3xl">
+      <h2 className="mt-3 text-2xl font-semibold text-balance text-foreground sm:text-3xl">
         <EmojiAnchor emoji={emoji} />
         {lead.title}
       </h2>
@@ -307,7 +302,7 @@ function EmptyHero() {
       <span aria-hidden="true" className="text-3xl">
         😌
       </span>
-      <h2 className="mt-3 text-xl font-bold text-foreground">הכול שקט כרגע</h2>
+      <h2 className="mt-3 text-xl font-semibold text-foreground">הכול שקט כרגע</h2>
       <p className="mt-1.5 text-sm text-muted">אין לך שיבוצים קרובים בלוח.</p>
     </Panel>
   );

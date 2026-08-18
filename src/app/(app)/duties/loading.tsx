@@ -24,14 +24,14 @@ export default function DutiesLoading() {
 
       <div className="skeleton h-4 w-40 rounded-lg" />
 
-      <div className="skeleton h-48 rounded-3xl" />
+      <div className="skeleton h-48 rounded-xl" />
 
       <div className="skeleton h-9 w-40 rounded-full" />
 
       <div className="flex flex-col gap-3">
-        <div className="skeleton h-20 rounded-2xl" />
-        <div className="skeleton h-20 rounded-2xl" />
-        <div className="skeleton h-20 rounded-2xl" />
+        <div className="skeleton h-20 rounded-xl" />
+        <div className="skeleton h-20 rounded-xl" />
+        <div className="skeleton h-20 rounded-xl" />
       </div>
     </div>
   );

@@ -55,10 +55,10 @@ export function ThemeToggle({ className = "", variant = "default" }: ThemeToggle
             className={`flex h-7 w-7 items-center justify-center rounded-full transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${
               isSidebar
                 ? isActive
-                  ? "bg-sidebar-active text-sidebar-foreground shadow-sm"
+                  ? "bg-sidebar-active text-sidebar-foreground"
                   : "text-sidebar-muted hover:text-sidebar-foreground"
                 : isActive
-                  ? "bg-surface-1 text-primary shadow-sm"
+                  ? "bg-surface-1 text-primary"
                   : "text-muted hover:text-foreground"
             }`}
           >

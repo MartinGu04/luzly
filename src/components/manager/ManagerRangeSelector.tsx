@@ -43,7 +43,7 @@ export function ManagerRangeSelector({ current, currentMonth }: ManagerRangeSele
               key={option.key}
               href={href}
               aria-current={isActive ? "page" : undefined}
-              className={`${TAB_BASE} ${isActive ? "bg-surface-1 text-primary shadow-sm" : "text-muted hover:text-foreground"}`}
+              className={`${TAB_BASE} ${isActive ? "bg-surface-1 text-primary" : "text-muted hover:text-foreground"}`}
             >
               {option.label}
             </Link>

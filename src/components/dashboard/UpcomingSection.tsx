@@ -161,7 +161,7 @@ export function UpcomingSection({
             >
               <div className="flex w-16 shrink-0 flex-col items-center justify-center rounded-lg bg-overlay-soft py-2 text-center">
                 <span className="text-[11px] font-medium text-muted-2">{formatShortWeekday(row.date)}</span>
-                <span dir="ltr" className="text-sm font-bold text-foreground">
+                <span dir="ltr" className="text-sm font-semibold text-foreground">
                   {formatDateRangeCompact(row.date, row.endDate)}
                 </span>
               </div>
