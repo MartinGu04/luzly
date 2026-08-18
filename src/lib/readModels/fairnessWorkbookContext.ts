@@ -12,7 +12,6 @@ export type FairnessWorkbookContextResult =
   | { status: "missing_email" }
   | { status: "unmapped" }
   | { status: "ambiguous_identity" }
-  | { status: "configuration_error"; message: string }
   | { status: "ok"; context: FairnessWorkbookContext };
 
 /** Everything the standalone Fairness experience needs on top of the shared fetch: the freshly re-verified viewer, the full parsed roster, and the raw snapshot to parse further sheets from. */
@@ -62,26 +61,36 @@ export function getFairnessWorkbookSheet(snapshot: RawWorkbookSnapshot, key: She
  * SAME fail-closed pattern already established there:
  *
  * 1. Reuses `getRequestPersonalSchedule()` (request-scoped, shared with the
- *    protected layout) as the FIRST authorization gate -- every existing
- *    auth/config state (unauthenticated/missing_email/unmapped/
- *    ambiguous_identity/configuration_error) passes through unchanged. A
- *    non-authenticated or unmapped visitor never triggers the Fairness
- *    workbook fetch below at all.
- * 2. Only once that first result is "ok" does this fetch
- *    `FAIRNESS_WORKBOOK_SOURCES` via `getWorkbookSnapshot` (`lib/sync`) --
- *    the same short-TTL cached wrapper every other loader uses, so a
- *    normal user tapping between Fairness periods/modes within the
- *    cache's TTL reuses the same snapshot instead of a fresh Google
- *    request each time.
+ *    protected layout) as the FIRST authorization/mapping gate --
+ *    unauthenticated/missing_email/unmapped/ambiguous_identity all pass
+ *    through unchanged, never triggering the Fairness workbook fetch
+ *    below. `configuration_error` is DELIBERATELY NOT one of those early
+ *    exits: it means identity resolved fine and only the SHIFT-SCHEDULE
+ *    configuration (shift start times, `buildShiftSchedule`) couldn't be
+ *    built -- something neither Fairness mode ever needs (Shift Fairness
+ *    uses confirmed Events directly, Duty Fairness uses the Potential/
+ *    Fairness table; `FAIRNESS_WORKBOOK_SOURCES` deliberately excludes
+ *    `settings`). An unrelated bad shift-start configuration must not make
+ *    `/fairness` unavailable, so this case falls through to step 2 exactly
+ *    like "ok" does -- the already-resolved identity from this step is
+ *    never reused directly either way; step 3 re-verifies from scratch.
+ * 2. Fetches `FAIRNESS_WORKBOOK_SOURCES` via `getWorkbookSnapshot`
+ *    (`lib/sync`) -- the same short-TTL cached wrapper every other loader
+ *    uses, so a normal user tapping between Fairness periods/modes within
+ *    the cache's TTL reuses the same snapshot instead of a fresh Google
+ *    request each time. No extra preliminary snapshot is fetched to work
+ *    around step 1 -- this is still the ONE Fairness fetch.
  * 3. Defense in depth: re-resolves the authenticated identity (a live
  *    Supabase call, NEVER cached) against the (possibly cache-reused)
  *    snapshot's own freshly-parsed personnel sheet. If that second
  *    resolution fails for ANY reason (personnel changed since that
  *    snapshot was fetched, a stale/edited record, anything), this fails
  *    closed with the corresponding auth status -- the already-fetched
- *    Fairness data is discarded, never returned to a caller. There is NO
- *    `isManager` check anywhere in this sequence, by design -- both a
- *    normal mapped user and a manager are equally "ok" here.
+ *    Fairness data is discarded, never returned to a caller. This
+ *    resolution is authoritative regardless of whether step 1 was "ok" or
+ *    "configuration_error". There is NO `isManager` check anywhere in this
+ *    sequence, by design -- both a normal mapped user and a manager are
+ *    equally "ok" here.
  *
  * Callers (`shiftFairness.ts`/`dutyFairness.ts`) parse whichever further
  * sheets their own mode needs from `context.snapshot` themselves -- this
@@ -95,10 +104,8 @@ export async function loadFairnessWorkbookContext(): Promise<FairnessWorkbookCon
   if (personalResult.status === "missing_email") return { status: "missing_email" };
   if (personalResult.status === "unmapped") return { status: "unmapped" };
   if (personalResult.status === "ambiguous_identity") return { status: "ambiguous_identity" };
-  if (personalResult.status === "configuration_error") {
-    return { status: "configuration_error", message: personalResult.message };
-  }
 
+  // "ok" and "configuration_error" both continue -- see step 1 above.
   const snapshot = await getWorkbookSnapshot(FAIRNESS_WORKBOOK_SOURCES);
 
   // Defense in depth: re-verify identity against the FRESH snapshot, never trust the first check alone.

@@ -81,13 +81,6 @@ describe("loadFairnessWorkbookContext — A. non-manager-only access", () => {
     },
   );
 
-  it("configuration_error: message passed through, never fetches the Fairness workbook", async () => {
-    getRequestPersonalSchedule.mockResolvedValue({ status: "configuration_error", message: "bad config" });
-    const result = await loadFairnessWorkbookContext();
-    expect(result).toEqual({ status: "configuration_error", message: "bad config" });
-    expect(getWorkbookSnapshot).not.toHaveBeenCalled();
-  });
-
   it("a mapped NON-manager is allowed -- status ok, no forbidden/manager gate anywhere in this loader", async () => {
     getRequestPersonalSchedule.mockResolvedValue(okPersonalResult());
     getAuthenticatedIdentity.mockResolvedValue({ status: "ok", email: "noa@example.invalid", avatarUrl: null });
@@ -108,6 +101,84 @@ describe("loadFairnessWorkbookContext — A. non-manager-only access", () => {
     expect(result.status).toBe("ok");
     if (result.status === "ok") {
       expect(result.context.person.isManager).toBe(true);
+    }
+  });
+});
+
+describe("loadFairnessWorkbookContext — configuration_error does not block Fairness (Fairness never depends on shift-schedule config)", () => {
+  it("a Personal Schedule configuration_error does NOT stop the Fairness workbook fetch", async () => {
+    getRequestPersonalSchedule.mockResolvedValue({
+      status: "configuration_error",
+      message: "bad shift-start config",
+      person: { id: "p_dani", name: "דני מנהל", isManager: true, isTechnician: false, isSupervisor: false, personnelType: null },
+      avatarUrl: null,
+    });
+    getAuthenticatedIdentity.mockResolvedValue({ status: "ok", email: "dani@example.invalid", avatarUrl: null });
+
+    const result = await loadFairnessWorkbookContext();
+    expect(getWorkbookSnapshot).toHaveBeenCalledWith(["personnel", "schedule", "potentialH1", "potentialH2"]);
+    expect(result.status).toBe("ok");
+  });
+
+  it("a successfully re-verified mapped person still receives real Fairness data after a configuration_error", async () => {
+    getRequestPersonalSchedule.mockResolvedValue({
+      status: "configuration_error",
+      message: "bad shift-start config",
+      person: { id: "p_noa", name: "נועה עובדת", isManager: false, isTechnician: true, isSupervisor: false, personnelType: null },
+      avatarUrl: null,
+    });
+    getAuthenticatedIdentity.mockResolvedValue({ status: "ok", email: "noa@example.invalid", avatarUrl: null });
+
+    const result = await loadFairnessWorkbookContext();
+    expect(result.status).toBe("ok");
+    if (result.status === "ok") {
+      expect(result.context.person.name).toBe("נועה עובדת");
+      expect(result.context.people.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("configuration_error + a second-pass identity that no longer resolves still fails closed as unmapped", async () => {
+    getRequestPersonalSchedule.mockResolvedValue({
+      status: "configuration_error",
+      message: "bad shift-start config",
+      person: { id: "p_dani", name: "דני מנהל", isManager: true, isTechnician: false, isSupervisor: false, personnelType: null },
+      avatarUrl: null,
+    });
+    getAuthenticatedIdentity.mockResolvedValue({ status: "ok", email: "gone@example.invalid", avatarUrl: null });
+
+    const result = await loadFairnessWorkbookContext();
+    expect(result).toEqual({ status: "unmapped" });
+  });
+
+  it("configuration_error + a second-pass ambiguous identity still fails closed", async () => {
+    getRequestPersonalSchedule.mockResolvedValue({
+      status: "configuration_error",
+      message: "bad shift-start config",
+      person: { id: "p_dani", name: "דני מנהל", isManager: true, isTechnician: false, isSupervisor: false, personnelType: null },
+      avatarUrl: null,
+    });
+    getWorkbookSnapshot.mockResolvedValue(
+      fairnessSnapshot({
+        personnel: [
+          ["שם", "מייל", "מנהל"],
+          ["דני א", "dup@example.invalid", false],
+          ["דני ב", "dup@example.invalid", false],
+        ],
+      }),
+    );
+    getAuthenticatedIdentity.mockResolvedValue({ status: "ok", email: "dup@example.invalid", avatarUrl: null });
+
+    const result = await loadFairnessWorkbookContext();
+    expect(result).toEqual({ status: "ambiguous_identity" });
+  });
+
+  it("normal auth failures (unauthenticated/missing_email/unmapped/ambiguous_identity) still never expose Fairness data or trigger a fetch", async () => {
+    for (const status of ["unauthenticated", "missing_email", "unmapped", "ambiguous_identity"] as const) {
+      getWorkbookSnapshot.mockClear();
+      getRequestPersonalSchedule.mockResolvedValue({ status });
+      const result = await loadFairnessWorkbookContext();
+      expect(result).toEqual({ status });
+      expect(getWorkbookSnapshot).not.toHaveBeenCalled();
     }
   });
 });

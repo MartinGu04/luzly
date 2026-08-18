@@ -26,7 +26,6 @@ export type ShiftFairnessLoadResult =
   | { status: "missing_email" }
   | { status: "unmapped" }
   | { status: "ambiguous_identity" }
-  | { status: "configuration_error"; message: string }
   | { status: "ok"; model: ShiftFairnessReadModel; person: Person };
 
 /** Same convention as `managerOverview.ts`'s own `reserveParticipationSource` -- one Potential sheet's Fairness-table participation evidence, tagged with the real year its own tab name represents. */

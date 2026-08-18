@@ -13,7 +13,6 @@ export type DutyFairnessLoadResult =
   | { status: "missing_email" }
   | { status: "unmapped" }
   | { status: "ambiguous_identity" }
-  | { status: "configuration_error"; message: string }
   | { status: "ok"; model: DutyFairnessReadModel; person: Person };
 
 const PERIOD_SHEET_KEYS: Record<"h1" | "h2", SheetSourceKey> = {

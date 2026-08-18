@@ -56,11 +56,6 @@ describe("loadDutyFairnessReadModel — auth pass-through", () => {
     expect(result).toEqual({ status });
   });
 
-  it("configuration_error: message passed through", async () => {
-    loadFairnessWorkbookContext.mockResolvedValue({ status: "configuration_error", message: "bad config" });
-    const result = await loadDutyFairnessReadModel(null);
-    expect(result).toEqual({ status: "configuration_error", message: "bad config" });
-  });
 });
 
 describe("loadDutyFairnessReadModel — E. H1/H2 period selection", () => {

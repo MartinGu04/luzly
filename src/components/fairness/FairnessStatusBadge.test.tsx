@@ -16,9 +16,10 @@ describe("FairnessStatusBadge", () => {
     expect(screen.getByText(label)).toBeInTheDocument();
   });
 
-  it("null status renders its own honest label, never a fourth color-coded verdict", () => {
+  it("null status renders its own honest, GENERIC label, never a fourth color-coded verdict and never naming a specific missing piece", () => {
     render(<FairnessStatusBadge status={null} />);
-    expect(screen.getByText("לא ניתן לחשב יעד מלא")).toBeInTheDocument();
+    expect(screen.getByText("לא ניתן להשוות")).toBeInTheDocument();
+    expect(screen.queryByText(/יעד/)).toBeNull();
   });
 
   it("below and above share the exact same tone/classes as balanced -- never styled as an error", () => {

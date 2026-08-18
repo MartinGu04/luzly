@@ -116,13 +116,6 @@ describe("/fairness — auth failure states", () => {
     expect(screen.getByText("אין לך הרשאה ל-מי-מה-מו")).toBeInTheDocument();
   });
 
-  it("configuration_error shows the configuration error state, not raw exception text", async () => {
-    getRequestShiftFairness.mockResolvedValue({ status: "configuration_error", message: "boom" });
-    await renderFairnessPage();
-    expect(screen.getByText("לא ניתן לחשב כרגע את שעות המשמרות")).toBeInTheDocument();
-    expect(screen.queryByText("boom")).toBeNull();
-  });
-
   it("a mapped normal (non-manager) user reaches the real page -- no manager requirement anywhere", async () => {
     getRequestShiftFairness.mockResolvedValue({ status: "ok", model: shiftModel(), person: { isManager: false } });
     await renderFairnessPage();
@@ -171,7 +164,7 @@ describe("/fairness — F. Shift cards", () => {
     expect(screen.getByText("מאוזן")).toBeInTheDocument();
   });
 
-  it("an unmodelable target never renders 0/מאוזן -- shows the honest unavailable note, actual work stays visible", async () => {
+  it("C. an unmodelable target never renders 0/מאוזן -- shows the honest target-specific note plus the generic status badge, actual work stays visible", async () => {
     getRequestShiftFairness.mockResolvedValue({
       status: "ok",
       model: shiftModel({
@@ -197,6 +190,7 @@ describe("/fairness — F. Shift cards", () => {
     await renderFairnessPage();
     expect(screen.getByText(/בוצעו/).textContent).toContain("4");
     expect(screen.getByText("לא ניתן לחשב יעד מלא לתקופה זו", { exact: false })).toBeInTheDocument();
+    expect(screen.getByText("לא ניתן להשוות")).toBeInTheDocument();
     expect(screen.queryByText("מאוזן")).toBeNull();
     expect(screen.queryByText(/יעד 0/)).toBeNull();
   });
@@ -216,16 +210,18 @@ describe("/fairness — G. Duty cards", () => {
     expect(screen.getByText("מתחת ליעד")).toBeInTheDocument();
   });
 
-  it("null target -> no fake status, real score still visible", async () => {
+  it("B. null target -> no fake target/status, generic comparison-unavailable label, real score still visible", async () => {
     getRequestDutyFairness.mockResolvedValue({
       status: "ok",
       model: dutyModel({
         groups: [{ key: "other", rows: [dutyRow({ allocationLabel: "הסמכה", comparisonTarget: null, gapToTarget: null, status: null })] }],
       }),
     });
-    await renderFairnessPage({ mode: "duties" });
-    expect(screen.getByText("לא ניתן לחשב יעד מלא")).toBeInTheDocument();
+    const { container } = await renderFairnessPage({ mode: "duties" });
+    expect(screen.getByText("לא ניתן להשוות")).toBeInTheDocument();
     expect(screen.getByText(/ניקוד/).textContent).toContain("6");
+    expect(container.textContent).toContain("יעד —");
+    expect(container.textContent).not.toMatch(/יעד \d/);
   });
 
   it("exemptions are visible without hover", async () => {
@@ -245,6 +241,19 @@ describe("/fairness — G. Duty cards", () => {
     expect(screen.getByText(/סופ"שים/).textContent).toContain("2");
   });
 
+  it("A. null status from an unavailable currentScore (target known) shows the known target and a generic unavailable-comparison label, never claiming the target itself is missing", async () => {
+    getRequestDutyFairness.mockResolvedValue({
+      status: "ok",
+      model: dutyModel({
+        groups: [{ key: "technician", rows: [dutyRow({ currentScore: null, comparisonTarget: 8, status: null })] }],
+      }),
+    });
+    const { container } = await renderFairnessPage({ mode: "duties" });
+    expect(container.textContent).toContain("יעד 8");
+    expect(screen.getByText("לא ניתן להשוות")).toBeInTheDocument();
+    expect(screen.queryByText(/לחשב יעד/)).toBeNull();
+  });
+
   it('a ר"צ row appears in the supervisor section with a null target/status', async () => {
     getRequestDutyFairness.mockResolvedValue({
       status: "ok",
@@ -260,7 +269,7 @@ describe("/fairness — G. Duty cards", () => {
     await renderFairnessPage({ mode: "duties" });
     expect(screen.getByText(/אחמ״שים/)).toBeInTheDocument();
     expect(screen.getByText("רוני רצ")).toBeInTheDocument();
-    expect(screen.getByText("לא ניתן לחשב יעד מלא")).toBeInTheDocument();
+    expect(screen.getByText("לא ניתן להשוות")).toBeInTheDocument();
   });
 });
 

@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 import { redirect } from "next/navigation";
 import { AccessDeniedScreen } from "@/components/auth/AccessDeniedScreen";
-import { ConfigurationErrorState } from "@/components/dashboard/ConfigurationErrorState";
 import { DutyFairnessCard } from "@/components/fairness/DutyFairnessCard";
 import { DutyFairnessDetail } from "@/components/fairness/DutyFairnessDetail";
 import { FairnessDetailOverlay } from "@/components/fairness/FairnessDetailOverlay";
@@ -55,12 +54,19 @@ const DUTY_GROUP_LABEL: Record<DutyFairnessGroupView["key"], string> = {
   other: "אחרים",
 };
 
-/** Both loaders share the exact same non-"ok" status vocabulary (the fail-closed identity states from `loadFairnessWorkbookContext`) -- one shared render for all of them, same convention the protected layout itself uses. */
-type FairnessAuthFailureStatus = "unauthenticated" | "missing_email" | "unmapped" | "ambiguous_identity" | "configuration_error";
+/**
+ * Both loaders share the exact same non-"ok" status vocabulary (the
+ * fail-closed identity states from `loadFairnessWorkbookContext`) -- one
+ * shared render for all of them, same convention the protected layout
+ * itself uses. `configuration_error` is NOT one of these -- neither
+ * Fairness mode depends on the shift-schedule configuration a
+ * `configuration_error` reports on, so `loadFairnessWorkbookContext`
+ * never surfaces it; only real identity-resolution failures reach here.
+ */
+type FairnessAuthFailureStatus = "unauthenticated" | "missing_email" | "unmapped" | "ambiguous_identity";
 
 function renderAuthFailure(status: FairnessAuthFailureStatus): ReactNode {
   if (status === "unauthenticated") redirect("/login");
-  if (status === "configuration_error") return <ConfigurationErrorState />;
   return <AccessDeniedScreen />;
 }
 

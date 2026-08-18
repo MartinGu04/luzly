@@ -14,10 +14,14 @@ interface FairnessStatusBadgeProps {
  * get the exact same visual weight as "balanced" -- only the text and a
  * small directional (not evaluative) icon differ. Status is never
  * communicated by color alone: the Hebrew label is always present too. A
- * `null` status renders its own calm "לא ניתן לחשב יעד מלא" pill with a
+ * `null` status renders its own calm, GENERIC "לא ניתן להשוות" pill with a
  * help icon, never a fabricated fourth color-coded verdict and never
  * simply omitted (the actual confirmed workload elsewhere on the card
- * still needs this context to read honestly).
+ * still needs this context to read honestly). Deliberately generic, not
+ * "target unavailable" -- a null status can come from a missing target OR
+ * a missing actual/current value, and this badge alone can't tell which
+ * (see `fairnessStatusLabel`'s own docs); a caller that knows the specific
+ * reason renders that separately.
  */
 export function FairnessStatusBadge({ status, className = "" }: FairnessStatusBadgeProps) {
   const Icon = status === "below" ? ArrowDown : status === "above" ? ArrowUp : status === "balanced" ? Minus : HelpCircle;
