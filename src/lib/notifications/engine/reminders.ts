@@ -531,7 +531,15 @@ async function runAlmashCheckInReminders(input: RemindersInput): Promise<{ creat
       title,
       body,
       path: "/duties",
-      tag: `almash-check-in-${today}-${recipient.userId}`,
+      // Must include dutyFamily/slot, same as `dedupeKey` below -- the
+      // service worker passes this tag straight through to
+      // `showNotification()` (`public/sw.js`), where the Notifications
+      // API replaces/collapses any existing OS-level notification with
+      // the same tag. A coarser tag (date+recipient alone) would silently
+      // drop a second legitimate same-day almash push for one person
+      // (e.g. two concurrent duty families/slots) even though both stay
+      // fully distinct logical jobs in notification_jobs/the inbox.
+      tag: `almash-check-in-${today}-${recipient.userId}-${action.dutyBlock.dutyFamily}-${slot}`,
       dedupeKey: `almash_check_in:${today}:${recipient.userId}:${action.dutyBlock.dutyFamily}:${slot}`,
       scheduledFor,
       sourceRef: `duty:${action.personId}:${action.date}`,

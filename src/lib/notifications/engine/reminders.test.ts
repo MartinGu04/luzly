@@ -1295,4 +1295,30 @@ describe("runReminders -- עלמ״ש check-in reminder (שמירה / עתודה 
 
     expect(upsertedFor("almash_check_in")).toEqual([]);
   });
+
+  it("two qualifying same-day duty families for one person produce two distinct jobs AND two distinct Push tags -- the service worker collapses same-tag pushes at the OS level (public/sw.js), so a coarser tag would silently drop one", async () => {
+    store.listPendingJobDedupeKeysByPrefix.mockResolvedValue([]);
+    const { runReminders } = await loadModule();
+    const wednesday = "2026-08-19";
+    const now: LocalNow = { date: wednesday, minuteOfDay: 600 };
+    const week = getOperationalWeek(now);
+
+    await runReminders({
+      events: [dutyEvent("p1", wednesday, "guard"), dutyEvent("p1", wednesday, "oxid")],
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: resolutionWith("p1", "user-p1"),
+    });
+
+    const jobs = upsertedFor("almash_check_in");
+    expect(jobs).toHaveLength(2);
+
+    const dedupeKeys = jobs.map((job) => job.dedupeKey);
+    const tags = jobs.map((job) => job.tag);
+    expect(new Set(dedupeKeys).size).toBe(2);
+    expect(new Set(tags).size).toBe(2);
+  });
 });
