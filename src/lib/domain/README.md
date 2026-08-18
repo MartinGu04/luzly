@@ -70,6 +70,22 @@ no Google API calls and no spreadsheet-cell access.
   deterministically sorted; a duplicate Event reference is deduplicated
   so it can never inflate `dayCount`. `parseCalendarDate`/`dayOfWeek` are
   also reused by `lib/presentation` for Date-free Hebrew weekday display.
+- `potentialDutyEvents.ts` — `buildPotentialDutyEvents`, converting Potential/
+  תקשא"ס period allocations (`PotentialAllocation[]`) attributed to ONE
+  person into synthetic duty `Event`s, so `buildDutyBlocks` above can group
+  them exactly like a real משמרות + תורנויות duty Event -- no separate
+  grouping logic. Person resolution reuses `potentialSourceOwnership.ts`'s
+  `scopeManagerPotentialAllocation` outright (the SAME generic resolver
+  Manager Overview already uses) -- never a name-based special case, and an
+  ambiguous short name never guesses (both already fail closed inside that
+  resolver). An allocation already covered by a real internal duty Event
+  for the exact same `(date, dutyFamily, slot)` is dropped, so a normal
+  department person's existing duties are never duplicated -- this is what
+  keeps `lib/readModels/personalSchedule.ts` reusing this safely for every
+  person, department or not. Always produces `certainty: "tentative"`
+  (a Potential allocation is the source/framework plan, never a confirmed
+  internal schedule entry) and never touches `role`/capability fields, so
+  it can never affect shift-worker classification anywhere in this domain.
 - `dutyActions.ts` — `deriveDutyActions`, turning `DutyBlock`s into
   machine-readable `duty_check_in` action data (never an actual
   notification — no Notification API, cron, or push subscription here).

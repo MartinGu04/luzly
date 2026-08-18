@@ -73,6 +73,12 @@ function scheduleSheet(rows: (string | number)[][]): RawSheet {
 function settingsSheet(rows: string[][]): RawSheet {
   return { name: "הגדרות", values: rows };
 }
+function potentialH1Sheet(rows: (string | number)[][]): RawSheet {
+  return { name: 'פוטנציאל תקש"אס 1-6/2026', values: rows };
+}
+function potentialH2Sheet(rows: (string | number)[][]): RawSheet {
+  return { name: 'פוטנציאל תקש"אס 7-12/2026', values: rows };
+}
 
 const PERSONNEL_ROWS = [
   ["שם", "מייל"],
@@ -86,7 +92,13 @@ const SETTINGS_ROWS_VALID = [
 function validSnapshot(fetchedAt: string) {
   return {
     fetchedAt,
-    sheets: [scheduleSheet([]), settingsSheet(SETTINGS_ROWS_VALID), personnelSheet(PERSONNEL_ROWS)],
+    sheets: [
+      scheduleSheet([]),
+      settingsSheet(SETTINGS_ROWS_VALID),
+      personnelSheet(PERSONNEL_ROWS),
+      potentialH1Sheet([]),
+      potentialH2Sheet([]),
+    ],
   };
 }
 
