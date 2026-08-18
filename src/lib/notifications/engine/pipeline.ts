@@ -107,6 +107,7 @@ export async function runNotificationWorkerTick(mode: WorkerMode): Promise<Worke
       remindersSummary.logisticsWithdrawalNoonAssignedJobs +
       remindersSummary.logisticsWithdrawalNoonSupervisorJobs +
       remindersSummary.logisticsWithdrawalNoonTeamJobs +
+      remindersSummary.almashCheckInJobs +
       remindersSummary.constraintsJobs,
     jobsDue,
     recipientCount: recipientResolution.resolved.size,
