@@ -67,11 +67,12 @@ function loadServiceWorker() {
 describe("public/sw.js (PR #28)", () => {
   it("registers exactly the expected lifecycle and push handlers, nothing else", () => {
     const { listeners } = loadServiceWorker();
-    expect([...listeners.keys()].sort()).toEqual(
-      ["activate", "install", "message", "notificationclick", "push"].sort(),
-    );
+    expect([...listeners.keys()].sort()).toEqual(["activate", "install", "notificationclick", "push"].sort());
     // The whole point of this PR: no offline caching, ever.
     expect(listeners.has("fetch")).toBe(false);
+    // No page-side "update now" flow exists anymore -- nothing ever posts
+    // a message to this worker, so there is no "message" handler either.
+    expect(listeners.has("message")).toBe(false);
   });
 
   it("install does nothing (never auto-activates a waiting worker)", () => {
@@ -86,15 +87,6 @@ describe("public/sw.js (PR #28)", () => {
     listeners.get("activate")?.[0]?.({ waitUntil: (p: Promise<unknown>) => (captured = p) });
     await captured;
     expect(fakeClients.claim).toHaveBeenCalledTimes(1);
-  });
-
-  it('only "SKIP_WAITING" messages trigger skipWaiting', () => {
-    const { listeners, fakeSelf } = loadServiceWorker();
-    const handler = listeners.get("message")?.[0];
-    handler?.({ data: "something-else" });
-    expect(fakeSelf.skipWaiting).not.toHaveBeenCalled();
-    handler?.({ data: "SKIP_WAITING" });
-    expect(fakeSelf.skipWaiting).toHaveBeenCalledTimes(1);
   });
 
   describe("push", () => {

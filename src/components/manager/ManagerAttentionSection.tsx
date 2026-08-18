@@ -16,12 +16,20 @@ interface ManagerAttentionSectionProps {
 
 function AttentionItemRow({ item, current }: { item: ManagerAttentionItem; current: ManagerHrefParams }) {
   return item.kind === "issue" ? (
-    <IssueRow view={item.view} current={current} />
+    <IssueRow view={item.view} current={current} variant="card" />
   ) : (
-    <ManagerPotentialRow view={item.view} />
+    <ManagerPotentialRow view={item.view} variant="card" />
   );
 }
 
+/**
+ * Each item is its own compact, bordered card (see `IssueRow`/
+ * `ManagerPotentialRow`'s "card" variant) rather than rows sharing one
+ * large panel -- these carry materially more copy than a Shifts coverage
+ * card, so this grid caps at TWO columns (never 3-4) so a card is never
+ * squeezed narrow enough to force wrapping/truncation. Order within the
+ * group is exactly the order `items` arrives in -- this never re-sorts.
+ */
 function AttentionGroup({
   severity,
   items,
@@ -40,13 +48,11 @@ function AttentionGroup({
         {issueSeverityLabel(severity)}
         <span className="text-sm font-normal text-muted-2">· {items.length}</span>
       </h3>
-      <Panel variant="panel" className="mt-2">
-        <ul className="divide-y divide-border">
-          {items.map((item) => (
-            <AttentionItemRow key={item.view.key} item={item} current={current} />
-          ))}
-        </ul>
-      </Panel>
+      <ul className="mt-2 grid grid-cols-1 gap-3 lg:grid-cols-2">
+        {items.map((item) => (
+          <AttentionItemRow key={item.view.key} item={item} current={current} />
+        ))}
+      </ul>
     </section>
   );
 }

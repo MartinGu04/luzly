@@ -380,3 +380,31 @@ describe("IssueRow — recommendation candidate names link to their manager dril
     expect(screen.getByRole("link", { name: 'עם, או "בדיקה' })).toHaveAttribute("href", "/manager?person=p_tricky");
   });
 });
+
+describe("IssueRow — variant", () => {
+  it("defaults to the plain divided-row chrome when no variant is given", () => {
+    render(<IssueRow view={view({ personName: "מרטין בדיקה" })} current={CURRENT} />);
+    const root = screen.getByText("חסר כיסוי למשמרת שלך").closest("li");
+    expect(root?.className).toContain("py-3");
+    expect(root?.className).not.toContain("ring-border");
+  });
+
+  it('variant="card" renders its own bordered surface instead of a divided-row chrome', () => {
+    render(<IssueRow view={view({ personName: "מרטין בדיקה" })} current={CURRENT} variant="card" />);
+    const root = screen.getByText("חסר כיסוי למשמרת שלך").closest("li");
+    expect(root?.className).toContain("ring-border");
+    expect(root?.className).toContain("rounded-xl");
+  });
+
+  it('the card variant preserves the exact same problem-first hierarchy and recommendation disclosure as the row variant', () => {
+    render(
+      <IssueRow
+        view={view({ personName: "מרטין בדיקה", recommendation: recommendationView() })}
+        current={CURRENT}
+        variant="card"
+      />,
+    );
+    expect(screen.getByText("חסר כיסוי למשמרת שלך")).toBeInTheDocument();
+    expect(screen.getByText("פעולה מומלצת")).toBeInTheDocument();
+  });
+});

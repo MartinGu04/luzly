@@ -19,7 +19,22 @@ interface IssueRowProps {
    * `ManagerRosterSection` already uses -- never a second URL builder.
    */
   current?: ManagerHrefParams;
+  /**
+   * "row" (default): a divided list row, no chrome of its own -- meant to
+   * sit inside a parent `<ul className="divide-y">` (`IssueSeverityGroup`'s
+   * person-drill-down list). "card": its own bordered, self-contained
+   * surface -- meant to sit inside a bare grid, one item per cell (the
+   * Overview "דורש טיפול" grid, see `ManagerAttentionSection`). Only the
+   * OUTER chrome differs; every other layout/hierarchy decision below is
+   * identical between the two.
+   */
+  variant?: "row" | "card";
 }
+
+const ROOT_CLASS: Record<NonNullable<IssueRowProps["variant"]>, string> = {
+  row: "flex items-start gap-3 py-3",
+  card: "flex items-start gap-3 rounded-xl bg-surface-1 ring-1 ring-border p-4",
+};
 
 /**
  * A subtle, keyboard-accessible inline link for one recommended candidate --
@@ -105,10 +120,10 @@ function RecommendationDisclosure({ view, current }: { view: IssueRecommendation
  * itself already leads as plain text -- there's no one else to name first,
  * so that layout is unchanged.
  */
-export function IssueRow({ view, current }: IssueRowProps) {
+export function IssueRow({ view, current, variant = "row" }: IssueRowProps) {
   if (view.personName) {
     return (
-      <li className="flex items-start gap-3 py-3">
+      <li className={ROOT_CLASS[variant]}>
         <IssueSeverityBadge severity={view.severity} className="mt-0.5 h-4 w-4 shrink-0" />
         <div className="min-w-0 flex-1 space-y-1.5">
           <p
@@ -148,7 +163,7 @@ export function IssueRow({ view, current }: IssueRowProps) {
   }
 
   return (
-    <li className="flex items-start gap-3 py-3">
+    <li className={ROOT_CLASS[variant]}>
       <IssueSeverityBadge severity={view.severity} className="mt-0.5 h-4 w-4 shrink-0" />
       <div className="min-w-0 flex-1 space-y-1">
         <p className="text-sm font-medium text-foreground">{view.reasonLabel}</p>

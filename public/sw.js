@@ -2,8 +2,8 @@
  * מי-מה-מו -- minimal first-party Service Worker (PR #28).
  *
  * Scope of THIS file, deliberately narrow:
- *   1. Register/lifecycle correctly (install -> waiting -> user-approved
- *      activate, see the "message" handler below).
+ *   1. Register/lifecycle correctly (install -> waiting -> activate, the
+ *      browser's own ordinary timing -- no forced early activation).
  *   2. Prepare the app for a FUTURE Web Push PR: clean "push" and
  *      "notificationclick" handlers.
  *
@@ -40,21 +40,15 @@ function resolveSafeNotificationPath(rawPath) {
 
 self.addEventListener("install", function () {
   // Deliberately does NOT call self.skipWaiting() here -- a newly
-  // installed worker must sit in "waiting" until the page's own update
-  // flow gets explicit user consent (see components/pwa) and posts
-  // "SKIP_WAITING" below. The very first install has no page listening
-  // for that yet, which is fine: the browser activates a worker with no
-  // prior controller on its own, with nothing to "update away" from.
+  // installed worker sits in "waiting" and activates the ordinary way the
+  // browser already handles this, once every tab/client still controlled
+  // by the previous worker has closed. There is no page-side "update now"
+  // flow that force-activates it early (see components/pwa/
+  // ServiceWorkerManager.tsx's docstring for why that was removed).
 });
 
 self.addEventListener("activate", function (event) {
   event.waitUntil(self.clients.claim());
-});
-
-self.addEventListener("message", function (event) {
-  if (event.data === "SKIP_WAITING") {
-    self.skipWaiting();
-  }
 });
 
 /**
