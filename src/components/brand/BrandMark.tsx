@@ -8,8 +8,8 @@ interface BrandMarkProps {
 }
 
 const SIZE_CLASSES = {
-  sm: { icon: "h-11 w-11", text: "text-lg", gap: "gap-2.5" },
-  md: { icon: "h-14 w-14", text: "text-3xl", gap: "gap-3" },
+  sm: { icon: "h-9 w-9", text: "text-base", gap: "gap-2.5" },
+  md: { icon: "h-11 w-11", text: "text-2xl", gap: "gap-3" },
 } as const;
 
 /**

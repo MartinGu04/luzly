@@ -35,8 +35,11 @@ interface ShellUtilityBarProps {
  * keeping the SAME measured ratio (≈1.3) between them, so the calibration
  * itself is unchanged -- only the overall scale. Release-polish pass:
  * scaled back down slightly (49px/64px) purely to shave real height off
- * the bar (see `ShellUtilityBar`'s own docstring) -- the ≈1.3 ratio is
- * still preserved.
+ * the bar (see `ShellUtilityBar`'s own docstring). Header-logo-correction
+ * pass: the previous pass over-corrected in the wrong direction (a
+ * different mark, `BrandMark`, was enlarged instead of these two) --
+ * these two are now the actual target, grown meaningfully (49px/64px ->
+ * 69px/90px, +~41%) while the ≈1.3 ratio is still preserved.
  */
 function OrgLogoImage({ logo, heightClassName }: { logo: OrgLogo; heightClassName: string }) {
   return (
@@ -72,16 +75,20 @@ function OrgLogoImage({ logo, heightClassName }: { logo: OrgLogo; heightClassNam
  * bell right next to it, the extra outline read as one more heavy frame;
  * the `surface-1` tint alone still separates it from the bar's background
  * without boxing it in. The two logos are real supplied institutional marks
- * (`lib/config/brandAssets.ts`), used exactly as provided -- deliberately
- * smaller/quieter than the clock pill so they frame it rather than compete
- * with it. The bell (`NotificationBell` `variant="shell"`) sits at the
- * bar's own physical left, replacing its old spot in `Sidebar`'s top row --
- * same component, same push-notification behavior, purely relocated.
+ * (`lib/config/brandAssets.ts`), used exactly as provided -- grown to a
+ * genuinely prominent size (header-logo-correction pass) so they carry real
+ * visual weight next to the clock rather than reading as small icons; the
+ * bar's own vertical padding was trimmed slightly (`py-2` -> `py-1.5`) to
+ * absorb part of that growth, so the bar itself grows only by what the
+ * bigger marks actually need, not by added dead space. The bell
+ * (`NotificationBell` `variant="shell"`) sits at the bar's own physical
+ * left, replacing its old spot in `Sidebar`'s top row -- same component,
+ * same push-notification behavior, purely relocated.
  */
 export function ShellUtilityBar({ initialClockTime, dateLabel }: ShellUtilityBarProps) {
   return (
     <div className="hidden shrink-0 border-b border-border lg:block">
-      <div className="mx-auto grid w-full max-w-[1440px] grid-cols-[1fr_auto_1fr] items-center gap-4 px-10 py-2">
+      <div className="mx-auto grid w-full max-w-[1440px] grid-cols-[1fr_auto_1fr] items-center gap-4 px-10 py-1.5">
         {/* CSS Grid columns mirror under RTL exactly like a flex row does --
             the FIRST-defined column ends up on the PHYSICAL right, the LAST
             on the physical left. The bell is therefore the LAST grid child
@@ -91,7 +98,7 @@ export function ShellUtilityBar({ initialClockTime, dateLabel }: ShellUtilityBar
         <div aria-hidden="true" />
 
         <div className="flex items-center justify-center gap-5 sm:gap-8">
-          <OrgLogoImage logo={ORG_LOGO_TAKSHAL} heightClassName="h-[64px]" />
+          <OrgLogoImage logo={ORG_LOGO_TAKSHAL} heightClassName="h-[90px]" />
 
           <div className="flex flex-col items-center gap-1 rounded-xl bg-surface-1 px-5 py-2">
             <div className="flex items-center gap-2">
@@ -101,7 +108,7 @@ export function ShellUtilityBar({ initialClockTime, dateLabel }: ShellUtilityBar
             {dateLabel ? <span className="text-xs font-medium text-muted">{dateLabel}</span> : null}
           </div>
 
-          <OrgLogoImage logo={ORG_LOGO_STRATEGIC_COMMUNICATION} heightClassName="h-[49px]" />
+          <OrgLogoImage logo={ORG_LOGO_STRATEGIC_COMMUNICATION} heightClassName="h-[69px]" />
         </div>
 
         <div className="flex items-center justify-self-end">
