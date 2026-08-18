@@ -1,15 +1,19 @@
 import Link from "next/link";
 import type { ShiftFairnessCardView } from "@/lib/presentation/fairnessCards";
-import { FairnessStatusBadge } from "./FairnessStatusBadge";
+import { FairnessMetric } from "./FairnessMetric";
+import { FairnessStatusBadge, fairnessStatusTintTextClass } from "./FairnessStatusBadge";
 
 /**
- * One Shift Fairness person card (PR #4 §11) -- name, status, actual vs
- * target, deviation, and a concise weekend line, in that hierarchy. A
- * `null` target/status never renders as "0"/"מאוזן" -- `unavailableNote`
- * replaces the whole target/deviation line with a calm, honest sentence
- * instead, while `actualLabel` (always a real, confirmed number) stays
- * visible regardless. No generic "partial data" badge -- the note IS the
- * only incompleteness signal, shown only when it materially matters.
+ * One Shift Fairness person card (PR #4 §11, redesigned PR #51 follow-up)
+ * -- name + status, then a compact self-explanatory metric grid (משמרות
+ * שבוצעו / יעד אישי / פער מהיעד, the gap tinted with the same restrained
+ * status color as the badge), then a smaller secondary weekend-context
+ * row, in that hierarchy. A `null` target/status never renders as "0"/
+ * "מאוזן" -- `unavailableNote` replaces the whole metric grid with a calm,
+ * honest sentence instead, while `actualLabel` (always a real, confirmed
+ * number) stays visible regardless. No generic "partial data" badge -- the
+ * note IS the only incompleteness signal, shown only when it materially
+ * matters.
  */
 export function ShiftFairnessCard({ view }: { view: ShiftFairnessCardView }) {
   return (
@@ -25,24 +29,31 @@ export function ShiftFairnessCard({ view }: { view: ShiftFairnessCardView }) {
 
         {view.unavailableNote ? (
           <p className="mt-3 text-xs leading-relaxed text-muted">
-            <span className="font-medium text-foreground">בוצעו {view.actualLabel}</span> · {view.unavailableNote}
+            <span className="font-medium text-foreground">משמרות שבוצעו: {view.actualLabel}</span> · {view.unavailableNote}
           </p>
         ) : (
-          <div className="mt-3 flex items-baseline gap-4 text-sm">
-            <span className="text-foreground">
-              בוצעו <span className="font-semibold">{view.actualLabel}</span>
-            </span>
-            <span className="text-muted">
-              יעד <span className="font-medium text-foreground">{view.targetLabel}</span>
-            </span>
-            {view.deviationLabel ? <span className="text-xs text-muted-2">פער {view.deviationLabel}</span> : null}
+          <div className="mt-3 grid grid-cols-3 gap-x-2 gap-y-1 rounded-xl bg-overlay-faint px-3 py-2.5">
+            <FairnessMetric testId="metric-shift-actual" label="משמרות שבוצעו" value={view.actualLabel} />
+            <FairnessMetric testId="metric-shift-target" label="יעד אישי" value={view.targetLabel ?? "—"} />
+            <FairnessMetric
+              testId="metric-shift-gap"
+              label="פער מהיעד"
+              value={view.deviationLabel ?? "—"}
+              toneClassName={fairnessStatusTintTextClass(view.status)}
+            />
           </div>
         )}
 
-        <p className="mt-2 text-xs text-muted-2">
-          סופ&quot;ש {view.weekendActualLabel}
-          {view.weekendTargetLabel ? <> · יעד {view.weekendTargetLabel}</> : null}
-        </p>
+        <div className="mt-2 flex items-center gap-4 border-t border-border pt-2 text-xs text-muted-2">
+          <span data-testid="metric-shift-weekend-actual">
+            משמרות סופ&quot;ש <span className="font-medium text-muted">{view.weekendActualLabel}</span>
+          </span>
+          {view.weekendTargetLabel ? (
+            <span data-testid="metric-shift-weekend-target">
+              יעד סופ&quot;ש <span className="font-medium text-muted">{view.weekendTargetLabel}</span>
+            </span>
+          ) : null}
+        </div>
       </Link>
     </li>
   );

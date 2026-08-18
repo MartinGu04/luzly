@@ -8,6 +8,7 @@ import {
   type ShiftFairnessGroupResult,
 } from "@/lib/domain/fairnessShiftEngine";
 import type { LocalNow } from "@/lib/domain/localNow";
+import { classifyPersonnelType } from "@/lib/domain/personnelType";
 import { EMPTY_RESERVE_ROLE_PARTICIPATION, type ReserveRoleParticipation } from "@/lib/domain/reserveParticipation";
 import type { Person } from "@/lib/domain/types";
 import type { ShiftFairnessGroupView, ShiftFairnessPersonRowView, ShiftFairnessReadModel } from "./shiftFairnessTypes";
@@ -18,8 +19,12 @@ import type { ShiftFairnessGroupView, ShiftFairnessPersonRowView, ShiftFairnessR
  * convention as `buildManagerFairnessReadModel.ts`. Computes BOTH
  * comparison groups (supervisor, technician) from `fairnessShiftEngine.ts`
  * and projects each into the safe `ShiftFairnessPersonRowView` shape,
- * looking up each row's display name from `people` (never carried by the
- * domain engine itself, which only ever deals in `personId`).
+ * looking up each row's display name and `serviceCategory` (PR #51 follow-
+ * up, via `classifyPersonnelType`) from `people` (neither is carried by the
+ * domain engine itself, which only ever deals in `personId`). This is the
+ * single place `serviceCategory` is resolved -- the read model carries it
+ * from here on, so downstream orchestration/UI never needs the full
+ * `people` roster just to know a row's own service type.
  *
  * No orchestration layer (Google fetch, auth, request-scoped caching) is
  * added yet -- there is no page to serve, and PR #48's existing
@@ -75,6 +80,7 @@ function toGroupView(group: ShiftFairnessGroupResult, people: readonly Person[])
   const rows: ShiftFairnessPersonRowView[] = group.people.map((personResult) => ({
     personId: personResult.personId,
     personName: peopleById.get(personResult.personId)?.name ?? "",
+    serviceCategory: classifyPersonnelType(peopleById.get(personResult.personId)?.personnelType ?? null),
     actualShifts: personResult.actualShifts,
     target: personResult.target,
     deviation: personResult.deviation,

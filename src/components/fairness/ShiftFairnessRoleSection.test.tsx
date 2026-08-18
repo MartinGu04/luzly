@@ -13,6 +13,7 @@ function card(overrides: Partial<ShiftFairnessCardView> = {}): ShiftFairnessCard
     key: "p1",
     personId: "p1",
     personName: "אדם בדיקה",
+    serviceCategory: "regular",
     href: "#",
     actualLabel: "4",
     targetLabel: "4",

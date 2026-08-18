@@ -8,6 +8,7 @@ function shiftRow(overrides: Partial<ShiftFairnessPersonRowView> = {}): ShiftFai
   return {
     personId: "p_1",
     personName: "דני טכנאי",
+    serviceCategory: "regular",
     actualShifts: 4,
     target: 4.3,
     deviation: -0.3,
@@ -28,6 +29,7 @@ describe("buildShiftFairnessCardView", () => {
       key: "p_1",
       personId: "p_1",
       personName: "דני טכנאי",
+      serviceCategory: "regular",
       href: "/fairness?person=p_1",
       actualLabel: "4",
       targetLabel: "4.3",
@@ -58,6 +60,13 @@ describe("buildShiftFairnessCardView", () => {
     expect(view.actualLabel).toBe("4");
     expect(view.unavailableNote).toBe("לא ניתן לחשב יעד מלא לתקופה זו");
     expect(view.completenessNote).not.toBeNull();
+  });
+});
+
+describe("buildShiftFairnessCardView -- serviceCategory", () => {
+  it("carries the row's own serviceCategory straight through, unmodified", () => {
+    const view = buildShiftFairnessCardView(shiftRow({ serviceCategory: "reserve" }), "/fairness?person=p_1");
+    expect(view.serviceCategory).toBe("reserve");
   });
 });
 

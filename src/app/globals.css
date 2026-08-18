@@ -207,6 +207,28 @@
 
   --surface-critical: color-mix(in srgb, var(--critical) 8%, var(--surface-1));
   --surface-critical-border: color-mix(in srgb, var(--critical) 30%, transparent);
+
+  /* Restrained, DESCRIPTIVE (never punitive) Fairness status tinting
+     (PR #51 follow-up) -- reuses the existing --success/--primary/--warning
+     tokens rather than introducing a parallel raw-hex palette, so both
+     themes stay in sync automatically. balanced -> the existing teal/green
+     --success tone, below -> the existing purple --primary brand tone
+     (repurposed here as a calm "under" cue, not an alert), above -> the
+     existing amber --warning tone. All three are intentionally the SAME
+     restrained strength -- none reads as more "wrong" than another. An
+     "unavailable" (null) status stays fully neutral (--muted/--overlay-*),
+     no token needed. */
+  --status-balanced: var(--success);
+  --status-balanced-soft: color-mix(in srgb, var(--success) 14%, var(--surface-1));
+  --status-balanced-border: color-mix(in srgb, var(--success) 32%, transparent);
+
+  --status-below: var(--primary);
+  --status-below-soft: color-mix(in srgb, var(--primary) 12%, var(--surface-1));
+  --status-below-border: color-mix(in srgb, var(--primary) 30%, transparent);
+
+  --status-above: var(--warning);
+  --status-above-soft: color-mix(in srgb, var(--warning) 14%, var(--surface-1));
+  --status-above-border: color-mix(in srgb, var(--warning) 32%, transparent);
 }
 
 @theme inline {
@@ -252,6 +274,16 @@
   --color-warning-foreground: var(--warning-foreground);
   --color-critical: var(--critical);
   --color-critical-foreground: var(--critical-foreground);
+
+  --color-status-balanced: var(--status-balanced);
+  --color-status-balanced-soft: var(--status-balanced-soft);
+  --color-status-balanced-border: var(--status-balanced-border);
+  --color-status-below: var(--status-below);
+  --color-status-below-soft: var(--status-below-soft);
+  --color-status-below-border: var(--status-below-border);
+  --color-status-above: var(--status-above);
+  --color-status-above-soft: var(--status-above-soft);
+  --color-status-above-border: var(--status-above-border);
 
   --font-sans: var(--font-heebo);
 }

@@ -1,4 +1,5 @@
 import type { FairnessDataCompletenessReason, FairnessStatus } from "@/lib/domain/fairnessFoundation";
+import type { PersonnelServiceCategory } from "@/lib/domain/personnelType";
 import { exemptionBadgeLabel, formatFairnessDelta, formatFairnessGap, formatFairnessScore, formatFairnessWeekendCount } from "@/lib/presentation/fairness";
 import type { DutyFairnessPersonRowView } from "@/lib/readModels/dutyFairnessTypes";
 import type { ShiftFairnessPersonRowView } from "@/lib/readModels/shiftFairnessTypes";
@@ -18,6 +19,8 @@ export interface ShiftFairnessCardView {
   key: string;
   personId: string;
   personName: string;
+  /** Carried straight from the row (PR #51 follow-up) so the service-type presentation subgrouping can be built from cards alone, with no separate roster lookup. */
+  serviceCategory: PersonnelServiceCategory;
   href: string;
   actualLabel: string;
   targetLabel: string | null;
@@ -55,6 +58,7 @@ export function buildShiftFairnessCardView(row: ShiftFairnessPersonRowView, href
     key: row.personId,
     personId: row.personId,
     personName: row.personName,
+    serviceCategory: row.serviceCategory,
     href,
     actualLabel: String(row.actualShifts),
     targetLabel: row.target !== null ? formatFairnessScore(row.target) : null,

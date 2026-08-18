@@ -33,26 +33,22 @@ const SERVICE_SUBGROUP_ORDER: readonly PersonnelServiceCategory[] = ["regular", 
 
 /**
  * Buckets `cards` (already-built Shift Fairness card views, one role
- * section's worth) by each card's own service category, looked up from
- * `serviceCategoryByPersonId` (built by the caller via `classifyPersonnelType`
- * over the roster -- this function never re-derives or guesses a category
- * itself). Preserves each card's existing relative order within its
- * subgroup -- never re-sorts. A subgroup with zero cards is omitted
- * entirely, never rendered as an empty heading. A card whose id has no
- * entry in the map (should not happen in practice -- every row comes from
- * the same roster the map is built from) safely falls to "unclassified"
- * rather than being silently dropped.
+ * section's worth, already visibility-filtered by the caller) by each
+ * card's own `serviceCategory` -- carried straight off the read model's
+ * row (`ShiftFairnessPersonRowView.serviceCategory`, resolved once in
+ * `buildShiftFairnessReadModel`), never re-derived or looked up from a
+ * separate roster here. Preserves each card's existing relative order
+ * within its subgroup -- never re-sorts. A subgroup with zero cards is
+ * omitted entirely, never rendered as an empty heading.
  */
 export function groupShiftFairnessCardsByServiceType(
   cards: readonly ShiftFairnessCardView[],
-  serviceCategoryByPersonId: ReadonlyMap<string, PersonnelServiceCategory>,
 ): ShiftFairnessServiceSubgroupView[] {
   const bySubgroup = new Map<PersonnelServiceCategory, ShiftFairnessCardView[]>();
   for (const card of cards) {
-    const category = serviceCategoryByPersonId.get(card.personId) ?? "unclassified";
-    const bucket = bySubgroup.get(category);
+    const bucket = bySubgroup.get(card.serviceCategory);
     if (bucket) bucket.push(card);
-    else bySubgroup.set(category, [card]);
+    else bySubgroup.set(card.serviceCategory, [card]);
   }
 
   const result: ShiftFairnessServiceSubgroupView[] = [];

@@ -7,6 +7,7 @@ function card(overrides: Partial<ShiftFairnessCardView> = {}): ShiftFairnessCard
     key: "p1",
     personId: "p1",
     personName: "אדם בדיקה",
+    serviceCategory: "regular",
     href: "#",
     actualLabel: "4",
     targetLabel: "4",
@@ -23,19 +24,14 @@ function card(overrides: Partial<ShiftFairnessCardView> = {}): ShiftFairnessCard
 }
 
 describe("groupShiftFairnessCardsByServiceType", () => {
-  it("buckets cards into סדיר / קבע / מילואים, in that order", () => {
+  it("buckets cards into סדיר / קבע / מילואים, in that order, reading serviceCategory straight off each card", () => {
     const cards = [
-      card({ key: "reg", personId: "p_regular" }),
-      card({ key: "perm", personId: "p_permanent" }),
-      card({ key: "res", personId: "p_reserve" }),
+      card({ key: "reg", personId: "p_regular", serviceCategory: "regular" }),
+      card({ key: "perm", personId: "p_permanent", serviceCategory: "permanent" }),
+      card({ key: "res", personId: "p_reserve", serviceCategory: "reserve" }),
     ];
-    const byId = new Map([
-      ["p_regular", "regular" as const],
-      ["p_permanent", "permanent" as const],
-      ["p_reserve", "reserve" as const],
-    ]);
 
-    const groups = groupShiftFairnessCardsByServiceType(cards, byId);
+    const groups = groupShiftFairnessCardsByServiceType(cards);
 
     expect(groups.map((g) => g.key)).toEqual(["regular", "permanent", "reserve"]);
     expect(groups.map((g) => g.label)).toEqual(["סדיר", "קבע", "מילואים"]);
@@ -45,38 +41,33 @@ describe("groupShiftFairnessCardsByServiceType", () => {
   });
 
   it("omits a subgroup entirely when it has no members -- never an empty heading", () => {
-    const cards = [card({ personId: "p1" })];
-    const byId = new Map([["p1", "regular" as const]]);
+    const cards = [card({ personId: "p1", serviceCategory: "regular" })];
 
-    const groups = groupShiftFairnessCardsByServiceType(cards, byId);
+    const groups = groupShiftFairnessCardsByServiceType(cards);
 
     expect(groups).toHaveLength(1);
     expect(groups[0].key).toBe("regular");
   });
 
   it("an empty card list produces zero subgroups", () => {
-    expect(groupShiftFairnessCardsByServiceType([], new Map())).toEqual([]);
+    expect(groupShiftFairnessCardsByServiceType([])).toEqual([]);
   });
 
   it("groups multiple people of the same service type together, preserving their relative order", () => {
     const cards = [
-      card({ key: "a", personId: "p_a" }),
-      card({ key: "b", personId: "p_b" }),
+      card({ key: "a", personId: "p_a", serviceCategory: "regular" }),
+      card({ key: "b", personId: "p_b", serviceCategory: "regular" }),
     ];
-    const byId = new Map([
-      ["p_a", "regular" as const],
-      ["p_b", "regular" as const],
-    ]);
 
-    const groups = groupShiftFairnessCardsByServiceType(cards, byId);
+    const groups = groupShiftFairnessCardsByServiceType(cards);
 
     expect(groups).toHaveLength(1);
     expect(groups[0].cards.map((c) => c.key)).toEqual(["a", "b"]);
   });
 
-  it("a person id absent from the map safely falls to unclassified, never dropped", () => {
-    const cards = [card({ personId: "p_unknown" })];
-    const groups = groupShiftFairnessCardsByServiceType(cards, new Map());
+  it("a card carrying serviceCategory: unclassified renders in its own last-ordered subgroup, never dropped", () => {
+    const cards = [card({ personId: "p_unknown", serviceCategory: "unclassified" })];
+    const groups = groupShiftFairnessCardsByServiceType(cards);
 
     expect(groups).toHaveLength(1);
     expect(groups[0].key).toBe("unclassified");
@@ -85,12 +76,11 @@ describe("groupShiftFairnessCardsByServiceType", () => {
 
   it("unclassified renders last when mixed with real categories", () => {
     const cards = [
-      card({ key: "reg", personId: "p_regular" }),
-      card({ key: "unk", personId: "p_unknown" }),
+      card({ key: "reg", personId: "p_regular", serviceCategory: "regular" }),
+      card({ key: "unk", personId: "p_unknown", serviceCategory: "unclassified" }),
     ];
-    const byId = new Map([["p_regular", "regular" as const]]);
 
-    const groups = groupShiftFairnessCardsByServiceType(cards, byId);
+    const groups = groupShiftFairnessCardsByServiceType(cards);
 
     expect(groups.map((g) => g.key)).toEqual(["regular", "unclassified"]);
   });

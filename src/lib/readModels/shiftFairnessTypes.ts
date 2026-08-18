@@ -1,6 +1,7 @@
 import type { FairnessDataCompleteness, FairnessPeriodStatus } from "@/lib/domain/fairnessFoundation";
 import type { FairnessComparisonGroupKey } from "@/lib/domain/fairnessGroups";
 import type { FairnessShiftStatus } from "@/lib/domain/fairnessShiftEngine";
+import type { PersonnelServiceCategory } from "@/lib/domain/personnelType";
 
 /**
  * PR #2 -- the shift Fairness read model's safe projections. No email, no
@@ -19,6 +20,16 @@ import type { FairnessShiftStatus } from "@/lib/domain/fairnessShiftEngine";
 export interface ShiftFairnessPersonRowView {
   personId: string;
   personName: string;
+  /**
+   * Existing `classifyPersonnelType` classification (PR #51 follow-up) --
+   * carried on the row itself so the UI can build a service-type
+   * presentation subgrouping straight from this read model, without the
+   * page needing the full `Person[]` roster. Never a new classification
+   * source, never fed back into the Fairness comparison (which stays
+   * role-based) -- purely a presentation-safe projection of a field the
+   * engine's own `people` input already had.
+   */
+  serviceCategory: PersonnelServiceCategory;
   actualShifts: number;
   target: number | null;
   deviation: number | null;

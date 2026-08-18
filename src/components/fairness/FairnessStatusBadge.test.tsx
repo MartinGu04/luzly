@@ -22,13 +22,32 @@ describe("FairnessStatusBadge", () => {
     expect(screen.queryByText(/יעד/)).toBeNull();
   });
 
-  it("below and above share the exact same tone/classes as balanced -- never styled as an error", () => {
+  it("below/balanced/above each get their own restrained tint, but none uses an aggressive raw red/green Tailwind utility", () => {
     const { container: belowContainer } = render(<FairnessStatusBadge status="below" />);
-    const belowClass = belowContainer.querySelector("span")?.className;
+    const belowClass = belowContainer.querySelector("span")?.className ?? "";
     cleanup();
     const { container: balancedContainer } = render(<FairnessStatusBadge status="balanced" />);
-    const balancedClass = balancedContainer.querySelector("span")?.className;
-    expect(belowClass).toBe(balancedClass);
+    const balancedClass = balancedContainer.querySelector("span")?.className ?? "";
+    cleanup();
+    const { container: aboveContainer } = render(<FairnessStatusBadge status="above" />);
+    const aboveClass = aboveContainer.querySelector("span")?.className ?? "";
+
+    // Distinct tones -- not a copy/paste of the same neutral pill for all three.
+    expect(belowClass).not.toBe(balancedClass);
+    expect(balancedClass).not.toBe(aboveClass);
+    expect(belowClass).not.toBe(aboveClass);
+
+    // Never a saturated traffic-light utility class (bg-red-*, bg-green-*, text-red-*, ...).
+    for (const cls of [belowClass, balancedClass, aboveClass]) {
+      expect(cls).not.toMatch(/-(red|green)-\d/);
+    }
+  });
+
+  it("null (unavailable) stays fully neutral gray, distinct from every real status tint", () => {
+    const { container } = render(<FairnessStatusBadge status={null} />);
+    const className = container.querySelector("span")?.className ?? "";
+    expect(className).toContain("text-muted");
+    expect(className).not.toMatch(/status-(below|balanced|above)/);
   });
 
   it("status is never communicated by color alone -- text is always present alongside the icon", () => {

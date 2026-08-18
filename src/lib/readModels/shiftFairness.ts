@@ -26,7 +26,7 @@ export type ShiftFairnessLoadResult =
   | { status: "missing_email" }
   | { status: "unmapped" }
   | { status: "ambiguous_identity" }
-  | { status: "ok"; model: ShiftFairnessReadModel; person: Person; people: Person[] };
+  | { status: "ok"; model: ShiftFairnessReadModel; person: Person };
 
 /** Same convention as `managerOverview.ts`'s own `reserveParticipationSource` -- one Potential sheet's Fairness-table participation evidence, tagged with the real year its own tab name represents. */
 function reserveParticipationSource(sheet: RawSheet, people: readonly Person[]): ReserveRoleParticipationSource {
@@ -48,19 +48,20 @@ function reserveParticipationSource(sheet: RawSheet, people: readonly Person[]):
  * every actual calculation to `buildShiftFairnessReadModel` UNCHANGED.
  * Never reproduces the shift engine here.
  *
- * `people` is returned alongside `model` (follow-up: service-type
- * subgrouping) purely so the PAGE can classify each row's own
- * `personnelType` (`lib/domain/personnelType.ts`'s `classifyPersonnelType`)
- * for a PRESENTATION-only subdivision within each role section --
- * `buildShiftFairnessReadModel`'s own read model is untouched by this, and
- * the page only ever extracts `personnelType` from these records, never
- * `email`.
+ * `people` (the full roster) is deliberately NOT part of the returned
+ * result -- the page needs each row's service type for a PRESENTATION-only
+ * subdivision within each role section, and `buildShiftFairnessReadModel`
+ * already resolves that onto each row itself (`ShiftFairnessPersonRowView
+ * .serviceCategory`, PR #51 follow-up), so the page can build its grouping
+ * from `model` alone, never a parallel roster.
  */
 export async function loadShiftFairnessReadModel(rawMonth: string | null): Promise<ShiftFairnessLoadResult> {
   const contextResult = await loadFairnessWorkbookContext();
   if (contextResult.status !== "ok") return contextResult;
 
   const { person, people, snapshot } = contextResult.context;
+  // `people` (the roster) stays local to this loader -- only used to
+  // resolve events/reserve-participation evidence below, never returned.
 
   const now = getJerusalemLocalNow();
   const month: CalendarMonthKey = parseMonthParam(rawMonth) ?? calendarMonthOfLocalNow(now);
@@ -82,5 +83,5 @@ export async function loadShiftFairnessReadModel(rawMonth: string | null): Promi
 
   const model = buildShiftFairnessReadModel(people, events, month, now, snapshot.fetchedAt, reserveParticipation);
 
-  return { status: "ok", model, person, people };
+  return { status: "ok", model, person };
 }
