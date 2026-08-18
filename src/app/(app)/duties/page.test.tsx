@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
+import type { DutyFairnessPersonRowView } from "@/lib/readModels/dutyFairnessTypes";
 import type { PersonalDutyAction, PersonalDutyBlock, PersonalScheduleReadModel } from "@/lib/readModels/types";
 
 const getRequestPersonalSchedule = vi.fn();
+const getRequestDutyFairness = vi.fn();
 vi.mock("@/lib/readModels/getRequestPersonalSchedule", () => ({ getRequestPersonalSchedule }));
+vi.mock("@/lib/readModels/getRequestDutyFairness", () => ({ getRequestDutyFairness }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 vi.mock("@/components/ui/DataFreshnessStatus", () => ({
   DataFreshnessStatus: ({ fetchedAt }: { fetchedAt: string }) => <div data-testid="freshness">{fetchedAt}</div>,
@@ -17,7 +20,48 @@ afterEach(() => {
 
 beforeEach(() => {
   getRequestPersonalSchedule.mockReset();
+  // Default: no reachable Duty Fairness data for this request -- the exact
+  // same "show nothing extra" outcome as a genuinely absent exemption, so
+  // every existing test (which never mocked this call) keeps working
+  // unchanged and only the new exemption-specific tests below override it.
+  getRequestDutyFairness.mockReset();
+  getRequestDutyFairness.mockResolvedValue({ status: "unmapped" });
 });
+
+function dutyFairnessRow(overrides: Partial<DutyFairnessPersonRowView> = {}): DutyFairnessPersonRowView {
+  return {
+    key: "p_1-0",
+    personId: "p_1",
+    sourceName: "דני בדיקה",
+    allocationLabel: "טכנאי",
+    previousScore: null,
+    currentScore: 5,
+    delta: null,
+    comparisonTarget: null,
+    gapToTarget: null,
+    normalizedLoad: null,
+    status: null,
+    weekendCount: null,
+    exemptions: [],
+    dataCompleteness: { status: "complete", reasons: [] },
+    ...overrides,
+  };
+}
+
+function dutyFairnessOkResult(rows: DutyFairnessPersonRowView[]) {
+  return {
+    status: "ok" as const,
+    person: { id: "p_1", name: "דני בדיקה", isManager: false, isTechnician: true, isSupervisor: false, personnelType: null },
+    model: {
+      fetchedAt: "2026-08-12T08:00:00.000Z",
+      fairnessModelVersion: 1,
+      period: { key: "h2" as const, year: 2026, label: "7–12/2026", status: "current" as const },
+      targets: { supervisorTarget: null, technicianTarget: null },
+      groups: [{ key: "technician" as const, rows }],
+      totals: null,
+    },
+  };
+}
 
 function dutyBlock(overrides: Partial<PersonalDutyBlock> = {}): PersonalDutyBlock {
   return {
@@ -395,6 +439,68 @@ describe("DutiesPage — security", () => {
     const element = await DutiesPage({ searchParams: searchParams() });
     const { container } = render(element);
     expect(container.querySelector("aside")).toBeNull();
+  });
+});
+
+describe("DutiesPage — duty exemption (reuses the existing Duty Fairness exemption data, no new flag)", () => {
+  it("shows the person's exemption badge when their current-period Duty Fairness row carries one", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(okResult(model({ dutyBlocks: [] })));
+    getRequestDutyFairness.mockResolvedValue(
+      dutyFairnessOkResult([dutyFairnessRow({ exemptions: [{ raw: "שמירות", affectedDutyFamilies: ["guard"] }] })]),
+    );
+    const element = await DutiesPage({ searchParams: searchParams() });
+    render(element);
+    expect(screen.getByText("🚫 שמירות")).toBeInTheDocument();
+  });
+
+  it("shows multiple exemption badges when more than one is recorded", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(okResult(model({ dutyBlocks: [] })));
+    getRequestDutyFairness.mockResolvedValue(
+      dutyFairnessOkResult([
+        dutyFairnessRow({
+          exemptions: [
+            { raw: "שמירות", affectedDutyFamilies: ["guard"] },
+            { raw: "מטבח", affectedDutyFamilies: ["daily_kitchen", "full_kitchen", "weekend_kitchen"] },
+          ],
+        }),
+      ]),
+    );
+    const element = await DutiesPage({ searchParams: searchParams() });
+    render(element);
+    expect(screen.getByText("🚫 שמירות")).toBeInTheDocument();
+    expect(screen.getByText("🚫 מטבח")).toBeInTheDocument();
+  });
+
+  it("shows nothing extra when the person's row has no exemption", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(okResult(model({ dutyBlocks: [] })));
+    getRequestDutyFairness.mockResolvedValue(dutyFairnessOkResult([dutyFairnessRow({ exemptions: [] })]));
+    const element = await DutiesPage({ searchParams: searchParams() });
+    render(element);
+    expect(screen.queryByText(/🚫/)).toBeNull();
+  });
+
+  it("never shows another person's exemption -- matched strictly by personId", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(okResult(model({ dutyBlocks: [] })));
+    getRequestDutyFairness.mockResolvedValue(
+      dutyFairnessOkResult([
+        dutyFairnessRow({
+          personId: "p_someone_else",
+          exemptions: [{ raw: "שמירות", affectedDutyFamilies: ["guard"] }],
+        }),
+      ]),
+    );
+    const element = await DutiesPage({ searchParams: searchParams() });
+    render(element);
+    expect(screen.queryByText(/🚫/)).toBeNull();
+  });
+
+  it("degrades quietly (no exemption badge, no crash) when the Duty Fairness table isn't reachable", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(okResult(model({ dutyBlocks: [] })));
+    getRequestDutyFairness.mockResolvedValue({ status: "unauthenticated" });
+    const element = await DutiesPage({ searchParams: searchParams() });
+    render(element);
+    expect(screen.getByText("תורנויות")).toBeInTheDocument();
+    expect(screen.queryByText(/🚫/)).toBeNull();
   });
 });
 

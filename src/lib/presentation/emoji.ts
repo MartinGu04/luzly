@@ -18,8 +18,8 @@ export interface AssignmentEmojiInput {
 }
 
 const DUTY_FAMILY_EMOJI: Partial<Record<DutyFamily, string>> = {
-  guard: "🛡️",
-  reserve: "🧩",
+  guard: "💂",
+  reserve: "🪖",
   evacuation_on_call: "🚑",
   full_kitchen: "🍽️",
   daily_kitchen: "🍽️",
@@ -31,7 +31,9 @@ const DUTY_FAMILY_EMOJI: Partial<Record<DutyFamily, string>> = {
 const ABSENCE_EMOJI: Partial<Record<AbsenceKind, string>> = {
   vacation: "🏖️",
   abroad: "🏖️",
-  // medical/day_off/after: no fitting calm symbol -- left unmapped.
+  after: "🌅",
+  referral: "🩺",
+  // medical/day_off: no fitting calm symbol -- left unmapped.
 };
 
 /**
