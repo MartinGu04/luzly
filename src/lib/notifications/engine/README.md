@@ -62,8 +62,10 @@ implements; this file is the module map.
   (cross week boundaries, upsert-or-cancel semantics -- a moved
   assignment cancels the old recipient's job and creates the new
   recipient's, since dedupe_key includes the resolved user id) and
-  weekly constraints reminders (all push-enabled users, Sunday/Monday
-  only). Also the logistics-withdrawal team-coordination reminders built
+  weekly constraints reminders (every real auth account, account-wide by
+  product intent -- `fetchAllAuthUserIds`, never gated on push-
+  subscription state or כ"א/roster mapping -- Sunday/Monday only). Also
+  the logistics-withdrawal team-coordination reminders built
   on `logisticsCoordination.ts`: a day-before (20:00) supervisor
   notification (informed of the assignee, or an anti-spam-only warning
   if still unassigned -- never a technician-wide push that evening), and
