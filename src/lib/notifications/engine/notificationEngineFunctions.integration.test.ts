@@ -294,4 +294,122 @@ describe.skipIf(!databaseAvailable)("notification engine SQL functions -- real P
       await expect(insertJob("job-unique", 60_000)).rejects.toThrow(/duplicate key/i);
     });
   });
+
+  // -------------------------------------------------------------------
+  // upsert_pending_reminder_job -- hotfix regression coverage. A GENUINE
+  // proof that Postgres's own `ON CONFLICT ... DO UPDATE ... WHERE` guard
+  // (not a PostgREST client-side filter, which does NOT apply to an
+  // upsert's conflict action) is what actually protects a terminal job
+  // from revival -- exactly the property a mock cannot honestly prove,
+  // and exactly the assumption the pre-fix code got wrong in Production.
+  // -------------------------------------------------------------------
+
+  describe("upsert_pending_reminder_job", () => {
+    async function callUpsert(dedupeKey: string, overrides: Partial<{ title: string; scheduledForOffsetMs: number }> = {}) {
+      return db.query(
+        `select public.upsert_pending_reminder_job($1, $2, $3, 'b', '/', null, $4, now() + ($5 || ' milliseconds')::interval, null)`,
+        ["tomorrow_shift", USER_A, overrides.title ?? "t", dedupeKey, overrides.scheduledForOffsetMs ?? 3_600_000],
+      );
+    }
+
+    async function jobRow(dedupeKey: string) {
+      const result = await db.query("select * from public.notification_jobs where dedupe_key = $1", [dedupeKey]);
+      return result.rows[0];
+    }
+
+    it("12. first call creates a new pending job", async () => {
+      await callUpsert("reminder-fresh");
+      const row = await jobRow("reminder-fresh");
+      expect(row.status).toBe("pending");
+      expect(row.attempts).toBe(0);
+    });
+
+    it("13. a SECOND call while still pending legitimately refreshes content (e.g. the underlying assignment changed)", async () => {
+      await callUpsert("reminder-refresh", { title: "original" });
+      await callUpsert("reminder-refresh", { title: "updated" });
+
+      const row = await jobRow("reminder-refresh");
+      expect(row.status).toBe("pending");
+      expect(row.title).toBe("updated");
+    });
+
+    it("14. reproduces the real Production incident: once a job reaches 'completed', a LATER reminder tick's upsert must NOT revive it", async () => {
+      await callUpsert("reminder-completed", { scheduledForOffsetMs: -1000 });
+
+      // Simulate delivery reaching a genuine terminal state, exactly like
+      // delivery.ts's processJob does after every device succeeds.
+      await db.query("update public.notification_jobs set status = 'completed', attempts = 1 where dedupe_key = $1", [
+        "reminder-completed",
+      ]);
+
+      // A later tick recomputes the SAME still-in-range reminder and
+      // upserts it again, exactly as runTomorrowShiftReminders does on
+      // every tick regardless of the job's current delivery state.
+      await callUpsert("reminder-completed", { title: "revived?" });
+
+      const row = await jobRow("reminder-completed");
+      expect(row.status).toBe("completed");
+      expect(row.attempts).toBe(1);
+      // Content is untouched too -- a no-op WHERE-guard miss must not
+      // partially apply the update.
+      expect(row.title).not.toBe("revived?");
+    });
+
+    it("15. 'failed' is not revived either", async () => {
+      await callUpsert("reminder-failed");
+      await db.query("update public.notification_jobs set status = 'failed', attempts = 5 where dedupe_key = $1", [
+        "reminder-failed",
+      ]);
+      await callUpsert("reminder-failed");
+
+      const row = await jobRow("reminder-failed");
+      expect(row.status).toBe("failed");
+    });
+
+    it("16. 'skipped' (recipient had zero active push subscriptions) is not revived either", async () => {
+      await callUpsert("reminder-skipped");
+      await db.query("update public.notification_jobs set status = 'skipped', attempts = 1 where dedupe_key = $1", [
+        "reminder-skipped",
+      ]);
+      await callUpsert("reminder-skipped");
+
+      const row = await jobRow("reminder-skipped");
+      expect(row.status).toBe("skipped");
+    });
+
+    it("17. 'cancelled' is not revived either", async () => {
+      await callUpsert("reminder-cancelled");
+      await db.query("update public.notification_jobs set status = 'cancelled' where dedupe_key = $1", [
+        "reminder-cancelled",
+      ]);
+      await callUpsert("reminder-cancelled");
+
+      const row = await jobRow("reminder-cancelled");
+      expect(row.status).toBe("cancelled");
+    });
+
+    it("18. end-to-end: a completed job stays permanently unclaimable by claim_due_notification_jobs even after a later upsert", async () => {
+      await callUpsert("reminder-e2e", { scheduledForOffsetMs: -1000 });
+      const claimed = await db.query("select * from public.claim_due_notification_jobs(100)");
+      expect(claimed.rows.map((r) => r.dedupe_key)).toContain("reminder-e2e");
+
+      await db.query("update public.notification_jobs set status = 'completed' where dedupe_key = $1", ["reminder-e2e"]);
+      await callUpsert("reminder-e2e"); // the next tick's reminder recomputation
+
+      const row = await jobRow("reminder-e2e");
+      expect(row.status).toBe("completed");
+
+      const reclaimed = await db.query("select * from public.claim_due_notification_jobs(100)");
+      expect(reclaimed.rows.map((r) => r.dedupe_key)).not.toContain("reminder-e2e");
+    });
+
+    it("19. anon/authenticated cannot execute the function at all", async () => {
+      await db.query("set role authenticated");
+      try {
+        await expect(callUpsert("reminder-forbidden")).rejects.toThrow(/permission denied/i);
+      } finally {
+        await db.query("reset role");
+      }
+    });
+  });
 });

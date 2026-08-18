@@ -416,3 +416,78 @@ describe("getRecentSettledJobsForRecipient (PR #36 dashboard recap)", () => {
     expect(Object.keys(row).sort()).toEqual(["body", "category", "createdAt", "id", "path", "sourceRef", "title"]);
   });
 });
+
+describe("upsertPendingReminderJob -- hotfix regression guard", () => {
+  function makeRpcFakeSupabase() {
+    const rpcCalls: { name: string; args: unknown }[] = [];
+    const client = {
+      rpc: (name: string, args: unknown) => {
+        rpcCalls.push({ name, args });
+        return Promise.resolve({ error: null });
+      },
+      from: () => {
+        throw new Error("upsertPendingReminderJob must never call .from() directly -- it must go through the RPC");
+      },
+    };
+    return { client, rpcCalls };
+  }
+
+  function newJob(overrides: Partial<import("./store").NewNotificationJob> = {}): import("./store").NewNotificationJob {
+    return {
+      category: "tomorrow_shift",
+      recipientUserId: "u_me",
+      title: "⏰ המשמרת שלך מחר",
+      body: "מחר ב־07:30 מתחילה משמרת יום שלך",
+      path: "/",
+      dedupeKey: "tomorrow_shift:2026-08-19:u_me:day",
+      scheduledFor: "2026-08-18T17:00:00.000Z",
+      ...overrides,
+    };
+  }
+
+  it(
+    "calls the upsert_pending_reminder_job RPC with the exact job fields -- NEVER a plain .upsert(...).eq('status','pending') " +
+      "client call, which does not actually guard an upsert's ON CONFLICT DO UPDATE (the real Production bug)",
+    async () => {
+      const { client, rpcCalls } = makeRpcFakeSupabase();
+      const { upsertPendingReminderJob } = await loadModule(client);
+
+      await upsertPendingReminderJob(newJob({ tag: "tag-1", sourceRef: "shift:p1:2026-08-19" }));
+
+      expect(rpcCalls).toEqual([
+        {
+          name: "upsert_pending_reminder_job",
+          args: {
+            p_category: "tomorrow_shift",
+            p_recipient_user_id: "u_me",
+            p_title: "⏰ המשמרת שלך מחר",
+            p_body: "מחר ב־07:30 מתחילה משמרת יום שלך",
+            p_path: "/",
+            p_tag: "tag-1",
+            p_dedupe_key: "tomorrow_shift:2026-08-19:u_me:day",
+            p_scheduled_for: "2026-08-18T17:00:00.000Z",
+            p_source_ref: "shift:p1:2026-08-19",
+          },
+        },
+      ]);
+    },
+  );
+
+  it("passes null for omitted optional tag/sourceRef, never undefined (RPC parameter binding)", async () => {
+    const { client, rpcCalls } = makeRpcFakeSupabase();
+    const { upsertPendingReminderJob } = await loadModule(client);
+
+    await upsertPendingReminderJob(newJob());
+
+    const args = rpcCalls[0].args as Record<string, unknown>;
+    expect(args.p_tag).toBeNull();
+    expect(args.p_source_ref).toBeNull();
+  });
+
+  it("propagates an RPC error rather than swallowing it", async () => {
+    const client = { rpc: () => Promise.resolve({ error: new Error("db down") }) };
+    const { upsertPendingReminderJob } = await loadModule(client);
+
+    await expect(upsertPendingReminderJob(newJob())).rejects.toThrow("db down");
+  });
+});

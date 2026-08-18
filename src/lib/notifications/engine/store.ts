@@ -385,29 +385,33 @@ export async function insertNotificationJobIfAbsent(job: NewNotificationJob): Pr
  * Upsert semantics for time-based reminders (tomorrow shift/duty), whose
  * content can legitimately change before send (the underlying assignment
  * changed) -- see PR #30 spec sections 16-17. Only touches a job still
- * `pending`; a job already claimed/completed is never rewritten out from
- * under an in-flight or already-delivered send.
+ * `pending`; a job already claimed/completed/failed/skipped/cancelled is
+ * never rewritten out from under an in-flight or already-resolved send.
+ *
+ * ALWAYS goes through the `upsert_pending_reminder_job` RPC -- never a
+ * plain `.upsert(...).eq('status','pending')` client call. That chained
+ * `.eq()` looks like a WHERE guard but is NOT one for an upsert: PostgREST
+ * request-level filters are not applied to a merge-duplicates upsert's
+ * `ON CONFLICT ... DO UPDATE` action, so that call unconditionally
+ * revived ANY existing row back to 'pending' regardless of its real
+ * status -- confirmed as a real Production incident (see the migration's
+ * own comment for the exact tick-by-tick mechanism). The RPC expresses
+ * the guard as a genuine `ON CONFLICT ... DO UPDATE ... WHERE` clause in
+ * SQL instead, which Postgres actually honors.
  */
 export async function upsertPendingReminderJob(job: NewNotificationJob): Promise<void> {
   const supabase = getNotificationServiceClient();
-  const { error } = await supabase
-    .from("notification_jobs")
-    .upsert(
-      {
-        category: job.category,
-        recipient_user_id: job.recipientUserId,
-        title: job.title,
-        body: job.body,
-        path: job.path,
-        tag: job.tag ?? null,
-        dedupe_key: job.dedupeKey,
-        scheduled_for: job.scheduledFor,
-        source_ref: job.sourceRef ?? null,
-        status: "pending",
-      },
-      { onConflict: "dedupe_key" },
-    )
-    .eq("status", "pending");
+  const { error } = await supabase.rpc("upsert_pending_reminder_job", {
+    p_category: job.category,
+    p_recipient_user_id: job.recipientUserId,
+    p_title: job.title,
+    p_body: job.body,
+    p_path: job.path,
+    p_tag: job.tag ?? null,
+    p_dedupe_key: job.dedupeKey,
+    p_scheduled_for: job.scheduledFor,
+    p_source_ref: job.sourceRef ?? null,
+  });
   if (error) throw error;
 }
 
