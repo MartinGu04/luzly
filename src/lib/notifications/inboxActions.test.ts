@@ -5,6 +5,7 @@ const loadNotificationInbox = vi.fn();
 const getInboxClearedBefore = vi.fn();
 const getInboxJobsForRecipient = vi.fn();
 const getReadJobIds = vi.fn();
+const isEligibleInboxJobForRecipient = vi.fn();
 const markNotificationJobRead = vi.fn();
 const markNotificationJobsRead = vi.fn();
 const clearNotificationInbox = vi.fn();
@@ -16,6 +17,7 @@ vi.mock("@/lib/notifications/engine/store", () => ({
   getInboxClearedBefore: (...args: unknown[]) => getInboxClearedBefore(...args),
   getInboxJobsForRecipient: (...args: unknown[]) => getInboxJobsForRecipient(...args),
   getReadJobIds: (...args: unknown[]) => getReadJobIds(...args),
+  isEligibleInboxJobForRecipient: (...args: unknown[]) => isEligibleInboxJobForRecipient(...args),
   markNotificationJobRead: (...args: unknown[]) => markNotificationJobRead(...args),
   markNotificationJobsRead: (...args: unknown[]) => markNotificationJobsRead(...args),
   clearNotificationInbox: (...args: unknown[]) => clearNotificationInbox(...args),
@@ -36,6 +38,7 @@ beforeEach(() => {
   getInboxClearedBefore.mockReset().mockResolvedValue("-infinity");
   getInboxJobsForRecipient.mockReset().mockResolvedValue([]);
   getReadJobIds.mockReset().mockResolvedValue(new Set());
+  isEligibleInboxJobForRecipient.mockReset().mockResolvedValue(true);
   markNotificationJobRead.mockReset();
   markNotificationJobsRead.mockReset();
   clearNotificationInbox.mockReset();
@@ -69,10 +72,44 @@ describe("markNotificationReadAction", () => {
     expect(markNotificationJobRead).toHaveBeenCalledWith("u_me", "job_1");
   });
 
+  it("verifies ownership BEFORE ever writing a read-state row", async () => {
+    await markNotificationReadAction("job_1");
+    expect(isEligibleInboxJobForRecipient).toHaveBeenCalledWith("u_me", "job_1");
+
+    const ownershipCallOrder = isEligibleInboxJobForRecipient.mock.invocationCallOrder[0];
+    const writeCallOrder = markNotificationJobRead.mock.invocationCallOrder[0];
+    expect(ownershipCallOrder).toBeLessThan(writeCallOrder);
+  });
+
+  it("rejects another user's job id -- never writes a foreign read-state row", async () => {
+    isEligibleInboxJobForRecipient.mockResolvedValue(false);
+
+    const result = await markNotificationReadAction("someone_elses_job");
+
+    expect(result).toEqual({ ok: false, error: "not_found" });
+    expect(markNotificationJobRead).not.toHaveBeenCalled();
+  });
+
+  it("rejects a nonexistent job id -- never writes a read-state row for it", async () => {
+    isEligibleInboxJobForRecipient.mockResolvedValue(false);
+
+    const result = await markNotificationReadAction("job_does_not_exist");
+
+    expect(result).toEqual({ ok: false, error: "not_found" });
+    expect(markNotificationJobRead).not.toHaveBeenCalled();
+  });
+
   it("never throws on a store failure -- fails closed with a typed result", async () => {
     markNotificationJobRead.mockRejectedValue(new Error("db down"));
     const result = await markNotificationReadAction("job_1");
     expect(result).toEqual({ ok: false, error: "mark_read_failed" });
+  });
+
+  it("never throws when the ownership check itself fails -- fails closed with a typed result", async () => {
+    isEligibleInboxJobForRecipient.mockRejectedValue(new Error("db down"));
+    const result = await markNotificationReadAction("job_1");
+    expect(result).toEqual({ ok: false, error: "mark_read_failed" });
+    expect(markNotificationJobRead).not.toHaveBeenCalled();
   });
 });
 

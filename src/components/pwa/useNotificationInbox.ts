@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { APP_REVALIDATE_EVENT } from "@/components/layout/AppRevalidator";
 import type { NotificationInboxItem } from "@/lib/readModels/notificationInboxTypes";
 import {
   clearNotificationInboxAction,
@@ -62,6 +63,24 @@ export function useNotificationInbox() {
 
   useEffect(() => {
     refresh();
+  }, [refresh]);
+
+  // Keeps the badge fresh while the app shell stays mounted, without the
+  // user ever opening the bell -- `AppRevalidator` is already mounted
+  // once for the whole authenticated shell and already re-checks
+  // freshness on tab-resume/BFCache-restore/a slow periodic cadence
+  // while visible (see its own docstring); this listens for the SAME
+  // event rather than running a second timer or visibility listener of
+  // its own. No polling loop and no realtime channel are added here --
+  // this only reacts to a signal that already exists.
+  useEffect(() => {
+    function handleAppRevalidate() {
+      refresh();
+    }
+    window.addEventListener(APP_REVALIDATE_EVENT, handleAppRevalidate);
+    return () => {
+      window.removeEventListener(APP_REVALIDATE_EVENT, handleAppRevalidate);
+    };
   }, [refresh]);
 
   const unreadCount = useMemo(() => items.filter((item) => !item.isRead).length, [items]);

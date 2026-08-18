@@ -133,6 +133,47 @@ describe("loadNotificationInbox -- safe presentation model", () => {
   });
 });
 
+describe("loadNotificationInbox -- path re-validation at the server/client boundary", () => {
+  it("a normal hardcoded path passes through unchanged", async () => {
+    getInboxJobsForRecipient.mockResolvedValue([job({ path: "/schedule" })]);
+    const result = await loadNotificationInbox();
+    expect(result.items[0].path).toBe("/schedule");
+  });
+
+  it("a protocol-relative path (would escape same-origin) degrades to '/'", async () => {
+    getInboxJobsForRecipient.mockResolvedValue([job({ path: "//evil.example.com" })]);
+    const result = await loadNotificationInbox();
+    expect(result.items[0].path).toBe("/");
+  });
+
+  it("an absolute external URL degrades to '/'", async () => {
+    getInboxJobsForRecipient.mockResolvedValue([job({ path: "https://evil.example.com" })]);
+    const result = await loadNotificationInbox();
+    expect(result.items[0].path).toBe("/");
+  });
+
+  it("a javascript: pseudo-URL degrades to '/'", async () => {
+    getInboxJobsForRecipient.mockResolvedValue([job({ path: "javascript:alert(1)" })]);
+    const result = await loadNotificationInbox();
+    expect(result.items[0].path).toBe("/");
+  });
+
+  it("a path with no leading slash degrades to '/'", async () => {
+    getInboxJobsForRecipient.mockResolvedValue([job({ path: "schedule" })]);
+    const result = await loadNotificationInbox();
+    expect(result.items[0].path).toBe("/");
+  });
+
+  it("never trusts persisted data as safe-forever -- reuses the SAME resolver buildNotificationPayload already applies to outgoing push paths", async () => {
+    // A malformed/unexpected value never reaches items[].path unvalidated,
+    // regardless of how it got into notification_jobs.path.
+    getInboxJobsForRecipient.mockResolvedValue([job({ id: "a", path: "/duties" }), job({ id: "b", path: "ftp://example.com" })]);
+    const result = await loadNotificationInbox();
+    expect(result.items.find((i) => i.id === "a")?.path).toBe("/duties");
+    expect(result.items.find((i) => i.id === "b")?.path).toBe("/");
+  });
+});
+
 describe("loadNotificationInbox -- isolation", () => {
   it("never requests another user's recipient id, regardless of who is authenticated", async () => {
     getAuthenticatedIdentity.mockResolvedValue({ status: "authenticated", userId: OTHER_ID, email: "other@example.com", avatarUrl: null });

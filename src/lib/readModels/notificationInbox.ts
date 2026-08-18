@@ -1,5 +1,6 @@
 import "server-only";
 import { getAuthenticatedIdentity } from "@/lib/auth/currentUser";
+import { resolveSafeNotificationPath } from "@/lib/push/notificationPath";
 import {
   NOTIFICATION_INBOX_LIMIT,
   getInboxClearedBefore,
@@ -57,7 +58,14 @@ export async function loadNotificationInbox(): Promise<NotificationInboxReadMode
       category: job.category,
       title: job.title,
       body: job.body,
-      path: job.path,
+      // `notification_jobs.path` is hardcoded at job-creation time today
+      // (`copy.ts`/`reminders.ts`), but this is the server/client
+      // boundary -- the exact point `buildNotificationPayload` already
+      // treats push paths the same way at (`resolveSafeNotificationPath`,
+      // reused here rather than trusted as persisted-therefore-safe
+      // forever). A malformed/unexpected future value degrades to "/",
+      // never an external or protocol-relative destination.
+      path: resolveSafeNotificationPath(job.path),
       happenedAt: job.scheduledFor,
       isRead: readIds.has(job.id),
     }));

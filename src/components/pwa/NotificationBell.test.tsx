@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { APP_REVALIDATE_EVENT } from "@/components/layout/AppRevalidator";
 import { NotificationBell } from "./NotificationBell";
 
 const enablePushNotificationsAction = vi.fn();
@@ -200,6 +201,40 @@ describe("NotificationBell — unread badge", () => {
     });
     render(<NotificationBell variant="mobile" />);
     await waitFor(() => expect(screen.getByText("9+")).toBeInTheDocument());
+  });
+});
+
+describe("NotificationBell — badge freshness while the shell stays mounted (never requires opening the bell first)", () => {
+  it("re-fetches and updates the badge when AppRevalidator's revalidate event fires, with the popover still closed", async () => {
+    getNotificationInboxAction.mockResolvedValue({ items: [], unreadCount: 0 });
+    render(<NotificationBell variant="mobile" />);
+    await waitFor(() => expect(getNotificationInboxAction).toHaveBeenCalled());
+    expect(screen.queryByText("3")).toBeNull();
+
+    getNotificationInboxAction.mockResolvedValue({
+      items: [inboxItem({ id: "a" }), inboxItem({ id: "b" }), inboxItem({ id: "c" })],
+      unreadCount: 3,
+    });
+    await act(async () => {
+      window.dispatchEvent(new Event(APP_REVALIDATE_EVENT));
+    });
+
+    await waitFor(() => expect(screen.getByText("3")).toBeInTheDocument());
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("stops listening once unmounted -- no further fetch after the revalidate event", async () => {
+    getNotificationInboxAction.mockResolvedValue({ items: [], unreadCount: 0 });
+    const { unmount } = render(<NotificationBell variant="mobile" />);
+    await waitFor(() => expect(getNotificationInboxAction).toHaveBeenCalled());
+    const callsBeforeUnmount = getNotificationInboxAction.mock.calls.length;
+
+    unmount();
+    await act(async () => {
+      window.dispatchEvent(new Event(APP_REVALIDATE_EVENT));
+    });
+
+    expect(getNotificationInboxAction.mock.calls.length).toBe(callsBeforeUnmount);
   });
 });
 

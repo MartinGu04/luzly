@@ -27,6 +27,23 @@ const VISIBLE_REFRESH_INTERVAL_MS = 5 * 60_000;
 const AUTO_REFRESH_COOLDOWN_MS = 5_000;
 
 /**
+ * Fired on `window` alongside every `router.refresh()` this component
+ * actually triggers (resume, BFCache restore, or the periodic cadence --
+ * never on the cooldown-suppressed duplicates). `router.refresh()` only
+ * re-renders the CURRENT route's Server Components; it does not reach a
+ * globally-mounted "use client" component like `NotificationBell` (a
+ * sibling of `AppShell`, not a descendant of whatever page tree gets
+ * refreshed) that maintains its own state via a Server Action rather than
+ * server-rendered props. This event is the deliberately minimal bridge
+ * for exactly that case (`useNotificationInbox` listens for it) --
+ * reusing this component's ALREADY-existing resume-detection/cooldown/
+ * periodic-cadence logic instead of a second, duplicate timer or
+ * visibility-listener elsewhere, and never a new polling loop or realtime
+ * channel of its own.
+ */
+export const APP_REVALIDATE_EVENT = "mimamo:app-revalidate";
+
+/**
  * Keeps the app's server-rendered data reasonably fresh without the user
  * ever manually reloading -- revalidates on return-from-background and on a
  * slow periodic cadence while visible. Renders nothing; a tiny, always-
@@ -84,6 +101,7 @@ export function AppRevalidator() {
       if (now - lastTriggeredAtRef.current < AUTO_REFRESH_COOLDOWN_MS) return;
       lastTriggeredAtRef.current = now;
       router.refresh();
+      window.dispatchEvent(new Event(APP_REVALIDATE_EVENT));
       scheduleNextPeriodicRefresh();
     }
 

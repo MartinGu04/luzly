@@ -427,9 +427,10 @@ describe("notification center -- inbox read/dismiss state", () => {
     created_at: string;
     scheduled_for: string;
     recipient_user_id: string;
+    status: string;
   }
 
-  /** A minimal, faithful fake of `.from("notification_jobs").select().eq().lte().gt().order().limit()`, same style as `makeJobsFakeSupabase` above. */
+  /** A minimal, faithful fake of `.from("notification_jobs").select().eq().neq().lte().gt().order().limit()` (and, for `isEligibleInboxJobForRecipient`, `.select().eq().eq().neq().maybeSingle()`), same style as `makeJobsFakeSupabase` above. */
   function makeInboxJobsFakeSupabase(rows: FakeInboxJobRow[]) {
     const calls: Record<string, unknown> = {};
     const client = {
@@ -444,6 +445,11 @@ describe("notification center -- inbox read/dismiss state", () => {
           eq: (column: string, value: unknown) => {
             calls.eq = [column, value];
             filtered = filtered.filter((row) => (row as unknown as Record<string, unknown>)[column] === value);
+            return builder;
+          },
+          neq: (column: string, value: unknown) => {
+            calls.neq = [column, value];
+            filtered = filtered.filter((row) => (row as unknown as Record<string, unknown>)[column] !== value);
             return builder;
           },
           lte: (column: string, value: string) => {
@@ -470,6 +476,10 @@ describe("notification center -- inbox read/dismiss state", () => {
             calls.limit = n;
             return Promise.resolve({ data: filtered.slice(0, n), error: null });
           },
+          maybeSingle: () => {
+            calls.maybeSingle = true;
+            return Promise.resolve({ data: filtered[0] ?? null, error: null });
+          },
         };
         return builder;
       },
@@ -487,21 +497,50 @@ describe("notification center -- inbox read/dismiss state", () => {
       created_at: "2026-08-18T00:05:00.000Z",
       scheduled_for: "2026-08-18T17:00:00.000Z",
       recipient_user_id: "u_me",
+      status: "pending",
       ...overrides,
     };
   }
 
   describe("getInboxJobsForRecipient", () => {
-    it("filters by recipient_user_id, scheduled_for <= now, and scheduled_for > clearedBefore", async () => {
+    it("filters by recipient_user_id, status != cancelled, scheduled_for <= now, and scheduled_for > clearedBefore", async () => {
       const { client, calls } = makeInboxJobsFakeSupabase([inboxJobRow()]);
       const { getInboxJobsForRecipient } = await loadModule(client);
 
       const rows = await getInboxJobsForRecipient("u_me", "-infinity", 50);
 
       expect(calls.eq).toEqual(["recipient_user_id", "u_me"]);
+      expect(calls.neq).toEqual(["status", "cancelled"]);
       expect((calls.lte as [string, string])[0]).toBe("scheduled_for");
       expect(calls.gt).toEqual(["scheduled_for", "-infinity"]);
       expect(rows).toHaveLength(1);
+    });
+
+    it("excludes a cancelled reminder even once its scheduled_for has passed -- a cancelled job never resurfaces as if it still described something real", async () => {
+      const { client } = makeInboxJobsFakeSupabase([
+        inboxJobRow({ id: "cancelled", status: "cancelled" }),
+        inboxJobRow({ id: "still-valid", status: "pending" }),
+      ]);
+      const { getInboxJobsForRecipient } = await loadModule(client);
+
+      const rows = await getInboxJobsForRecipient("u_me", "-infinity", 50);
+
+      expect(rows.map((r) => r.id)).toEqual(["still-valid"]);
+    });
+
+    it("includes every other delivery outcome -- completed/skipped/failed/still-pending all represent a real logical notification", async () => {
+      const { client } = makeInboxJobsFakeSupabase([
+        inboxJobRow({ id: "a", status: "completed" }),
+        inboxJobRow({ id: "b", status: "skipped" }),
+        inboxJobRow({ id: "c", status: "failed" }),
+        inboxJobRow({ id: "d", status: "pending" }),
+        inboxJobRow({ id: "e", status: "claimed" }),
+      ]);
+      const { getInboxJobsForRecipient } = await loadModule(client);
+
+      const rows = await getInboxJobsForRecipient("u_me", "-infinity", 50);
+
+      expect(rows.map((r) => r.id).sort()).toEqual(["a", "b", "c", "d", "e"]);
     });
 
     it("excludes a reminder whose scheduled_for hasn't happened yet -- never shown hours early", async () => {
@@ -560,6 +599,45 @@ describe("notification center -- inbox read/dismiss state", () => {
       const [row] = await getInboxJobsForRecipient("u_me", "-infinity", 50);
 
       expect(Object.keys(row).sort()).toEqual(["body", "category", "createdAt", "id", "path", "scheduledFor", "title"]);
+    });
+  });
+
+  describe("isEligibleInboxJobForRecipient", () => {
+    it("true for a job that belongs to this recipient and is not cancelled", async () => {
+      const { client } = makeInboxJobsFakeSupabase([inboxJobRow({ id: "job_1", recipient_user_id: "u_me", status: "pending" })]);
+      const { isEligibleInboxJobForRecipient } = await loadModule(client);
+
+      expect(await isEligibleInboxJobForRecipient("u_me", "job_1")).toBe(true);
+    });
+
+    it("false for a job that belongs to a DIFFERENT recipient", async () => {
+      const { client } = makeInboxJobsFakeSupabase([inboxJobRow({ id: "job_1", recipient_user_id: "u_other" })]);
+      const { isEligibleInboxJobForRecipient } = await loadModule(client);
+
+      expect(await isEligibleInboxJobForRecipient("u_me", "job_1")).toBe(false);
+    });
+
+    it("false for a job id that does not exist at all", async () => {
+      const { client } = makeInboxJobsFakeSupabase([]);
+      const { isEligibleInboxJobForRecipient } = await loadModule(client);
+
+      expect(await isEligibleInboxJobForRecipient("u_me", "job_missing")).toBe(false);
+    });
+
+    it("false for the caller's OWN job once it has been cancelled", async () => {
+      const { client } = makeInboxJobsFakeSupabase([inboxJobRow({ id: "job_1", recipient_user_id: "u_me", status: "cancelled" })]);
+      const { isEligibleInboxJobForRecipient } = await loadModule(client);
+
+      expect(await isEligibleInboxJobForRecipient("u_me", "job_1")).toBe(false);
+    });
+
+    it("scopes the lookup by both id and recipient_user_id -- never id alone", async () => {
+      const { client, calls } = makeInboxJobsFakeSupabase([inboxJobRow({ id: "job_1", recipient_user_id: "u_me" })]);
+      const { isEligibleInboxJobForRecipient } = await loadModule(client);
+
+      await isEligibleInboxJobForRecipient("u_me", "job_1");
+
+      expect(calls.eq).toEqual(["recipient_user_id", "u_me"]);
     });
   });
 

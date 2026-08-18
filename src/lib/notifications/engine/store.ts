@@ -588,12 +588,21 @@ export async function getInboxClearedBefore(userId: string): Promise<string> {
  * early) AND `scheduled_for > clearedBefore` (the user's own "נקה
  * התראות" cutoff, passed in by the caller after `getInboxClearedBefore`
  * -- never re-read here, so both queries always agree on the same
- * instant). Deliberately NO `status` filter, same reasoning as
- * `getRecentSettledJobsForRecipient`: whether push delivery completed,
- * was skipped (no subscription), or failed is irrelevant to whether the
- * logical notification happened -- a push-disabled user must see the
- * exact same inbox a push-enabled user would.
+ * instant). No `status` filter beyond excluding `cancelled` (see
+ * `INELIGIBLE_INBOX_STATUS` below) -- delivery OUTCOME is otherwise
+ * irrelevant to whether the logical notification happened, same
+ * reasoning as `getRecentSettledJobsForRecipient`: completed/skipped
+ * (no subscription)/failed/still-pending-but-due all represent a real
+ * logical notification, so a push-disabled user must see the exact same
+ * inbox a push-enabled user would. `cancelled` is different in KIND, not
+ * just outcome: a reminder job can be created ahead of its `scheduled_for`
+ * and later cancelled (`cancelPendingReminderJob`) because the underlying
+ * assignment disappeared/changed before it ever fired -- once
+ * `scheduled_for` passes, that row must never resurface as if it still
+ * described something real.
  */
+const INELIGIBLE_INBOX_STATUS = "cancelled";
+
 export async function getInboxJobsForRecipient(
   recipientUserId: string,
   clearedBefore: string,
@@ -605,6 +614,7 @@ export async function getInboxJobsForRecipient(
     .from("notification_jobs")
     .select("id, category, title, body, path, created_at, scheduled_for")
     .eq("recipient_user_id", recipientUserId)
+    .neq("status", INELIGIBLE_INBOX_STATUS)
     .lte("scheduled_for", nowIso)
     .gt("scheduled_for", clearedBefore)
     .order("scheduled_for", { ascending: false })
@@ -635,7 +645,33 @@ export async function getReadJobIds(userId: string, jobIds: readonly string[]): 
   return new Set(((data ?? []) as { job_id: string }[]).map((row) => row.job_id));
 }
 
-/** Marks one job read for this user -- idempotent (`ignoreDuplicates`), never errors on an already-read job. Never touches `notification_jobs` itself. */
+/**
+ * Whether `jobId` is a real, inbox-eligible job (not `cancelled`, same
+ * eligibility rule `getInboxJobsForRecipient` applies) whose
+ * `recipient_user_id` is `userId` -- the ONE ownership check
+ * `markNotificationReadAction` must run before ever writing a
+ * `notification_reads` row. `jobId` is always client-supplied (the item
+ * the user clicked); the service-role client bypasses RLS entirely, so
+ * without this explicit check a caller could otherwise write a read-state
+ * row for a job that was never addressed to them. `false` covers both
+ * "no such job" and "exists but belongs to someone else / is cancelled"
+ * identically -- the caller never needs to (and, by design, cannot)
+ * distinguish the two.
+ */
+export async function isEligibleInboxJobForRecipient(userId: string, jobId: string): Promise<boolean> {
+  const supabase = getNotificationServiceClient();
+  const { data, error } = await supabase
+    .from("notification_jobs")
+    .select("id")
+    .eq("id", jobId)
+    .eq("recipient_user_id", userId)
+    .neq("status", INELIGIBLE_INBOX_STATUS)
+    .maybeSingle();
+  if (error) throw error;
+  return data !== null;
+}
+
+/** Marks one job read for this user -- idempotent (`ignoreDuplicates`), never errors on an already-read job. Never touches `notification_jobs` itself. Callers MUST verify ownership first (`isEligibleInboxJobForRecipient`) -- this function itself trusts `jobId` as already-proven, so it never re-checks. */
 export async function markNotificationJobRead(userId: string, jobId: string): Promise<void> {
   const supabase = getNotificationServiceClient();
   const { error } = await supabase

@@ -9,6 +9,7 @@ import {
   getInboxClearedBefore,
   getInboxJobsForRecipient,
   getReadJobIds,
+  isEligibleInboxJobForRecipient,
   markNotificationJobRead,
   markNotificationJobsRead,
 } from "@/lib/notifications/engine/store";
@@ -29,13 +30,15 @@ export type InboxActionResult = { ok: true } | { ok: false; error: string };
 
 /**
  * Marks ONE job read for the authenticated caller. `jobId` is
- * client-supplied (the item the user clicked) but the write is ALWAYS
- * scoped to the server-verified `identity.userId` -- never a
- * client-supplied user id -- so this can only ever create a read-state
- * row under the CALLER's own account. A `jobId` that doesn't belong to
- * the caller (or doesn't exist) is harmless: `notification_reads` has no
- * content of its own, and `markNotificationJobRead` never reads back or
- * exposes the job it points at.
+ * client-supplied (the item the user clicked), so before writing
+ * anything this explicitly verifies -- server-side, via
+ * `isEligibleInboxJobForRecipient` -- that the job both belongs to
+ * `identity.userId` and is still inbox-eligible (not `cancelled`). The
+ * service-role client backing `markNotificationJobRead` bypasses RLS
+ * entirely, so that ownership check is the ONLY thing standing between a
+ * client-supplied id and an arbitrary write; it is never skipped, and
+ * never inferred from the write itself "succeeding" (an upsert would
+ * "succeed" for any real job id regardless of whose it is).
  */
 export async function markNotificationReadAction(jobId: string): Promise<InboxActionResult> {
   const identity = await getAuthenticatedIdentity();
@@ -43,6 +46,9 @@ export async function markNotificationReadAction(jobId: string): Promise<InboxAc
   if (typeof jobId !== "string" || jobId.length === 0) return { ok: false, error: "invalid_job_id" };
 
   try {
+    const eligible = await isEligibleInboxJobForRecipient(identity.userId, jobId);
+    if (!eligible) return { ok: false, error: "not_found" };
+
     await markNotificationJobRead(identity.userId, jobId);
     return { ok: true };
   } catch {
