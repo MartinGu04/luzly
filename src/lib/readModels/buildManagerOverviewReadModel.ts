@@ -8,6 +8,7 @@ import {
   type OperationalIssue,
 } from "@/lib/domain/operationalIssues";
 import type { PotentialAllocation } from "@/lib/domain/potentialAllocation";
+import { buildPotentialDutyEventsForRoster } from "@/lib/domain/potentialDutyEvents";
 import {
   reconcilePotentialAllocations,
   type ManagerRequirementReconciliation,
@@ -128,7 +129,20 @@ export function buildManagerOverviewReadModel(
 
   const coverageOverview = buildShiftStaffingOverview(events, shiftSchedule, rangeDates);
 
-  const duties = buildManagerDutyEntries(events, peopleById, rangeDates);
+  /**
+   * Roster-wide duty-data completeness (same conversion `selectedPerson`
+   * below reuses for one person, run once per roster member and merged in
+   * here too) -- so a person whose duties live only in a תקשא"ס period
+   * source, not "משמרות + תורנויות" at all, still appears in the range-scoped
+   * duties list instead of looking duty-free. Deliberately ONLY feeds
+   * `duties` -- `coverageOverview`/`issues`/`potentialRequirements` above
+   * and `absences` below all keep reading the raw `events`, untouched.
+   */
+  const eventsWithPotentialDuties = [
+    ...events,
+    ...buildPotentialDutyEventsForRoster(potentialAllocations, people, events),
+  ];
+  const duties = buildManagerDutyEntries(eventsWithPotentialDuties, peopleById, rangeDates);
 
   const absences = buildManagerAbsenceEntries(events, peopleById, rangeDates);
 
@@ -156,7 +170,15 @@ export function buildManagerOverviewReadModel(
   ).map((reconciliation) => toManagerPotentialRequirementView(reconciliation, peopleById));
 
   const selectedPerson = resolvedSelectedPerson
-    ? buildPersonalScheduleReadModel({ person: resolvedSelectedPerson, people, events, shiftSchedule, fetchedAt, now })
+    ? buildPersonalScheduleReadModel({
+        person: resolvedSelectedPerson,
+        people,
+        events,
+        shiftSchedule,
+        fetchedAt,
+        now,
+        potentialAllocations,
+      })
     : null;
 
   const selectedPersonRangeAbsences = resolvedSelectedPerson

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Event } from "./event";
 import type { PotentialAllocation } from "./potentialAllocation";
-import { buildPotentialDutyEvents } from "./potentialDutyEvents";
+import { buildPotentialDutyEvents, buildPotentialDutyEventsForRoster } from "./potentialDutyEvents";
 import type { Person } from "./types";
 
 function person(overrides: Partial<Person> = {}): Person {
@@ -269,5 +269,43 @@ describe("buildPotentialDutyEvents — determinism and input safety", () => {
     const personnel = Object.freeze([...PERSONNEL]);
     const personDutyEvents = Object.freeze([Object.freeze(dutyEvent({ date: "2026-01-01" }))]);
     expect(() => buildPotentialDutyEvents(allocations, NADAV, personnel, personDutyEvents)).not.toThrow();
+  });
+});
+
+describe("buildPotentialDutyEventsForRoster — the same per-person conversion, run across a whole roster", () => {
+  it("produces one synthetic Event per person whose allocation resolves and isn't already covered", () => {
+    const events = buildPotentialDutyEventsForRoster(
+      [
+        allocation({ date: "2026-08-20", dutyFamily: "guard", slot: 1, sourceAllocationLabel: "נדב דוגמה" }),
+        allocation({ date: "2026-08-21", dutyFamily: "oxid", slot: null, sourceAllocationLabel: "יובל דוגמה" }),
+      ],
+      PERSONNEL,
+      [],
+    );
+    expect(events).toHaveLength(2);
+    expect(events.map((e) => e.personId).sort()).toEqual([NADAV.id, YUVAL.id].sort());
+  });
+
+  it("a person whose duty is already a real internal Event never gets a roster-wide duplicate", () => {
+    const events = buildPotentialDutyEventsForRoster(
+      [allocation({ date: "2026-08-20", dutyFamily: "guard", slot: 1, sourceAllocationLabel: "נדב דוגמה" })],
+      PERSONNEL,
+      [dutyEvent({ personId: NADAV.id, personName: NADAV.name, date: "2026-08-20", dutyFamily: "guard", slot: 1 })],
+    );
+    expect(events).toHaveLength(0);
+  });
+
+  it("ambiguous ownership excludes the allocation for every person in the roster, not just one", () => {
+    const events = buildPotentialDutyEventsForRoster(
+      [allocation({ date: "2026-08-20", dutyFamily: "guard", slot: 1, sourceAllocationLabel: "דניאל" })],
+      PERSONNEL,
+      [],
+    );
+    expect(events).toHaveLength(0);
+  });
+
+  it("never mutates the input events array", () => {
+    const events = Object.freeze([Object.freeze(dutyEvent({ personId: YUVAL.id, date: "2026-01-01" }))]);
+    expect(() => buildPotentialDutyEventsForRoster([allocation()], PERSONNEL, events)).not.toThrow();
   });
 });

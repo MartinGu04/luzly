@@ -4,6 +4,7 @@ import { resolveManagerDateRange } from "@/lib/domain/dateRange";
 import { ShiftConfigurationError, buildShiftSchedule, type ShiftSchedule } from "@/lib/domain/shiftSchedule";
 import type { SheetSourceKey } from "@/lib/google";
 import { parseEvent } from "@/lib/parsers/event";
+import { parsePotentialSheet } from "@/lib/parsers/potential";
 import { parseScheduleSheet } from "@/lib/parsers/schedule";
 import { parseSettingsSheet } from "@/lib/parsers/settings";
 import { buildManagerScheduleReadModel, buildSelfOnlyScheduleReadModel } from "./buildScheduleReadModel";
@@ -22,12 +23,21 @@ export type ScheduleLoadResult =
 /**
  * Everything the Schedule feature ever needs, for a normal user OR a
  * manager in any of the three perspectives -- personnel + schedule +
- * settings. Deliberately narrower than `MANAGER_WORKBOOK_SOURCES`: never
- * potentialH1/H2 (PR #24 §25) -- Manager Overview happens to need Potential
- * for its own reconciliation section, but that's not a reason for Schedule
- * to fetch sheets it has no use for.
+ * settings + potentialH1/H2. PR #24 §25 originally kept this narrower than
+ * `MANAGER_WORKBOOK_SOURCES` (no Potential at all) since only Manager
+ * Overview's reconciliation section needed it; a later duty-completeness
+ * pass (see `buildPersonalScheduleReadModel.ts`) reuses the SAME Potential
+ * data for the "self"/"person" perspectives (never "all" -- unit-wide
+ * staffing/coverage stays out of scope for this source), so it's fetched
+ * here too now.
  */
-const SCHEDULE_MANAGER_SOURCES: SheetSourceKey[] = ["personnel", "schedule", "settings"];
+const SCHEDULE_MANAGER_SOURCES: SheetSourceKey[] = [
+  "personnel",
+  "schedule",
+  "settings",
+  "potentialH1",
+  "potentialH2",
+];
 
 export interface ScheduleParams {
   /** Raw, unvalidated `?month=` value ("YYYY-MM" or anything else) -- this loader resolves the "today" fallback itself from the shared personal read model's own `localNow`, the same `calendarMonthOfLocalNow` convention the page uses for display. Never trusted without `parseMonthParam`. */
@@ -58,10 +68,9 @@ export interface ScheduleParams {
  *    two fetches), this fails closed to the exact same self-only
  *    experience a normal user gets -- never a manager selector/data the
  *    fresh check couldn't currently verify.
- * 4. Parses schedule + settings from the authorized manager snapshot
- *    (never potentialH1/H2), resolves the displayed month's dates, and
- *    delegates all read-model construction to the pure
- *    `buildManagerScheduleReadModel`.
+ * 4. Parses schedule + settings + potentialH1/H2 from the authorized
+ *    manager snapshot, resolves the displayed month's dates, and delegates
+ *    all read-model construction to the pure `buildManagerScheduleReadModel`.
  */
 export async function loadScheduleReadModel(params: ScheduleParams): Promise<ScheduleLoadResult> {
   const personalResult = await getRequestPersonalSchedule();
@@ -111,6 +120,11 @@ export async function loadScheduleReadModel(params: ScheduleParams): Promise<Sch
   const rawAssignments = parseScheduleSheet(getManagerWorkbookSheet(snapshot, "schedule"), people);
   const events = rawAssignments.map(parseEvent);
 
+  const potentialAllocations = [
+    ...parsePotentialSheet(getManagerWorkbookSheet(snapshot, "potentialH1"), people),
+    ...parsePotentialSheet(getManagerWorkbookSheet(snapshot, "potentialH2"), people),
+  ];
+
   const range = resolveManagerDateRange("month", monthParam, selfModel.localNow);
 
   const model = buildManagerScheduleReadModel({
@@ -122,6 +136,7 @@ export async function loadScheduleReadModel(params: ScheduleParams): Promise<Sch
     now: selfModel.localNow,
     monthDates: range.dates,
     requestedPersonId: params.personId,
+    potentialAllocations,
   });
 
   return { status: "ok", model };

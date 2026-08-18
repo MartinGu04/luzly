@@ -53,11 +53,13 @@ export interface BuildPersonalScheduleReadModelInput {
    * Combined H1 + H2 Potential/תקשא"ס allocations, structurally parsed
    * (`lib/parsers/potential.ts`), across every person — never pre-filtered
    * by the caller. Optional/defaults to empty so every existing caller and
-   * test keeps working unchanged; only `dutyBlocks`/`dutyActions` below
-   * ever read this — every other section of this read model is untouched
-   * by it (see `buildPotentialDutyEvents`'s own docs for why: this is
-   * scoped to duty-data completeness only, never a second source of
-   * shift/absence/issue data).
+   * test keeps working unchanged. Feeds every duty-display section below
+   * (`todayEvents`/`upcomingEvents`/`calendarEvents`/`currentAssignments`/
+   * `nextAssignmentGroup`/`dutyBlocks`/`dutyActions`) — but never `issues`,
+   * `currentShiftContexts`/`nextShiftContexts` (coverage/roster), which
+   * deliberately keep reading the raw, unmodified `events` (see
+   * `buildPotentialDutyEvents`'s own docs: this is scoped to duty-data
+   * completeness only, never a second source of shift/coverage truth).
    */
   potentialAllocations?: readonly PotentialAllocation[];
 }
@@ -77,7 +79,28 @@ export function buildPersonalScheduleReadModel(
   const { person, people, events, shiftSchedule, fetchedAt, now, potentialAllocations = [] } = input;
 
   const personEvents = events.filter((event) => event.personId === person.id);
-  const sortedPersonEvents = [...personEvents].sort((a, b) => compareEventsForDisplay(a, b, shiftSchedule));
+
+  /**
+   * A normal department person's duties already have a real Event for
+   * every occurrence, so `buildPotentialDutyEvents` drops every matching
+   * Potential allocation as already-covered — every section below is
+   * therefore built from `personEvents` alone for them, exactly as before
+   * this source existed. A person whose duty only exists in a תקשא"ס period
+   * source (no matching internal Event at all) gets it filled in here, so
+   * it flows into every place this read model already displays that
+   * person's own duties -- the calendar, today/upcoming, and current/next
+   * assignments (PR #60 originally wired this into `dutyBlocks`/
+   * `dutyActions` only; this is the same conversion, just consumed more
+   * broadly) -- never JUST the personal Duties page. `issues`/shift
+   * counterpart context/coverage below deliberately keep reading the
+   * RAW `events` (every person, unmodified) instead of this per-person
+   * merged list — a synthetic duty Event only ever represents duty data
+   * for ITS OWN person's display, never a second source of shift/coverage
+   * truth for anyone.
+   */
+  const potentialDutyEvents = buildPotentialDutyEvents(potentialAllocations, person, people, personEvents);
+  const personDisplayEvents = [...personEvents, ...potentialDutyEvents];
+  const sortedPersonEvents = [...personDisplayEvents].sort((a, b) => compareEventsForDisplay(a, b, shiftSchedule));
 
   const todayEvents = sortedPersonEvents
     .filter((event) => event.date === now.date)
@@ -134,19 +157,10 @@ export function buildPersonalScheduleReadModel(
     .sort(compareIssues)
     .map(toPersonalIssue);
 
-  /**
-   * A normal department person's duties already have a real Event for
-   * every occurrence, so `buildPotentialDutyEvents` drops every matching
-   * Potential allocation as already-covered — their `dutyBlocks` are
-   * therefore built from `personEvents` alone, exactly as before this
-   * source was added. A person whose duty only exists in a תקשא"ס period
-   * source (no matching internal Event at all) gets it filled in here,
-   * merged into the SAME `buildDutyBlocks` call so a duty that spans both
-   * sources on consecutive dates still groups into one real block instead
-   * of two artificial ones.
-   */
-  const potentialDutyEvents = buildPotentialDutyEvents(potentialAllocations, person, people, personEvents);
-  const dutyBlocks = buildDutyBlocks([...personEvents, ...potentialDutyEvents]);
+  // Merged into the SAME `buildDutyBlocks` call (never a second grouping
+  // implementation) so a duty that spans both sources on consecutive dates
+  // still groups into one real block instead of two artificial ones.
+  const dutyBlocks = buildDutyBlocks(personDisplayEvents);
   const dutyActions = deriveDutyActions(dutyBlocks).filter((action) => action.date >= now.date);
 
   return {
