@@ -70,11 +70,30 @@ export const viewport: Viewport = {
  * client component; see `components/pwa` for why it never interferes with
  * authentication redirects (it renders nothing but an optional update
  * banner, and touches no auth/navigation state).
+ *
+ * Deliberately NO `h-full`/`height: 100%` here on `<html>`/`<body>` --
+ * that used to be a percentage-height chain rooted at the true document
+ * root, which on mobile Safari resolves against the LARGE/static
+ * viewport (chrome collapsed), the exact same phantom-scroll failure
+ * mode `AppShell`'s own `min-h-dvh` was already written to avoid (see
+ * its docstring). Since it's `height` (a fixed box), not `min-height`,
+ * `<body>` stayed pinned at that inflated size even once the visible
+ * dynamic viewport (chrome shown) was genuinely shorter -- on a SHORT
+ * page (nothing else tall enough to need real scrolling) that gap was
+ * the entire scrollable area: a large empty region below real content,
+ * everywhere in the app, most visible on short pages (Manager Area
+ * being a common one) since there's no real content to fill it and hide
+ * the discrepancy. Every actual page root already independently
+ * guarantees its own "at least one viewport tall" background via its
+ * OWN `min-h-dvh` wrapper (`AppShell`, `/login`, `error.tsx`,
+ * `AccessDeniedScreen`) — `<html>`/`<body>` never needed a height rule
+ * of their own for that; removing it costs nothing and closes the gap
+ * at its true source instead of clipping it with `overflow: hidden`.
  */
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="he" dir="rtl" className={`${heebo.variable} h-full antialiased`}>
-      <body className="h-full">
+    <html lang="he" dir="rtl" className={`${heebo.variable} antialiased`}>
+      <body>
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
         <ThemeProvider>
           {children}
