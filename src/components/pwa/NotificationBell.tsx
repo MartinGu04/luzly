@@ -14,9 +14,25 @@ const TRIGGER_CLASSES: Record<NotificationBellProps["variant"], string> = {
     "flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sidebar-muted transition-colors duration-150 hover:bg-sidebar-hover hover:text-sidebar-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary",
   mobile:
     "flex h-9 w-9 items-center justify-center rounded-lg text-muted transition-colors duration-150 hover:bg-overlay-soft hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary",
-  /** The global `ShellUtilityBar` top bar (header polish pass) -- same light-surface treatment as `mobile` (this bar sits on the ordinary theme background, never the dark sidebar), but the smaller `rounded-full` circle shape `sidebar` already established, since it sits directly on the header's own generous vertical padding rather than needing a larger square tap target of its own. */
+  /**
+   * The global `ShellUtilityBar` top bar (header polish pass) -- same
+   * light-surface treatment as `mobile` (this bar sits on the ordinary
+   * theme background, never the dark sidebar), but the `rounded-full`
+   * circle shape `sidebar` already established. Release-polish pass: sized
+   * up from `sidebar`'s 32px to 40px (see `ICON_SIZE_CLASSES` below for the
+   * matching icon bump) -- next to the bar's other elements (the two org
+   * logos at 64px/49px, the clock pill), the original 32px bell read as
+   * visually undersized/out of balance.
+   */
   shell:
-    "flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted transition-colors duration-150 hover:bg-overlay-soft hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary",
+    "flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-muted transition-colors duration-150 hover:bg-overlay-soft hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary",
+};
+
+/** Trigger icon size per variant -- `shell` alone grows alongside its own bigger trigger circle above; `sidebar`/`mobile` are unchanged. */
+const ICON_SIZE_CLASSES: Record<NotificationBellProps["variant"], string> = {
+  sidebar: "h-[16px] w-[16px]",
+  mobile: "h-[16px] w-[16px]",
+  shell: "h-[20px] w-[20px]",
 };
 
 /**
@@ -99,7 +115,7 @@ export function NotificationBell({ variant }: NotificationBellProps) {
         onClick={() => setOpen((prev) => !prev)}
         className={TRIGGER_CLASSES[variant]}
       >
-        <TriggerIcon className="h-[16px] w-[16px]" aria-hidden="true" strokeWidth={1.75} />
+        <TriggerIcon className={ICON_SIZE_CLASSES[variant]} aria-hidden="true" strokeWidth={1.75} />
       </button>
 
       {open ? (

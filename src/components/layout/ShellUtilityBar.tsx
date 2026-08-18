@@ -61,13 +61,17 @@ function OrgLogoImage({ logo, heightClassName }: { logo: OrgLogo; heightClassNam
  *
  *   [ bell ]   [ תקש"ל  ·  clock + date  ·  502/תקש"אס ]   [ (balance) ]
  *
- * The clock is the one deliberate FOCAL element -- its own bordered pill
+ * The clock is the one deliberate FOCAL element -- a soft `surface-1` pill
  * (bigger digits than the old bare "sm" readout, plus the date as a clear
  * secondary line underneath) so it reads as real shell chrome instead of
  * a loose timestamp. Release-polish pass: the bar's own vertical padding
  * and the pill's padding were both trimmed down -- the bar was taller than
  * it needed to be, tall enough to force a small unnecessary page scroll at
- * normal desktop viewport heights. The two logos are real supplied institutional marks
+ * normal desktop viewport heights. A follow-up pass then dropped the
+ * pill's own `ring-1 ring-border` -- against the two org marks and the
+ * bell right next to it, the extra outline read as one more heavy frame;
+ * the `surface-1` tint alone still separates it from the bar's background
+ * without boxing it in. The two logos are real supplied institutional marks
  * (`lib/config/brandAssets.ts`), used exactly as provided -- deliberately
  * smaller/quieter than the clock pill so they frame it rather than compete
  * with it. The bell (`NotificationBell` `variant="shell"`) sits at the
@@ -89,7 +93,7 @@ export function ShellUtilityBar({ initialClockTime, dateLabel }: ShellUtilityBar
         <div className="flex items-center justify-center gap-5 sm:gap-8">
           <OrgLogoImage logo={ORG_LOGO_TAKSHAL} heightClassName="h-[64px]" />
 
-          <div className="flex flex-col items-center gap-1 rounded-xl bg-surface-1 px-5 py-2 ring-1 ring-border">
+          <div className="flex flex-col items-center gap-1 rounded-xl bg-surface-1 px-5 py-2">
             <div className="flex items-center gap-2">
               <Clock className="h-4 w-4 text-primary" aria-hidden="true" strokeWidth={1.75} />
               <LiveClock initialTime={initialClockTime} size="md" />
