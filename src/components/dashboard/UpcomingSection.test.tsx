@@ -190,6 +190,6 @@ describe("UpcomingSection", () => {
       <UpcomingSection {...defaultProps} upcomingEvents={[shift]} dutyBlocks={[block]} />,
     );
     expect(container.textContent).toContain("🌙");
-    expect(container.textContent).toContain("🧩");
+    expect(container.textContent).toContain("🪖");
   });
 });

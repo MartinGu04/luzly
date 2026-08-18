@@ -673,12 +673,12 @@ describe("CalendarGrid", () => {
       expect(cell.textContent).toContain("🌙");
     });
 
-    it("an indicator with no semantic emoji (e.g. an 'אפטר' absence) shows a small non-truncated fallback dot instead of clipped text", () => {
+    it("an indicator with no semantic emoji (e.g. a 'גימלים' medical absence) shows a small non-truncated fallback dot instead of clipped text", () => {
       render(
         <CalendarGrid
           grid={WEEK_GRID}
           days={weekDays()}
-          eventsByDate={{ "2026-08-12": [absenceEvent({ date: "2026-08-12", absenceKind: "after", title: "אפטר" })] }}
+          eventsByDate={{ "2026-08-12": [absenceEvent({ date: "2026-08-12", absenceKind: "medical", title: "גימלים" })] }}
           selectedDate={null}
           onSelectDate={noop}
           activeShiftDates={[]}
@@ -686,7 +686,7 @@ describe("CalendarGrid", () => {
       );
       const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
       // The label text is present in the DOM (for sm:+) but hidden below sm:.
-      const label = screen.getByText("אפטר");
+      const label = screen.getByText("גימלים");
       expect(label.className).toMatch(/hidden/);
       expect(label.className).toMatch(/sm:inline/);
       // A small fallback dot exists for the mobile-only, non-text representation.

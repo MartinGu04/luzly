@@ -113,7 +113,7 @@ describe("TodayTimeline", () => {
     const { container } = render(
       <TodayTimeline todayEvents={[]} todayDutyActions={[dutyAction({ dutyFamily: "guard" })]} localNow={localNow()} />,
     );
-    expect(container.textContent).toContain("🛡️");
+    expect(container.textContent).toContain("💂");
   });
 
   it("shows no emoji for a non-timed event with no known semantic mapping", () => {

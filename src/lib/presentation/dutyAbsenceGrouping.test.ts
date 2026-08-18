@@ -69,7 +69,7 @@ describe("groupManagerDuties", () => {
       duty({ key: "b", personName: "ב", dutyFamily: "guard" }),
     ]);
     expect(groups[0].label).toBe("שמירה");
-    expect(groups[0].emoji).toBe("🛡️");
+    expect(groups[0].emoji).toBe("💂");
     expect(groups[0].rows.map((r) => r.personName)).toEqual(["א", "ב"]);
   });
 });

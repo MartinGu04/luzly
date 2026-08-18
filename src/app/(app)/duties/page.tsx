@@ -19,8 +19,10 @@ import {
   selectDutyFocus,
   summarizePendingActions,
 } from "@/lib/presentation/duty";
+import { exemptionBadgeLabel } from "@/lib/presentation/fairness";
 import { formatDateRange } from "@/lib/presentation/hebrewDate";
 import { getHolidayContext } from "@/lib/presentation/hebrewCalendar";
+import { getRequestDutyFairness } from "@/lib/readModels/getRequestDutyFairness";
 import { getRequestPersonalSchedule } from "@/lib/readModels/getRequestPersonalSchedule";
 import type { PersonalDutyAction, PersonalDutyBlock } from "@/lib/readModels/types";
 
@@ -69,6 +71,28 @@ export default async function DutiesPage({ searchParams }: DutiesPageProps) {
   const { model } = result;
   const todayDate = model.localNow.date;
 
+  /**
+   * Duty exemptions are Duty Fairness data (the current H1/H2 period's
+   * Fairness table `exemptions` column, `lib/domain/fairnessExemptions.ts`)
+   * -- a SEPARATE sheet/read model from the personal schedule this page is
+   * otherwise built from, reused here exactly as `/fairness` already reads
+   * it (`getRequestDutyFairness`, request-scoped cached, reuses THIS same
+   * request's already-resolved identity via `loadFairnessWorkbookContext`).
+   * No new exemption flag/rule is introduced -- this only surfaces the
+   * existing typed exemption a manager may have recorded for this person.
+   * A non-"ok" result (e.g. the Fairness table isn't reachable, or this
+   * person has no row in it) simply shows nothing extra -- never blocks or
+   * degrades the rest of the duty overview.
+   */
+  const dutyFairnessResult = await getRequestDutyFairness(null);
+  const exemptionBadges =
+    dutyFairnessResult.status === "ok"
+      ? (dutyFairnessResult.model.groups
+          .flatMap((group) => group.rows)
+          .find((row) => row.personId === dutyFairnessResult.person.id)
+          ?.exemptions.map(exemptionBadgeLabel) ?? [])
+      : [];
+
   const params = await searchParams;
   const rawView = Array.isArray(params.view) ? params.view[0] : params.view;
   const view = parseDutyView(rawView);
@@ -108,7 +132,7 @@ export default async function DutiesPage({ searchParams }: DutiesPageProps) {
 
   return (
     <div className="flex flex-col gap-4 sm:gap-6">
-      <DutiesHeader />
+      <DutiesHeader exemptionBadges={exemptionBadges} />
       <DataFreshnessStatus fetchedAt={model.fetchedAt} />
 
       <DutyFocusSection
