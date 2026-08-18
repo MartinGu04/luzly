@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Event } from "@/lib/domain/event";
+import type { DutyFamily, Event } from "@/lib/domain/event";
 import { buildShiftSchedule } from "@/lib/domain/shiftSchedule";
 import { getOperationalWeek } from "@/lib/domain/operationalWeek";
 import type { LocalNow } from "@/lib/domain/localNow";
+import { jerusalemLocalTimeToInstant } from "@/lib/time/jerusalemClock";
+import { resolveMotzashShabbatInstant } from "@/lib/time/motzashShabbat";
 import type { RecipientResolution } from "./recipients";
 
 function event(overrides: Partial<Event> & Pick<Event, "personId" | "date" | "category">): Event {
@@ -1054,5 +1056,269 @@ describe("runReminders -- logistics-withdrawal fallback only ever exists for Mon
     expect(upsertedFor("logistics_withdrawal_noon_team")).toEqual([
       expect.objectContaining({ recipientUserId: "user-helper", title: "🤝 משיכות היום" }),
     ]);
+  });
+});
+
+// Known week used throughout this suite (also used above):
+// Sun 2026-08-16, Mon 08-17, Tue 08-18, Wed 08-19, Thu 08-20, Fri 08-21, Sat 08-22.
+
+function dutyEvent(personId: string, date: string, dutyFamily: DutyFamily, overrides: Partial<Event> = {}): Event {
+  return event({ personId, date, category: "duty", dutyFamily, ...overrides });
+}
+
+describe("runReminders -- עלמ״ש check-in reminder (שמירה / עתודה / אוקסיד only)", () => {
+  it.each<[DutyFamily, string]>([
+    ["guard", "שמירה"],
+    ["reserve", "עתודה"],
+    ["oxid", "אוקסיד"],
+  ])("creates the correct עלמ״ש reminder for %s (%s)", async (dutyFamily, label) => {
+    store.listPendingJobDedupeKeysByPrefix.mockResolvedValue([]);
+    const { runReminders } = await loadModule();
+    const wednesday = "2026-08-19";
+    const now: LocalNow = { date: wednesday, minuteOfDay: 600 };
+    const week = getOperationalWeek(now);
+
+    await runReminders({
+      events: [dutyEvent("p1", wednesday, dutyFamily)],
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: resolutionWith("p1", "user-p1"),
+    });
+
+    expect(upsertedFor("almash_check_in")).toEqual([
+      expect.objectContaining({
+        category: "almash_check_in",
+        recipientUserId: "user-p1",
+        title: "🫡 עלמ״ש בעוד רבע שעה",
+        body: `יש לך היום עלמ״ש ל${label} — מתחילים ב־13:00`,
+        path: "/duties",
+        dedupeKey: `almash_check_in:${wednesday}:user-p1:${dutyFamily}:`,
+        scheduledFor: jerusalemLocalTimeToInstant(wednesday, 12, 45).toISOString(),
+      }),
+    ]);
+  });
+
+  it.each<DutyFamily>(["rasar", "callup", "full_kitchen", "daily_kitchen", "weekend_kitchen", "evacuation_on_call"])(
+    "never fires for %s -- only שמירה/עתודה/אוקסיד qualify, even though deriveDutyActions() itself has a check-in for this family too",
+    async (dutyFamily) => {
+      store.listPendingJobDedupeKeysByPrefix.mockResolvedValue([]);
+      const { runReminders } = await loadModule();
+      const wednesday = "2026-08-19";
+      const now: LocalNow = { date: wednesday, minuteOfDay: 600 };
+      const week = getOperationalWeek(now);
+
+      await runReminders({
+        events: [dutyEvent("p1", wednesday, dutyFamily)],
+        people: [],
+        shiftSchedule: schedule,
+        week,
+        now,
+        persist: true,
+        recipientResolution: resolutionWith("p1", "user-p1"),
+      });
+
+      expect(upsertedFor("almash_check_in")).toEqual([]);
+    },
+  );
+
+  it("a 3-day guard duty gets a check-in on day 1 and day 2, never on the final day", async () => {
+    store.listPendingJobDedupeKeysByPrefix.mockResolvedValue([]);
+    const threeDayEvents = [
+      dutyEvent("p1", "2026-08-19", "guard"),
+      dutyEvent("p1", "2026-08-20", "guard"),
+      dutyEvent("p1", "2026-08-21", "guard"),
+    ];
+
+    for (const [today, expectFires] of [
+      ["2026-08-19", true],
+      ["2026-08-20", true],
+      ["2026-08-21", false],
+    ] as const) {
+      store.upsertPendingReminderJob.mockClear();
+      const { runReminders } = await loadModule();
+      const now: LocalNow = { date: today, minuteOfDay: 600 };
+      const week = getOperationalWeek(now);
+
+      await runReminders({
+        events: threeDayEvents,
+        people: [],
+        shiftSchedule: schedule,
+        week,
+        now,
+        persist: true,
+        recipientResolution: resolutionWith("p1", "user-p1"),
+      });
+
+      expect(upsertedFor("almash_check_in")).toHaveLength(expectFires ? 1 : 0);
+    }
+  });
+
+  it("a single-day duty behaves like day 1 of a multi-day block -- it still gets its one check-in", async () => {
+    store.listPendingJobDedupeKeysByPrefix.mockResolvedValue([]);
+    const { runReminders } = await loadModule();
+    const wednesday = "2026-08-19";
+    const now: LocalNow = { date: wednesday, minuteOfDay: 600 };
+    const week = getOperationalWeek(now);
+
+    await runReminders({
+      events: [dutyEvent("p1", wednesday, "oxid")],
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: resolutionWith("p1", "user-p1"),
+    });
+
+    expect(upsertedFor("almash_check_in")).toHaveLength(1);
+  });
+
+  it("Friday is scheduled at 12:45 Jerusalem, same as any other weekday -- only Saturday is special", async () => {
+    store.listPendingJobDedupeKeysByPrefix.mockResolvedValue([]);
+    const { runReminders } = await loadModule();
+    const friday = "2026-08-21";
+    const now: LocalNow = { date: friday, minuteOfDay: 600 };
+    const week = getOperationalWeek(now);
+
+    await runReminders({
+      events: [dutyEvent("p1", friday, "guard")],
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: resolutionWith("p1", "user-p1"),
+    });
+
+    expect(upsertedFor("almash_check_in")).toEqual([
+      expect.objectContaining({ scheduledFor: jerusalemLocalTimeToInstant(friday, 12, 45).toISOString() }),
+    ]);
+  });
+
+  it("Saturday uses the real resolved מוצ״ש instant and the Saturday-specific copy, never 12:45/13:00", async () => {
+    store.listPendingJobDedupeKeysByPrefix.mockResolvedValue([]);
+    const { runReminders } = await loadModule();
+    const saturday = "2026-08-22";
+    const now: LocalNow = { date: saturday, minuteOfDay: 600 };
+    const week = getOperationalWeek(now);
+
+    await runReminders({
+      events: [dutyEvent("p1", saturday, "guard")],
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: resolutionWith("p1", "user-p1"),
+    });
+
+    const expectedMotzash = resolveMotzashShabbatInstant(saturday)!.toISOString();
+    // Sanity: genuinely different from what 12:45 that day would have been.
+    expect(expectedMotzash).not.toBe(jerusalemLocalTimeToInstant(saturday, 12, 45).toISOString());
+
+    expect(upsertedFor("almash_check_in")).toEqual([
+      expect.objectContaining({
+        title: "🫡 הגיע הזמן לעלמ״ש",
+        body: "יש לך הערב עלמ״ש לשמירה",
+        scheduledFor: expectedMotzash,
+      }),
+    ]);
+  });
+
+  it("repeated ticks with the same input use the identical dedupe key -- no duplicates, upsert-idempotent", async () => {
+    store.listPendingJobDedupeKeysByPrefix.mockResolvedValue([]);
+    const wednesday = "2026-08-19";
+    const now: LocalNow = { date: wednesday, minuteOfDay: 600 };
+    const week = getOperationalWeek(now);
+    const input = {
+      events: [dutyEvent("p1", wednesday, "reserve")],
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: resolutionWith("p1", "user-p1"),
+    };
+
+    const { runReminders: tick1 } = await loadModule();
+    await tick1(input);
+    const firstKey = upsertedFor("almash_check_in")[0]?.dedupeKey;
+
+    const { runReminders: tick2 } = await loadModule();
+    await tick2(input);
+    const secondKey = upsertedFor("almash_check_in")[0]?.dedupeKey;
+
+    expect(firstKey).toBeDefined();
+    expect(secondKey).toBe(firstKey);
+  });
+
+  it("cancels a still-pending עלמ״ש job whose qualifying duty disappeared before send", async () => {
+    const staleKey = "almash_check_in:2026-08-19:user-p1:guard:";
+    store.listPendingJobDedupeKeysByPrefix.mockResolvedValue([staleKey]);
+    const { runReminders } = await loadModule();
+    const wednesday = "2026-08-19";
+    const now: LocalNow = { date: wednesday, minuteOfDay: 600 };
+    const week = getOperationalWeek(now);
+
+    await runReminders({
+      events: [], // the duty no longer exists
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: resolutionWith("p1", "user-p1"),
+    });
+
+    expect(store.cancelPendingReminderJob).toHaveBeenCalledWith(staleKey);
+  });
+
+  it("never creates a job for a person who cannot be resolved to an auth user -- same recipient-resolution rule as every other reminder", async () => {
+    store.listPendingJobDedupeKeysByPrefix.mockResolvedValue([]);
+    const { runReminders } = await loadModule();
+    const wednesday = "2026-08-19";
+    const now: LocalNow = { date: wednesday, minuteOfDay: 600 };
+    const week = getOperationalWeek(now);
+
+    await runReminders({
+      events: [dutyEvent("p_unmapped", wednesday, "guard")],
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: resolutionWith("p1", "user-p1"), // p_unmapped is NOT in the resolution
+    });
+
+    expect(upsertedFor("almash_check_in")).toEqual([]);
+  });
+
+  it("two qualifying same-day duty families for one person produce two distinct jobs AND two distinct Push tags -- the service worker collapses same-tag pushes at the OS level (public/sw.js), so a coarser tag would silently drop one", async () => {
+    store.listPendingJobDedupeKeysByPrefix.mockResolvedValue([]);
+    const { runReminders } = await loadModule();
+    const wednesday = "2026-08-19";
+    const now: LocalNow = { date: wednesday, minuteOfDay: 600 };
+    const week = getOperationalWeek(now);
+
+    await runReminders({
+      events: [dutyEvent("p1", wednesday, "guard"), dutyEvent("p1", wednesday, "oxid")],
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: resolutionWith("p1", "user-p1"),
+    });
+
+    const jobs = upsertedFor("almash_check_in");
+    expect(jobs).toHaveLength(2);
+
+    const dedupeKeys = jobs.map((job) => job.dedupeKey);
+    const tags = jobs.map((job) => job.tag);
+    expect(new Set(dedupeKeys).size).toBe(2);
+    expect(new Set(tags).size).toBe(2);
   });
 });

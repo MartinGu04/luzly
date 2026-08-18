@@ -1,14 +1,17 @@
 import "server-only";
-import type { Event } from "@/lib/domain/event";
+import type { DutyFamily, Event } from "@/lib/domain/event";
 import type { Person } from "@/lib/domain/types";
 import type { OperationalWeek } from "@/lib/domain/operationalWeek";
 import type { LocalNow } from "@/lib/domain/localNow";
 import { nextCalendarDateString } from "@/lib/domain/operationalWeek";
-import { dayOfWeek, parseCalendarDate } from "@/lib/domain/dutyBlocks";
+import { dayOfWeek, parseCalendarDate, buildDutyBlocks } from "@/lib/domain/dutyBlocks";
+import { deriveDutyActions } from "@/lib/domain/dutyActions";
 import { resolveEventShiftInterval, type ShiftSchedule } from "@/lib/domain/shiftSchedule";
 import { dutyFamilyLabel, periodLabel } from "@/lib/presentation/labels";
 import { jerusalemLocalTimeToInstant } from "@/lib/time/jerusalemClock";
+import { resolveMotzashShabbatInstant } from "@/lib/time/motzashShabbat";
 import {
+  ALMASH_CHECKIN_REMINDER_TIME,
   CONSTRAINTS_MONDAY_REMINDER_TIME,
   CONSTRAINTS_SUNDAY_REMINDER_TIME,
   LOGISTICS_WITHDRAWAL_NOON_REMINDER_TIME,
@@ -43,6 +46,7 @@ export interface RemindersSummary {
   logisticsWithdrawalNoonAssignedJobs: number;
   logisticsWithdrawalNoonSupervisorJobs: number;
   logisticsWithdrawalNoonTeamJobs: number;
+  almashCheckInJobs: number;
   tomorrowShiftCancelled: number;
   tomorrowDutyCancelled: number;
   tomorrowLogisticsWithdrawalCancelled: number;
@@ -50,6 +54,7 @@ export interface RemindersSummary {
   logisticsWithdrawalNoonAssignedCancelled: number;
   logisticsWithdrawalNoonSupervisorCancelled: number;
   logisticsWithdrawalNoonTeamCancelled: number;
+  almashCheckInCancelled: number;
   constraintsJobs: number;
 }
 
@@ -89,6 +94,7 @@ export async function runReminders(input: RemindersInput): Promise<RemindersSumm
   const tomorrowLogisticsWithdrawal = await runTomorrowLogisticsWithdrawalReminders(input);
   const tomorrowLogisticsWithdrawalSupervisor = await runTomorrowLogisticsWithdrawalSupervisorReminders(input);
   const logisticsWithdrawalNoon = await runLogisticsWithdrawalNoonReminders(input);
+  const almashCheckIn = await runAlmashCheckInReminders(input);
   const constraintsJobs = await runConstraintsReminders(input);
 
   return {
@@ -99,6 +105,7 @@ export async function runReminders(input: RemindersInput): Promise<RemindersSumm
     logisticsWithdrawalNoonAssignedJobs: logisticsWithdrawalNoon.assigned.created,
     logisticsWithdrawalNoonSupervisorJobs: logisticsWithdrawalNoon.supervisor.created,
     logisticsWithdrawalNoonTeamJobs: logisticsWithdrawalNoon.team.created,
+    almashCheckInJobs: almashCheckIn.created,
     tomorrowShiftCancelled: tomorrowShift.cancelled,
     tomorrowDutyCancelled: tomorrowDuty.cancelled,
     tomorrowLogisticsWithdrawalCancelled: tomorrowLogisticsWithdrawal.cancelled,
@@ -106,6 +113,7 @@ export async function runReminders(input: RemindersInput): Promise<RemindersSumm
     logisticsWithdrawalNoonAssignedCancelled: logisticsWithdrawalNoon.assigned.cancelled,
     logisticsWithdrawalNoonSupervisorCancelled: logisticsWithdrawalNoon.supervisor.cancelled,
     logisticsWithdrawalNoonTeamCancelled: logisticsWithdrawalNoon.team.cancelled,
+    almashCheckInCancelled: almashCheckIn.cancelled,
     constraintsJobs,
   };
 }
@@ -455,6 +463,92 @@ async function runLogisticsWithdrawalNoonReminders(input: RemindersInput): Promi
   return { assigned: assignedResult, supervisor: supervisorResult, team: teamResult };
 }
 
+// ---------------------------------------------------------------------------
+// עלמ״ש check-in reminder (שמירה / עתודה / אוקסיד only)
+// ---------------------------------------------------------------------------
+
+/**
+ * Only these three duty families get an עלמ״ש check-in push -- NOT every
+ * family `deriveDutyActions()` produces a `duty_check_in` action for
+ * (kitchen/rasar/callup also get one, but are out of scope here by product
+ * decision). Filtered here, at the notification boundary, rather than by
+ * changing `deriveDutyActions()` itself -- that function's broader output
+ * is still correct domain data for its existing UI consumers
+ * (`duties/page.tsx`, `TodayTimeline`); this is a narrower selection ON
+ * TOP of it, never a fork of it.
+ */
+const ALMASH_CHECKIN_DUTY_FAMILIES: ReadonlySet<DutyFamily> = new Set<DutyFamily>(["guard", "reserve", "oxid"]);
+
+/**
+ * Reuses `buildDutyBlocks`/`deriveDutyActions` (the SAME domain functions
+ * `duties/page.tsx` already renders from) rather than re-deriving
+ * check-in dates from `Event`s directly -- so multi-day block semantics
+ * (check-in on every actual duty date EXCEPT the final day), dedup, and
+ * source-event traceability all come for free and can never drift from
+ * what the Duties page itself shows.
+ *
+ * Fires the SAME calendar day as the check-in (`action.date`), not the
+ * day before -- this is a same-day "noon-style" reminder like
+ * `logistics_withdrawal_noon_*`, not a day-before "tomorrow-style" one.
+ * Sunday-Friday: 12:45 (a quarter hour before the 13:00 check-in).
+ * Saturday: the actual מוצ״ש for that date (`resolveMotzashShabbatInstant`)
+ * -- 13:00/12:45 are never reachable/relevant on a Saturday, and מוצ״ש
+ * itself IS the real check-in moment then, not a 15-minutes-early nudge.
+ * A date whose מוצ״ש can't be resolved (should be unreachable --
+ * `action.date` always comes from a previously-validated `Event.date`)
+ * is skipped rather than falling back to a guessed clock time.
+ */
+async function runAlmashCheckInReminders(input: RemindersInput): Promise<{ created: number; cancelled: number }> {
+  const today = input.now.date;
+  const todayParsed = parseCalendarDate(today);
+  if (!todayParsed) return { created: 0, cancelled: 0 };
+
+  const isSaturday = dayOfWeek(todayParsed) === 6;
+  const scheduledFor = isSaturday
+    ? resolveMotzashShabbatInstant(today)?.toISOString()
+    : toIso(today, ALMASH_CHECKIN_REMINDER_TIME);
+  if (!scheduledFor) return { created: 0, cancelled: 0 };
+
+  const dutyBlocks = buildDutyBlocks(input.events);
+  const todayActions = deriveDutyActions(dutyBlocks).filter(
+    (action) => action.date === today && ALMASH_CHECKIN_DUTY_FAMILIES.has(action.dutyBlock.dutyFamily),
+  );
+
+  const validJobs: NewNotificationJob[] = [];
+  for (const action of todayActions) {
+    const recipient = input.recipientResolution.resolved.get(action.personId);
+    if (!recipient) continue;
+
+    const label = dutyFamilyLabel(action.dutyBlock.dutyFamily);
+    const { title, body } = isSaturday
+      ? { title: "🫡 הגיע הזמן לעלמ״ש", body: `יש לך הערב עלמ״ש ל${label}` }
+      : { title: "🫡 עלמ״ש בעוד רבע שעה", body: `יש לך היום עלמ״ש ל${label} — מתחילים ב־13:00` };
+
+    const slot = action.dutyBlock.slot ?? "";
+    validJobs.push({
+      category: "almash_check_in",
+      recipientUserId: recipient.userId,
+      title,
+      body,
+      path: "/duties",
+      // Must include dutyFamily/slot, same as `dedupeKey` below -- the
+      // service worker passes this tag straight through to
+      // `showNotification()` (`public/sw.js`), where the Notifications
+      // API replaces/collapses any existing OS-level notification with
+      // the same tag. A coarser tag (date+recipient alone) would silently
+      // drop a second legitimate same-day almash push for one person
+      // (e.g. two concurrent duty families/slots) even though both stay
+      // fully distinct logical jobs in notification_jobs/the inbox.
+      tag: `almash-check-in-${today}-${recipient.userId}-${action.dutyBlock.dutyFamily}-${slot}`,
+      dedupeKey: `almash_check_in:${today}:${recipient.userId}:${action.dutyBlock.dutyFamily}:${slot}`,
+      scheduledFor,
+      sourceRef: `duty:${action.personId}:${action.date}`,
+    });
+  }
+
+  return applyReminderJobs("almash_check_in", today, validJobs, input.persist);
+}
+
 /** Every dedupe-key prefix any reminder category above ever uses -- kept as a union so `applyReminderJobs` can't be called with a typo'd/unrelated category string. */
 type ReminderCategory =
   | "tomorrow_shift"
@@ -463,7 +557,8 @@ type ReminderCategory =
   | "tomorrow_logistics_withdrawal_supervisor"
   | "logistics_withdrawal_noon_assigned"
   | "logistics_withdrawal_noon_supervisor"
-  | "logistics_withdrawal_noon_team";
+  | "logistics_withdrawal_noon_team"
+  | "almash_check_in";
 
 /**
  * Shared upsert-or-cancel application for every time-based reminder

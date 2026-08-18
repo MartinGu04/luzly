@@ -51,6 +51,14 @@ export const CONSTRAINTS_SUNDAY_REMINDER_TIME: LocalClockTime = { hour: 18, minu
 /** 09:00 Asia/Jerusalem, Monday. */
 export const CONSTRAINTS_MONDAY_REMINDER_TIME: LocalClockTime = { hour: 9, minute: 0 };
 
+/**
+ * 12:45 Asia/Jerusalem, the SAME day as the עלמ״ש check-in itself (13:00) --
+ * Sunday-Friday only. Saturday never uses this: the check-in is pushed
+ * out to מוצ״ש instead (see `lib/time/motzashShabbat.ts`), so 13:00 is
+ * never actually reachable/relevant on a Saturday.
+ */
+export const ALMASH_CHECKIN_REMINDER_TIME: LocalClockTime = { hour: 12, minute: 45 };
+
 export function clockTimeToMinuteOfDay(time: LocalClockTime): number {
   return time.hour * 60 + time.minute;
 }

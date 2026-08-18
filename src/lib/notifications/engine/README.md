@@ -75,7 +75,13 @@ implements; this file is the module map.
   the shift/duty reminders -- every tick recomputes fresh from the
   current Schedule truth, so a reassignment, a newly-proven/lost
   supervisor, or a technician's eligibility change all resolve correctly
-  before the job is ever delivered.
+  before the job is ever delivered. The עלמ״ש check-in reminder
+  (`almash_check_in`, שמירה/עתודה/אוקסיד only) is the same same-day model
+  again, built directly on `lib/domain/dutyBlocks.ts`/`dutyActions.ts`
+  (never a re-derivation of check-in dates from `Event`s) -- 12:45 on a
+  weekday/Friday, or the real astronomical מוצ״ש for that Saturday
+  (`lib/time/motzashShabbat.ts`) when the check-in date is a Saturday.
+  See `reminders.ts`'s own `runAlmashCheckInReminders` docstring.
 - `delivery.ts` -- claims due outbox jobs, fans out to every active
   subscription per recipient, reuses PR #29's `sendPush` classification
   (permanent 404/410 -> delete subscription; transient -> never delete,
