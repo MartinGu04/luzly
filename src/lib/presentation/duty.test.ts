@@ -64,8 +64,8 @@ describe("dutyBlockTitle", () => {
 
 describe("dutyBlockEmoji", () => {
   it("maps known families", () => {
-    expect(dutyBlockEmoji({ dutyFamily: "guard" })).toBe("🛡️");
-    expect(dutyBlockEmoji({ dutyFamily: "reserve" })).toBe("🧩");
+    expect(dutyBlockEmoji({ dutyFamily: "guard" })).toBe("💂");
+    expect(dutyBlockEmoji({ dutyFamily: "reserve" })).toBe("🪖");
   });
 
   it("renders cleanly (null) for a family with no assigned emoji, never inventing one", () => {

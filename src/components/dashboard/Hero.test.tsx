@@ -217,9 +217,9 @@ describe("Hero — semantic assignment emoji", () => {
     expect(container.textContent).toContain("🌙");
   });
 
-  it("shows a shield emoji for a guard duty lead", () => {
+  it("shows a guard emoji for a guard duty lead", () => {
     const { container } = render(<Hero {...defaultProps} currentAssignments={[dutyAssignment()]} />);
-    expect(container.textContent).toContain("🛡️");
+    expect(container.textContent).toContain("💂");
   });
 
   it("shows no emoji for an unspecified-period shift -- never guesses", () => {

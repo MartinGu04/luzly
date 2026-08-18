@@ -23,6 +23,14 @@ function settingsSheet(rows: string[][]): RawSheet {
   return { name: "הגדרות", values: rows };
 }
 
+function potentialH1Sheet(rows: (string | number)[][]): RawSheet {
+  return { name: 'פוטנציאל תקש"אס 1-6/2026', values: rows };
+}
+
+function potentialH2Sheet(rows: (string | number)[][]): RawSheet {
+  return { name: 'פוטנציאל תקש"אס 7-12/2026', values: rows };
+}
+
 const PERSONNEL_ROWS: string[][] = [
   ["שם", "מייל"],
   ["דני בדיקה", "dani@example.invalid"],
@@ -40,6 +48,8 @@ function validSnapshot() {
       scheduleSheet([]),
       settingsSheet(SETTINGS_ROWS_VALID),
       personnelSheet(PERSONNEL_ROWS),
+      potentialH1Sheet([]),
+      potentialH2Sheet([]),
     ],
   };
 }
@@ -66,7 +76,7 @@ describe("loadPersonalScheduleReadModel", () => {
     expect(getWorkbookSnapshot).not.toHaveBeenCalled();
   });
 
-  it("1 & 2. requests only personnel + schedule + settings, in a single batch call", async () => {
+  it("1 & 2. requests personnel + schedule + settings + potentialH1 + potentialH2, in a single batch call", async () => {
     getAuthenticatedIdentity.mockResolvedValue({
       status: "authenticated",
       userId: "u1",
@@ -78,10 +88,16 @@ describe("loadPersonalScheduleReadModel", () => {
     await loadPersonalScheduleReadModel();
 
     expect(getWorkbookSnapshot).toHaveBeenCalledTimes(1);
-    expect(getWorkbookSnapshot).toHaveBeenCalledWith(["personnel", "schedule", "settings"]);
+    expect(getWorkbookSnapshot).toHaveBeenCalledWith([
+      "personnel",
+      "schedule",
+      "settings",
+      "potentialH1",
+      "potentialH2",
+    ]);
   });
 
-  it("3. never requests the potential sheets", async () => {
+  it("3. requests both Potential periods -- so a person whose duties only exist in a תקשא\"ס source still gets them, without a second Google request", async () => {
     getAuthenticatedIdentity.mockResolvedValue({
       status: "authenticated",
       userId: "u1",
@@ -93,8 +109,8 @@ describe("loadPersonalScheduleReadModel", () => {
     await loadPersonalScheduleReadModel();
 
     const requestedKeys = getWorkbookSnapshot.mock.calls[0][0];
-    expect(requestedKeys).not.toContain("potentialH1");
-    expect(requestedKeys).not.toContain("potentialH2");
+    expect(requestedKeys).toContain("potentialH1");
+    expect(requestedKeys).toContain("potentialH2");
   });
 
   it("4 & 5. unique authenticated email resolves the Person and builds a model", async () => {
@@ -179,6 +195,43 @@ describe("loadPersonalScheduleReadModel", () => {
 
     const result = await loadPersonalScheduleReadModel();
     expect(result.status).toBe("configuration_error");
+  });
+
+  it("a duty attributed via a תקשא\"ס period source (no matching internal Event at all) reaches dutyBlocks end-to-end", async () => {
+    getAuthenticatedIdentity.mockResolvedValue({
+      status: "authenticated",
+      userId: "u1",
+      email: "dani@example.invalid",
+      avatarUrl: null,
+    });
+    getWorkbookSnapshot.mockResolvedValue({
+      fetchedAt: "2026-08-12T08:00:00.000Z",
+      sheets: [
+        scheduleSheet([]),
+        settingsSheet(SETTINGS_ROWS_VALID),
+        personnelSheet(PERSONNEL_ROWS),
+        potentialH1Sheet([]),
+        potentialH2Sheet([
+          ["תאריך", "יום", "שומר 1"],
+          ["20/08/2026", "ה", "דני בדיקה"],
+        ]),
+      ],
+    });
+
+    const result = await loadPersonalScheduleReadModel();
+
+    expect(result.status).toBe("ok");
+    if (result.status === "ok") {
+      expect(result.model.dutyBlocks).toEqual([
+        expect.objectContaining({
+          dutyFamily: "guard",
+          slot: 1,
+          startDate: "2026-08-20",
+          endDate: "2026-08-20",
+          certainty: "tentative",
+        }),
+      ]);
+    }
   });
 
   it("10. the authenticated person's email is not present in the serialized result", async () => {

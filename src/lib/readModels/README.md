@@ -28,23 +28,38 @@ layer's safe projections may.
   `upcomingEvents`.
 - `buildPersonalScheduleReadModel.ts` — the pure, deterministic builder.
   Takes the authenticated `Person`, the full parsed `people`/`events`, a
-  `ShiftSchedule`, and an explicit `LocalNow` — no network, no auth, no
-  `Date`/UTC. Filters to the authenticated person's own Events, runs the
-  existing `analyzeShiftCounterparts`/`detectOperationalIssues`/
-  `buildDutyBlocks`/`deriveDutyActions` (reused, never reimplemented),
-  and projects everything down to the safe types above. Colleague
-  exposure is deliberately minimal: counterpart context only for the
-  person's current/next shift(s), never every coworker's schedule. Every
-  array is explicitly sorted — input Event order never affects output
-  order — and nothing passed in is ever mutated. Also exports
-  `toPersonalProfile`, reused by `personalSchedule.ts` for the
-  `configuration_error` state below.
+  `ShiftSchedule`, an explicit `LocalNow`, and (optional, defaults to `[]`)
+  `potentialAllocations` — no network, no auth, no `Date`/UTC. Filters to
+  the authenticated person's own Events, runs the existing
+  `analyzeShiftCounterparts`/`detectOperationalIssues`/`buildDutyBlocks`/
+  `deriveDutyActions` (reused, never reimplemented), and projects
+  everything down to the safe types above. Colleague exposure is
+  deliberately minimal: counterpart context only for the person's
+  current/next shift(s), never every coworker's schedule. Every array is
+  explicitly sorted — input Event order never affects output order — and
+  nothing passed in is ever mutated. Also exports `toPersonalProfile`,
+  reused by `personalSchedule.ts` for the `configuration_error` state
+  below.
+
+  **Duty-source completeness (Potential/תקשא"ס period sources).**
+  `potentialAllocations` feeds `lib/domain/potentialDutyEvents.ts`'s
+  `buildPotentialDutyEvents` (see that file's own docs), whose output is
+  merged into `personEvents` ONLY for the `dutyBlocks`/`dutyActions`
+  computation — every other section above (`todayEvents`/`upcomingEvents`/
+  `calendarEvents`/assignments/shift contexts/`issues`) still reads the
+  original, unmerged `events`/`personEvents`, exactly as before. This is
+  deliberately scoped: a person whose duties live only in a תקשא"ס period
+  source (never in "משמרות + תורנויות") now sees them on their own Duties
+  page, while a normal department person's existing duties, coverage,
+  fairness, and shift-worker classification are all completely unaffected
+  (verified — capability flags/`isTechnician`/`isSupervisor` are `Person`
+  fields this function never derives from duty data in either direction).
 - `personalSchedule.ts` — `loadPersonalScheduleReadModel()`, the
   server-only orchestration layer. Resolves the Supabase identity first
   (a non-authenticated session never triggers a Google request),
-  batch-fetches personnel + schedule + settings in a single
-  `fetchRawWorkbookSnapshot` call (never `potentialH1`/`potentialH2` —
-  that's a later manager feature), resolves the Person via
+  batch-fetches personnel + schedule + settings + potentialH1 + potentialH2
+  in a single `fetchRawWorkbookSnapshot` call — the same fixed source set
+  `FAIRNESS_WORKBOOK_SOURCES` already establishes — resolves the Person via
   `resolveIdentityAgainstPeople` (no second personnel fetch/parse), and
   fails closed as a typed `configuration_error` — never a default start
   time — on invalid/missing shift configuration. That state still carries

@@ -166,7 +166,7 @@ describe("SelectedDayPanel", () => {
 
     it("shows the duty's semantic emoji", () => {
       render(<SelectedDayPanel dayMeta={meta()} events={[dutyEvent({ dutyFamily: "guard" })]} />);
-      expect(screen.getByText("🛡️")).toBeInTheDocument();
+      expect(screen.getByText("💂")).toBeInTheDocument();
     });
 
     it("never shows a time row for a duty -- it isn't a timed shift", () => {

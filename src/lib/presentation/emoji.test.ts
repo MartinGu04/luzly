@@ -31,8 +31,8 @@ describe("assignmentEmoji — shift periods", () => {
 
 describe("assignmentEmoji — duty families", () => {
   it("maps known duty families", () => {
-    expect(assignmentEmoji(input({ category: "duty", period: "unspecified", dutyFamily: "guard" }))).toBe("🛡️");
-    expect(assignmentEmoji(input({ category: "duty", period: "unspecified", dutyFamily: "reserve" }))).toBe("🧩");
+    expect(assignmentEmoji(input({ category: "duty", period: "unspecified", dutyFamily: "guard" }))).toBe("💂");
+    expect(assignmentEmoji(input({ category: "duty", period: "unspecified", dutyFamily: "reserve" }))).toBe("🪖");
     expect(
       assignmentEmoji(input({ category: "duty", period: "unspecified", dutyFamily: "evacuation_on_call" })),
     ).toBe("🚑");
@@ -65,10 +65,16 @@ describe("assignmentEmoji — absence kinds", () => {
     );
   });
 
+  it("maps after and referral to their new symbols", () => {
+    expect(assignmentEmoji(input({ category: "absence", period: "unspecified", absenceKind: "after" }))).toBe("🌅");
+    expect(assignmentEmoji(input({ category: "absence", period: "unspecified", absenceKind: "referral" }))).toBe(
+      "🩺",
+    );
+  });
+
   it("returns null for absence kinds with no fitting mapping", () => {
     expect(assignmentEmoji(input({ category: "absence", period: "unspecified", absenceKind: "medical" }))).toBeNull();
     expect(assignmentEmoji(input({ category: "absence", period: "unspecified", absenceKind: "day_off" }))).toBeNull();
-    expect(assignmentEmoji(input({ category: "absence", period: "unspecified", absenceKind: "after" }))).toBeNull();
   });
 });
 
@@ -102,7 +108,7 @@ describe("assignmentEmoji never infers from rawValue/title text", () => {
 
 describe("dutyFamilyEmoji", () => {
   it("maps a known duty family directly", () => {
-    expect(dutyFamilyEmoji("guard")).toBe("🛡️");
+    expect(dutyFamilyEmoji("guard")).toBe("💂");
   });
 
   it("returns null for a duty family with no fitting mapping", () => {
