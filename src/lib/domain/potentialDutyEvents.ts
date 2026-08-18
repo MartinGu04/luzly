@@ -87,3 +87,30 @@ function isAlreadyCoveredByInternalDuty(
       event.slot === allocation.slot,
   );
 }
+
+/**
+ * The same conversion as `buildPotentialDutyEvents`, run once per person in
+ * `people` and concatenated -- for a manager-facing, roster-wide projection
+ * (e.g. `buildManagerDutyEntries`) that needs every attributed תקשא"ס duty
+ * across the whole team, not just one person's own. Deliberately a thin
+ * loop over the EXISTING per-person function -- resolution and dedup are
+ * never re-implemented here, so a roster-wide caller and a single-person
+ * caller (`buildPersonalScheduleReadModel.ts`) can never drift into two
+ * different definitions of "attributed" or "already covered."
+ */
+export function buildPotentialDutyEventsForRoster(
+  allocations: readonly PotentialAllocation[],
+  people: readonly Person[],
+  events: readonly Event[],
+): Event[] {
+  const eventsByPerson = new Map<string, Event[]>();
+  for (const event of events) {
+    const bucket = eventsByPerson.get(event.personId);
+    if (bucket) bucket.push(event);
+    else eventsByPerson.set(event.personId, [event]);
+  }
+
+  return people.flatMap((person) =>
+    buildPotentialDutyEvents(allocations, person, people, eventsByPerson.get(person.id) ?? []),
+  );
+}

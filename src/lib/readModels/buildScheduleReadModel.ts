@@ -1,5 +1,6 @@
 import type { Event } from "@/lib/domain/event";
 import type { LocalNow } from "@/lib/domain/localNow";
+import type { PotentialAllocation } from "@/lib/domain/potentialAllocation";
 import type { ShiftSchedule } from "@/lib/domain/shiftSchedule";
 import type { Person } from "@/lib/domain/types";
 import { buildPersonalScheduleReadModel } from "./buildPersonalScheduleReadModel";
@@ -48,6 +49,14 @@ export interface BuildManagerScheduleReadModelInput {
    * see `resolveSchedulePerspective`.
    */
   requestedPersonId: string | null;
+  /**
+   * Combined H1 + H2 Potential/תקשא"ס allocations, structurally parsed —
+   * threaded straight through to `buildPersonalScheduleReadModel` for the
+   * "self"/"person" perspectives (see there for exactly which sections it
+   * feeds). Optional/defaults to empty. The "all" perspective never reads
+   * this -- unit-wide staffing/coverage is out of scope for this source.
+   */
+  potentialAllocations?: readonly PotentialAllocation[];
 }
 
 type ResolvedSchedulePerspective =
@@ -114,7 +123,17 @@ function buildRosterOptions(people: readonly Person[], managerId: string): Sched
  * forcing per-date staffing into `PersonalEventView` (PR #24 §14).
  */
 export function buildManagerScheduleReadModel(input: BuildManagerScheduleReadModelInput): ScheduleReadModel {
-  const { manager, people, events, shiftSchedule, fetchedAt, now, monthDates, requestedPersonId } = input;
+  const {
+    manager,
+    people,
+    events,
+    shiftSchedule,
+    fetchedAt,
+    now,
+    monthDates,
+    requestedPersonId,
+    potentialAllocations,
+  } = input;
 
   const roster = buildRosterOptions(people, manager.id);
   const perspective = resolveSchedulePerspective(requestedPersonId, people, manager.id);
@@ -141,7 +160,15 @@ export function buildManagerScheduleReadModel(input: BuildManagerScheduleReadMod
   }
 
   const targetPerson = perspective.kind === "person" ? perspective.person : manager;
-  const personal = buildPersonalScheduleReadModel({ person: targetPerson, people, events, shiftSchedule, fetchedAt, now });
+  const personal = buildPersonalScheduleReadModel({
+    person: targetPerson,
+    people,
+    events,
+    shiftSchedule,
+    fetchedAt,
+    now,
+    potentialAllocations,
+  });
 
   return {
     fetchedAt,

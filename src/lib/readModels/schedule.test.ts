@@ -21,6 +21,12 @@ function scheduleSheet(rows: (string | number)[][]): RawSheet {
 function settingsSheet(rows: string[][]): RawSheet {
   return { name: "הגדרות", values: rows };
 }
+function potentialH1Sheet(rows: (string | number)[][]): RawSheet {
+  return { name: 'פוטנציאל תקש"אס 1-6/2026', values: rows };
+}
+function potentialH2Sheet(rows: (string | number)[][]): RawSheet {
+  return { name: 'פוטנציאל תקש"אס 7-12/2026', values: rows };
+}
 
 const MANAGER_PERSONNEL_ROWS: (string | boolean)[][] = [
   ["שם", "מייל", "מנהל"],
@@ -33,13 +39,17 @@ const SETTINGS_ROWS_VALID: string[][] = [
   ["תחילת משמרת יום", "07:30"],
 ];
 
-function managerSnapshot(overrides: Partial<{ personnel: (string | boolean)[][] }> = {}) {
+function managerSnapshot(
+  overrides: Partial<{ personnel: (string | boolean)[][]; potentialH1: (string | number)[][]; potentialH2: (string | number)[][] }> = {},
+) {
   return {
     fetchedAt: "2026-08-13T08:00:00.000Z",
     sheets: [
       personnelSheet(overrides.personnel ?? MANAGER_PERSONNEL_ROWS),
       scheduleSheet([]),
       settingsSheet(SETTINGS_ROWS_VALID),
+      potentialH1Sheet(overrides.potentialH1 ?? []),
+      potentialH2Sheet(overrides.potentialH2 ?? []),
     ],
   };
 }
@@ -151,11 +161,17 @@ describe("loadScheduleReadModel — normal (non-manager) user (PR #24 §3)", () 
 });
 
 describe("loadScheduleReadModel — manager authorization / fetch scope (PR #24 §25/§26)", () => {
-  it("manager: fetches exactly personnel+schedule+settings -- never potentialH1/H2", async () => {
+  it("manager: fetches personnel+schedule+settings+potentialH1+potentialH2 -- Potential is now needed for duty-source completeness on self/person calendars", async () => {
     getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(true));
     await loadScheduleReadModel(DEFAULT_PARAMS);
     expect(getWorkbookSnapshot).toHaveBeenCalledTimes(1);
-    expect(getWorkbookSnapshot).toHaveBeenCalledWith(["personnel", "schedule", "settings"]);
+    expect(getWorkbookSnapshot).toHaveBeenCalledWith([
+      "personnel",
+      "schedule",
+      "settings",
+      "potentialH1",
+      "potentialH2",
+    ]);
   });
 
   it("a normal user only ever calls getRequestPersonalSchedule once", async () => {
@@ -243,5 +259,35 @@ describe("loadScheduleReadModel — success / privacy", () => {
     const result = await loadScheduleReadModel({ rawMonth: null, personId: "all" });
     expect(JSON.stringify(result)).not.toContain("daniel@example.invalid");
     expect(JSON.stringify(result)).not.toContain("@example.invalid");
+  });
+});
+
+describe("loadScheduleReadModel — תקשא\"ס period (Potential) duty completeness reaches the calendar", () => {
+  it("a colleague with a תקשא\"ס-only duty (no matching internal Event) shows it on the manager's 'person' perspective calendar", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(true));
+    const snapshot = managerSnapshot({
+      potentialH2: [
+        ["תאריך", "יום", "שומר 1"],
+        ["20/08/2026", "ה", "דניאל כהן"],
+      ],
+    });
+    getWorkbookSnapshot.mockResolvedValue(snapshot);
+
+    // Resolve דניאל כהן's real generated id from the roster first -- ids
+    // come from `stableIdFromName` inside the real parser, never hardcoded.
+    const rosterResult = await loadScheduleReadModel({ rawMonth: null, personId: "all" });
+    expect(rosterResult.status).toBe("ok");
+    const daniel =
+      rosterResult.status === "ok" ? rosterResult.model.roster.find((p) => p.name === "דניאל כהן") : undefined;
+    expect(daniel).toBeDefined();
+
+    const result = await loadScheduleReadModel({ rawMonth: null, personId: daniel!.id });
+    expect(result.status).toBe("ok");
+    if (result.status === "ok" && result.model.perspective === "person") {
+      const dutyEntries = result.model.personal?.calendarEvents.filter((event) => event.category === "duty");
+      expect(dutyEntries).toEqual([expect.objectContaining({ date: "2026-08-20", dutyFamily: "guard", slot: 1 })]);
+    } else {
+      throw new Error("expected 'person' perspective");
+    }
   });
 });

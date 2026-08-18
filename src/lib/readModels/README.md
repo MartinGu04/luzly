@@ -44,16 +44,28 @@ layer's safe projections may.
   **Duty-source completeness (Potential/תקשא"ס period sources).**
   `potentialAllocations` feeds `lib/domain/potentialDutyEvents.ts`'s
   `buildPotentialDutyEvents` (see that file's own docs), whose output is
-  merged into `personEvents` ONLY for the `dutyBlocks`/`dutyActions`
-  computation — every other section above (`todayEvents`/`upcomingEvents`/
-  `calendarEvents`/assignments/shift contexts/`issues`) still reads the
-  original, unmerged `events`/`personEvents`, exactly as before. This is
-  deliberately scoped: a person whose duties live only in a תקשא"ס period
-  source (never in "משמרות + תורנויות") now sees them on their own Duties
-  page, while a normal department person's existing duties, coverage,
-  fairness, and shift-worker classification are all completely unaffected
-  (verified — capability flags/`isTechnician`/`isSupervisor` are `Person`
-  fields this function never derives from duty data in either direction).
+  merged into a `personDisplayEvents` list used for EVERY duty-display
+  section: `todayEvents`/`upcomingEvents`/`calendarEvents`/
+  `currentAssignments`/`nextAssignmentGroup`/`dutyBlocks`/`dutyActions` —
+  originally (PR #60) this only fed `dutyBlocks`/`dutyActions` (the
+  personal Duties page); a later pass widened it to every place this read
+  model already displays the person's own duties (the calendar, Manager
+  Area's selected-person drill-down, dashboard today/upcoming), since all
+  of them are built from this ONE shared function. `issues`/
+  `currentShiftContexts`/`nextShiftContexts` (coverage/roster) deliberately
+  keep reading the ORIGINAL, unmerged `events` — a synthetic duty Event is
+  never a second source of shift/coverage truth. A person whose duties
+  live only in a תקשא"ס period source (never in "משמרות + תורנויות") now
+  sees them everywhere this read model is consumed, while a normal
+  department person's existing duties, coverage, fairness, and
+  shift-worker classification are all completely unaffected (verified —
+  capability flags/`isTechnician`/`isSupervisor` are `Person` fields this
+  function never derives from duty data in either direction). Every other
+  caller of this function (`buildScheduleReadModel.ts`'s "self"/"person"
+  perspectives, `buildManagerOverviewReadModel.ts`'s `selectedPerson`) now
+  threads its own already-fetched `potentialAllocations` through, so the
+  same completeness reaches the calendar and Manager Area drill-down
+  without any of them reimplementing the resolution/dedup logic.
 - `personalSchedule.ts` — `loadPersonalScheduleReadModel()`, the
   server-only orchestration layer. Resolves the Supabase identity first
   (a non-authenticated session never triggers a Google request),
@@ -124,7 +136,19 @@ person's own schedule, and that broader scope is authorized, not assumed:
   `people`/`events`/`shiftSchedule` snapshot — no per-person Google
   fetch, no reimplemented current/next/counterpart/duty/issue logic. An
   invalid/unknown `selectedPersonId` falls back safely to the "everyone"
-  scope rather than crashing.
+  scope rather than crashing. This call also now passes the same
+  `potentialAllocations` this builder already receives, so a selected
+  person's תקשא"ס-only duty appears in their `currentAssignments`/
+  `nextAssignmentGroup` exactly like a real one would (see
+  `buildPersonalScheduleReadModel.ts`'s own "Duty-source completeness"
+  notes). The unit-wide `duties` list gets the SAME completeness
+  separately: `lib/domain/potentialDutyEvents.ts`'s
+  `buildPotentialDutyEventsForRoster` (the identical per-person conversion
+  and dedup, just run once per roster member) is merged into the `events`
+  passed to `buildManagerDutyEntries` ONLY — `coverageOverview`/`issues`/
+  `potentialRequirements`/`absences` above and below all keep reading the
+  raw `events`, so this never touches coverage, fairness, or the Potential
+  reconciliation section.
 - `managerOverviewParams.ts` — `parseManagerOverviewSearchParams`, strict
   parsing of `/manager`'s `?person=`/`?range=`/`?month=`/`?problems=`
   query params into typed, defaulted values. `person` omitted or `"all"`

@@ -86,6 +86,14 @@ no Google API calls and no spreadsheet-cell access.
   (a Potential allocation is the source/framework plan, never a confirmed
   internal schedule entry) and never touches `role`/capability fields, so
   it can never affect shift-worker classification anywhere in this domain.
+  `buildPotentialDutyEventsForRoster` is the SAME conversion run once per
+  person across a whole roster and concatenated -- for a manager-facing,
+  roster-wide projection (`buildManagerDutyEntries`'s input in
+  `buildManagerOverviewReadModel.ts`) that needs every attributed תקשא"ס
+  duty across the team, not just one person's own. It never
+  re-implements resolution/dedup -- it's a thin loop over the
+  single-person function, so the two can never define "attributed" or
+  "already covered" differently.
 - `dutyActions.ts` — `deriveDutyActions`, turning `DutyBlock`s into
   machine-readable `duty_check_in` action data (never an actual
   notification — no Notification API, cron, or push subscription here).

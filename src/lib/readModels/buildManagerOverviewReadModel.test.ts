@@ -485,6 +485,45 @@ describe("buildManagerOverviewReadModel — duties", () => {
     const model = buildModel({ events });
     expect(model.duties.every((d) => d.date === "2026-08-13")).toBe(true);
   });
+
+  it("includes a תקשא\"ס-only duty (no matching internal Event) for a person with none at all", () => {
+    const model = buildModel({
+      events: [],
+      potentialAllocations: [allocation({ date: "2026-08-13", dutyFamily: "guard", slot: 1 })],
+    });
+    expect(model.duties).toEqual([
+      expect.objectContaining({ personId: MARTIN.id, date: "2026-08-13", dutyFamily: "guard", slot: 1 }),
+    ]);
+  });
+
+  it("still respects the Manager Area's selected time range -- an out-of-range תקשא\"ס allocation never appears", () => {
+    const model = buildModel({
+      events: [],
+      potentialAllocations: [allocation({ date: "2026-09-30", dutyFamily: "guard", slot: 1 })],
+    });
+    expect(model.duties).toEqual([]);
+  });
+
+  it("a normal department person's duty is unaffected -- no duplicate from an overlapping allocation covering the same slot", () => {
+    const events: Event[] = [
+      event({ personId: MARTIN.id, personName: MARTIN.name, date: "2026-08-13", category: "duty", role: null, dutyFamily: "guard", slot: 1 }),
+    ];
+    const model = buildModel({
+      events,
+      potentialAllocations: [allocation({ date: "2026-08-13", dutyFamily: "guard", slot: 1 })],
+    });
+    expect(model.duties).toHaveLength(1);
+  });
+
+  it("ambiguous source ownership (two personnel sharing a leading token) is never attributed to either -- no guess", () => {
+    const martinTwin = person({ id: "p_martin_twin", name: "מרטין אחר" });
+    const model = buildModel({
+      people: [MANAGER, MARTIN, martinTwin, EITAN, NOA],
+      events: [],
+      potentialAllocations: [allocation({ date: "2026-08-13", dutyFamily: "guard", slot: 1, sourceAllocationLabel: "מרטין" })],
+    });
+    expect(model.duties).toEqual([]);
+  });
 });
 
 describe("buildManagerOverviewReadModel — absences", () => {
@@ -673,6 +712,58 @@ describe("buildManagerOverviewReadModel — selected person", () => {
     const model = buildModel({ selectedPersonId: MARTIN.id });
     expect(model.manager.id).toBe(MANAGER.id);
     expect(model.manager.name).toBe(MANAGER.name);
+  });
+});
+
+describe("buildManagerOverviewReadModel — selected person's תקשא\"ס-only duty completeness", () => {
+  it("a person with a תקשא\"ס-only duty (no matching internal Event) shows it in their upcoming assignments instead of looking duty-free", () => {
+    const model = buildModel({
+      events: [],
+      potentialAllocations: [allocation({ date: "2026-08-20", dutyFamily: "guard", slot: 1 })],
+      selectedPersonId: MARTIN.id,
+      now: { date: "2026-08-13", minuteOfDay: 600 },
+    });
+    expect(model.selectedPerson?.nextAssignmentGroup?.events).toEqual([
+      expect.objectContaining({ date: "2026-08-20", dutyFamily: "guard", category: "duty" }),
+    ]);
+  });
+
+  it("a normal department person's existing assignments are unaffected -- no duplicate from an overlapping allocation", () => {
+    const events: Event[] = [
+      event({ personId: MARTIN.id, personName: MARTIN.name, date: "2026-08-20", category: "duty", role: null, dutyFamily: "guard", slot: 1 }),
+    ];
+    const model = buildModel({
+      events,
+      potentialAllocations: [allocation({ date: "2026-08-20", dutyFamily: "guard", slot: 1 })],
+      selectedPersonId: MARTIN.id,
+      now: { date: "2026-08-13", minuteOfDay: 600 },
+    });
+    expect(model.selectedPerson?.nextAssignmentGroup?.events).toHaveLength(1);
+  });
+
+  it("adding a תקשא\"ס duty never makes the selected person a shift worker -- capability flags untouched", () => {
+    const nonShiftPerson = person({ id: "p_nonshift", name: "אלון דוגמה", isTechnician: false, isSupervisor: false });
+    const model = buildModel({
+      people: [MANAGER, nonShiftPerson],
+      events: [],
+      potentialAllocations: [allocation({ date: "2026-08-20", dutyFamily: "guard", slot: 1, sourceAllocationLabel: nonShiftPerson.name })],
+      selectedPersonId: nonShiftPerson.id,
+    });
+    expect(model.selectedPerson?.person.isTechnician).toBe(false);
+    expect(model.selectedPerson?.person.isSupervisor).toBe(false);
+  });
+
+  it("ambiguous source ownership is never attributed to the selected person either", () => {
+    const martinTwin = person({ id: "p_martin_twin", name: "מרטין אחר" });
+    const model = buildModel({
+      people: [MANAGER, MARTIN, martinTwin, EITAN, NOA],
+      events: [],
+      potentialAllocations: [allocation({ date: "2026-08-20", dutyFamily: "guard", slot: 1, sourceAllocationLabel: "מרטין" })],
+      selectedPersonId: MARTIN.id,
+      now: { date: "2026-08-13", minuteOfDay: 600 },
+    });
+    expect(model.selectedPerson?.nextAssignmentGroup).toBeNull();
+    expect(model.selectedPerson?.dutyBlocks).toEqual([]);
   });
 });
 
