@@ -66,6 +66,14 @@ layer's safe projections may.
   threads its own already-fetched `potentialAllocations` through, so the
   same completeness reaches the calendar and Manager Area drill-down
   without any of them reimplementing the resolution/dedup logic.
+  `buildScheduleReadModel.ts`'s THIRD perspective, "all" (the shared/
+  everyone calendar), doesn't call this function at all — it gets the
+  identical completeness a different way: `lib/domain/potentialDutyEvents.ts`'s
+  `buildPotentialDutyEventsForRoster` (the same per-person conversion, run
+  once per roster member) is merged into `everyone.duties`'s input ONLY —
+  `everyone.staffing` keeps reading the raw `events`, so a תקשא"ס-sourced
+  duty is visible on the shared calendar as a normal duty entry but never
+  affects shift staffing/coverage.
 - `personalSchedule.ts` — `loadPersonalScheduleReadModel()`, the
   server-only orchestration layer. Resolves the Supabase identity first
   (a non-authenticated session never triggers a Google request),

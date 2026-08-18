@@ -516,7 +516,7 @@ describe("buildManagerScheduleReadModel — תקשא\"ס period (Potential) duty
     expect(model.personal?.calendarEvents.some((e) => e.category === "duty")).toBe(true);
   });
 
-  it("the 'all' (everyone) perspective never consumes potentialAllocations", () => {
+  it("the 'all' (everyone) calendar shows an attributed תקשא\"ס-only duty as a normal duty entry", () => {
     const model = buildManagerScheduleReadModel({
       manager: MANAGER,
       people: PEOPLE,
@@ -526,7 +526,73 @@ describe("buildManagerScheduleReadModel — תקשא\"ס period (Potential) duty
       now,
       monthDates: AUGUST_DATES,
       requestedPersonId: "all",
-      potentialAllocations: [allocation()],
+      potentialAllocations: [allocation({ date: "2026-08-20", dutyFamily: "guard", slot: 1 })],
+    });
+    expect(model.perspective).toBe("all");
+    expect(model.everyone?.duties).toEqual([
+      expect.objectContaining({ personId: DANIEL.id, date: "2026-08-20", dutyFamily: "guard", slot: 1 }),
+    ]);
+  });
+
+  it("the 'all' perspective NEVER mixes a תקשא\"ס duty into staffing/coverage -- everyone.staffing is untouched", () => {
+    const model = buildManagerScheduleReadModel({
+      manager: MANAGER,
+      people: PEOPLE,
+      events: [],
+      shiftSchedule: schedule,
+      fetchedAt: "2026-08-13T08:00:00.000Z",
+      now,
+      monthDates: AUGUST_DATES,
+      requestedPersonId: "all",
+      potentialAllocations: [allocation({ date: "2026-08-20", dutyFamily: "guard", slot: 1 })],
+    });
+    expect(model.everyone?.staffing).toEqual([]);
+  });
+
+  it("a normal department person's duty in the 'all' calendar is unaffected -- no duplicate from an overlapping allocation", () => {
+    const events: Event[] = [
+      event({ personId: DANIEL.id, personName: DANIEL.name, category: "duty", role: null, period: "unspecified", dutyFamily: "guard", slot: 1, date: "2026-08-20" }),
+    ];
+    const model = buildManagerScheduleReadModel({
+      manager: MANAGER,
+      people: PEOPLE,
+      events,
+      shiftSchedule: schedule,
+      fetchedAt: "2026-08-13T08:00:00.000Z",
+      now,
+      monthDates: AUGUST_DATES,
+      requestedPersonId: "all",
+      potentialAllocations: [allocation({ date: "2026-08-20", dutyFamily: "guard", slot: 1 })],
+    });
+    expect(model.everyone?.duties).toHaveLength(1);
+  });
+
+  it("ambiguous source ownership is excluded from the 'all' calendar too", () => {
+    const danielTwin = person({ id: "p_daniel_twin", name: "דניאל אחר" });
+    const model = buildManagerScheduleReadModel({
+      manager: MANAGER,
+      people: [MANAGER, DANIEL, danielTwin, EITAN, NOA],
+      events: [],
+      shiftSchedule: schedule,
+      fetchedAt: "2026-08-13T08:00:00.000Z",
+      now,
+      monthDates: AUGUST_DATES,
+      requestedPersonId: "all",
+      potentialAllocations: [allocation({ date: "2026-08-20", dutyFamily: "guard", slot: 1, sourceAllocationLabel: "דניאל" })],
+    });
+    expect(model.everyone?.duties).toEqual([]);
+  });
+
+  it("omitting potentialAllocations entirely keeps the 'all' perspective working unchanged", () => {
+    const model = buildManagerScheduleReadModel({
+      manager: MANAGER,
+      people: PEOPLE,
+      events: [],
+      shiftSchedule: schedule,
+      fetchedAt: "2026-08-13T08:00:00.000Z",
+      now,
+      monthDates: AUGUST_DATES,
+      requestedPersonId: "all",
     });
     expect(model.perspective).toBe("all");
     expect(model.everyone?.duties).toEqual([]);

@@ -290,4 +290,27 @@ describe("loadScheduleReadModel — תקשא\"ס period (Potential) duty complet
       throw new Error("expected 'person' perspective");
     }
   });
+
+  it("the same colleague's תקשא\"ס-only duty also appears on the shared 'all' (everyone) calendar, without affecting staffing", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(true));
+    getWorkbookSnapshot.mockResolvedValue(
+      managerSnapshot({
+        potentialH2: [
+          ["תאריך", "יום", "שומר 1"],
+          ["20/08/2026", "ה", "דניאל כהן"],
+        ],
+      }),
+    );
+
+    const result = await loadScheduleReadModel({ rawMonth: null, personId: "all" });
+    expect(result.status).toBe("ok");
+    if (result.status === "ok" && result.model.perspective === "all") {
+      expect(result.model.everyone?.duties).toEqual([
+        expect.objectContaining({ personName: "דניאל כהן", date: "2026-08-20", dutyFamily: "guard", slot: 1 }),
+      ]);
+      expect(result.model.everyone?.staffing).toEqual([]);
+    } else {
+      throw new Error("expected 'all' perspective");
+    }
+  });
 });

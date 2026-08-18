@@ -1,6 +1,7 @@
 import type { Event } from "@/lib/domain/event";
 import type { LocalNow } from "@/lib/domain/localNow";
 import type { PotentialAllocation } from "@/lib/domain/potentialAllocation";
+import { buildPotentialDutyEventsForRoster } from "@/lib/domain/potentialDutyEvents";
 import type { ShiftSchedule } from "@/lib/domain/shiftSchedule";
 import type { Person } from "@/lib/domain/types";
 import { buildPersonalScheduleReadModel } from "./buildPersonalScheduleReadModel";
@@ -53,8 +54,11 @@ export interface BuildManagerScheduleReadModelInput {
    * Combined H1 + H2 Potential/תקשא"ס allocations, structurally parsed —
    * threaded straight through to `buildPersonalScheduleReadModel` for the
    * "self"/"person" perspectives (see there for exactly which sections it
-   * feeds). Optional/defaults to empty. The "all" perspective never reads
-   * this -- unit-wide staffing/coverage is out of scope for this source.
+   * feeds). Optional/defaults to empty. The "all" perspective also reads
+   * this now, but ONLY for `everyone.duties` (via
+   * `buildPotentialDutyEventsForRoster`) -- `everyone.staffing` keeps
+   * reading the raw `events` untouched, so this can never affect shift
+   * staffing/coverage, which stays out of scope for this source.
    */
   potentialAllocations?: readonly PotentialAllocation[];
 }
@@ -121,6 +125,10 @@ function buildRosterOptions(people: readonly Person[], managerId: string): Sched
  * Events would see. "all" builds a separate, explicitly-typed team
  * staffing projection (`buildShiftStaffingOverview` et al.) instead of
  * forcing per-date staffing into `PersonalEventView` (PR #24 §14).
+ * `everyone.duties` additionally gets תקשא"ס period (Potential) duty
+ * completeness the same way Manager Overview's roster-wide `duties` list
+ * does (`buildPotentialDutyEventsForRoster`, reused outright) -- a
+ * calendar-visible duty entry only, never mixed into `everyone.staffing`.
  */
 export function buildManagerScheduleReadModel(input: BuildManagerScheduleReadModelInput): ScheduleReadModel {
   const {
@@ -142,6 +150,20 @@ export function buildManagerScheduleReadModel(input: BuildManagerScheduleReadMod
     const dates = new Set(monthDates);
     const peopleById = new Map(people.map((person) => [person.id, person]));
 
+    /**
+     * Duty-data completeness for the shared/"everyone" calendar, same
+     * conversion `buildManagerOverviewReadModel.ts` already reuses for its
+     * own roster-wide `duties` list (`buildPotentialDutyEventsForRoster` --
+     * resolution/dedup are never re-implemented here). Deliberately feeds
+     * ONLY `duties` -- `staffing` below keeps reading the raw `events`, so
+     * a Potential-sourced duty can never affect shift staffing/coverage,
+     * shift contexts, or fairness; it's a calendar-visible duty entry only.
+     */
+    const eventsWithPotentialDuties = [
+      ...events,
+      ...buildPotentialDutyEventsForRoster(potentialAllocations ?? [], people, events),
+    ];
+
     return {
       fetchedAt,
       localNow: now,
@@ -153,7 +175,7 @@ export function buildManagerScheduleReadModel(input: BuildManagerScheduleReadMod
       personal: null,
       everyone: {
         staffing: buildShiftStaffingOverview(events, shiftSchedule, dates),
-        duties: buildManagerDutyEntries(events, peopleById, dates),
+        duties: buildManagerDutyEntries(eventsWithPotentialDuties, peopleById, dates),
         absences: buildManagerAbsenceEntries(events, peopleById, dates),
       },
     };
