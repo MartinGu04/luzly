@@ -1,22 +1,41 @@
+import Link from "next/link";
 import { Panel } from "@/components/ui/Panel";
 import { CoverageBadge } from "@/components/ui/CoverageBadge";
-import type { ManagerRoleCoverageRowView, ManagerShiftGroupView } from "./types";
+import type { CoverageStatus } from "@/lib/domain/shiftCoverage";
+import { scheduleEveryoneHref } from "@/lib/presentation/scheduleUrl";
+import type { ManagerRoleCoverageRowView, ManagerShiftDayView, ManagerShiftGroupView } from "./types";
 
 interface ManagerCoverageSectionProps {
-  groups: ManagerShiftGroupView[];
+  days: ManagerShiftDayView[];
 }
 
 const ROLE_TONE_CLASS: Record<ManagerRoleCoverageRowView["status"], string> = {
-  full: "text-xs text-muted",
-  partial: "text-sm font-medium text-warning",
-  missing: "text-sm font-medium text-critical",
-  not_evaluable: "text-xs text-muted",
+  full: "text-[11px] text-muted",
+  partial: "text-xs font-medium text-warning",
+  missing: "text-xs font-medium text-critical",
+  not_evaluable: "text-[11px] text-muted",
+};
+
+/** The stronger of a day's two period statuses -- decides the card's own accent border, so a problem is visible before reading a single name. `null` when the date has no shift data for either period at all. */
+function worstCoverageStatus(day: ManagerShiftGroupView | null, night: ManagerShiftGroupView | null): CoverageStatus | null {
+  const statuses = [day?.coverageStatus, night?.coverageStatus].filter((status): status is CoverageStatus => status !== undefined);
+  if (statuses.includes("missing")) return "missing";
+  if (statuses.includes("partial")) return "partial";
+  if (statuses.length === 0) return null;
+  return statuses.includes("not_evaluable") ? "not_evaluable" : "full";
+}
+
+const CARD_ACCENT_CLASS: Record<CoverageStatus, string> = {
+  full: "",
+  not_evaluable: "",
+  partial: "border-s-2 border-s-warning",
+  missing: "border-s-2 border-s-critical",
 };
 
 function ShadowList({ label, names }: { label: string; names: string[] }) {
   if (names.length === 0) return null;
   return (
-    <p className="text-xs text-muted">
+    <p className="text-[11px] text-muted">
       <span className="text-muted-2">{label}:</span> {names.join(", ")}
     </p>
   );
@@ -24,11 +43,9 @@ function ShadowList({ label, names }: { label: string; names: string[] }) {
 
 /**
  * One role's explicit coverage line -- "טכנאים: X, Y" when full (calm,
- * names only, same as before); "חסר טכנאי" / "כיסוי טכנאי חלקי · 05:30–07:30"
- * / "לא ניתן להעריך כיסוי טכנאי" otherwise (Design Pass PR #21 §13/§14) --
- * NEVER inferred from an empty name list, always the domain-derived
- * `roleCoverage` diagnostic message. Partial coverage still shows whichever
- * names ARE assigned alongside the explicit gap.
+ * names only); "חסר טכנאי" / "כיסוי טכנאי חלקי · 05:30–07:30" / "לא ניתן
+ * להעריך כיסוי טכנאי" otherwise -- NEVER inferred from an empty name list,
+ * always the domain-derived `roleCoverage` diagnostic message.
  */
 function RoleCoverageLine({
   roleLabel,
@@ -42,7 +59,7 @@ function RoleCoverageLine({
   if (coverage.status === "full") {
     if (names.length === 0) return null;
     return (
-      <p className="text-xs text-muted">
+      <p className="text-[11px] text-muted">
         <span className="text-muted-2">{roleLabel}:</span> {names.join(", ")}
       </p>
     );
@@ -56,16 +73,69 @@ function RoleCoverageLine({
   );
 }
 
+function PeriodColumn({ emoji, periodLabel, group }: { emoji: string; periodLabel: string; group: ManagerShiftGroupView | null }) {
+  return (
+    <div className="min-w-0 flex-1">
+      <div className="flex items-center justify-between gap-2">
+        <p className="flex items-center gap-1 text-[11px] font-medium text-muted-2">
+          <span aria-hidden="true">{emoji}</span>
+          {periodLabel}
+        </p>
+        {group ? <CoverageBadge status={group.coverageStatus} /> : null}
+      </div>
+      {group ? (
+        <div className="mt-1.5 space-y-1">
+          <RoleCoverageLine roleLabel="טכנאים" names={group.technicianNames} coverage={group.technicianCoverage} />
+          <RoleCoverageLine roleLabel="אחמ״שים" names={group.supervisorNames} coverage={group.supervisorCoverage} />
+          <ShadowList label="צל טכנאי" names={group.shadowTechnicianNames} />
+          <ShadowList label='צל אחמ״ש' names={group.shadowSupervisorNames} />
+        </div>
+      ) : (
+        <p className="mt-1.5 text-[11px] text-muted-2">אין נתוני שיבוץ</p>
+      )}
+    </div>
+  );
+}
+
+function DayCard({ view }: { view: ManagerShiftDayView }) {
+  const accent = CARD_ACCENT_CLASS[worstCoverageStatus(view.day, view.night) ?? "full"];
+
+  return (
+    <Panel variant="panel" className={`flex flex-col gap-2.5 ${accent}`}>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm font-semibold text-foreground">{view.dateLabel}</p>
+        <Link
+          href={scheduleEveryoneHref({ date: view.date })}
+          className="shrink-0 text-xs font-medium text-primary hover:underline"
+        >
+          ללוח ←
+        </Link>
+      </div>
+      <div className="flex gap-4 border-t border-border pt-2.5">
+        <PeriodColumn emoji="☀️" periodLabel="יום" group={view.day} />
+        <PeriodColumn emoji="🌙" periodLabel="לילה" group={view.night} />
+      </div>
+    </Panel>
+  );
+}
+
 /**
- * "מה מסודר?" -- unit-wide shift coverage within the selected range,
- * grouped by date+period (PR #14 §24). Each role's line is explicit about
- * WHO or WHAT is missing (§13) rather than making the manager infer it from
- * an empty name list -- `CoverageBadge` stays as an at-a-glance summary but
- * is never the sole explanation. `not_evaluable` is rendered as truthfully
- * unknown, never as a claimed gap.
+ * "משמרות" category's coverage picture -- the selected range's shifts as a
+ * compact grid of per-date cards (redesign), day+night paired side by side
+ * in EACH card instead of one full-width card per date+period (which, at
+ * 30d/month ranges, used to mean 40-60+ stacked full-width panels with no
+ * shape to scan). Every date with shift data still appears -- this is the
+ * FULL picture for the range, never filtered down to problems only (that
+ * job belongs to "דורש טיפול" in Overview) -- just laid out so the manager
+ * can understand the period at a glance: a problem date's card carries a
+ * visible amber/critical accent border, a fully-covered date stays quiet.
+ * Each card links straight into the real team calendar
+ * (`/schedule?person=all&date=...`, the existing manager-only Schedule
+ * perspective) for that specific date's full detail -- never a second
+ * calendar implementation here.
  */
-export function ManagerCoverageSection({ groups }: ManagerCoverageSectionProps) {
-  if (groups.length === 0) {
+export function ManagerCoverageSection({ days }: ManagerCoverageSectionProps) {
+  if (days.length === 0) {
     return (
       <Panel variant="compact" className="text-sm text-muted">
         אין משמרות בטווח שנבחר.
@@ -74,27 +144,9 @@ export function ManagerCoverageSection({ groups }: ManagerCoverageSectionProps) 
   }
 
   return (
-    <div className="flex flex-col gap-3">
-      {groups.map((group) => (
-        <Panel key={group.key} variant="panel">
-          <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
-            <div className="min-w-0">
-              <h3 className="flex items-center gap-1.5 text-[15px] font-semibold text-foreground">
-                {group.emoji ? <span aria-hidden="true">{group.emoji}</span> : null}
-                {group.periodLabel}
-              </h3>
-              <p className="mt-1 text-xs text-muted">{group.dateLabel}</p>
-            </div>
-            <CoverageBadge status={group.coverageStatus} />
-          </div>
-
-          <div className="mt-3 space-y-1">
-            <RoleCoverageLine roleLabel="טכנאים" names={group.technicianNames} coverage={group.technicianCoverage} />
-            <RoleCoverageLine roleLabel="אחמ״שים" names={group.supervisorNames} coverage={group.supervisorCoverage} />
-            <ShadowList label="צל טכנאי" names={group.shadowTechnicianNames} />
-            <ShadowList label="צל אחמ״ש" names={group.shadowSupervisorNames} />
-          </div>
-        </Panel>
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+      {days.map((view) => (
+        <DayCard key={view.key} view={view} />
       ))}
     </div>
   );

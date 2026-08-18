@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildManagerHref } from "./managerUrl";
+import { buildManagerHref, parseManagerCategoryParam } from "./managerUrl";
 
-const BASE = { personId: null, range: "7d" as const, month: null, problemsOnly: false };
+const BASE = { personId: null, range: "7d" as const, month: null, category: "overview" as const };
 
 describe("buildManagerHref", () => {
-  it("the default scope (everyone, 7d, no month, no problems-only) is the bare /manager", () => {
+  it("the default scope (everyone, 7d, no month, overview category) is the bare /manager", () => {
     expect(buildManagerHref(BASE)).toBe("/manager");
   });
 
@@ -31,13 +31,30 @@ describe("buildManagerHref", () => {
     expect(buildManagerHref({ ...BASE, range: "7d", month: "2026-08" })).toBe("/manager");
   });
 
-  it("problemsOnly adds ?problems=1", () => {
-    expect(buildManagerHref({ ...BASE, problemsOnly: true })).toBe("/manager?problems=1");
+  it("a non-default category adds ?category=", () => {
+    expect(buildManagerHref({ ...BASE, category: "shifts" })).toBe("/manager?category=shifts");
+    expect(buildManagerHref({ ...BASE, category: "personnel" })).toBe("/manager?category=personnel");
+    expect(buildManagerHref({ ...BASE, category: "duties" })).toBe("/manager?category=duties");
   });
 
   it("combines every non-default param", () => {
     expect(
-      buildManagerHref({ personId: "p_1", range: "month", month: "2026-02", problemsOnly: true }),
-    ).toBe("/manager?person=p_1&range=month&month=2026-02&problems=1");
+      buildManagerHref({ personId: "p_1", range: "month", month: "2026-02", category: "shifts" }),
+    ).toBe("/manager?person=p_1&range=month&month=2026-02&category=shifts");
+  });
+});
+
+describe("parseManagerCategoryParam", () => {
+  it("defaults to overview for missing/unknown values", () => {
+    expect(parseManagerCategoryParam(undefined)).toBe("overview");
+    expect(parseManagerCategoryParam(null)).toBe("overview");
+    expect(parseManagerCategoryParam("bogus")).toBe("overview");
+    expect(parseManagerCategoryParam("overview")).toBe("overview");
+  });
+
+  it("accepts the three other real categories", () => {
+    expect(parseManagerCategoryParam("shifts")).toBe("shifts");
+    expect(parseManagerCategoryParam("personnel")).toBe("personnel");
+    expect(parseManagerCategoryParam("duties")).toBe("duties");
   });
 });

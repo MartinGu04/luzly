@@ -240,11 +240,18 @@ export type ManagerNotificationReadinessState =
  * ID, raw Google API objects, raw personnel rows, or auth internals.
  */
 export interface ManagerOverviewReadModel {
-  manager: { id: string; name: string };
+  /**
+   * `avatarUrl` is the SAME presentation-only Google profile photo the app
+   * shell already carries for the current session (see
+   * `lib/auth/currentUser.ts`) -- sourced from the request-scoped, already-
+   * cached `getRequestPersonalSchedule()` call `managerWorkbookContext.ts`
+   * makes anyway (identity verification), never a new fetch and never
+   * looked up for anyone other than the manager viewing this page.
+   */
+  manager: { id: string; name: string; avatarUrl: string | null };
   fetchedAt: string;
   localNow: LocalNow;
   range: ManagerRangeView;
-  problemsOnly: boolean;
 
   /** Every person visible to the manager, deterministically ordered (by name, then id to break ties -- duplicate names stay safe). */
   roster: ManagerPersonSummary[];

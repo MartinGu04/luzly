@@ -59,6 +59,25 @@ export interface ManagerShiftGroupView {
   supervisorCoverage: ManagerRoleCoverageRowView;
 }
 
+/**
+ * One date's day+night shift picture, paired -- the Shifts category's
+ * compact "understand the period as a whole" grid (redesign), one card per
+ * date instead of one full-width card per date+period. Mirrors the SAME
+ * day/night pairing `ScheduleEveryoneDayView` already establishes for the
+ * manager-only Schedule "כולם" perspective (`lib/presentation/scheduleEveryone.ts`)
+ * -- a "morning"/"unspecified" shift period intentionally never surfaces
+ * here either, same reasoning. `null` means no shift Events at all for
+ * that date+period, never a fabricated "missing" verdict.
+ */
+export interface ManagerShiftDayView {
+  key: string;
+  /** Raw "YYYY-MM-DD", kept for building a `/schedule?person=all&date=...` deep link -- `dateLabel` alone isn't reversible. */
+  date: string;
+  dateLabel: string;
+  day: ManagerShiftGroupView | null;
+  night: ManagerShiftGroupView | null;
+}
+
 /** Presentation-ready view of one `ManagerDutyEntry`. `dutyFamily` is carried through (a typed domain enum, not raw sheet text) so the section can group by it -- same family, different slots, group together (Design Pass PR #21 §15). */
 export interface ManagerDutyRowView {
   key: string;

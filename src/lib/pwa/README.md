@@ -28,7 +28,8 @@ Related pieces living elsewhere, by existing layering convention:
   real network; the server-side workbook-snapshot cache (`lib/sync`)
   already owns short-lived freshness, and this worker must never be able
   to serve a stale authenticated schedule instead. It only implements
-  lifecycle (`install`/`activate`/a `"SKIP_WAITING"` message handler) and
+  lifecycle (`install`/`activate`, no forced early activation -- a
+  waiting worker activates the ordinary way once old clients close) and
   two forward-looking, currently-inert-until-a-backend-exists handlers:
   `push` (shows a notification from a small JSON payload) and
   `notificationclick` (closes it and navigates to an in-app path —
@@ -38,10 +39,14 @@ Related pieces living elsewhere, by existing layering convention:
 - `components/pwa/ServiceWorkerManager.tsx` — registers `/sw.js` once at
   the application root (mounted in `app/layout.tsx`, so it covers
   `/login`/`/auth/callback` too and never re-registers on client-side
-  navigation) and drives the user-controlled "new version available"
-  banner (`UpdateNotice.tsx`) — see that component's docstring for the
-  full update-detection/consent flow. Never calls
-  `Notification.requestPermission()`.
+  navigation). Never calls `Notification.requestPermission()`. No
+  user-facing "new version available" flow — a previous version drove a
+  manual "Update now" banner whose "wait for controllerchange, then
+  reload" step could get stuck pending indefinitely; it was removed
+  outright rather than patched. A waiting worker now activates the
+  ordinary way the browser already handles this (once every client still
+  controlled by the old worker has closed) — see that component's
+  docstring.
 
 ## What this PR deliberately does NOT do
 

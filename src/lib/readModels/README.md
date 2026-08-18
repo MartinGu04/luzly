@@ -136,7 +136,7 @@ person's own schedule, and that broader scope is authorized, not assumed:
      `person.isManager === true` ONLY; supervisor/technician/
      personnelType/route-visibility are never treated as equivalent.
 - `getRequestManagerOverview.ts` — `cache(loadManagerOverviewReadModel)`,
-  keyed on primitive `(personId, range, month, problemsOnly)` args (not
+  keyed on primitive `(personId, range, month)` args (not
   one object literal) so React's `cache()` per-argument identity
   comparison actually dedupes multiple Server Components on the same
   `/manager` render.

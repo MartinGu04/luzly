@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { parseManagerOverviewSearchParams } from "./managerOverviewParams";
 
 describe("parseManagerOverviewSearchParams", () => {
-  it("defaults: no params at all -> everyone, 7d, no month, problems off", () => {
+  it("defaults: no params at all -> everyone, 7d, no month", () => {
     const params = parseManagerOverviewSearchParams({});
-    expect(params).toEqual({ personId: null, range: "7d", month: null, problemsOnly: false });
+    expect(params).toEqual({ personId: null, range: "7d", month: null });
   });
 
   it("person=all is treated the same as omitted -- everyone", () => {
@@ -25,19 +25,12 @@ describe("parseManagerOverviewSearchParams", () => {
     expect(parseManagerOverviewSearchParams({ month: "not-a-month" }).month).toBe("not-a-month");
   });
 
-  it("problems=1 is the only value that enables problemsOnly", () => {
-    expect(parseManagerOverviewSearchParams({ problems: "1" }).problemsOnly).toBe(true);
-    expect(parseManagerOverviewSearchParams({ problems: "true" }).problemsOnly).toBe(false);
-    expect(parseManagerOverviewSearchParams({ problems: "0" }).problemsOnly).toBe(false);
-  });
-
   it("takes the first value when Next.js gives an array (repeated query key)", () => {
     const params = parseManagerOverviewSearchParams({
       person: ["p_1", "p_2"],
       range: ["30d", "today"],
       month: ["2026-01", "2026-02"],
-      problems: ["1", "0"],
     });
-    expect(params).toEqual({ personId: "p_1", range: "30d", month: "2026-01", problemsOnly: true });
+    expect(params).toEqual({ personId: "p_1", range: "30d", month: "2026-01" });
   });
 });

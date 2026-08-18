@@ -8,6 +8,9 @@ import { groupRosterHierarchy, type RosterTopGroup } from "@/lib/presentation/ro
 interface ManagerRosterSectionProps {
   roster: ManagerPersonSummary[];
   current: ManagerHrefParams;
+  /** The viewing manager's own id + Google profile photo (already resolved from the current auth session, never a new lookup) -- used ONLY to show a real photo for the manager's own row, if they appear in their own roster. Every other person has no photo data available, so they always fall back to initials. */
+  managerId: string;
+  managerAvatarUrl: string | null;
 }
 
 /** Real capabilities, independent of which presentation group/subgroup the person landed in -- never a second source of truth, just `person.isSupervisor`/`isTechnician` echoed back. */
@@ -31,14 +34,22 @@ function CapabilityBadges({ person }: { person: ManagerPersonSummary }) {
   );
 }
 
-function PersonRow({ person, current }: { person: ManagerPersonSummary; current: ManagerHrefParams }) {
+function PersonRow({
+  person,
+  current,
+  avatarUrl,
+}: {
+  person: ManagerPersonSummary;
+  current: ManagerHrefParams;
+  avatarUrl: string | null;
+}) {
   return (
     <li>
       <Link
         href={buildManagerHref({ ...current, personId: person.id })}
         className="flex items-center gap-2.5 rounded-xl px-1.5 py-1.5 transition-colors duration-200 hover:bg-overlay-soft"
       >
-        <Avatar name={person.name} size="sm" />
+        <Avatar name={person.name} size="sm" avatarUrl={avatarUrl} />
         <span className="min-w-0 flex-1 truncate text-sm text-foreground">{person.name}</span>
         <CapabilityBadges person={person} />
       </Link>
@@ -59,10 +70,15 @@ function groupCount(group: RosterTopGroup<ManagerPersonSummary>): number {
  * אחמ״שים/טכנאים/אחרים. Every person appears EXACTLY ONCE. Uses the
  * existing `personnelType`/`isSupervisor`/`isTechnician` fields only -- no
  * new Google fetch, no re-derived flags. Each row drills down via
- * `buildManagerHref`, preserving the current range/problems URL state.
+ * `buildManagerHref`, preserving the current range/category URL state.
+ * `managerAvatarUrl` (the viewer's own already-resolved Google photo) is
+ * shown ONLY on the manager's own row, if present in this roster --
+ * every other person has no photo data without a new lookup, so they stay
+ * on the initials fallback (see `ManagerOverviewReadModel.manager.avatarUrl`).
  */
-export function ManagerRosterSection({ roster, current }: ManagerRosterSectionProps) {
+export function ManagerRosterSection({ roster, current, managerId, managerAvatarUrl }: ManagerRosterSectionProps) {
   const groups = groupRosterHierarchy(roster);
+  const avatarUrlFor = (personId: string): string | null => (personId === managerId ? managerAvatarUrl : null);
 
   if (groups.length === 0) {
     return (
@@ -91,7 +107,7 @@ export function ManagerRosterSection({ roster, current }: ManagerRosterSectionPr
                     </p>
                     <ul className="mt-1">
                       {subgroup.people.map((person) => (
-                        <PersonRow key={person.id} person={person} current={current} />
+                        <PersonRow key={person.id} person={person} current={current} avatarUrl={avatarUrlFor(person.id)} />
                       ))}
                     </ul>
                   </div>
@@ -100,7 +116,7 @@ export function ManagerRosterSection({ roster, current }: ManagerRosterSectionPr
             ) : (
               <ul className="mt-2">
                 {group.people.map((person) => (
-                  <PersonRow key={person.id} person={person} current={current} />
+                  <PersonRow key={person.id} person={person} current={current} avatarUrl={avatarUrlFor(person.id)} />
                 ))}
               </ul>
             )}

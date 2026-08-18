@@ -7,7 +7,7 @@ afterEach(() => {
   cleanup();
 });
 
-const BASE: ManagerHrefParams = { personId: null, range: "7d", month: null, problemsOnly: false };
+const BASE: ManagerHrefParams = { personId: null, range: "7d", month: null, category: "overview" };
 
 describe("ManagerRangeSelector", () => {
   it("renders all four range options", () => {
@@ -15,13 +15,19 @@ describe("ManagerRangeSelector", () => {
     expect(screen.getByRole("link", { name: "היום" })).toHaveAttribute("href", "/manager?range=today");
     expect(screen.getByRole("link", { name: "7 ימים" })).toHaveAttribute("href", "/manager");
     expect(screen.getByRole("link", { name: "30 יום" })).toHaveAttribute("href", "/manager?range=30d");
-    expect(screen.getByRole("link", { name: "חודש" })).toHaveAttribute("href", "/manager?range=month");
+    expect(screen.getByRole("link", { name: "החודש" })).toHaveAttribute("href", "/manager?range=month");
   });
 
   it("marks the active range with aria-current", () => {
     render(<ManagerRangeSelector current={{ ...BASE, range: "today" }} currentMonth={null} />);
     expect(screen.getByRole("link", { name: "היום" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("link", { name: "7 ימים" })).not.toHaveAttribute("aria-current");
+  });
+
+  it("the active range carries a visible ring, not just a same-family background shade (light-mode contrast fix)", () => {
+    render(<ManagerRangeSelector current={{ ...BASE, range: "today" }} currentMonth={null} />);
+    expect(screen.getByRole("link", { name: "היום" }).className).toContain("ring-1");
+    expect(screen.getByRole("link", { name: "7 ימים" }).className).not.toContain("ring-1");
   });
 
   it("preserves the selected person when switching range", () => {
@@ -41,5 +47,23 @@ describe("ManagerRangeSelector", () => {
   it("rolls the year over at a December/January boundary", () => {
     render(<ManagerRangeSelector current={{ ...BASE, range: "month" }} currentMonth={{ year: 2026, month: 12 }} />);
     expect(screen.getByLabelText("חודש הבא")).toHaveAttribute("href", "/manager?range=month&month=2027-01");
+  });
+
+  it("shows the generic 'החודש' tab (no navigation arrows) only until month mode is active", () => {
+    render(<ManagerRangeSelector current={BASE} currentMonth={null} />);
+    expect(screen.getByRole("link", { name: "החודש" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("חודש קודם")).toBeNull();
+  });
+
+  it("in month mode, shows the real selected calendar month instead of the generic 'החודש' label -- never both at once", () => {
+    render(<ManagerRangeSelector current={{ ...BASE, range: "month" }} currentMonth={{ year: 2026, month: 8 }} />);
+    expect(screen.queryByRole("link", { name: "החודש" })).toBeNull();
+    expect(screen.getByText("אוגוסט 2026")).toBeInTheDocument();
+  });
+
+  it("the prev/next controls each show their OWN target month's name next to the arrow, not a bare glyph", () => {
+    render(<ManagerRangeSelector current={{ ...BASE, range: "month" }} currentMonth={{ year: 2026, month: 8 }} />);
+    expect(screen.getByLabelText("חודש קודם")).toHaveTextContent("יולי 2026");
+    expect(screen.getByLabelText("חודש הבא")).toHaveTextContent("ספטמבר 2026");
   });
 });

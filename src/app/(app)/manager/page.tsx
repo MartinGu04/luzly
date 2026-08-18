@@ -1,6 +1,8 @@
+import Link from "next/link";
 import { ConfigurationErrorState } from "@/components/dashboard/ConfigurationErrorState";
 import type { IssueRowView } from "@/components/issues/types";
 import { ManagerAttentionSection } from "@/components/manager/ManagerAttentionSection";
+import { ManagerCategoryNav } from "@/components/manager/ManagerCategoryNav";
 import { ManagerCommandBar } from "@/components/manager/ManagerCommandBar";
 import { ManagerCoverageSection } from "@/components/manager/ManagerCoverageSection";
 import { ManagerDutiesAbsencesSection } from "@/components/manager/ManagerDutiesAbsencesSection";
@@ -20,6 +22,7 @@ import type {
   ManagerAttentionItem,
   ManagerDutyRowView,
   ManagerPotentialRowView,
+  ManagerShiftDayView,
   ManagerShiftGroupView,
 } from "@/components/manager/types";
 import { formatMonthParam } from "@/lib/domain/calendarMonth";
@@ -40,11 +43,12 @@ import {
   periodLabel,
   roleLabel,
 } from "@/lib/presentation/labels";
-import type { ManagerHrefParams } from "@/lib/presentation/managerUrl";
+import { parseManagerCategoryParam, type ManagerHrefParams } from "@/lib/presentation/managerUrl";
 import { managerIssueCoverageReasonLabel } from "@/lib/presentation/managerIssueCoverage";
 import { managerSummaryLabel } from "@/lib/presentation/managerSummary";
 import { buildNotificationReadinessSummary } from "@/lib/presentation/notificationReadiness";
 import { roleCoverageMessage } from "@/lib/presentation/roleCoverage";
+import { scheduleEveryoneHref } from "@/lib/presentation/scheduleUrl";
 import { formatMissingIntervals } from "@/lib/presentation/scheduleTime";
 import { getRequestManagerOverview } from "@/lib/readModels/getRequestManagerOverview";
 import { parseManagerOverviewSearchParams } from "@/lib/readModels/managerOverviewParams";
@@ -65,7 +69,7 @@ interface ManagerPageProps {
     person?: SearchParamValue;
     range?: SearchParamValue;
     month?: SearchParamValue;
-    problems?: SearchParamValue;
+    category?: SearchParamValue;
   }>;
 }
 
@@ -189,6 +193,37 @@ function buildManagerShiftGroupView(group: ManagerShiftOverviewEntry, todayDate:
   };
 }
 
+/**
+ * Pairs the flat per-date+period `coverageOverview` into one row per DATE
+ * (redesign) -- the Shifts category's compact day-card grid, mirroring the
+ * SAME day/night pairing `lib/presentation/scheduleEveryone.ts` already
+ * establishes for the manager-only Schedule "כולם" perspective. A
+ * "morning"/"unspecified" shift period intentionally never surfaces here
+ * either, same reasoning as that module. Sorted chronologically -- a `Map`
+ * only preserves insertion order, which here is `coverageOverview`'s own
+ * date+period sort, not guaranteed date-major.
+ */
+function buildManagerShiftDayViews(entries: ManagerShiftOverviewEntry[], todayDate: string): ManagerShiftDayView[] {
+  const byDate = new Map<string, { day: ManagerShiftOverviewEntry | null; night: ManagerShiftOverviewEntry | null }>();
+  for (const entry of entries) {
+    if (entry.period !== "day" && entry.period !== "night") continue;
+    const bucket = byDate.get(entry.date) ?? { day: null, night: null };
+    if (entry.period === "day") bucket.day = entry;
+    else bucket.night = entry;
+    byDate.set(entry.date, bucket);
+  }
+
+  return [...byDate.entries()]
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([date, { day, night }]) => ({
+      key: date,
+      date,
+      dateLabel: issueDateLabel(date, todayDate),
+      day: day ? buildManagerShiftGroupView(day, todayDate) : null,
+      night: night ? buildManagerShiftGroupView(night, todayDate) : null,
+    }));
+}
+
 function buildManagerDutyRowView(duty: ManagerDutyEntry, todayDate: string): ManagerDutyRowView {
   return {
     key: `${duty.personId}-${duty.date}-${duty.dutyFamily}-${duty.slot ?? "x"}`,
@@ -238,28 +273,36 @@ function buildAssignmentView(
   };
 }
 
-function toHrefParams(model: ManagerOverviewReadModel): ManagerHrefParams {
+function toHrefParams(model: ManagerOverviewReadModel, category: ManagerHrefParams["category"]): ManagerHrefParams {
   return {
     personId: model.selectedPersonId,
     range: model.range.key,
     month: model.range.month ? formatMonthParam(model.range.month) : null,
-    problemsOnly: model.problemsOnly,
+    category,
   };
 }
 
 /**
- * "מבט מנהל" -- the manager's control center: everyone by default, or one
- * selected person's drill-down. Entirely driven by `ManagerOverviewReadModel`
- * (see `getRequestManagerOverview`/`loadManagerOverviewReadModel`) -- this
- * page never fetches Google itself, never re-runs `detectOperationalIssues()`,
+ * "אזור מנהל" -- the manager's full operational picture (redesign): a
+ * command-center Overview by default, plus three focused categories
+ * (Shifts / Personnel / Duties & Absences), or one selected person's
+ * drill-down. Entirely driven by `ManagerOverviewReadModel` (see
+ * `getRequestManagerOverview`/`loadManagerOverviewReadModel`) -- this page
+ * never fetches Google itself, never re-runs `detectOperationalIssues()`,
  * and never receives more than safe roster ids/names on the client (see
- * `ManagerPersonSelector`).
+ * `ManagerPersonSelector`). The category switch is a pure presentation
+ * concern: every section below reads from the SAME already-loaded model,
+ * just organized differently -- switching category never triggers a
+ * second fetch or a different server call.
  */
 export default async function ManagerPage({ searchParams }: ManagerPageProps) {
   const rawParams = await searchParams;
   const params = parseManagerOverviewSearchParams(rawParams);
+  const category = parseManagerCategoryParam(
+    Array.isArray(rawParams.category) ? rawParams.category[0] : rawParams.category,
+  );
 
-  const result = await getRequestManagerOverview(params.personId, params.range, params.month, params.problemsOnly);
+  const result = await getRequestManagerOverview(params.personId, params.range, params.month);
 
   if (result.status === "forbidden") {
     return <ManagerForbiddenState />;
@@ -270,7 +313,8 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
 
   const { model } = result;
   const todayDate = model.localNow.date;
-  const hrefParams = toHrefParams(model);
+  const hrefParams = toHrefParams(model, category);
+  const categoryNavCurrent = { range: hrefParams.range, month: hrefParams.month };
   // `ManagerPersonSummary` already carries personnelType/isSupervisor/
   // isTechnician -- passed straight through to `ManagerPersonSelector` so
   // it can group people the same way `ManagerRosterSection` does, instead
@@ -295,15 +339,16 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
           current={hrefParams}
           currentMonth={model.range.month}
           fetchedAt={model.fetchedAt}
-          showProblemsToggle={false}
         />
         <ManagerSelectedPersonView
+          personId={model.selectedPersonId}
           person={{
             name: selected.person.name,
             isManager: selected.person.isManager,
             isTechnician: selected.person.isTechnician,
             isSupervisor: selected.person.isSupervisor,
           }}
+          avatarUrl={model.selectedPersonId === model.manager.id ? model.manager.avatarUrl : null}
           currentAssignments={selected.currentAssignments.map((assignment, index) =>
             buildAssignmentView(assignment, todayDate, "current", index),
           )}
@@ -351,44 +396,58 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
       .map((view) => ({ kind: "potential" as const, view })),
   ];
 
+  const shiftDayViews = buildManagerShiftDayViews(model.coverageOverview, todayDate);
+
   return (
     <div className="flex flex-col gap-6">
       <ManagerHeader />
+      <ManagerCategoryNav active={category} current={categoryNavCurrent} />
       <ManagerCommandBar
         people={people}
         selectedPersonId={model.selectedPersonId}
         current={hrefParams}
         currentMonth={model.range.month}
         fetchedAt={model.fetchedAt}
-        showProblemsToggle
       />
-      {summary ? <ManagerSummaryStrip summary={summary} /> : null}
 
-      <ManagerAttentionSection criticalItems={criticalItems} reviewItems={reviewItems} current={hrefParams} />
-
-      <ManagerNotificationReadinessSection readiness={notificationReadiness} />
-
-      {!model.problemsOnly ? (
+      {category === "overview" ? (
         <>
-          <section>
-            <h2 className="mb-2 text-lg font-semibold text-foreground sm:text-xl">כיסוי משמרות</h2>
-            <ManagerCoverageSection
-              groups={model.coverageOverview.map((group) => buildManagerShiftGroupView(group, todayDate))}
-            />
-          </section>
-
-          <section>
-            <h2 className="mb-2 text-lg font-semibold text-foreground sm:text-xl">פוטנציאל מול סידור</h2>
-            <ManagerPotentialSection rows={potentialRowViews} />
-          </section>
-
-          <ManagerDutiesAbsencesSection
-            duties={model.duties.map((duty) => buildManagerDutyRowView(duty, todayDate))}
-            absences={model.absences.map((absence) => buildManagerAbsenceRowView(absence, todayDate))}
-          />
-
-          <ManagerRosterSection roster={model.roster} current={hrefParams} />
+          {summary ? <ManagerSummaryStrip summary={summary} /> : null}
+          <ManagerAttentionSection criticalItems={criticalItems} reviewItems={reviewItems} current={hrefParams} />
+          <ManagerNotificationReadinessSection readiness={notificationReadiness} />
         </>
+      ) : null}
+
+      {category === "shifts" ? (
+        <div className="flex flex-col gap-4">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-lg font-semibold text-foreground sm:text-xl">כיסוי משמרות</h2>
+            <Link
+              href={scheduleEveryoneHref()}
+              className="shrink-0 text-sm font-medium text-primary hover:underline"
+            >
+              ללוח הצוות המלא ←
+            </Link>
+          </div>
+          <ManagerCoverageSection days={shiftDayViews} />
+          <ManagerPotentialSection rows={potentialRowViews} />
+        </div>
+      ) : null}
+
+      {category === "personnel" ? (
+        <ManagerRosterSection
+          roster={model.roster}
+          current={hrefParams}
+          managerId={model.manager.id}
+          managerAvatarUrl={model.manager.avatarUrl}
+        />
+      ) : null}
+
+      {category === "duties" ? (
+        <ManagerDutiesAbsencesSection
+          duties={model.duties.map((duty) => buildManagerDutyRowView(duty, todayDate))}
+          absences={model.absences.map((absence) => buildManagerAbsenceRowView(absence, todayDate))}
+        />
       ) : null}
 
       <ManagerSourceOfTruthNote />

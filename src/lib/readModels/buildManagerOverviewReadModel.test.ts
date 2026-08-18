@@ -113,7 +113,7 @@ function buildModel(overrides: Partial<Parameters<typeof buildManagerOverviewRea
     now,
     range: range7d(),
     selectedPersonId: null,
-    problemsOnly: false,
+    managerAvatarUrl: null,
     notificationReadiness: { status: "skipped" },
     ...overrides,
   });
@@ -704,12 +704,16 @@ describe("buildManagerOverviewReadModel — privacy", () => {
   });
 });
 
-describe("buildManagerOverviewReadModel — problemsOnly / range echo", () => {
-  it("echoes the resolved range and problemsOnly flag", () => {
-    const model = buildModel({ problemsOnly: true });
-    expect(model.problemsOnly).toBe(true);
+describe("buildManagerOverviewReadModel — range echo", () => {
+  it("echoes the resolved range", () => {
+    const model = buildModel();
     expect(model.range.key).toBe("7d");
     expect(model.range.startDate).toBe("2026-08-13");
+  });
+
+  it("echoes the manager's own avatarUrl, never anyone else's", () => {
+    const model = buildModel({ managerAvatarUrl: "https://example.invalid/photo.jpg" });
+    expect(model.manager.avatarUrl).toBe("https://example.invalid/photo.jpg");
   });
 });
 
@@ -756,9 +760,8 @@ describe("buildManagerOverviewReadModel — PR #16 manager Potential scope", () 
     expect(missing[0].sourceAllocationLabel).toBe('תקש"ל');
   });
 
-  it("problemsOnly=1: an external missing requirement never contributes a problem -- it was excluded before reconciliation, regardless of mode", () => {
+  it("an external missing requirement never contributes a problem -- it was excluded before reconciliation", () => {
     const model = buildModel({
-      problemsOnly: true,
       potentialAllocations: [
         allocation({ sourceAllocationLabel: 'תקש"ל', dutyFamily: "evacuation_on_call", date: "2026-08-13" }),
         allocation({

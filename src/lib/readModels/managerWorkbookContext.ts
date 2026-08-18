@@ -22,6 +22,14 @@ export interface ManagerWorkbookContext {
   manager: Person;
   people: Person[];
   snapshot: RawWorkbookSnapshot;
+  /**
+   * The manager's OWN presentation-only Google profile photo -- read
+   * straight off the `getRequestPersonalSchedule()` call this function
+   * already makes for authorization (never a second/new fetch, and never
+   * looked up for anyone other than the manager themselves). See
+   * `lib/auth/currentUser.ts` for where it originates.
+   */
+  avatarUrl: string | null;
 }
 
 /**
@@ -120,5 +128,8 @@ export async function loadManagerWorkbookContext(
     return { status: "forbidden" };
   }
 
-  return { status: "ok", context: { manager: identityResult.person, people, snapshot } };
+  return {
+    status: "ok",
+    context: { manager: identityResult.person, people, snapshot, avatarUrl: personalResult.avatarUrl },
+  };
 }

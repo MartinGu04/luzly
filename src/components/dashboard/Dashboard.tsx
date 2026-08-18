@@ -31,7 +31,13 @@ function findVacationEvent(todayEvents: readonly PersonalEventView[]): PersonalE
  *
  * Layout: a main narrative column (header, hero, today) plus a secondary
  * contextual column (issues, upcoming) on desktop; a single stacked column
- * on mobile, hero-first.
+ * on mobile, hero-first. Release-polish pass: the top-level Header/
+ * freshness/content spacing was trimmed from `gap-6` down to `gap-4` (a
+ * follow-up pass tightened it further from an intermediate `gap-5`) --
+ * real vertical space this page didn't need, part of removing a small
+ * unnecessary page scroll at normal desktop viewport heights, alongside
+ * `AppShell`'s own top padding. The two-column grid's OWN internal `gap-6`
+ * (between Hero/Timeline/etc.) is unchanged.
  */
 export function Dashboard({ model, recentChanges = [] }: DashboardProps) {
   const hasCurrentAssignment = model.currentAssignments.length > 0;
@@ -58,7 +64,7 @@ export function Dashboard({ model, recentChanges = [] }: DashboardProps) {
   const todayDutyActions = model.dutyActions.filter((action) => action.date === model.localNow.date);
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4">
       <Header personName={model.person.name} localNow={model.localNow} />
       <DataFreshnessStatus fetchedAt={model.fetchedAt} />
 

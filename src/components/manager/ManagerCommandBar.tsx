@@ -1,9 +1,7 @@
 import type { CalendarMonthKey } from "@/lib/domain/calendarMonth";
 import type { ManagerHrefParams } from "@/lib/presentation/managerUrl";
-import { Panel } from "@/components/ui/Panel";
 import { DataFreshnessStatus } from "@/components/ui/DataFreshnessStatus";
 import { ManagerPersonSelector, type ManagerPersonOption } from "./ManagerPersonSelector";
-import { ManagerProblemsToggle } from "./ManagerProblemsToggle";
 import { ManagerRangeSelector } from "./ManagerRangeSelector";
 
 interface ManagerCommandBarProps {
@@ -12,45 +10,34 @@ interface ManagerCommandBarProps {
   current: ManagerHrefParams;
   currentMonth: CalendarMonthKey | null;
   fetchedAt: string;
-  /**
-   * False on the selected-person view -- "הצג רק בעיות" filters the
-   * EVERYONE overview and has no meaning once already drilled into one
-   * person (Design Pass PR #21 §8), so it's omitted there entirely rather
-   * than rendered disabled/non-functional.
-   */
-  showProblemsToggle: boolean;
 }
 
 /**
- * "/manager"'s unified command bar (Design Pass PR #21 §5/§6): person
- * scope + date range + freshness metadata + the problems-only action, all
- * in one intentional bar instead of scattered controls. RIGHT/primary
- * (renders first, which is visually the start side in RTL): person +
- * range. LEFT/high-attention (renders last, visually the end side):
- * "הצג רק בעיות" -- the command bar's most visually dominant action. Every
- * control here is a real URL/server-state control (`ManagerPersonSelector`
- * changes `?person=`, `ManagerRangeSelector`/`ManagerProblemsToggle` are
- * plain `Link`s) -- this component only composes layout, it never adds
- * client-side filtering of its own.
+ * "/manager"'s ONE global-controls bar (redesign) -- person scope, date
+ * range, and data-freshness, together, so they read as clearly-owned
+ * global state rather than scattered across the page. Deliberately
+ * narrower than before: the old "הצג רק בעיות" action is gone (Overview,
+ * `ManagerCategoryNav`'s default category, already IS that focused view --
+ * a second control that also hid/showed sections would only fight the
+ * category switch for the same job). Every control here is a real URL/
+ * server-state control (`ManagerPersonSelector` changes `?person=`,
+ * `ManagerRangeSelector` is a plain `Link` set) -- this component only
+ * composes layout, it never adds client-side filtering of its own.
+ *
+ * Final polish pass: no more `Panel` card of its own -- the bordered/
+ * shaded surface read as one more heavy panel among several stacked on the
+ * page. A plain flow group (same "no chrome, just spacing" idiom the
+ * dashboard's `Header`/`DataFreshnessStatus` pairing already uses) keeps
+ * the controls grouped and readable without the extra visual weight.
  */
-export function ManagerCommandBar({
-  people,
-  selectedPersonId,
-  current,
-  currentMonth,
-  fetchedAt,
-  showProblemsToggle,
-}: ManagerCommandBarProps) {
+export function ManagerCommandBar({ people, selectedPersonId, current, currentMonth, fetchedAt }: ManagerCommandBarProps) {
   return (
-    <Panel variant="compact" className="flex flex-col gap-3">
+    <div className="flex flex-col gap-2.5">
       <DataFreshnessStatus fetchedAt={fetchedAt} />
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <ManagerPersonSelector people={people} selectedId={selectedPersonId} />
-          <ManagerRangeSelector current={current} currentMonth={currentMonth} />
-        </div>
-        {showProblemsToggle ? <ManagerProblemsToggle current={current} /> : null}
+      <div className="flex flex-wrap items-center gap-2">
+        <ManagerPersonSelector people={people} selectedId={selectedPersonId} />
+        <ManagerRangeSelector current={current} currentMonth={currentMonth} />
       </div>
-    </Panel>
+    </div>
   );
 }

@@ -36,6 +36,8 @@ import type { PersonalIssueTargetSummary } from "./types";
 export interface BuildManagerOverviewReadModelInput {
   /** The authenticated manager -- already verified `isManager === true` by the caller (see `managerOverview.ts`). */
   manager: Person;
+  /** The manager's own presentation-only Google profile photo, already resolved by the caller from the shared request-scoped identity -- never a new lookup here. */
+  managerAvatarUrl: string | null;
   /** Full parsed personnel list -- everyone visible to the manager. */
   people: readonly Person[];
   /** Full parsed internal Event[] (every person). */
@@ -61,7 +63,6 @@ export interface BuildManagerOverviewReadModelInput {
   range: ManagerDateRange;
   /** Raw, unvalidated -- null means "everyone"; validated against `people` below. */
   selectedPersonId: string | null;
-  problemsOnly: boolean;
   /**
    * PR #40 -- the caller's own record of whether `computeNotificationReadiness()`
    * was skipped, attempted-and-failed, or attempted-and-succeeded (with its
@@ -98,6 +99,7 @@ export function buildManagerOverviewReadModel(
 ): ManagerOverviewReadModel {
   const {
     manager,
+    managerAvatarUrl,
     people,
     events,
     potentialAllocations,
@@ -107,7 +109,6 @@ export function buildManagerOverviewReadModel(
     now,
     range,
     selectedPersonId,
-    problemsOnly,
     notificationReadiness: rawNotificationReadiness,
   } = input;
 
@@ -164,11 +165,10 @@ export function buildManagerOverviewReadModel(
   const notificationReadiness = toManagerNotificationReadinessState(rawNotificationReadiness, peopleById);
 
   return {
-    manager: { id: manager.id, name: manager.name },
+    manager: { id: manager.id, name: manager.name, avatarUrl: managerAvatarUrl },
     fetchedAt,
     localNow: now,
     range: { key: range.key, startDate: range.startDate, endDate: range.endDate, month: range.month },
-    problemsOnly,
     roster,
     selectedPersonId: resolvedSelectedPerson?.id ?? null,
     issues,

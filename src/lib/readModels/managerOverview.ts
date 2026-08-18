@@ -41,7 +41,7 @@ export async function loadManagerOverviewReadModel(
   const contextResult = await loadManagerWorkbookContext();
   if (contextResult.status !== "ok") return contextResult;
 
-  const { manager, people, snapshot } = contextResult.context;
+  const { manager, people, snapshot, avatarUrl } = contextResult.context;
 
   // PR #40 -- started now (the manager is already authorized above by
   // `loadManagerWorkbookContext`) so its Supabase Admin API + bulk
@@ -94,6 +94,7 @@ export async function loadManagerOverviewReadModel(
 
   const model = buildManagerOverviewReadModel({
     manager,
+    managerAvatarUrl: avatarUrl,
     people,
     events,
     potentialAllocations,
@@ -103,7 +104,6 @@ export async function loadManagerOverviewReadModel(
     now,
     range,
     selectedPersonId: params.personId,
-    problemsOnly: params.problemsOnly,
     notificationReadiness,
   });
 

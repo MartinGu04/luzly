@@ -17,41 +17,28 @@ afterEach(() => {
   cleanup();
 });
 
-const CURRENT: ManagerHrefParams = { personId: null, range: "7d", month: null, problemsOnly: false };
+const CURRENT: ManagerHrefParams = { personId: null, range: "7d", month: null, category: "overview" };
 const PEOPLE = [{ id: "p1", name: "מרטין בדיקה", personnelType: null, isSupervisor: false, isTechnician: false }];
 
 describe("ManagerCommandBar", () => {
   it("renders the person selector, range selector, and freshness status", () => {
     render(
-      <ManagerCommandBar
-        people={PEOPLE}
-        selectedPersonId={null}
-        current={CURRENT}
-        currentMonth={null}
-        fetchedAt="2026-08-14T08:00:00.000Z"
-        showProblemsToggle
-      />,
+      <ManagerCommandBar people={PEOPLE} selectedPersonId={null} current={CURRENT} currentMonth={null} fetchedAt="2026-08-14T08:00:00.000Z" />,
     );
     expect(screen.getByRole("button")).toHaveTextContent("כולם");
     expect(screen.getByRole("navigation", { name: "טווח תאריכים" })).toBeInTheDocument();
     expect(screen.getByTestId("freshness")).toHaveTextContent("2026-08-14T08:00:00.000Z");
   });
 
-  it("shows the problems-only action when showProblemsToggle is true", () => {
+  it("never renders a problems-only action -- Overview owns that job now", () => {
     render(
-      <ManagerCommandBar
-        people={PEOPLE}
-        selectedPersonId={null}
-        current={CURRENT}
-        currentMonth={null}
-        fetchedAt="2026-08-14T08:00:00.000Z"
-        showProblemsToggle
-      />,
+      <ManagerCommandBar people={PEOPLE} selectedPersonId={null} current={CURRENT} currentMonth={null} fetchedAt="2026-08-14T08:00:00.000Z" />,
     );
-    expect(screen.getByRole("link", { name: "הצג רק בעיות" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "הצג רק בעיות" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "מציג רק בעיות" })).toBeNull();
   });
 
-  it("hides the problems-only action on the selected-person view (showProblemsToggle=false) -- never a fake/nonfunctional toggle", () => {
+  it("still renders the range selector on a selected-person view", () => {
     render(
       <ManagerCommandBar
         people={PEOPLE}
@@ -59,10 +46,8 @@ describe("ManagerCommandBar", () => {
         current={{ ...CURRENT, personId: "p1" }}
         currentMonth={null}
         fetchedAt="2026-08-14T08:00:00.000Z"
-        showProblemsToggle={false}
       />,
     );
-    expect(screen.queryByRole("link", { name: "הצג רק בעיות" })).toBeNull();
-    expect(screen.queryByRole("link", { name: "מציג רק בעיות" })).toBeNull();
+    expect(screen.getByRole("navigation", { name: "טווח תאריכים" })).toBeInTheDocument();
   });
 });

@@ -133,11 +133,10 @@ function personalModel(overrides: Partial<PersonalScheduleReadModel> = {}): Pers
 
 function model(overrides: Partial<ManagerOverviewReadModel> = {}): ManagerOverviewReadModel {
   return {
-    manager: { id: "p_manager", name: "דני מנהל" },
+    manager: { id: "p_manager", name: "דני מנהל", avatarUrl: null },
     fetchedAt: "2026-08-13T08:00:00.000Z",
     localNow: { date: "2026-08-13", minuteOfDay: 600 },
     range: { key: "7d", startDate: "2026-08-13", endDate: "2026-08-19", month: null },
-    problemsOnly: false,
     roster: [
       { id: "p_martin", name: "מרטין בדיקה", isManager: false, isTechnician: true, isSupervisor: false, personnelType: null },
       { id: "p_eitan", name: "איתן דוגמה", isManager: false, isTechnician: false, isSupervisor: true, personnelType: null },
@@ -180,39 +179,104 @@ describe("ManagerPage — authorization states", () => {
 });
 
 describe("ManagerPage — request scope", () => {
-  it("passes parsed search params through to getRequestManagerOverview", async () => {
+  it("passes parsed search params through to getRequestManagerOverview (category is a page-local rendering concern, never sent to the loader)", async () => {
     getRequestManagerOverview.mockResolvedValue(okResult(model()));
-    await renderPage({ person: "p_martin", range: "30d", problems: "1" });
-    expect(getRequestManagerOverview).toHaveBeenCalledWith("p_martin", "30d", null, true);
+    await renderPage({ person: "p_martin", range: "30d", category: "shifts" });
+    expect(getRequestManagerOverview).toHaveBeenCalledWith("p_martin", "30d", null);
   });
 
-  it("defaults: no search params -> everyone, 7d, no problems", async () => {
+  it("defaults: no search params -> everyone, 7d, no month", async () => {
     getRequestManagerOverview.mockResolvedValue(okResult(model()));
     await renderPage();
-    expect(getRequestManagerOverview).toHaveBeenCalledWith(null, "7d", null, false);
+    expect(getRequestManagerOverview).toHaveBeenCalledWith(null, "7d", null);
   });
 });
 
-describe("ManagerPage — everyone view", () => {
-  it("empty state: no problems shows the calm success panel", async () => {
+describe("ManagerPage — category navigation", () => {
+  it("renders all four category tabs, Overview active by default", async () => {
     getRequestManagerOverview.mockResolvedValue(okResult(model()));
     await renderPage();
-    expect(screen.getByText("אין כרגע דברים שדורשים טיפול בטווח שנבחר")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "סקירה" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "משמרות" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "כוח אדם" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "תורנויות והיעדרויות" })).toBeInTheDocument();
   });
 
+  it("Overview (default): shows דורש טיפול, never the other categories' sections", async () => {
+    getRequestManagerOverview.mockResolvedValue(
+      okResult(model({ issues: [issue()], coverageOverview: [shiftGroup()], duties: [duty()] })),
+    );
+    await renderPage();
+    expect(screen.getByText("דורש טיפול")).toBeInTheDocument();
+    expect(screen.queryByText("כיסוי משמרות")).toBeNull();
+    expect(screen.queryByText("תורנויות")).toBeNull();
+    expect(screen.queryByText("צוות")).toBeNull();
+  });
+
+  it("Shifts category: shows coverage + Potential, never the Overview/Duties/Personnel sections", async () => {
+    getRequestManagerOverview.mockResolvedValue(
+      okResult(model({ issues: [issue()], coverageOverview: [shiftGroup()], duties: [duty()] })),
+    );
+    await renderPage({ category: "shifts" });
+    expect(screen.getByText("כיסוי משמרות")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "ללוח הצוות המלא ←" })).toHaveAttribute("href", "/schedule?person=all");
+    expect(screen.queryByText("דורש טיפול")).toBeNull();
+    expect(screen.queryByText("תורנויות")).toBeNull();
+    expect(screen.queryByText("צוות")).toBeNull();
+  });
+
+  it("Personnel category: shows the roster, never the Overview/Shifts/Duties sections", async () => {
+    getRequestManagerOverview.mockResolvedValue(okResult(model({ issues: [issue()], coverageOverview: [shiftGroup()] })));
+    await renderPage({ category: "personnel" });
+    expect(screen.getByText("צוות")).toBeInTheDocument();
+    expect(screen.queryByText("דורש טיפול")).toBeNull();
+    expect(screen.queryByText("כיסוי משמרות")).toBeNull();
+  });
+
+  it("Duties & Absences category: shows duties/absences, never the Overview/Shifts/Personnel sections", async () => {
+    getRequestManagerOverview.mockResolvedValue(
+      okResult(model({ issues: [issue()], coverageOverview: [shiftGroup()], duties: [duty()] })),
+    );
+    await renderPage({ category: "duties" });
+    expect(screen.getByText("תורנויות")).toBeInTheDocument();
+    expect(screen.queryByText("דורש טיפול")).toBeNull();
+    expect(screen.queryByText("כיסוי משמרות")).toBeNull();
+    expect(screen.queryByText("צוות")).toBeNull();
+  });
+
+  it("an unknown category value falls back to Overview, never a crash", async () => {
+    getRequestManagerOverview.mockResolvedValue(okResult(model({ issues: [issue()] })));
+    await renderPage({ category: "bogus" });
+    expect(screen.getByText("דורש טיפול")).toBeInTheDocument();
+  });
+
+  it("switching category preserves the current range", async () => {
+    getRequestManagerOverview.mockResolvedValue(okResult(model({ range: { key: "30d", startDate: "2026-08-01", endDate: "2026-08-30", month: null } })));
+    await renderPage({ range: "30d" });
+    expect(screen.getByRole("tab", { name: "משמרות" })).toHaveAttribute("href", "/manager?range=30d&category=shifts");
+  });
+
+  it("no problems-only toggle exists anywhere -- Overview owns that job now", async () => {
+    getRequestManagerOverview.mockResolvedValue(okResult(model()));
+    await renderPage();
+    expect(screen.queryByRole("link", { name: "הצג רק בעיות" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "מציג רק בעיות" })).toBeNull();
+  });
+});
+
+describe("ManagerPage — Overview: אזור מנהל identity", () => {
   it("shows the אזור מנהל title (no מנהל chip) and no leftover subnav (PR #4 -- ManagerSubNav removed, Fairness moved to /fairness)", async () => {
     getRequestManagerOverview.mockResolvedValue(okResult(model()));
     await renderPage();
     expect(screen.getByRole("heading", { name: "אזור מנהל", level: 1 })).toBeInTheDocument();
     expect(screen.queryByText("מנהל")).toBeNull();
-    expect(screen.queryByRole("link", { name: "סקירה" })).toBeNull();
     expect(screen.queryByRole("link", { name: "טבלת צדק" })).toBeNull();
   });
 
-  it("shows the strong outlined הצג רק בעיות action when problems are not filtered", async () => {
+  it("empty state: no problems shows the calm success panel", async () => {
     getRequestManagerOverview.mockResolvedValue(okResult(model()));
     await renderPage();
-    expect(screen.getByRole("link", { name: "הצג רק בעיות" })).toHaveAttribute("href", "/manager?problems=1");
+    expect(screen.getByText("אין כרגע דברים שדורשים טיפול בטווח שנבחר")).toBeInTheDocument();
   });
 
   it("shows several critical/review issues, grouped by severity", async () => {
@@ -236,8 +300,10 @@ describe("ManagerPage — everyone view", () => {
     const { container } = await renderPage();
     expect(container.textContent).not.toContain("שלך");
   });
+});
 
-  it("shows a covered Potential requirement with its actual internal assignee", async () => {
+describe("ManagerPage — Shifts category: coverage + Potential", () => {
+  it("shows a covered Potential requirement (inside the collapsed disclosure) with its actual internal assignee", async () => {
     getRequestManagerOverview.mockResolvedValue(
       okResult(
         model({
@@ -251,7 +317,7 @@ describe("ManagerPage — everyone view", () => {
         }),
       ),
     );
-    await renderPage();
+    await renderPage({ category: "shifts" });
     expect(screen.getAllByText(/מכוסה/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/איתן דוגמה/).length).toBeGreaterThan(0);
   });
@@ -260,13 +326,13 @@ describe("ManagerPage — everyone view", () => {
     getRequestManagerOverview.mockResolvedValue(
       okResult(model({ potentialRequirements: [potentialRow({ status: "not_evaluable", sourceConflict: null })] })),
     );
-    await renderPage();
+    await renderPage({ category: "shifts" });
     expect(screen.getAllByText(/לא ניתן להצליב אוטומטית/).length).toBeGreaterThan(0);
   });
 
   it("shows a missing Potential requirement with the named-source conflict note", async () => {
     getRequestManagerOverview.mockResolvedValue(okResult(model({ potentialRequirements: [potentialRow()] })));
-    await renderPage();
+    await renderPage({ category: "shifts" });
     expect(screen.getAllByText(/חסר/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/היעדרות חוסמת/).length).toBeGreaterThan(0);
   });
@@ -286,7 +352,7 @@ describe("ManagerPage — everyone view", () => {
         }),
       ),
     );
-    await renderPage();
+    await renderPage({ category: "shifts" });
     expect(screen.getAllByText("סייבר").length).toBeGreaterThan(0);
     expect(screen.getAllByText(/איתן דוגמה/).length).toBeGreaterThan(0);
   });
@@ -315,7 +381,7 @@ describe("ManagerPage — everyone view", () => {
         }),
       ),
     );
-    await renderPage();
+    await renderPage({ category: "shifts" });
     expect(screen.getAllByText("אוקסיד 3").length).toBeGreaterThan(0);
     expect(screen.getAllByText("מטבח מלא 2").length).toBeGreaterThan(0);
     // The bare family label alone (without its Potential-side number) is never shown for these rows.
@@ -338,10 +404,27 @@ describe("ManagerPage — everyone view", () => {
         }),
       ),
     );
-    await renderPage();
+    await renderPage({ category: "shifts" });
     expect(screen.getByText(/מרטין בדיקה, נועה דוגמה/)).toBeInTheDocument();
   });
 
+  it("pairs day+night shift groups for the same date into one day card", async () => {
+    getRequestManagerOverview.mockResolvedValue(
+      okResult(
+        model({
+          coverageOverview: [
+            shiftGroup({ date: "2026-08-13", period: "day" }),
+            shiftGroup({ date: "2026-08-13", period: "night" }),
+          ],
+        }),
+      ),
+    );
+    const { container } = await renderPage({ category: "shifts" });
+    expect(container.querySelectorAll('a[href^="/schedule?person=all&date="]').length).toBe(1);
+  });
+});
+
+describe("ManagerPage — Duties & Absences category", () => {
   it("shows several duties and absences", async () => {
     getRequestManagerOverview.mockResolvedValue(
       okResult(
@@ -351,16 +434,26 @@ describe("ManagerPage — everyone view", () => {
         }),
       ),
     );
-    await renderPage();
+    await renderPage({ category: "duties" });
     expect(screen.getByText("תורנויות")).toBeInTheDocument();
     expect(screen.getByText("היעדרויות")).toBeInTheDocument();
   });
+});
 
-  it("the roster section links to each person by id", async () => {
+describe("ManagerPage — Personnel category", () => {
+  it("the roster section links to each person by id, preserving range/category", async () => {
     getRequestManagerOverview.mockResolvedValue(okResult(model()));
-    await renderPage();
+    await renderPage({ category: "personnel" });
     const link = screen.getAllByRole("link", { name: /מרטין בדיקה/ })[0];
-    expect(link).toHaveAttribute("href", "/manager?person=p_martin");
+    expect(link).toHaveAttribute("href", "/manager?person=p_martin&category=personnel");
+  });
+
+  it("shows a real photo for the manager's own roster row when one is available", async () => {
+    getRequestManagerOverview.mockResolvedValue(
+      okResult(model({ manager: { id: "p_martin", name: "מרטין בדיקה", avatarUrl: "https://example.invalid/photo.jpg" } })),
+    );
+    const { container } = await renderPage({ category: "personnel" });
+    expect(container.querySelectorAll('img[data-testid="avatar-photo"]')).toHaveLength(1);
   });
 });
 
@@ -474,8 +567,8 @@ describe("ManagerPage — PR #37 recommendation wiring", () => {
   });
 });
 
-describe("ManagerPage — attention section agrees with coverage section on which role is missing", () => {
-  it("technician missing: attention says 'חסר טכנאי למשמרת', matching the coverage section's 'חסר טכנאי'", async () => {
+describe("ManagerPage — Overview issue wording matches the domain's own role-coverage diagnostic", () => {
+  it("technician missing: attention says 'חסר טכנאי למשמרת'", async () => {
     getRequestManagerOverview.mockResolvedValue(
       okResult(
         model({
@@ -503,8 +596,6 @@ describe("ManagerPage — attention section agrees with coverage section on whic
     expect(screen.getAllByText("טוביה פרי", { exact: false }).length).toBeGreaterThan(0);
     expect(screen.getByText(/חסר טכנאי למשמרת/)).toBeInTheDocument();
     expect(screen.queryByText(/חסר כיסוי למשמרת/)).toBeNull();
-    // Same wording as the lower coverage section's own explicit role message -- the two sections now agree.
-    expect(screen.getAllByText(/חסר טכנאי/).length).toBeGreaterThanOrEqual(1);
   });
 
   it('supervisor missing: attention says \'חסר אחמ"ש למשמרת\'', async () => {
@@ -673,30 +764,6 @@ describe("ManagerPage — attention section agrees with coverage section on whic
   });
 });
 
-describe("ManagerPage — problems-only filter", () => {
-  it("hides coverage/potential/duties/roster sections when problemsOnly is set", async () => {
-    getRequestManagerOverview.mockResolvedValue(
-      okResult(
-        model({
-          problemsOnly: true,
-          issues: [issue()],
-          coverageOverview: [shiftGroup()],
-          duties: [duty()],
-        }),
-      ),
-    );
-    await renderPage({ problems: "1" });
-    expect(screen.queryByText("כיסוי משמרות")).toBeNull();
-    expect(screen.queryByText("תורנויות")).toBeNull();
-  });
-
-  it("still shows the attention section when problemsOnly is set", async () => {
-    getRequestManagerOverview.mockResolvedValue(okResult(model({ problemsOnly: true, issues: [issue()] })));
-    await renderPage({ problems: "1" });
-    expect(screen.getByText("דחוף")).toBeInTheDocument();
-  });
-});
-
 describe("ManagerPage — PR #40 מצב התראות section", () => {
   it("skipped: renders nothing (lookup never attempted)", async () => {
     getRequestManagerOverview.mockResolvedValue(okResult(model({ notificationReadiness: { status: "skipped" } })));
@@ -753,11 +820,11 @@ describe("ManagerPage — PR #40 מצב התראות section", () => {
     expect(screen.getByText("אין מכשיר רשום להתראות")).toBeInTheDocument();
   });
 
-  it("stays visible when problemsOnly is set -- data-quality context, not a shift conflict", async () => {
+  it("lives in Overview alongside דורש טיפול -- data-quality context, not a shift conflict", async () => {
     getRequestManagerOverview.mockResolvedValue(
       okResult(
         model({
-          problemsOnly: true,
+          issues: [issue()],
           notificationReadiness: {
             status: "available",
             view: {
@@ -769,7 +836,8 @@ describe("ManagerPage — PR #40 מצב התראות section", () => {
         }),
       ),
     );
-    await renderPage({ problems: "1" });
+    await renderPage();
+    expect(screen.getByText("דורש טיפול")).toBeInTheDocument();
     expect(screen.getByText("אדם אחד עדיין לא יכול לקבל התראות אישיות")).toBeInTheDocument();
   });
 
@@ -785,6 +853,14 @@ describe("ManagerPage — PR #40 מצב התראות section", () => {
     );
     await renderPage({ person: "p_martin" });
     expect(screen.queryByText("הצג פרטים")).toBeNull();
+    expect(screen.queryByText("לא ניתן לבדוק כרגע את מצב ההתראות")).toBeNull();
+  });
+
+  it("never appears outside Overview", async () => {
+    getRequestManagerOverview.mockResolvedValue(
+      okResult(model({ notificationReadiness: { status: "unavailable" } })),
+    );
+    await renderPage({ category: "shifts" });
     expect(screen.queryByText("לא ניתן לבדוק כרגע את מצב ההתראות")).toBeNull();
   });
 });
@@ -828,15 +904,6 @@ describe("ManagerPage — selected person view", () => {
     expect(screen.queryByText("נועה דוגמה")).toBeNull();
   });
 
-  it("never shows the problems-only toggle -- it has no meaning once already drilled into one person (Design Pass PR #21 §8)", async () => {
-    getRequestManagerOverview.mockResolvedValue(
-      okResult(model({ selectedPersonId: "p_martin", selectedPerson: personalModel() })),
-    );
-    await renderPage({ person: "p_martin" });
-    expect(screen.queryByRole("link", { name: "הצג רק בעיות" })).toBeNull();
-    expect(screen.queryByRole("link", { name: "מציג רק בעיות" })).toBeNull();
-  });
-
   it("still shows the shared אזור מנהל header on the selected-person view", async () => {
     getRequestManagerOverview.mockResolvedValue(
       okResult(model({ selectedPersonId: "p_martin", selectedPerson: personalModel() })),
@@ -878,6 +945,43 @@ describe("ManagerPage — selected person view", () => {
     expect(screen.getByText('חסר אחמ"ש למשמרת שלך')).toBeInTheDocument();
     expect(screen.queryByText("חסר כיסוי למשמרת שלך")).toBeNull();
   });
+
+  it("gateways into the person's real Schedule and Fairness detail, never reproducing either here", async () => {
+    getRequestManagerOverview.mockResolvedValue(
+      okResult(model({ selectedPersonId: "p_martin", selectedPerson: personalModel() })),
+    );
+    await renderPage({ person: "p_martin" });
+    expect(screen.getByRole("link", { name: /לוח מלא/ })).toHaveAttribute("href", "/schedule?person=p_martin");
+    expect(screen.getByRole("link", { name: /מצב הוגנות/ })).toHaveAttribute("href", "/fairness?person=p_martin");
+  });
+
+  it("shows the manager's own photo only when the drilled-down person IS the manager", async () => {
+    getRequestManagerOverview.mockResolvedValue(
+      okResult(
+        model({
+          manager: { id: "p_martin", name: "מרטין בדיקה", avatarUrl: "https://example.invalid/photo.jpg" },
+          selectedPersonId: "p_martin",
+          selectedPerson: personalModel(),
+        }),
+      ),
+    );
+    const { container } = await renderPage({ person: "p_martin" });
+    expect(container.querySelectorAll('img[data-testid="avatar-photo"]')).toHaveLength(1);
+  });
+
+  it("never shows another person's photo, even if the manager has one", async () => {
+    getRequestManagerOverview.mockResolvedValue(
+      okResult(
+        model({
+          manager: { id: "p_manager", name: "דני מנהל", avatarUrl: "https://example.invalid/photo.jpg" },
+          selectedPersonId: "p_martin",
+          selectedPerson: personalModel(),
+        }),
+      ),
+    );
+    const { container } = await renderPage({ person: "p_martin" });
+    expect(container.querySelectorAll('img[data-testid="avatar-photo"]')).toHaveLength(0);
+  });
 });
 
 describe("ManagerPage — data freshness uses ManagerOverviewReadModel.fetchedAt (PR #17 §10/§19)", () => {
@@ -916,7 +1020,7 @@ describe("ManagerPage — privacy", () => {
         }),
       ),
     );
-    const { container } = await renderPage();
+    const { container } = await renderPage({ category: "shifts" });
     expect(container.textContent).not.toContain("sourceSheet");
     expect(container.textContent).not.toContain("sourceCell");
     expect(container.textContent).not.toContain("@");

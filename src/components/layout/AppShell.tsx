@@ -67,7 +67,7 @@ export function AppShell({ children, person, initialClockTime = null, dateLabel 
           <MobileIdentityBar name={person.name} isManager={person.isManager} avatarUrl={person.avatarUrl} />
         ) : null}
         <ShellUtilityBar initialClockTime={initialClockTime} dateLabel={dateLabel} />
-        <main className="flex-1 px-4 pt-6 pb-28 sm:px-6 lg:px-10 lg:pt-10 lg:pb-10">
+        <main className="flex-1 px-4 pt-6 pb-28 sm:px-6 lg:px-10 lg:pb-10">
           <div className="mx-auto w-full max-w-[1440px]">{children}</div>
         </main>
       </div>

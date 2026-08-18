@@ -7,7 +7,6 @@ export interface ManagerOverviewParams {
   range: ManagerRangeKey;
   /** Raw "YYYY-MM", or null -- validated later. */
   month: string | null;
-  problemsOnly: boolean;
 }
 
 type SearchParamValue = string | string[] | undefined;
@@ -27,7 +26,6 @@ export function parseManagerOverviewSearchParams(searchParams: {
   person?: SearchParamValue;
   range?: SearchParamValue;
   month?: SearchParamValue;
-  problems?: SearchParamValue;
 }): ManagerOverviewParams {
   const rawPerson = firstParam(searchParams.person);
   const personId = rawPerson && rawPerson !== "all" ? rawPerson : null;
@@ -36,6 +34,5 @@ export function parseManagerOverviewSearchParams(searchParams: {
     personId,
     range: parseManagerRangeParam(firstParam(searchParams.range)),
     month: firstParam(searchParams.month) ?? null,
-    problemsOnly: firstParam(searchParams.problems) === "1",
   };
 }

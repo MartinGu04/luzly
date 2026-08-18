@@ -20,7 +20,5 @@ export const getRequestManagerOverview = cache(
     personId: string | null,
     range: Parameters<typeof loadManagerOverviewReadModel>[0]["range"],
     month: string | null,
-    problemsOnly: boolean,
-  ): Promise<ManagerOverviewLoadResult> =>
-    loadManagerOverviewReadModel({ personId, range, month, problemsOnly }),
+  ): Promise<ManagerOverviewLoadResult> => loadManagerOverviewReadModel({ personId, range, month }),
 );

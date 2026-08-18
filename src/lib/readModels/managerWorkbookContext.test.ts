@@ -45,9 +45,10 @@ function managerSnapshot(overrides: Partial<{ personnel: (string | boolean)[][] 
   };
 }
 
-function okPersonalResult(isManager: boolean) {
+function okPersonalResult(isManager: boolean, avatarUrl: string | null = null) {
   return {
     status: "ok" as const,
+    avatarUrl,
     model: {
       person: {
         id: "p_dani",
@@ -154,6 +155,24 @@ describe("loadManagerWorkbookContext — manager authorization", () => {
       expect(result.context.manager.name).toBe("דני מנהל");
       expect(result.context.people).toHaveLength(2);
       expect(result.context.snapshot.sheets).toHaveLength(5);
+    }
+  });
+
+  it("carries the manager's own avatarUrl through from getRequestPersonalSchedule, never a new lookup", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(true, "https://example.invalid/photo.jpg"));
+    const result = await loadManagerWorkbookContext();
+    expect(result.status).toBe("ok");
+    if (result.status === "ok") {
+      expect(result.context.avatarUrl).toBe("https://example.invalid/photo.jpg");
+    }
+  });
+
+  it("avatarUrl is null when the manager has no Google profile photo", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(true, null));
+    const result = await loadManagerWorkbookContext();
+    expect(result.status).toBe("ok");
+    if (result.status === "ok") {
+      expect(result.context.avatarUrl).toBeNull();
     }
   });
 

@@ -22,6 +22,11 @@ const STATUS_TEXT_CLASS: Record<ManagerPotentialRowView["status"], string> = {
   not_evaluable: "text-muted",
 };
 
+const ROOT_CLASS = {
+  row: "flex items-start gap-3 py-3",
+  card: "flex items-start gap-3 rounded-xl bg-surface-1 ring-1 ring-border p-4",
+} as const;
+
 /**
  * One "פוטנציאל מול סידור" row -- דרישה / מקור / בסידור בפועל / סטטוס,
  * using ONLY the typed reconciliation domain's own conclusion (PR #14
@@ -30,12 +35,17 @@ const STATUS_TEXT_CLASS: Record<ManagerPotentialRowView["status"], string> = {
  * (the internal schedule's own match), never from `sourceAllocationLabel`.
  * A source conflict (a named source person blocked internally the same
  * date) is shown as an independent note -- it never overrides `status`.
+ *
+ * `variant` mirrors `IssueRow`'s: "row" (default) sits inside a parent
+ * `divide-y` list (`ManagerPotentialSection`'s full reconciliation);
+ * "card" is its own bordered surface for a bare grid cell (the Overview
+ * "דורש טיפול" grid, see `ManagerAttentionSection`).
  */
-export function ManagerPotentialRow({ view }: { view: ManagerPotentialRowView }) {
+export function ManagerPotentialRow({ view, variant = "row" }: { view: ManagerPotentialRowView; variant?: "row" | "card" }) {
   const Icon = STATUS_ICON[view.status];
 
   return (
-    <li className="flex items-start gap-3 py-3">
+    <li className={ROOT_CLASS[variant]}>
       <Icon
         className={`mt-0.5 h-4 w-4 shrink-0 ${STATUS_TEXT_CLASS[view.status]}`}
         aria-hidden="true"

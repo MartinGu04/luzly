@@ -5,7 +5,7 @@ import type { ManagerAttentionItem, ManagerPotentialRowView } from "./types";
 import type { IssueRowView } from "@/components/issues/types";
 import type { ManagerHrefParams } from "@/lib/presentation/managerUrl";
 
-const CURRENT: ManagerHrefParams = { personId: null, range: "7d", month: null, problemsOnly: false };
+const CURRENT: ManagerHrefParams = { personId: null, range: "7d", month: null, category: "overview" };
 
 afterEach(() => {
   cleanup();
@@ -102,5 +102,38 @@ describe("ManagerAttentionSection", () => {
     );
     expect(screen.getByText("דחוף")).toBeInTheDocument();
     expect(screen.getByText("לבדיקה")).toBeInTheDocument();
+  });
+
+  it("lays each severity group out as a two-column-at-desktop grid, never a single shared panel", () => {
+    render(<ManagerAttentionSection criticalItems={[issueItem()]} reviewItems={[]} current={CURRENT} />);
+    const list = screen.getByText("דחוף").closest("section")?.querySelector("ul");
+    expect(list?.className).toContain("grid");
+    expect(list?.className).toContain("lg:grid-cols-2");
+  });
+
+  it("each item renders as its own bordered card, not a divided row sharing a panel", () => {
+    render(<ManagerAttentionSection criticalItems={[issueItem()]} reviewItems={[]} current={CURRENT} />);
+    const card = screen.getByText("חסר כיסוי למשמרת").closest("li");
+    expect(card?.className).toContain("ring-border");
+    expect(card?.className).not.toContain("divide-y");
+  });
+
+  it("preserves the given order within a severity group when it mixes issues and Potential problems", () => {
+    render(
+      <ManagerAttentionSection
+        criticalItems={[
+          potentialItem({ key: "p1", requirementTitle: "כונן ראשון" }),
+          issueItem({ key: "i1", reasonLabel: "בעיה ראשונה" }),
+          potentialItem({ key: "p2", requirementTitle: "כונן שני" }),
+        ]}
+        reviewItems={[]}
+        current={CURRENT}
+      />,
+    );
+    const list = screen.getByText("דחוף").closest("section")?.querySelector("ul");
+    const titles = [...(list?.querySelectorAll("li") ?? [])].map((li) => li.textContent);
+    expect(titles[0]).toContain("כונן ראשון");
+    expect(titles[1]).toContain("בעיה ראשונה");
+    expect(titles[2]).toContain("כונן שני");
   });
 });
