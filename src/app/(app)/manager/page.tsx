@@ -14,7 +14,6 @@ import {
   type ManagerSelectedPersonAssignmentView,
 } from "@/components/manager/ManagerSelectedPersonView";
 import { ManagerSourceOfTruthNote } from "@/components/manager/ManagerSourceOfTruthNote";
-import { ManagerSubNav } from "@/components/manager/ManagerSubNav";
 import { ManagerSummaryStrip } from "@/components/manager/ManagerSummaryStrip";
 import type {
   ManagerAbsenceRowView,
@@ -290,7 +289,6 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
     return (
       <div className="flex flex-col gap-6">
         <ManagerHeader />
-        <ManagerSubNav active="overview" />
         <ManagerCommandBar
           people={people}
           selectedPersonId={model.selectedPersonId}
@@ -356,7 +354,6 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
   return (
     <div className="flex flex-col gap-6">
       <ManagerHeader />
-      <ManagerSubNav active="overview" />
       <ManagerCommandBar
         people={people}
         selectedPersonId={model.selectedPersonId}

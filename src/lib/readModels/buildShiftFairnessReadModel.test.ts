@@ -72,6 +72,27 @@ describe("buildShiftFairnessReadModel", () => {
     expect(technicianGroup?.rows[0].personName).toBe("טל טכנאי");
   });
 
+  it("resolves each row's serviceCategory from the person's own personnelType, for the read-model's UI-safe presentation subgrouping (PR #51 follow-up) -- never a raw roster lookup downstream", () => {
+    const permanent = person({ id: "p_perm", isTechnician: true, personnelType: "קבע" });
+    const reserve = person({ id: "p_res", isTechnician: true, personnelType: "מילואים" });
+    const unclassified = person({ id: "p_unk", isTechnician: true, personnelType: "לא ברור" });
+    const now: LocalNow = { date: "2026-08-15", minuteOfDay: 600 };
+
+    const model = buildShiftFairnessReadModel(
+      [permanent, reserve, unclassified],
+      [],
+      { year: 2026, month: 8 },
+      now,
+      "2026-08-15T10:00:00.000Z",
+    );
+
+    const technicianGroup = model.groups.find((group) => group.role === "technician");
+    const byId = new Map(technicianGroup?.rows.map((row) => [row.personId, row.serviceCategory]));
+    expect(byId.get("p_perm")).toBe("permanent");
+    expect(byId.get("p_res")).toBe("reserve");
+    expect(byId.get("p_unk")).toBe("unclassified");
+  });
+
   it("a wholly future month reports null period bounds and empty-but-present groups", () => {
     const tech = person({ id: "p_tech", isTechnician: true });
     const now: LocalNow = { date: "2026-08-15", minuteOfDay: 600 };

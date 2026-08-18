@@ -1,0 +1,108 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { ShiftFairnessCardInfo } from "./ShiftFairnessCardInfo";
+
+afterEach(() => {
+  cleanup();
+});
+
+describe("ShiftFairnessCardInfo", () => {
+  it("renders exactly ONE info affordance, closed by default", () => {
+    render(<ShiftFairnessCardInfo />);
+    expect(screen.getAllByRole("button", { name: "הסבר על מדדי הכרטיס" })).toHaveLength(1);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("is a real, natively keyboard-focusable <button> -- not a div/span with synthetic key handlers", () => {
+    render(<ShiftFairnessCardInfo />);
+    const trigger = screen.getByRole("button", { name: "הסבר על מדדי הכרטיס" });
+    expect(trigger.tagName).toBe("BUTTON");
+    expect(trigger).toHaveAttribute("type", "button");
+  });
+
+  it("clicking the trigger opens a panel explaining actual / personal target / gap / weekend actual / weekend target, together", () => {
+    render(<ShiftFairnessCardInfo />);
+    fireEvent.click(screen.getByRole("button", { name: "הסבר על מדדי הכרטיס" }));
+
+    const dialog = screen.getByRole("dialog", { name: "הסבר על מדדי הכרטיס" });
+    expect(dialog).toBeInTheDocument();
+    expect(dialog.textContent).toContain("משמרות שבוצעו");
+    expect(dialog.textContent).toContain("יעד אישי");
+    expect(dialog.textContent).toContain("פער מהיעד");
+    expect(dialog.textContent).toContain('משמרות סופ"ש שבוצעו');
+    expect(dialog.textContent).toContain('יעד סופ"ש');
+    // Explanatory only -- no raw formulas/opportunity-count implementation details.
+    expect(dialog.textContent).not.toMatch(/הזדמנות תואמת|opportunit/i);
+  });
+
+  it("clicking the trigger again closes the panel", () => {
+    render(<ShiftFairnessCardInfo />);
+    const trigger = screen.getByRole("button", { name: "הסבר על מדדי הכרטיס" });
+    fireEvent.click(trigger);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    fireEvent.click(trigger);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("Escape closes the panel and returns focus to the trigger", () => {
+    render(<ShiftFairnessCardInfo />);
+    const trigger = screen.getByRole("button", { name: "הסבר על מדדי הכרטיס" });
+    fireEvent.click(trigger);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(trigger).toHaveFocus();
+  });
+
+  it("a pointerdown outside the control closes the panel", () => {
+    render(
+      <div>
+        <ShiftFairnessCardInfo />
+        <div data-testid="outside">מחוץ לבקרה</div>
+      </div>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "הסבר על מדדי הכרטיס" }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    fireEvent.pointerDown(screen.getByTestId("outside"));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("aria-expanded and aria-haspopup correctly reflect open state", () => {
+    render(<ShiftFairnessCardInfo />);
+    const trigger = screen.getByRole("button", { name: "הסבר על מדדי הכרטיס" });
+    expect(trigger).toHaveAttribute("aria-haspopup", "dialog");
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(trigger);
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("clicking the trigger never bubbles to an ancestor click handler and always prevents the native default action -- so it cannot trigger the surrounding card's own navigation", () => {
+    const ancestorClick = vi.fn();
+    render(
+      <div onClick={ancestorClick}>
+        <ShiftFairnessCardInfo />
+      </div>,
+    );
+    const trigger = screen.getByRole("button", { name: "הסבר על מדדי הכרטיס" });
+    const notPrevented = fireEvent.click(trigger);
+
+    expect(notPrevented).toBe(false); // fireEvent returns false when preventDefault() was called.
+    expect(ancestorClick).not.toHaveBeenCalled();
+  });
+
+  it("clicking inside the open panel also never bubbles to an ancestor click handler", () => {
+    const ancestorClick = vi.fn();
+    render(
+      <div onClick={ancestorClick}>
+        <ShiftFairnessCardInfo />
+      </div>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "הסבר על מדדי הכרטיס" }));
+    ancestorClick.mockClear();
+
+    fireEvent.click(screen.getByRole("dialog"));
+    expect(ancestorClick).not.toHaveBeenCalled();
+  });
+});

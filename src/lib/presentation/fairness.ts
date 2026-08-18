@@ -1,4 +1,4 @@
-import type { ManagerFairnessExemptionView } from "@/lib/readModels/managerFairnessTypes";
+import type { FairnessExemption } from "@/lib/domain/fairnessExemptions";
 
 /** "6.35" stays as-is; "5.00" trims to "5"; "7.10" trims to "7.1". Never re-derives the value itself -- purely cosmetic. */
 function trimmedNumber(value: number): string {
@@ -38,7 +38,14 @@ export function formatNormalizedLoad(value: number | null): string {
   return value === null ? "—" : `${Math.round(value * 100)}%`;
 }
 
-/** "🚫 שמירות" -- exemptions must be visible without a tooltip/hover (PR #15 §37). */
-export function exemptionBadgeLabel(exemption: ManagerFairnessExemptionView): string {
+/**
+ * "🚫 שמירות" -- exemptions must be visible without a tooltip/hover (PR
+ * #15 §37). Typed against the domain `FairnessExemption` shape directly
+ * (PR #4 -- the old manager-only `ManagerFairnessExemptionView` this used
+ * to take is gone) -- both the Shift and Duty Fairness read models'
+ * exemption views mirror this same `{raw, affectedDutyFamilies}` shape,
+ * so this one formatter keeps serving every Fairness surface.
+ */
+export function exemptionBadgeLabel(exemption: FairnessExemption): string {
   return `🚫 ${exemption.raw}`;
 }
