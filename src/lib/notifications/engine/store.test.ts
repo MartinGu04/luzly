@@ -417,6 +417,400 @@ describe("getRecentSettledJobsForRecipient (PR #36 dashboard recap)", () => {
   });
 });
 
+describe("notification center -- inbox read/dismiss state", () => {
+  interface FakeInboxJobRow {
+    id: string;
+    category: string;
+    title: string;
+    body: string;
+    path: string;
+    created_at: string;
+    scheduled_for: string;
+    recipient_user_id: string;
+    status: string;
+  }
+
+  /** A minimal, faithful fake of `.from("notification_jobs").select().eq().neq().lte().gt().order().limit()` (and, for `isEligibleInboxJobForRecipient`, `.select().eq().eq().neq().maybeSingle()`), same style as `makeJobsFakeSupabase` above. */
+  function makeInboxJobsFakeSupabase(rows: FakeInboxJobRow[]) {
+    const calls: Record<string, unknown> = {};
+    const client = {
+      from: (table: string) => {
+        if (table !== "notification_jobs") throw new Error(`unexpected table ${table}`);
+        let filtered = [...rows];
+        const builder = {
+          select: (columns: string) => {
+            calls.select = columns;
+            return builder;
+          },
+          eq: (column: string, value: unknown) => {
+            calls.eq = [column, value];
+            filtered = filtered.filter((row) => (row as unknown as Record<string, unknown>)[column] === value);
+            return builder;
+          },
+          neq: (column: string, value: unknown) => {
+            calls.neq = [column, value];
+            filtered = filtered.filter((row) => (row as unknown as Record<string, unknown>)[column] !== value);
+            return builder;
+          },
+          lte: (column: string, value: string) => {
+            calls.lte = [column, value];
+            filtered = filtered.filter((row) => String((row as unknown as Record<string, unknown>)[column]) <= value);
+            return builder;
+          },
+          gt: (column: string, value: string) => {
+            calls.gt = [column, value];
+            filtered = filtered.filter((row) => String((row as unknown as Record<string, unknown>)[column]) > value);
+            return builder;
+          },
+          order: (column: string, opts: { ascending: boolean }) => {
+            calls.order = [column, opts];
+            filtered = [...filtered].sort((a, b) => {
+              const av = String((a as unknown as Record<string, unknown>)[column]);
+              const bv = String((b as unknown as Record<string, unknown>)[column]);
+              const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+              return opts.ascending ? cmp : -cmp;
+            });
+            return builder;
+          },
+          limit: (n: number) => {
+            calls.limit = n;
+            return Promise.resolve({ data: filtered.slice(0, n), error: null });
+          },
+          maybeSingle: () => {
+            calls.maybeSingle = true;
+            return Promise.resolve({ data: filtered[0] ?? null, error: null });
+          },
+        };
+        return builder;
+      },
+    };
+    return { client, calls };
+  }
+
+  function inboxJobRow(overrides: Partial<FakeInboxJobRow> = {}): FakeInboxJobRow {
+    return {
+      id: "job_1",
+      category: "tomorrow_shift",
+      title: "⏰ המשמרת שלך מחר",
+      body: "מחר ב־07:30 מתחילה משמרת יום שלך",
+      path: "/",
+      created_at: "2026-08-18T00:05:00.000Z",
+      scheduled_for: "2026-08-18T17:00:00.000Z",
+      recipient_user_id: "u_me",
+      status: "pending",
+      ...overrides,
+    };
+  }
+
+  describe("getInboxJobsForRecipient", () => {
+    it("filters by recipient_user_id, status != cancelled, scheduled_for <= now, and scheduled_for > clearedBefore", async () => {
+      const { client, calls } = makeInboxJobsFakeSupabase([inboxJobRow()]);
+      const { getInboxJobsForRecipient } = await loadModule(client);
+
+      const rows = await getInboxJobsForRecipient("u_me", "-infinity", 50);
+
+      expect(calls.eq).toEqual(["recipient_user_id", "u_me"]);
+      expect(calls.neq).toEqual(["status", "cancelled"]);
+      expect((calls.lte as [string, string])[0]).toBe("scheduled_for");
+      expect(calls.gt).toEqual(["scheduled_for", "-infinity"]);
+      expect(rows).toHaveLength(1);
+    });
+
+    it("excludes a cancelled reminder even once its scheduled_for has passed -- a cancelled job never resurfaces as if it still described something real", async () => {
+      const { client } = makeInboxJobsFakeSupabase([
+        inboxJobRow({ id: "cancelled", status: "cancelled" }),
+        inboxJobRow({ id: "still-valid", status: "pending" }),
+      ]);
+      const { getInboxJobsForRecipient } = await loadModule(client);
+
+      const rows = await getInboxJobsForRecipient("u_me", "-infinity", 50);
+
+      expect(rows.map((r) => r.id)).toEqual(["still-valid"]);
+    });
+
+    it("includes every other delivery outcome -- completed/skipped/failed/still-pending all represent a real logical notification", async () => {
+      const { client } = makeInboxJobsFakeSupabase([
+        inboxJobRow({ id: "a", status: "completed" }),
+        inboxJobRow({ id: "b", status: "skipped" }),
+        inboxJobRow({ id: "c", status: "failed" }),
+        inboxJobRow({ id: "d", status: "pending" }),
+        inboxJobRow({ id: "e", status: "claimed" }),
+      ]);
+      const { getInboxJobsForRecipient } = await loadModule(client);
+
+      const rows = await getInboxJobsForRecipient("u_me", "-infinity", 50);
+
+      expect(rows.map((r) => r.id).sort()).toEqual(["a", "b", "c", "d", "e"]);
+    });
+
+    it("excludes a reminder whose scheduled_for hasn't happened yet -- never shown hours early", async () => {
+      const futureIso = new Date(Date.now() + 60 * 60_000).toISOString();
+      const { client } = makeInboxJobsFakeSupabase([inboxJobRow({ id: "future", scheduled_for: futureIso })]);
+      const { getInboxJobsForRecipient } = await loadModule(client);
+
+      const rows = await getInboxJobsForRecipient("u_me", "-infinity", 50);
+
+      expect(rows).toEqual([]);
+    });
+
+    it("excludes a job scheduled at/before the user's own clear cutoff", async () => {
+      const { client } = makeInboxJobsFakeSupabase([
+        inboxJobRow({ id: "before", scheduled_for: "2026-08-10T00:00:00.000Z" }),
+        inboxJobRow({ id: "after", scheduled_for: "2026-08-18T17:00:00.000Z" }),
+      ]);
+      const { getInboxJobsForRecipient } = await loadModule(client);
+
+      const rows = await getInboxJobsForRecipient("u_me", "2026-08-15T00:00:00.000Z", 50);
+
+      expect(rows.map((r) => r.id)).toEqual(["after"]);
+    });
+
+    it("never returns another recipient's rows", async () => {
+      const { client } = makeInboxJobsFakeSupabase([
+        inboxJobRow({ id: "mine", recipient_user_id: "u_me" }),
+        inboxJobRow({ id: "theirs", recipient_user_id: "u_other" }),
+      ]);
+      const { getInboxJobsForRecipient } = await loadModule(client);
+
+      const rows = await getInboxJobsForRecipient("u_me", "-infinity", 50);
+
+      expect(rows.map((r) => r.id)).toEqual(["mine"]);
+    });
+
+    it("orders newest (by scheduled_for) first and respects the limit", async () => {
+      const { client, calls } = makeInboxJobsFakeSupabase([
+        inboxJobRow({ id: "old", scheduled_for: "2026-08-16T00:00:00.000Z" }),
+        inboxJobRow({ id: "new", scheduled_for: "2026-08-18T00:00:00.000Z" }),
+        inboxJobRow({ id: "mid", scheduled_for: "2026-08-17T00:00:00.000Z" }),
+      ]);
+      const { getInboxJobsForRecipient } = await loadModule(client);
+
+      const rows = await getInboxJobsForRecipient("u_me", "-infinity", 2);
+
+      expect(calls.order).toEqual(["scheduled_for", { ascending: false }]);
+      expect(calls.limit).toBe(2);
+      expect(rows.map((r) => r.id)).toEqual(["new", "mid"]);
+    });
+
+    it("never exposes internal columns (recipient_user_id, status, etc.) on the returned rows", async () => {
+      const { client } = makeInboxJobsFakeSupabase([inboxJobRow()]);
+      const { getInboxJobsForRecipient } = await loadModule(client);
+
+      const [row] = await getInboxJobsForRecipient("u_me", "-infinity", 50);
+
+      expect(Object.keys(row).sort()).toEqual(["body", "category", "createdAt", "id", "path", "scheduledFor", "title"]);
+    });
+  });
+
+  describe("isEligibleInboxJobForRecipient", () => {
+    it("true for a job that belongs to this recipient and is not cancelled", async () => {
+      const { client } = makeInboxJobsFakeSupabase([inboxJobRow({ id: "job_1", recipient_user_id: "u_me", status: "pending" })]);
+      const { isEligibleInboxJobForRecipient } = await loadModule(client);
+
+      expect(await isEligibleInboxJobForRecipient("u_me", "job_1")).toBe(true);
+    });
+
+    it("false for a job that belongs to a DIFFERENT recipient", async () => {
+      const { client } = makeInboxJobsFakeSupabase([inboxJobRow({ id: "job_1", recipient_user_id: "u_other" })]);
+      const { isEligibleInboxJobForRecipient } = await loadModule(client);
+
+      expect(await isEligibleInboxJobForRecipient("u_me", "job_1")).toBe(false);
+    });
+
+    it("false for a job id that does not exist at all", async () => {
+      const { client } = makeInboxJobsFakeSupabase([]);
+      const { isEligibleInboxJobForRecipient } = await loadModule(client);
+
+      expect(await isEligibleInboxJobForRecipient("u_me", "job_missing")).toBe(false);
+    });
+
+    it("false for the caller's OWN job once it has been cancelled", async () => {
+      const { client } = makeInboxJobsFakeSupabase([inboxJobRow({ id: "job_1", recipient_user_id: "u_me", status: "cancelled" })]);
+      const { isEligibleInboxJobForRecipient } = await loadModule(client);
+
+      expect(await isEligibleInboxJobForRecipient("u_me", "job_1")).toBe(false);
+    });
+
+    it("scopes the lookup by both id and recipient_user_id -- never id alone", async () => {
+      const { client, calls } = makeInboxJobsFakeSupabase([inboxJobRow({ id: "job_1", recipient_user_id: "u_me" })]);
+      const { isEligibleInboxJobForRecipient } = await loadModule(client);
+
+      await isEligibleInboxJobForRecipient("u_me", "job_1");
+
+      expect(calls.eq).toEqual(["recipient_user_id", "u_me"]);
+    });
+  });
+
+  describe("getInboxClearedBefore", () => {
+    function makeInboxStateFakeSupabase(row: { user_id: string; cleared_before: string } | null) {
+      const client = {
+        from: (table: string) => {
+          if (table !== "notification_inbox_state") throw new Error(`unexpected table ${table}`);
+          return {
+            select: () => ({
+              eq: (_column: string, value: string) => ({
+                maybeSingle: () =>
+                  Promise.resolve({ data: row && row.user_id === value ? row : null, error: null }),
+              }),
+            }),
+          };
+        },
+      };
+      return client;
+    }
+
+    it("returns the stored cutoff for this user", async () => {
+      const client = makeInboxStateFakeSupabase({ user_id: "u_me", cleared_before: "2026-08-15T00:00:00.000Z" });
+      const { getInboxClearedBefore } = await loadModule(client);
+
+      expect(await getInboxClearedBefore("u_me")).toBe("2026-08-15T00:00:00.000Z");
+    });
+
+    it("defaults to -infinity when the user has never cleared their inbox", async () => {
+      const client = makeInboxStateFakeSupabase(null);
+      const { getInboxClearedBefore } = await loadModule(client);
+
+      expect(await getInboxClearedBefore("u_new")).toBe("-infinity");
+    });
+  });
+
+  describe("getReadJobIds / markNotificationJobRead / markNotificationJobsRead", () => {
+    function makeReadsFakeSupabase(initialReadJobIds: string[] = []) {
+      const reads = new Map<string, Set<string>>(); // user_id -> job_ids
+      for (const jobId of initialReadJobIds) {
+        reads.set("u_me", (reads.get("u_me") ?? new Set()).add(jobId));
+      }
+      const upsertCalls: Record<string, unknown>[][] = [];
+
+      const client = {
+        from: (table: string) => {
+          if (table !== "notification_reads") throw new Error(`unexpected table ${table}`);
+          return {
+            select: () => ({
+              eq: (_col: string, userId: string) => ({
+                in: (_col2: string, jobIds: string[]) => {
+                  const userReads = reads.get(userId) ?? new Set();
+                  const matched = jobIds.filter((id) => userReads.has(id)).map((id) => ({ job_id: id }));
+                  return Promise.resolve({ data: matched, error: null });
+                },
+              }),
+            }),
+            upsert: (rowOrRows: Record<string, unknown> | Record<string, unknown>[]) => {
+              const rows = Array.isArray(rowOrRows) ? rowOrRows : [rowOrRows];
+              upsertCalls.push(rows);
+              for (const row of rows) {
+                const userId = row.user_id as string;
+                const jobId = row.job_id as string;
+                reads.set(userId, (reads.get(userId) ?? new Set()).add(jobId));
+              }
+              return Promise.resolve({ error: null });
+            },
+          };
+        },
+      };
+      return { client, reads, upsertCalls };
+    }
+
+    it("getReadJobIds returns only the subset of jobIds this user has read", async () => {
+      const { client } = makeReadsFakeSupabase(["job_1", "job_2"]);
+      const { getReadJobIds } = await loadModule(client);
+
+      const readIds = await getReadJobIds("u_me", ["job_1", "job_2", "job_3"]);
+
+      expect(readIds).toEqual(new Set(["job_1", "job_2"]));
+    });
+
+    it("getReadJobIds never queries when jobIds is empty -- no wasted round trip", async () => {
+      const fromSpy = vi.fn();
+      const client = { from: fromSpy };
+      const { getReadJobIds } = await loadModule(client);
+
+      const readIds = await getReadJobIds("u_me", []);
+
+      expect(readIds).toEqual(new Set());
+      expect(fromSpy).not.toHaveBeenCalled();
+    });
+
+    it("markNotificationJobRead upserts exactly one (user_id, job_id) row", async () => {
+      const { client, upsertCalls } = makeReadsFakeSupabase();
+      const { markNotificationJobRead } = await loadModule(client);
+
+      await markNotificationJobRead("u_me", "job_1");
+
+      expect(upsertCalls).toEqual([[{ user_id: "u_me", job_id: "job_1" }]]);
+    });
+
+    it("markNotificationJobsRead marks every job in ONE upsert call -- never one query per job", async () => {
+      const { client, upsertCalls } = makeReadsFakeSupabase();
+      const { markNotificationJobsRead } = await loadModule(client);
+
+      await markNotificationJobsRead("u_me", ["job_1", "job_2", "job_3"]);
+
+      expect(upsertCalls).toHaveLength(1);
+      expect(upsertCalls[0]).toEqual([
+        { user_id: "u_me", job_id: "job_1" },
+        { user_id: "u_me", job_id: "job_2" },
+        { user_id: "u_me", job_id: "job_3" },
+      ]);
+    });
+
+    it("markNotificationJobsRead never queries when jobIds is empty", async () => {
+      const fromSpy = vi.fn();
+      const client = { from: fromSpy };
+      const { markNotificationJobsRead } = await loadModule(client);
+
+      await markNotificationJobsRead("u_me", []);
+
+      expect(fromSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("clearNotificationInbox", () => {
+    it("upserts this user's cutoff, never touching notification_jobs", async () => {
+      const upsertCalls: Record<string, unknown>[] = [];
+      const client = {
+        from: (table: string) => {
+          if (table !== "notification_inbox_state") throw new Error(`unexpected table ${table}`);
+          return {
+            upsert: (row: Record<string, unknown>) => {
+              upsertCalls.push(row);
+              return Promise.resolve({ error: null });
+            },
+          };
+        },
+      };
+      const { clearNotificationInbox } = await loadModule(client);
+
+      await clearNotificationInbox("u_me");
+
+      expect(upsertCalls).toHaveLength(1);
+      expect(upsertCalls[0].user_id).toBe("u_me");
+      expect(typeof upsertCalls[0].cleared_before).toBe("string");
+    });
+
+    it("is idempotent -- calling it twice never errors, and the second call's cutoff is never earlier than the first", async () => {
+      const upsertCalls: Record<string, unknown>[] = [];
+      const client = {
+        from: () => ({
+          upsert: (row: Record<string, unknown>) => {
+            upsertCalls.push(row);
+            return Promise.resolve({ error: null });
+          },
+        }),
+      };
+      const { clearNotificationInbox } = await loadModule(client);
+
+      await clearNotificationInbox("u_me");
+      await clearNotificationInbox("u_me");
+
+      expect(upsertCalls).toHaveLength(2);
+      expect(Date.parse(upsertCalls[1].cleared_before as string)).toBeGreaterThanOrEqual(
+        Date.parse(upsertCalls[0].cleared_before as string),
+      );
+    });
+  });
+});
+
 describe("upsertPendingReminderJob -- hotfix regression guard", () => {
   function makeRpcFakeSupabase() {
     const rpcCalls: { name: string; args: unknown }[] = [];

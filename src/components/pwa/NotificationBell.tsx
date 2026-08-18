@@ -1,13 +1,19 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import { Bell, BellOff, BellRing, Loader2, RefreshCw } from "lucide-react";
+import Link from "next/link";
+import { ArrowRight, Bell, BellOff, BellRing, Loader2, RefreshCw, Settings } from "lucide-react";
+import type { NotificationInboxItem } from "@/lib/readModels/notificationInboxTypes";
+import { formatRecentChangeRelativeTime } from "@/lib/presentation/relativeChangeTime";
 import { usePushSubscription } from "./usePushSubscription";
+import { useNotificationInbox } from "./useNotificationInbox";
 
 interface NotificationBellProps {
   /** Only affects the trigger button's own visual treatment -- the popover panel's CONTENT looks identical in every context; only its anchor side (see `PANEL_POSITION_CLASSES`) varies by variant. */
   variant: "sidebar" | "mobile" | "shell";
 }
+
+type BellView = "inbox" | "settings";
 
 const TRIGGER_CLASSES: Record<NotificationBellProps["variant"], string> = {
   sidebar:
@@ -57,37 +63,63 @@ const PANEL_POSITION_CLASSES: Record<NotificationBellProps["variant"], string> =
   shell: "end-0",
 };
 
+/** 9+ reads as "9+", never a wrapping/overflowing three-digit badge. */
+function formatBadgeCount(count: number): string {
+  return count > 9 ? "9+" : String(count);
+}
+
 /**
- * The real notification control (PR #29), originally replacing the "בקרוב"
- * placeholder bell from PR #28 in both `Sidebar` (desktop) and
- * `MobileIdentityBar` (mobile). Header polish pass: the desktop instance
- * moved from `Sidebar` into `ShellUtilityBar` (`variant="shell"`) -- the
- * mobile one is unchanged. A compact popover, matching `MobileProfileMenu`'s
- * existing click-outside/Escape-to-dismiss pattern, rather than a new
- * main navigation entry.
+ * The bell's primary surface (notification-center PR): the user's real
+ * Mi-Ma-Mo inbox (`useNotificationInbox`, reusing the existing
+ * `notification_jobs` outbox -- never a second notification-rule engine),
+ * newest first. Push controls (`usePushSubscription`, unchanged) moved
+ * BEHIND the gear icon in the header -- push is one delivery channel
+ * among possibly none, never a precondition for the inbox itself, and
+ * `sendTestNotificationAction` (reached from there) stays diagnostic-only:
+ * it never creates an inbox item, since it never touches
+ * `notification_jobs` at all.
  *
- * All state/actions live in `usePushSubscription` -- this component is
- * presentation + the popover's open/close/dismiss mechanics only.
+ * Originally replacing the "בקרוב" placeholder bell from PR #28 in both
+ * `Sidebar` (desktop) and `MobileIdentityBar` (mobile); the desktop
+ * instance later moved into `ShellUtilityBar` (`variant="shell"`).
+ * Same click-outside/Escape-to-dismiss pattern `MobileProfileMenu`
+ * already uses.
  */
 export function NotificationBell({ variant }: NotificationBellProps) {
   const [open, setOpen] = useState(false);
+  const [view, setView] = useState<BellView>("inbox");
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelId = useId();
 
   const { state, errorMessage, testStatus, enable, disable, sendTest } = usePushSubscription();
+  const { status: inboxStatus, items, unreadCount, refresh, markRead, markAllRead, clear } = useNotificationInbox();
+
+  function closePopover() {
+    setOpen(false);
+    setView("inbox");
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    // A fresh read every time the popover opens (not just once on mount)
+    // -- other activity may have created new notifications since the last
+    // open. No polling while closed/open: matches this app's existing
+    // "no automatic polling for new data" convention (`DataFreshnessStatus`).
+    refresh();
+  }, [open, refresh]);
 
   useEffect(() => {
     if (!open) return;
 
     function handlePointerDown(event: PointerEvent) {
       if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-        setOpen(false);
+        closePopover();
       }
     }
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
-        setOpen(false);
+        closePopover();
         triggerRef.current?.focus();
       }
     }
@@ -100,8 +132,13 @@ export function NotificationBell({ variant }: NotificationBellProps) {
     };
   }, [open]);
 
-  const isEnabled = state === "enabled" || state === "disabling";
-  const TriggerIcon = isEnabled ? BellRing : Bell;
+  const isPushEnabled = state === "enabled" || state === "disabling";
+  const TriggerIcon = isPushEnabled ? BellRing : Bell;
+
+  function handleItemClick(item: NotificationInboxItem) {
+    if (!item.isRead) markRead(item.id);
+    closePopover();
+  }
 
   return (
     <div ref={containerRef} className="relative">
@@ -111,36 +148,209 @@ export function NotificationBell({ variant }: NotificationBellProps) {
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls={open ? panelId : undefined}
-        aria-label={isEnabled ? "התראות פעילות" : "התראות"}
+        aria-label={unreadCount > 0 ? `התראות, ${unreadCount} שלא נקראו` : "התראות"}
         onClick={() => setOpen((prev) => !prev)}
-        className={TRIGGER_CLASSES[variant]}
+        className={`relative ${TRIGGER_CLASSES[variant]}`}
       >
         <TriggerIcon className={ICON_SIZE_CLASSES[variant]} aria-hidden="true" strokeWidth={1.75} />
+        {unreadCount > 0 ? (
+          <span
+            aria-hidden="true"
+            className="absolute -top-0.5 end-[-2px] flex h-4 min-w-4 items-center justify-center rounded-full bg-critical px-1 text-[10px] font-semibold leading-none text-critical-foreground"
+          >
+            {formatBadgeCount(unreadCount)}
+          </span>
+        ) : null}
       </button>
 
       {open ? (
         <div
           id={panelId}
           role="dialog"
-          aria-label="הגדרות התראות"
-          className={`absolute ${PANEL_POSITION_CLASSES[variant]} top-full z-50 mt-2 w-72 max-w-[calc(100vw-2.5rem)] rounded-xl bg-surface-1 p-4 text-foreground shadow-[var(--shadow-elevated)] ring-1 ring-border-strong`}
+          aria-label={view === "settings" ? "הגדרות התראות" : "התראות"}
+          className={`absolute ${PANEL_POSITION_CLASSES[variant]} top-full z-50 mt-2 w-80 max-w-[calc(100vw-2.5rem)] rounded-xl bg-surface-1 p-3 text-foreground shadow-[var(--shadow-elevated)] ring-1 ring-border-strong`}
         >
-          {state === "checking" ? <CheckingPanel /> : null}
-          {state === "unsupported" ? <UnsupportedPanel /> : null}
-          {state === "permission_denied" ? <PermissionDeniedPanel /> : null}
-          {state === "not_enabled" || state === "enabling" ? (
-            <NotEnabledPanel pending={state === "enabling"} errorMessage={errorMessage} onEnable={enable} />
-          ) : null}
-          {state === "enabled" || state === "disabling" ? (
-            <EnabledPanel
-              disabling={state === "disabling"}
+          {view === "inbox" ? (
+            <InboxView
+              status={inboxStatus}
+              items={items}
+              unreadCount={unreadCount}
+              onOpenSettings={() => setView("settings")}
+              onItemClick={handleItemClick}
+              onMarkAllRead={markAllRead}
+              onClear={clear}
+            />
+          ) : (
+            <SettingsView
+              onBack={() => setView("inbox")}
+              state={state}
+              errorMessage={errorMessage}
               testStatus={testStatus}
+              onEnable={enable}
               onDisable={disable}
               onSendTest={sendTest}
             />
-          ) : null}
+          )}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Inbox view
+// ---------------------------------------------------------------------------
+
+function InboxView({
+  status,
+  items,
+  unreadCount,
+  onOpenSettings,
+  onItemClick,
+  onMarkAllRead,
+  onClear,
+}: {
+  status: "loading" | "ready" | "error";
+  items: NotificationInboxItem[];
+  unreadCount: number;
+  onOpenSettings: () => void;
+  onItemClick: (item: NotificationInboxItem) => void;
+  onMarkAllRead: () => void;
+  onClear: () => void;
+}) {
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-2 px-1">
+        <p className="text-sm font-semibold text-foreground">התראות</p>
+        <button
+          type="button"
+          onClick={onOpenSettings}
+          aria-label="הגדרות התראות"
+          className="flex h-7 w-7 items-center justify-center rounded-full text-muted transition-colors duration-150 hover:bg-overlay-soft hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        >
+          <Settings className="h-4 w-4" aria-hidden="true" strokeWidth={1.75} />
+        </button>
+      </div>
+
+      {status === "loading" ? (
+        <div className="flex items-center gap-2 px-1 py-6 text-sm text-muted">
+          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" strokeWidth={1.75} />
+          טוען התראות...
+        </div>
+      ) : null}
+
+      {status === "error" ? (
+        <p className="px-1 py-6 text-center text-sm text-muted">לא ניתן לטעון כרגע את ההתראות</p>
+      ) : null}
+
+      {status === "ready" && items.length === 0 ? (
+        <p className="px-1 py-6 text-center text-sm text-muted">אין התראות חדשות</p>
+      ) : null}
+
+      {status === "ready" && items.length > 0 ? (
+        <>
+          <div className="mt-2 flex items-center justify-between gap-2 px-1 text-xs">
+            <button
+              type="button"
+              onClick={onMarkAllRead}
+              disabled={unreadCount === 0}
+              className="font-medium text-primary transition-colors duration-150 hover:underline disabled:cursor-not-allowed disabled:text-muted-2 disabled:no-underline"
+            >
+              סמן הכל כנקרא
+            </button>
+            <button
+              type="button"
+              onClick={onClear}
+              className="font-medium text-muted transition-colors duration-150 hover:text-critical"
+            >
+              נקה התראות
+            </button>
+          </div>
+          <ul className="mt-1 max-h-96 overflow-y-auto">
+            {items.map((item) => (
+              <InboxItemRow key={item.id} item={item} onClick={onItemClick} />
+            ))}
+          </ul>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function InboxItemRow({ item, onClick }: { item: NotificationInboxItem; onClick: (item: NotificationInboxItem) => void }) {
+  return (
+    <li>
+      <Link
+        href={item.path}
+        onClick={() => onClick(item)}
+        className="flex items-start gap-2.5 rounded-xl px-1.5 py-2 transition-colors duration-200 hover:bg-overlay-faint focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+      >
+        <span
+          aria-hidden="true"
+          className={`mt-2 h-1.5 w-1.5 shrink-0 rounded-full ${item.isRead ? "bg-transparent" : "bg-primary"}`}
+        />
+        <div className="min-w-0 flex-1">
+          <p className={`text-sm ${item.isRead ? "text-muted" : "font-medium text-foreground"}`}>{item.title}</p>
+          <p className="mt-0.5 line-clamp-2 text-xs text-muted">{item.body}</p>
+          <p className="mt-0.5 text-[11px] text-muted-2">{formatRecentChangeRelativeTime(item.happenedAt, new Date())}</p>
+        </div>
+      </Link>
+    </li>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Settings view -- the EXISTING push controls (PR #29), unchanged, only
+// relocated behind the gear.
+// ---------------------------------------------------------------------------
+
+function SettingsView({
+  onBack,
+  state,
+  errorMessage,
+  testStatus,
+  onEnable,
+  onDisable,
+  onSendTest,
+}: {
+  onBack: () => void;
+  state: ReturnType<typeof usePushSubscription>["state"];
+  errorMessage: string | null;
+  testStatus: ReturnType<typeof usePushSubscription>["testStatus"];
+  onEnable: () => void;
+  onDisable: () => void;
+  onSendTest: () => void;
+}) {
+  return (
+    <div>
+      <div className="flex items-center gap-2 px-1">
+        <button
+          type="button"
+          onClick={onBack}
+          aria-label="חזרה להתראות"
+          className="flex h-7 w-7 items-center justify-center rounded-full text-muted transition-colors duration-150 hover:bg-overlay-soft hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        >
+          <ArrowRight className="h-4 w-4" aria-hidden="true" strokeWidth={1.75} />
+        </button>
+        <p className="text-sm font-semibold text-foreground">הגדרות התראות</p>
+      </div>
+
+      <div className="mt-2 px-1">
+        {state === "checking" ? <CheckingPanel /> : null}
+        {state === "unsupported" ? <UnsupportedPanel /> : null}
+        {state === "permission_denied" ? <PermissionDeniedPanel /> : null}
+        {state === "not_enabled" || state === "enabling" ? (
+          <NotEnabledPanel pending={state === "enabling"} errorMessage={errorMessage} onEnable={onEnable} />
+        ) : null}
+        {state === "enabled" || state === "disabling" ? (
+          <EnabledPanel
+            disabling={state === "disabling"}
+            testStatus={testStatus}
+            onDisable={onDisable}
+            onSendTest={onSendTest}
+          />
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -185,7 +395,7 @@ function NotEnabledPanel({
 }) {
   return (
     <div>
-      <p className="text-sm font-semibold text-foreground">התראות</p>
+      <p className="text-sm font-semibold text-foreground">סטטוס: כבוי</p>
       <p className="mt-1 text-xs text-muted">קבל תזכורות ועדכונים חשובים ממי-מה-מו</p>
       <button
         type="button"
@@ -216,7 +426,7 @@ function EnabledPanel({
     <div>
       <div className="flex items-center gap-2">
         <BellRing className="h-4 w-4 text-primary" aria-hidden="true" strokeWidth={1.75} />
-        <p className="text-sm font-semibold text-foreground">התראות פעילות</p>
+        <p className="text-sm font-semibold text-foreground">סטטוס: פעיל</p>
       </div>
 
       <button

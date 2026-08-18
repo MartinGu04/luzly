@@ -546,6 +546,175 @@ export async function getRecentSettledJobsForRecipient(
 }
 
 // ---------------------------------------------------------------------------
+// Notification center -- inbox read/dismiss state
+//
+// Read-only projection + minimal per-user state over the SAME
+// notification_jobs outbox above -- never a second notification-rule
+// engine, never a new column on notification_jobs. Every function here
+// requires the caller to already have a SERVER-VERIFIED recipientUserId
+// (see `lib/readModels/notificationInbox.ts`, which resolves it via
+// `getAuthenticatedIdentity()` exactly like `recentDashboardChanges.ts`
+// already does) -- never a client-supplied id, and never called from
+// anywhere but a Server Action/Server Component.
+// ---------------------------------------------------------------------------
+
+/** A bounded inbox window -- a bell popover, never a full notification archive (same "bounded, not an archive" convention `RECENT_DASHBOARD_CHANGES_LIMIT` already establishes). The unread badge counts only within this window. */
+export const NOTIFICATION_INBOX_LIMIT = 50;
+
+export interface InboxJobRow {
+  id: string;
+  category: string;
+  title: string;
+  body: string;
+  path: string;
+  createdAt: string;
+  scheduledFor: string;
+}
+
+/** The current user's "נקה התראות" cutoff -- `-infinity` (i.e. no cutoff at all) when the user has never cleared their inbox. Never throws on a missing row; that's the ordinary, expected first-visit state. */
+export async function getInboxClearedBefore(userId: string): Promise<string> {
+  const supabase = getNotificationServiceClient();
+  const { data, error } = await supabase
+    .from("notification_inbox_state")
+    .select("cleared_before")
+    .eq("user_id", userId)
+    .maybeSingle<{ cleared_before: string }>();
+  if (error) throw error;
+  return data?.cleared_before ?? "-infinity";
+}
+
+/**
+ * One recipient's own inbox jobs -- filtered to `scheduled_for <= now()`
+ * (a time-based reminder like `tomorrow_shift` is upserted repeatedly
+ * from just after midnight, hours before its real 20:00 `scheduled_for`;
+ * gating on `scheduled_for` rather than `created_at` means it appears in
+ * the inbox at the moment it was actually meant to notify, never hours
+ * early) AND `scheduled_for > clearedBefore` (the user's own "נקה
+ * התראות" cutoff, passed in by the caller after `getInboxClearedBefore`
+ * -- never re-read here, so both queries always agree on the same
+ * instant). No `status` filter beyond excluding `cancelled` (see
+ * `INELIGIBLE_INBOX_STATUS` below) -- delivery OUTCOME is otherwise
+ * irrelevant to whether the logical notification happened, same
+ * reasoning as `getRecentSettledJobsForRecipient`: completed/skipped
+ * (no subscription)/failed/still-pending-but-due all represent a real
+ * logical notification, so a push-disabled user must see the exact same
+ * inbox a push-enabled user would. `cancelled` is different in KIND, not
+ * just outcome: a reminder job can be created ahead of its `scheduled_for`
+ * and later cancelled (`cancelPendingReminderJob`) because the underlying
+ * assignment disappeared/changed before it ever fired -- once
+ * `scheduled_for` passes, that row must never resurface as if it still
+ * described something real.
+ */
+const INELIGIBLE_INBOX_STATUS = "cancelled";
+
+export async function getInboxJobsForRecipient(
+  recipientUserId: string,
+  clearedBefore: string,
+  limit: number = NOTIFICATION_INBOX_LIMIT,
+): Promise<InboxJobRow[]> {
+  const supabase = getNotificationServiceClient();
+  const nowIso = new Date().toISOString();
+  const { data, error } = await supabase
+    .from("notification_jobs")
+    .select("id, category, title, body, path, created_at, scheduled_for")
+    .eq("recipient_user_id", recipientUserId)
+    .neq("status", INELIGIBLE_INBOX_STATUS)
+    .lte("scheduled_for", nowIso)
+    .gt("scheduled_for", clearedBefore)
+    .order("scheduled_for", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+
+  return ((data ?? []) as Record<string, unknown>[]).map((row) => ({
+    id: row.id as string,
+    category: row.category as string,
+    title: row.title as string,
+    body: row.body as string,
+    path: row.path as string,
+    createdAt: row.created_at as string,
+    scheduledFor: row.scheduled_for as string,
+  }));
+}
+
+/** Every job id, among `jobIds`, this user has already marked read. A single `.in()` query regardless of how many ids are passed -- never one query per job. */
+export async function getReadJobIds(userId: string, jobIds: readonly string[]): Promise<Set<string>> {
+  if (jobIds.length === 0) return new Set();
+  const supabase = getNotificationServiceClient();
+  const { data, error } = await supabase
+    .from("notification_reads")
+    .select("job_id")
+    .eq("user_id", userId)
+    .in("job_id", jobIds);
+  if (error) throw error;
+  return new Set(((data ?? []) as { job_id: string }[]).map((row) => row.job_id));
+}
+
+/**
+ * Whether `jobId` is a real, inbox-eligible job (not `cancelled`, same
+ * eligibility rule `getInboxJobsForRecipient` applies) whose
+ * `recipient_user_id` is `userId` -- the ONE ownership check
+ * `markNotificationReadAction` must run before ever writing a
+ * `notification_reads` row. `jobId` is always client-supplied (the item
+ * the user clicked); the service-role client bypasses RLS entirely, so
+ * without this explicit check a caller could otherwise write a read-state
+ * row for a job that was never addressed to them. `false` covers both
+ * "no such job" and "exists but belongs to someone else / is cancelled"
+ * identically -- the caller never needs to (and, by design, cannot)
+ * distinguish the two.
+ */
+export async function isEligibleInboxJobForRecipient(userId: string, jobId: string): Promise<boolean> {
+  const supabase = getNotificationServiceClient();
+  const { data, error } = await supabase
+    .from("notification_jobs")
+    .select("id")
+    .eq("id", jobId)
+    .eq("recipient_user_id", userId)
+    .neq("status", INELIGIBLE_INBOX_STATUS)
+    .maybeSingle();
+  if (error) throw error;
+  return data !== null;
+}
+
+/** Marks one job read for this user -- idempotent (`ignoreDuplicates`), never errors on an already-read job. Never touches `notification_jobs` itself. Callers MUST verify ownership first (`isEligibleInboxJobForRecipient`) -- this function itself trusts `jobId` as already-proven, so it never re-checks. */
+export async function markNotificationJobRead(userId: string, jobId: string): Promise<void> {
+  const supabase = getNotificationServiceClient();
+  const { error } = await supabase
+    .from("notification_reads")
+    .upsert({ user_id: userId, job_id: jobId }, { onConflict: "user_id,job_id", ignoreDuplicates: true });
+  if (error) throw error;
+}
+
+/** Marks every one of `jobIds` read for this user in ONE upsert -- never one query per job (avoids N+1 for "סמן הכל כנקרא"). A job already marked read is left untouched (`ignoreDuplicates`). */
+export async function markNotificationJobsRead(userId: string, jobIds: readonly string[]): Promise<void> {
+  if (jobIds.length === 0) return;
+  const supabase = getNotificationServiceClient();
+  const rows = jobIds.map((jobId) => ({ user_id: userId, job_id: jobId }));
+  const { error } = await supabase
+    .from("notification_reads")
+    .upsert(rows, { onConflict: "user_id,job_id", ignoreDuplicates: true });
+  if (error) throw error;
+}
+
+/**
+ * "נקה התראות" -- advances this user's inbox cutoff to now, so every
+ * currently-visible job stops appearing. Idempotent by construction
+ * (upserting a later `cleared_before` is always safe to repeat) and
+ * never deletes/updates a single `notification_jobs` row -- the
+ * technical outbox history this cutoff hides is still fully intact for
+ * the worker and for any future audit.
+ */
+export async function clearNotificationInbox(userId: string): Promise<void> {
+  const supabase = getNotificationServiceClient();
+  const { error } = await supabase
+    .from("notification_inbox_state")
+    .upsert(
+      { user_id: userId, cleared_before: new Date().toISOString(), updated_at: new Date().toISOString() },
+      { onConflict: "user_id" },
+    );
+  if (error) throw error;
+}
+
+// ---------------------------------------------------------------------------
 // Deliveries (per push subscription / device)
 // ---------------------------------------------------------------------------
 

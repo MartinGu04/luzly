@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render } from "@testing-library/react";
-import { AppRevalidator } from "./AppRevalidator";
+import { APP_REVALIDATE_EVENT, AppRevalidator } from "./AppRevalidator";
 
 const refresh = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
@@ -238,6 +238,67 @@ describe("AppRevalidator — cleanup", () => {
 
     addSpy.mockRestore();
     removeSpy.mockRestore();
+  });
+});
+
+describe("AppRevalidator — APP_REVALIDATE_EVENT (bridges router.refresh() to client-fetched state like the notification inbox)", () => {
+  it("dispatches the event on window alongside every real router.refresh()", () => {
+    const handler = vi.fn();
+    window.addEventListener(APP_REVALIDATE_EVENT, handler);
+    render(<AppRevalidator />);
+
+    act(() => fireVisibilityChange());
+
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledTimes(1);
+    window.removeEventListener(APP_REVALIDATE_EVENT, handler);
+  });
+
+  it("never dispatches when the trigger is cooldown-suppressed (mirrors router.refresh() exactly)", async () => {
+    const handler = vi.fn();
+    window.addEventListener(APP_REVALIDATE_EVENT, handler);
+    render(<AppRevalidator />);
+
+    act(() => fireVisibilityChange());
+    expect(handler).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    act(() => fireVisibilityChange());
+
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledTimes(1);
+    window.removeEventListener(APP_REVALIDATE_EVENT, handler);
+  });
+
+  it("never dispatches while hidden, even once the periodic interval elapses", async () => {
+    const handler = vi.fn();
+    window.addEventListener(APP_REVALIDATE_EVENT, handler);
+    setVisibility("hidden");
+    render(<AppRevalidator />);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+    });
+
+    expect(refresh).not.toHaveBeenCalled();
+    expect(handler).not.toHaveBeenCalled();
+    window.removeEventListener(APP_REVALIDATE_EVENT, handler);
+  });
+
+  it("dispatches on the periodic cadence too, in lockstep with router.refresh()", async () => {
+    const handler = vi.fn();
+    window.addEventListener(APP_REVALIDATE_EVENT, handler);
+    render(<AppRevalidator />);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+    });
+
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledTimes(1);
+    window.removeEventListener(APP_REVALIDATE_EVENT, handler);
   });
 });
 

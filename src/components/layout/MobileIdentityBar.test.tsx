@@ -37,10 +37,10 @@ describe("MobileIdentityBar", () => {
     expect(bell).not.toBeDisabled();
   });
 
-  it("opens a notification popover when the Bell is clicked", async () => {
+  it("opens a notification popover (the inbox, by default) when the Bell is clicked", async () => {
     await renderWithTheme(<MobileIdentityBar name="דני בדיקה" isManager={false} avatarUrl={null} />);
     fireEvent.click(screen.getByRole("button", { name: "התראות" }));
-    expect(screen.getByRole("dialog", { name: "הגדרות התראות" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "התראות" })).toBeInTheDocument();
   });
 
   it("never renders a 3-button theme segmented control directly in the header", async () => {
