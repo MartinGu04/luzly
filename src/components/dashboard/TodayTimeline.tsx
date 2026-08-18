@@ -175,7 +175,7 @@ export function TodayTimeline({ todayEvents, todayDutyActions, localNow }: Today
 function TimelineDot({ status }: { status: TimelineStatus }) {
   if (status === "current") {
     return (
-      <span className="animate-breathe flex h-4 w-4 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-[0_0_10px_1px_var(--primary)]">
+      <span className="flex h-4 w-4 items-center justify-center rounded-full bg-primary text-primary-foreground">
         <Circle className="h-1.5 w-1.5 fill-current" aria-hidden="true" />
       </span>
     );

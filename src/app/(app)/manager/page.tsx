@@ -371,14 +371,14 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
       {!model.problemsOnly ? (
         <>
           <section>
-            <h2 className="mb-2 text-lg font-bold text-foreground sm:text-xl">כיסוי משמרות</h2>
+            <h2 className="mb-2 text-lg font-semibold text-foreground sm:text-xl">כיסוי משמרות</h2>
             <ManagerCoverageSection
               groups={model.coverageOverview.map((group) => buildManagerShiftGroupView(group, todayDate))}
             />
           </section>
 
           <section>
-            <h2 className="mb-2 text-lg font-bold text-foreground sm:text-xl">פוטנציאל מול סידור</h2>
+            <h2 className="mb-2 text-lg font-semibold text-foreground sm:text-xl">פוטנציאל מול סידור</h2>
             <ManagerPotentialSection rows={potentialRowViews} />
           </section>
 

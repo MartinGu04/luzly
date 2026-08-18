@@ -44,7 +44,7 @@ export function Avatar({ name, size = "md", className = "", avatarUrl = null }: 
   return (
     <div
       aria-hidden="true"
-      className={`flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-primary to-primary-strong font-semibold text-primary-foreground ring-1 ring-white/10 ${sizeClasses} ${className}`}
+      className={`flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary font-semibold text-primary-foreground ring-1 ring-white/10 ${sizeClasses} ${className}`}
     >
       {showPhoto ? (
         // eslint-disable-next-line @next/next/no-img-element -- external OAuth-provided URL; must degrade gracefully via onError, which next/image cannot do for unconfigured hosts.

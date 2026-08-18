@@ -297,7 +297,7 @@ export function PersonPicker({
       </button>
 
       {open ? (
-        <div className="absolute z-20 mt-1.5 w-64 rounded-2xl bg-surface-2 p-1.5 shadow-[var(--shadow-hero)] ring-1 ring-border-strong">
+        <div className="absolute z-20 mt-1.5 w-64 rounded-xl bg-surface-2 p-1.5 shadow-[var(--shadow-elevated)] ring-1 ring-border-strong">
           <input
             ref={searchRef}
             type="text"

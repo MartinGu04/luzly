@@ -33,7 +33,7 @@ import { ShiftFairnessCardInfo } from "./ShiftFairnessCardInfo";
 export function ShiftFairnessCard({ view }: { view: ShiftFairnessCardView }) {
   return (
     <li className="relative">
-      <div className="rounded-2xl bg-surface-1 p-4 ring-1 ring-border">
+      <div className="rounded-xl bg-surface-1 p-4 ring-1 ring-border">
         <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1.5">
           <div className="flex min-w-0 items-center gap-1">
             <p className="min-w-0 truncate text-sm font-semibold text-foreground">{view.personName}</p>
@@ -47,7 +47,7 @@ export function ShiftFairnessCard({ view }: { view: ShiftFairnessCardView }) {
             <span className="font-medium text-foreground">משמרות שבוצעו: {view.actualLabel}</span> · {view.unavailableNote}
           </p>
         ) : (
-          <div className="mt-3 grid grid-cols-3 gap-x-2 gap-y-1 rounded-xl bg-overlay-faint px-3 py-2.5">
+          <div className="mt-3 grid grid-cols-3 gap-x-2 gap-y-1 rounded-lg bg-overlay-faint px-3 py-2.5">
             <FairnessMetric testId="metric-shift-actual" label="משמרות שבוצעו" value={view.actualLabel} />
             <FairnessMetric testId="metric-shift-target" label="יעד אישי" value={view.targetLabel ?? "—"} />
             <FairnessMetric
@@ -78,7 +78,7 @@ export function ShiftFairnessCard({ view }: { view: ShiftFairnessCardView }) {
       <Link
         href={view.href}
         aria-label={view.personName}
-        className="absolute inset-0 z-10 rounded-2xl transition-colors duration-200 hover:bg-overlay-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        className="absolute inset-0 z-10 rounded-xl transition-colors duration-200 hover:bg-overlay-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
       />
     </li>
   );

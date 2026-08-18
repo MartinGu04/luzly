@@ -56,7 +56,7 @@ export function SelectedDayPanel({ dayMeta, events }: SelectedDayPanelProps) {
     <section aria-label="פרטי היום הנבחר">
       <Panel variant="panel" className={SELECTED_DAY_PANEL_MIN_HEIGHT_CLASS}>
         <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-          <p className="text-base font-bold text-foreground sm:text-lg">{dayMeta.dateLabel}</p>
+          <p className="text-base font-semibold text-foreground sm:text-lg">{dayMeta.dateLabel}</p>
           {dayMeta.holiday ? (
             <span className="inline-flex items-center gap-1 rounded-full bg-overlay-soft px-2 py-0.5 text-xs font-medium text-foreground ring-1 ring-border">
               <span aria-hidden="true">{dayMeta.holiday.emoji}</span>

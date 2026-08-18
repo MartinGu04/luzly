@@ -40,7 +40,7 @@ export function LoginHero({ initialClockTime, weekdayLabel, dayNumber, monthLabe
 
       <div className="mt-6 grid grid-cols-1 gap-y-6 sm:mt-12 sm:gap-y-9 lg:mt-14 lg:grid-cols-[1fr_1fr] lg:items-center lg:gap-x-16 lg:gap-y-8 xl:gap-x-24">
         <div className="order-1 flex flex-col items-center text-center lg:order-none lg:col-start-2 lg:row-start-1 lg:items-start lg:text-start">
-          <p className="text-sm font-semibold text-[#b39bfa] sm:text-base lg:text-xl lg:tracking-wide">
+          <p className="text-sm font-semibold text-[#8ab4d6] sm:text-base lg:text-xl lg:tracking-wide">
             {LOGIN_HERO_EYEBROW}
           </p>
           <h1 className="mt-2 max-w-md text-[clamp(1.75rem,4.4vw,2.75rem)] leading-[1.15] font-bold text-white lg:mt-4 lg:max-w-xl lg:text-[clamp(3rem,3.6vw,4.75rem)] lg:leading-[1.08]">

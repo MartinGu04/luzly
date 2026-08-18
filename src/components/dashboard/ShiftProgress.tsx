@@ -84,7 +84,7 @@ export function ShiftProgress({ timing, fetchedAt, mode }: ShiftProgressProps) {
         className="mt-2.5 h-2 w-full overflow-hidden rounded-full bg-overlay-soft"
       >
         <div
-          className="h-full rounded-full bg-primary shadow-[0_0_12px_1px_var(--primary)] transition-[width] duration-1000 ease-out"
+          className="h-full rounded-full bg-primary transition-[width] duration-1000 ease-out"
           style={{ width: `${progressPercent}%` }}
         />
       </div>

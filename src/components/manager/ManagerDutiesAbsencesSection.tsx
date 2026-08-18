@@ -72,7 +72,7 @@ export function ManagerDutiesAbsencesSection({ duties, absences }: ManagerDuties
     <div className="grid gap-4 sm:grid-cols-2">
       {dutyGroups.length > 0 ? (
         <Panel variant="panel">
-          <h3 className="text-[15px] font-bold text-foreground">תורנויות</h3>
+          <h3 className="text-[15px] font-semibold text-foreground">תורנויות</h3>
           <div className="mt-3 flex flex-col gap-4">
             {dutyGroups.map((group) => (
               <DutyGroupCard key={group.key} group={group} />
@@ -83,7 +83,7 @@ export function ManagerDutiesAbsencesSection({ duties, absences }: ManagerDuties
 
       {absenceGroups.length > 0 ? (
         <Panel variant="panel">
-          <h3 className="text-[15px] font-bold text-foreground">היעדרויות</h3>
+          <h3 className="text-[15px] font-semibold text-foreground">היעדרויות</h3>
           <div className="mt-3 flex flex-col gap-4">
             {absenceGroups.map((group) => (
               <AbsenceGroupCard key={group.key} group={group} />

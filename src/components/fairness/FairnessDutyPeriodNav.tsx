@@ -42,7 +42,7 @@ export function FairnessDutyPeriodNav({ current, currentLabel }: FairnessDutyPer
               aria-current={isActive ? "page" : undefined}
               dir="ltr"
               className={`rounded-full px-3 py-1.5 text-sm font-medium transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${
-                isActive ? "bg-surface-1 text-primary shadow-sm" : "text-muted hover:text-foreground"
+                isActive ? "bg-surface-1 text-primary" : "text-muted hover:text-foreground"
               }`}
             >
               {option.label}

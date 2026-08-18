@@ -18,7 +18,7 @@ interface FairnessMetricProps {
 export function FairnessMetric({ label, value, toneClassName, testId }: FairnessMetricProps) {
   return (
     <div className="flex min-w-0 flex-col gap-0.5" data-testid={testId}>
-      <span className="truncate text-[11px] text-muted-2">{label}</span>
+      <span className="text-xs leading-tight text-muted-2">{label}</span>
       <span className={`truncate text-sm font-semibold ${toneClassName ?? "text-foreground"}`}>{value}</span>
     </div>
   );

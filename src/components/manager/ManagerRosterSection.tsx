@@ -74,7 +74,7 @@ export function ManagerRosterSection({ roster, current }: ManagerRosterSectionPr
 
   return (
     <Panel variant="panel">
-      <h3 className="text-[15px] font-bold text-foreground">צוות</h3>
+      <h3 className="text-[15px] font-semibold text-foreground">צוות</h3>
       <div className="mt-3 flex flex-col gap-5">
         {groups.map((group) => (
           <div key={group.group}>

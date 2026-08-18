@@ -58,7 +58,7 @@ function PeriodDetail({
   return (
     <div>
       <div className="flex items-center justify-between">
-        <h4 className="flex items-center gap-1.5 text-sm font-bold text-foreground">
+        <h4 className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
           <span aria-hidden="true">{emoji}</span>
           {title}
         </h4>
@@ -97,7 +97,7 @@ export function EveryoneSelectedDayPanel({ dayMeta, dayView }: EveryoneSelectedD
     <section aria-label="פרטי היום הנבחר">
       <Panel variant="panel" className={`flex flex-col gap-4 ${SELECTED_DAY_PANEL_MIN_HEIGHT_CLASS}`}>
         <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-          <p className="text-base font-bold text-foreground sm:text-lg">{dayMeta.dateLabel}</p>
+          <p className="text-base font-semibold text-foreground sm:text-lg">{dayMeta.dateLabel}</p>
           {dayMeta.holiday ? (
             <span className="inline-flex items-center gap-1 rounded-full bg-overlay-soft px-2 py-0.5 text-xs font-medium text-foreground ring-1 ring-border">
               <span aria-hidden="true">{dayMeta.holiday.emoji}</span>
@@ -111,7 +111,7 @@ export function EveryoneSelectedDayPanel({ dayMeta, dayView }: EveryoneSelectedD
 
         {duties.length > 0 ? (
           <div>
-            <h4 className="text-sm font-bold text-foreground">תורנויות</h4>
+            <h4 className="text-sm font-semibold text-foreground">תורנויות</h4>
             <ul className="mt-1 divide-y divide-border">
               {duties.map((duty) => (
                 <li key={duty.key} className="flex items-center gap-2 py-1.5 text-sm">
@@ -126,7 +126,7 @@ export function EveryoneSelectedDayPanel({ dayMeta, dayView }: EveryoneSelectedD
 
         {absences.length > 0 ? (
           <div>
-            <h4 className="text-sm font-bold text-foreground">היעדרויות</h4>
+            <h4 className="text-sm font-semibold text-foreground">היעדרויות</h4>
             <ul className="mt-1 divide-y divide-border">
               {absences.map((absence) => (
                 <li key={absence.key} className="flex items-center gap-2 py-1.5 text-sm">

@@ -17,7 +17,6 @@ describe("globals.css motion system", () => {
     for (const className of [
       "animate-pulse-dot",
       "animate-pulse-ring",
-      "animate-ambient-glow",
       "animate-fade-up",
       "animate-breathe",
       "animate-issue-pulse",
@@ -31,7 +30,6 @@ describe("globals.css motion system", () => {
     for (const keyframeName of [
       "pulse-dot",
       "pulse-ring",
-      "ambient-glow",
       "fade-up",
       "breathe",
       "issue-pulse",

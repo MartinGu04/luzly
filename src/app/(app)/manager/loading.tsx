@@ -26,15 +26,15 @@ export default function ManagerLoading() {
 
       <div className="skeleton h-9 w-40 rounded-full" />
 
-      <div className="skeleton h-28 rounded-2xl" />
+      <div className="skeleton h-28 rounded-xl" />
 
       <div className="flex flex-col gap-3">
         <div className="skeleton h-6 w-32 rounded-lg" />
-        <div className="skeleton h-24 rounded-2xl" />
-        <div className="skeleton h-24 rounded-2xl" />
+        <div className="skeleton h-24 rounded-xl" />
+        <div className="skeleton h-24 rounded-xl" />
       </div>
 
-      <div className="skeleton h-64 rounded-2xl" />
+      <div className="skeleton h-64 rounded-xl" />
     </div>
   );
 }

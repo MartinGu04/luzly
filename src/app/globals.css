@@ -11,55 +11,59 @@
 /* to hydrate differently) -- "system" means no attribute is set at all, */
 /* letting the media query below decide.                                 */
 /*                                                                         */
+/* Visual system refresh: modern operational software, not AI/SaaS. Blue  */
+/* (`--primary`) is an INTERACTION/SELECTION color (active nav, selected  */
+/* controls, primary CTA, focus, today) -- most pixels stay neutral.      */
+/*                                                                         */
 /* The sidebar is a deep navy surface in BOTH themes (Design Pass         */
 /* PR #19) -- only its exact tone shifts between light/dark. That is why  */
 /* the sidebar-interaction tokens further down (`--sidebar-hover-bg`,     */
 /* `--sidebar-active-bg`, ...) are defined once, using `color-mix()`      */
-/* formulas against `--primary`/white rather than per-theme literals.     */
+/* formulas against `--sidebar-accent`/white rather than per-theme        */
+/* literals. `--sidebar-accent` is a FIXED steel-blue (not `--primary`)   */
+/* because the light theme's own `--primary` is a deliberately muted,     */
+/* darker blue that reads with too little contrast against the           */
+/* always-dark sidebar -- see the derived-tokens block below.             */
 /* ---------------------------------------------------------------------- */
 :root {
   color-scheme: light;
 
-  --background: #f4f6fa;
-  --background-glow-a: #e4d9fb;
-  --background-glow-b: #d3eef7;
+  --background: #f4f6f8;
 
-  --foreground: #1c1f27;
-  --muted: #5b6577;
-  --muted-2: #838da0;
+  --foreground: #18212b;
+  --muted: #5f6b78;
+  --muted-2: #64707d;
 
   --surface-1: #ffffff;
-  --surface-2: #fdfeff;
-  --surface-3: #eef1fa;
+  --surface-2: #f8fafb;
+  --surface-3: #edf1f3;
 
-  --border: rgba(15, 23, 42, 0.08);
-  --border-strong: rgba(15, 23, 42, 0.14);
+  --border: #dce2e8;
+  --border-strong: #c9d2da;
 
-  --overlay-faint: rgba(15, 23, 42, 0.035);
-  --overlay-soft: rgba(15, 23, 42, 0.05);
-  --overlay-strong: rgba(15, 23, 42, 0.08);
-
-  --grid-line: rgba(15, 23, 42, 0.035);
+  --overlay-faint: rgba(24, 33, 43, 0.035);
+  --overlay-soft: rgba(24, 33, 43, 0.05);
+  --overlay-strong: rgba(24, 33, 43, 0.08);
 
   /* A dedicated, deliberately-tuned wash for weekend calendar columns/cells
      -- its own token (not a reuse of --overlay-faint, which serves many
      unrelated hover/wash purposes elsewhere) so it can be tuned
-     independently per theme without touching anything else. Calm and
-     tasteful: a faint brand-tinted wash, never a loud block of color, and
-     never strong enough to compete with the "today" accent (which lives on
-     a separate layer -- the day-number badge -- and always wins). */
-  --weekend-tint: rgba(124, 58, 237, 0.05);
+     independently per theme without touching anything else. A quiet,
+     cool-neutral wash -- never colored/branded, never strong enough to
+     compete with the "today" accent (which lives on a separate layer --
+     the day-number badge -- and always wins). */
+  --weekend-tint: rgba(24, 33, 43, 0.04);
 
   --card: var(--surface-1);
   --card-foreground: var(--foreground);
 
-  --sidebar: #101a34;
-  --sidebar-foreground: #f3f5fc;
-  --sidebar-muted: #97a2c2;
+  --sidebar: #162331;
+  --sidebar-foreground: #edf1f4;
+  --sidebar-muted: #9aa6b2;
   --sidebar-border: rgba(255, 255, 255, 0.08);
 
-  --primary: #7c3aed;
-  --primary-strong: #6d28d9;
+  --primary: #2f648e;
+  --primary-strong: #285578;
   --primary-foreground: #ffffff;
 
   --accent: #0e7490;
@@ -71,48 +75,47 @@
   --critical: #dc2626;
   --critical-foreground: #ffffff;
 
-  --shadow-hero: 0 1px 0 0 rgba(255, 255, 255, 0.7) inset, 0 20px 45px -24px rgba(15, 23, 42, 0.18);
+  /* Restrained, neutral elevation shadow for surfaces that are physically
+     ABOVE the page -- popovers, menus, dialogs, drawers, the command
+     palette. Never used for normal in-page cards/panels, and never
+     colored/glowing. */
+  --shadow-elevated: 0 12px 28px -12px rgba(24, 33, 43, 0.18);
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
 
-    --background: #090b12;
-    --background-glow-a: #241a45;
-    --background-glow-b: #0d2233;
+    --background: #0f141a;
 
-    --foreground: #eef0f6;
-    --muted: #8b93a8;
-    --muted-2: #6b7590;
+    --foreground: #edf1f4;
+    --muted: #9aa6b2;
+    --muted-2: #8a96a3;
 
-    --surface-1: #12151f;
-    --surface-2: #171c29;
-    --surface-3: #1c2233;
+    --surface-1: #161d24;
+    --surface-2: #1b242d;
+    --surface-3: #212b35;
 
-    --border: rgba(255, 255, 255, 0.08);
-    --border-strong: rgba(255, 255, 255, 0.16);
+    --border: #2a3540;
+    --border-strong: #3a4854;
 
     --overlay-faint: rgba(255, 255, 255, 0.03);
     --overlay-soft: rgba(255, 255, 255, 0.06);
     --overlay-strong: rgba(255, 255, 255, 0.1);
 
-    --grid-line: rgba(255, 255, 255, 0.025);
+    --weekend-tint: rgba(255, 255, 255, 0.05);
 
-    /* Deliberately tuned for dark surfaces, not inherited from light: a
-       higher opacity + the dark theme's own lighter primary tone, since the
-       same low-opacity value that reads clearly on a light surface all but
-       disappears on a dark one. */
-    --weekend-tint: rgba(139, 123, 245, 0.1);
-
-    --sidebar: #10162a;
-    --sidebar-foreground: #e7e9f2;
-    --sidebar-muted: #8b93ac;
+    --sidebar: #111b25;
+    --sidebar-foreground: #edf1f4;
+    --sidebar-muted: #9aa6b2;
     --sidebar-border: rgba(255, 255, 255, 0.08);
 
-    --primary: #8b7bf5;
-    --primary-strong: #7461e8;
-    --primary-foreground: #ffffff;
+    /* Filled `bg-primary` controls need a DARK foreground here -- the
+       lighter dark-mode primary tone does not carry white text at
+       readable contrast. */
+    --primary: #78a9cc;
+    --primary-strong: #8ab5d4;
+    --primary-foreground: #0f141a;
 
     --accent: #4fc3e8;
 
@@ -123,44 +126,40 @@
     --critical: #f77272;
     --critical-foreground: #2b0a0a;
 
-    --shadow-hero: 0 1px 0 0 rgba(255, 255, 255, 0.05) inset, 0 24px 60px -28px rgba(0, 0, 0, 0.65);
+    --shadow-elevated: 0 16px 36px -14px rgba(0, 0, 0, 0.55);
   }
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
 
-  --background: #090b12;
-  --background-glow-a: #241a45;
-  --background-glow-b: #0d2233;
+  --background: #0f141a;
 
-  --foreground: #eef0f6;
-  --muted: #8b93a8;
-  --muted-2: #6b7590;
+  --foreground: #edf1f4;
+  --muted: #9aa6b2;
+  --muted-2: #8a96a3;
 
-  --surface-1: #12151f;
-  --surface-2: #171c29;
-  --surface-3: #1c2233;
+  --surface-1: #161d24;
+  --surface-2: #1b242d;
+  --surface-3: #212b35;
 
-  --border: rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(255, 255, 255, 0.16);
+  --border: #2a3540;
+  --border-strong: #3a4854;
 
   --overlay-faint: rgba(255, 255, 255, 0.03);
   --overlay-soft: rgba(255, 255, 255, 0.06);
   --overlay-strong: rgba(255, 255, 255, 0.1);
 
-  --grid-line: rgba(255, 255, 255, 0.025);
+  --weekend-tint: rgba(255, 255, 255, 0.05);
 
-  --weekend-tint: rgba(139, 123, 245, 0.1);
-
-  --sidebar: #10162a;
-  --sidebar-foreground: #e7e9f2;
-  --sidebar-muted: #8b93ac;
+  --sidebar: #111b25;
+  --sidebar-foreground: #edf1f4;
+  --sidebar-muted: #9aa6b2;
   --sidebar-border: rgba(255, 255, 255, 0.08);
 
-  --primary: #8b7bf5;
-  --primary-strong: #7461e8;
-  --primary-foreground: #ffffff;
+  --primary: #78a9cc;
+  --primary-strong: #8ab5d4;
+  --primary-foreground: #0f141a;
 
   --accent: #4fc3e8;
 
@@ -171,7 +170,7 @@
   --critical: #f77272;
   --critical-foreground: #2b0a0a;
 
-  --shadow-hero: 0 1px 0 0 rgba(255, 255, 255, 0.05) inset, 0 24px 60px -28px rgba(0, 0, 0, 0.65);
+  --shadow-elevated: 0 16px 36px -14px rgba(0, 0, 0, 0.55);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -185,13 +184,14 @@
   /* The fixed light/milky Google CTA -- a clear focal point against the
      always-dark login canvas at every width. Text is a fixed dark neutral
      (never --foreground, which would flip to light text in dark app theme
-     and vanish on this light button). */
+     and vanish on this light button). The shadow is a plain neutral
+     elevation lift, never a colored/brand glow. */
   --login-cta-fixed-bg: rgba(255, 255, 255, 0.96);
   --login-cta-fixed-bg-hover: rgba(255, 255, 255, 1);
   --login-cta-fixed-text: #23283a;
-  --shadow-login-cta-fixed: 0 12px 28px -10px rgba(139, 123, 245, 0.45);
-  --shadow-login-cta-fixed-hover: 0 18px 38px -12px rgba(139, 123, 245, 0.55);
-  --shadow-login-cta-fixed-active: 0 6px 16px -8px rgba(139, 123, 245, 0.42);
+  --shadow-login-cta-fixed: 0 10px 24px -10px rgba(0, 0, 0, 0.35);
+  --shadow-login-cta-fixed-hover: 0 14px 30px -10px rgba(0, 0, 0, 0.4);
+  --shadow-login-cta-fixed-active: 0 6px 14px -8px rgba(0, 0, 0, 0.3);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -201,9 +201,19 @@
 /* `color-mix()` resolves against at that element, automatically.         */
 /* ---------------------------------------------------------------------- */
 :root {
+  /* Fixed steel-blue used ONLY for interaction states on the always-dark
+     sidebar/bottom-nav surface -- see the top-of-file note. Deliberately
+     NOT `--primary`: the light theme's `--primary` (#2f648e) is a muted,
+     darker blue tuned for readable text/icons on LIGHT surfaces, and
+     drops to ~2.5:1 contrast against the dark sidebar -- too low for a
+     "this is the active item" affordance. `--sidebar-accent` stays the
+     same steel-blue regardless of app theme, matching the sidebar's own
+     fixed-dark treatment. */
+  --sidebar-accent: #78a9cc;
+
   --sidebar-hover-bg: color-mix(in srgb, white 7%, transparent);
-  --sidebar-active-bg: color-mix(in srgb, var(--primary) 20%, transparent);
-  --sidebar-active-ring: color-mix(in srgb, var(--primary) 55%, transparent);
+  --sidebar-active-bg: color-mix(in srgb, var(--sidebar-accent) 18%, transparent);
+  --sidebar-active-ring: color-mix(in srgb, var(--sidebar-accent) 45%, transparent);
 
   --surface-critical: color-mix(in srgb, var(--critical) 8%, var(--surface-1));
   --surface-critical-border: color-mix(in srgb, var(--critical) 30%, transparent);
@@ -211,8 +221,8 @@
   /* Restrained, DESCRIPTIVE (never punitive) Fairness status tinting
      (PR #51 follow-up) -- reuses the existing --success/--primary/--warning
      tokens rather than introducing a parallel raw-hex palette, so both
-     themes stay in sync automatically. balanced -> the existing teal/green
-     --success tone, below -> the existing purple --primary brand tone
+     themes stay in sync automatically. balanced -> the existing green
+     --success tone, below -> the existing blue --primary brand tone
      (repurposed here as a calm "under" cue, not an alert), above -> the
      existing amber --warning tone. All three are intentionally the SAME
      restrained strength -- none reads as more "wrong" than another. An
@@ -258,6 +268,7 @@
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-muted: var(--sidebar-muted);
   --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent: var(--sidebar-accent);
   --color-sidebar-hover: var(--sidebar-hover-bg);
   --color-sidebar-active: var(--sidebar-active-bg);
   --color-sidebar-active-ring: var(--sidebar-active-ring);
@@ -296,35 +307,6 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
-  position: relative;
-}
-
-/* A restrained ambient backdrop: two soft, very low-opacity radial blobs
-   fixed behind all content, plus a faint grid for depth. Never opaque
-   enough to fight with foreground contrast, in either theme. */
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: -2;
-  pointer-events: none;
-  background:
-    radial-gradient(60rem 40rem at 15% -10%, color-mix(in srgb, var(--background-glow-a) 32%, transparent), transparent 60%),
-    radial-gradient(50rem 36rem at 110% 15%, color-mix(in srgb, var(--background-glow-b) 28%, transparent), transparent 55%);
-}
-
-body::after {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  opacity: 0.5;
-  background-image:
-    linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px),
-    linear-gradient(to right, var(--grid-line) 1px, transparent 1px);
-  background-size: 42px 42px;
-  mask-image: radial-gradient(80% 60% at 50% 0%, black, transparent 85%);
 }
 
 ::selection {
@@ -346,11 +328,6 @@ body::after {
 @keyframes pulse-ring {
   0% { transform: scale(0.75); opacity: 0.5; }
   75%, 100% { transform: scale(2.1); opacity: 0; }
-}
-
-@keyframes ambient-glow {
-  0%, 100% { opacity: 0.28; transform: translate3d(0, 0, 0) scale(1); }
-  50% { opacity: 0.48; transform: translate3d(-1.5%, 1.5%, 0) scale(1.04); }
 }
 
 @keyframes fade-up {
@@ -383,7 +360,6 @@ body::after {
 
 .animate-pulse-dot { animation: pulse-dot 2.4s ease-in-out infinite; }
 .animate-pulse-ring { animation: pulse-ring 2.4s cubic-bezier(0.25, 0.6, 0.35, 1) infinite; }
-.animate-ambient-glow { animation: ambient-glow 7s ease-in-out infinite; }
 .animate-fade-up { animation: fade-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }
 .animate-breathe { animation: breathe 3.4s ease-in-out infinite; }
 .animate-issue-pulse { animation: issue-pulse 2.8s ease-in-out infinite; }
@@ -403,7 +379,6 @@ body::after {
 @media (prefers-reduced-motion: reduce) {
   .animate-pulse-dot,
   .animate-pulse-ring,
-  .animate-ambient-glow,
   .animate-fade-up,
   .animate-breathe,
   .animate-issue-pulse,

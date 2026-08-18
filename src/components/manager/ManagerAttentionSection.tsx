@@ -35,7 +35,7 @@ function AttentionGroup({
 
   return (
     <section>
-      <h3 className="flex items-center gap-2 text-lg font-bold text-foreground sm:text-xl">
+      <h3 className="flex items-center gap-2 text-lg font-semibold text-foreground sm:text-xl">
         <IssueSeverityBadge severity={severity} className="h-4 w-4" />
         {issueSeverityLabel(severity)}
         <span className="text-sm font-normal text-muted-2">· {items.length}</span>
@@ -80,7 +80,7 @@ export function ManagerAttentionSection({ criticalItems, reviewItems, current }:
 
   return (
     <div className="flex flex-col gap-4">
-      <h2 className="text-xl font-bold text-foreground sm:text-2xl">דורש טיפול</h2>
+      <h2 className="text-xl font-semibold text-foreground sm:text-2xl">דורש טיפול</h2>
       <AttentionGroup severity="critical" items={criticalItems} current={current} />
       <AttentionGroup severity="review" items={reviewItems} current={current} />
     </div>

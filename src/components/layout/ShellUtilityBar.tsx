@@ -83,7 +83,7 @@ export function ShellUtilityBar({ initialClockTime, dateLabel }: ShellUtilityBar
         <div className="flex items-center justify-center gap-5 sm:gap-8">
           <OrgLogoImage logo={ORG_LOGO_TAKSHAL} heightClassName="h-[78px]" />
 
-          <div className="flex flex-col items-center gap-1 rounded-2xl bg-surface-1 px-6 py-2.5 ring-1 ring-border">
+          <div className="flex flex-col items-center gap-1 rounded-xl bg-surface-1 px-6 py-2.5 ring-1 ring-border">
             <div className="flex items-center gap-2">
               <Clock className="h-4 w-4 text-primary" aria-hidden="true" strokeWidth={1.75} />
               <LiveClock initialTime={initialClockTime} size="md" />

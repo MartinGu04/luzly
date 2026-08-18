@@ -43,7 +43,7 @@ export function PermanentManagerHome({ model }: PermanentManagerHomeProps) {
       <DataFreshnessStatus fetchedAt={model.fetchedAt} className="w-fit" />
 
       <div>
-        <h2 className="mb-3 text-lg font-bold text-foreground sm:text-xl">מה קורה עכשיו במחלקה?</h2>
+        <h2 className="mb-3 text-lg font-semibold text-foreground sm:text-xl">מה קורה עכשיו במחלקה?</h2>
         <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[1fr_1.5fr_1fr]">
           <div className="order-2 lg:order-1">
             <ShiftSnapshotCard label="הקודמת" shift={model.previousShift} todayDate={todayDate} />

@@ -22,7 +22,7 @@ export function DutyViewToggle({ view }: DutyViewToggleProps) {
         aria-current={view === "upcoming" ? "page" : undefined}
         className={`${TAB_BASE} ${
           view === "upcoming"
-            ? "bg-surface-1 font-semibold text-primary shadow-sm ring-1 ring-border"
+            ? "bg-surface-1 font-semibold text-primary ring-1 ring-border"
             : "font-medium text-muted hover:text-foreground"
         }`}
       >
@@ -33,7 +33,7 @@ export function DutyViewToggle({ view }: DutyViewToggleProps) {
         aria-current={view === "history" ? "page" : undefined}
         className={`${TAB_BASE} ${
           view === "history"
-            ? "bg-surface-1 font-semibold text-primary shadow-sm ring-1 ring-border"
+            ? "bg-surface-1 font-semibold text-primary ring-1 ring-border"
             : "font-medium text-muted hover:text-foreground"
         }`}
       >

@@ -39,7 +39,7 @@ export function LoginClockReadout({
 }: LoginClockReadoutProps) {
   const iconBadge = (size: string) => (
     <span className={`flex ${size} shrink-0 items-center justify-center rounded-full bg-white/5 ring-1 ring-white/15`}>
-      <Clock className="h-[45%] w-[45%] text-[#a996ff]" aria-hidden="true" strokeWidth={1.75} />
+      <Clock className="h-[45%] w-[45%] text-[#8ab4d6]" aria-hidden="true" strokeWidth={1.75} />
     </span>
   );
 

@@ -21,7 +21,7 @@ export function UpdateNotice({ onUpdate, pending }: UpdateNoticeProps) {
   return (
     <div
       role="status"
-      className="fixed inset-x-0 bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-50 mx-auto flex w-fit max-w-[calc(100%-2rem)] items-center gap-3 rounded-full border border-border-strong bg-surface-1 px-4 py-2.5 text-sm shadow-hero lg:bottom-6"
+      className="fixed inset-x-0 bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-50 mx-auto flex w-fit max-w-[calc(100%-2rem)] items-center gap-3 rounded-full border border-border-strong bg-surface-1 px-4 py-2.5 text-sm shadow-[var(--shadow-elevated)] lg:bottom-6"
     >
       <span className="text-foreground">גרסה חדשה של {APP_NAME} זמינה</span>
       <button

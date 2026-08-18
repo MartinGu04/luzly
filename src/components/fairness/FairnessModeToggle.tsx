@@ -32,7 +32,7 @@ export function FairnessModeToggle({ active }: FairnessModeToggleProps) {
         href={fairnessShiftsHref()}
         role="tab"
         aria-selected={active === "shifts"}
-        className={`${TAB_BASE} ${active === "shifts" ? "bg-surface-1 text-primary shadow-sm" : "text-muted hover:text-foreground"}`}
+        className={`${TAB_BASE} ${active === "shifts" ? "bg-surface-1 text-primary" : "text-muted hover:text-foreground"}`}
       >
         משמרות
       </Link>
@@ -40,7 +40,7 @@ export function FairnessModeToggle({ active }: FairnessModeToggleProps) {
         href={fairnessDutiesHref()}
         role="tab"
         aria-selected={active === "duties"}
-        className={`${TAB_BASE} ${active === "duties" ? "bg-surface-1 text-primary shadow-sm" : "text-muted hover:text-foreground"}`}
+        className={`${TAB_BASE} ${active === "duties" ? "bg-surface-1 text-primary" : "text-muted hover:text-foreground"}`}
       >
         תורנויות
       </Link>

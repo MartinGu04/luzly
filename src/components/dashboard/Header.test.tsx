@@ -22,7 +22,7 @@ describe("Header — date line", () => {
   it("keeps the greeting as the visually dominant line, date/holiday as secondary text", () => {
     render(<Header personName="דני בדיקה" localNow={{ date: "2026-08-12", minuteOfDay: 10 * 60 }} />);
     const heading = screen.getByRole("heading", { level: 1 });
-    expect(heading.className).toMatch(/font-bold/);
+    expect(heading.className).toMatch(/font-semibold/);
     const dateLine = screen.getByText("יום רביעי · 12 באוגוסט · כ״ט באב תשפ״ו");
     expect(dateLine.className).toMatch(/text-muted/);
   });
