@@ -5,7 +5,7 @@ import type { ManagerHrefParams } from "@/lib/presentation/managerUrl";
 import type { IssueRowView } from "./types";
 import { IssueRow } from "./IssueRow";
 
-const CURRENT: ManagerHrefParams = { personId: null, range: "7d", month: null, problemsOnly: false };
+const CURRENT: ManagerHrefParams = { personId: null, range: "7d", month: null, category: "overview" };
 
 /** A single plain-text part -- the equivalent of the former flat `primaryText: string` shape, for tests that don't care about candidate links specifically. */
 function textOnly(value: string): IssueRecommendationTextPart[] {
@@ -86,15 +86,25 @@ describe("IssueRow — manager everyone view (personName set)", () => {
     return view({ personName: "מרטין בדיקה", reasonLabel: "חסר כיסוי למשמרת", ...overrides });
   }
 
-  it("leads with the person's name, then their own role/shift on the same line", () => {
+  it("the problem itself leads visually -- its severity-tinted callout renders before the person/shift/date line, never after", () => {
     const { container } = render(<IssueRow view={managerView({ targetEmoji: "🌙", targetTitle: 'אחמ"ש לילה' })} />);
-    expect(screen.getByText("מרטין בדיקה")).toBeInTheDocument();
+    const problem = screen.getByText("חסר כיסוי למשמרת");
+    const person = screen.getByText("מרטין בדיקה");
     expect(container.textContent).toContain('אחמ"ש לילה');
+    // DOM order IS visual order here (no CSS re-ordering) -- the problem's
+    // own node must precede the person/shift/date line's node.
+    expect(problem.compareDocumentPosition(person) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("renders the finding as its own severity-tinted callout, separate from the name line", () => {
+  it("renders the finding as its own severity-tinted callout, separate from the person/shift/date line", () => {
     render(<IssueRow view={managerView()} />);
     expect(screen.getByText("חסר כיסוי למשמרת")).toBeInTheDocument();
+  });
+
+  it("the person's name is supporting context, not the primary heading -- it never carries the severity tint", () => {
+    render(<IssueRow view={managerView()} />);
+    const person = screen.getByText("מרטין בדיקה");
+    expect(person.className).not.toMatch(/text-critical|text-warning/);
   });
 
   it("shows the missing-hours callout with manager-view wording", () => {
@@ -114,6 +124,13 @@ describe("IssueRow — recommendation (secondary, collapsed) [PR #37]", () => {
     const summary = screen.getByText("פעולה מומלצת");
     expect(summary.closest("details")).not.toHaveAttribute("open");
     expect(screen.getByText("לפי הסידור הקיים, אפשר לבדוק עם איתי לגבי הכיסוי.")).toBeInTheDocument();
+  });
+
+  it("the collapsed trigger carries a warm/amber treatment so it's noticeable, distinct from the finding's own severity color", () => {
+    render(<IssueRow view={view({ severity: "critical", recommendation: recommendationView() })} />);
+    const summary = screen.getByText("פעולה מומלצת").closest("summary");
+    expect(summary?.className).toContain("text-warning");
+    expect(summary?.className).not.toMatch(/text-critical/);
   });
 
   it("36. renders the primary recommendation text verbatim", () => {
@@ -226,8 +243,8 @@ describe("IssueRow — recommendation candidate names link to their manager dril
     expect(screen.getByRole("link", { name: "איתי אוליר" })).toHaveAttribute("href", "/manager?person=p_extra");
   });
 
-  it("preserves the current manager range/month/problems URL state in the candidate's href, via the same buildManagerHref used elsewhere", () => {
-    const currentWithState: ManagerHrefParams = { personId: null, range: "month", month: "2026-08", problemsOnly: true };
+  it("preserves the current manager range/month/category URL state in the candidate's href, via the same buildManagerHref used elsewhere", () => {
+    const currentWithState: ManagerHrefParams = { personId: null, range: "month", month: "2026-08", category: "shifts" };
     render(
       <IssueRow
         view={view({
@@ -242,7 +259,7 @@ describe("IssueRow — recommendation candidate names link to their manager dril
     expect(href).toContain("person=p_extra");
     expect(href).toContain("range=month");
     expect(href).toContain("month=2026-08");
-    expect(href).toContain("problems=1");
+    expect(href).toContain("category=shifts");
   });
 
   it("multiple candidates each link to their own distinct person", () => {

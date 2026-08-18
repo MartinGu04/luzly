@@ -7,7 +7,7 @@ afterEach(() => {
   cleanup();
 });
 
-const BASE: ManagerHrefParams = { personId: null, range: "7d", month: null, problemsOnly: false };
+const BASE: ManagerHrefParams = { personId: null, range: "7d", month: null, category: "overview" };
 
 describe("ManagerRangeSelector", () => {
   it("renders all four range options", () => {
@@ -22,6 +22,12 @@ describe("ManagerRangeSelector", () => {
     render(<ManagerRangeSelector current={{ ...BASE, range: "today" }} currentMonth={null} />);
     expect(screen.getByRole("link", { name: "היום" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("link", { name: "7 ימים" })).not.toHaveAttribute("aria-current");
+  });
+
+  it("the active range carries a visible ring, not just a same-family background shade (light-mode contrast fix)", () => {
+    render(<ManagerRangeSelector current={{ ...BASE, range: "today" }} currentMonth={null} />);
+    expect(screen.getByRole("link", { name: "היום" }).className).toContain("ring-1");
+    expect(screen.getByRole("link", { name: "7 ימים" }).className).not.toContain("ring-1");
   });
 
   it("preserves the selected person when switching range", () => {

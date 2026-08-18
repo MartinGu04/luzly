@@ -96,8 +96,10 @@ describe("ShiftSnapshotCard — coverage", () => {
     render(<ShiftSnapshotCard label="המשמרת עכשיו" shift={shift} todayDate="2026-08-12" />);
     expect(screen.getByText('חסר אחמ"ש')).toBeInTheDocument();
     const link = screen.getByRole("link");
-    expect(link.getAttribute("href")).toContain("/manager");
-    expect(link.getAttribute("href")).toContain("problems=1");
+    // Links to the Manager Area's default Overview category ("דורש טיפול"
+    // already surfaces this exact coverage gap as an issue) -- the old
+    // problems=1 toggle no longer exists.
+    expect(link.getAttribute("href")).toBe("/manager?range=today");
   });
 
   it("partial coverage renders the explicit interval message", () => {

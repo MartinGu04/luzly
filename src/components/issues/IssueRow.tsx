@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Lightbulb } from "lucide-react";
 import type { ReactNode } from "react";
 import { ISSUE_SEVERITY_BG_CLASS, ISSUE_SEVERITY_TEXT_CLASS, IssueSeverityBadge } from "@/components/ui/IssueSeverityBadge";
 import type { IssueRecommendationTextPart, IssueRecommendationView } from "@/lib/presentation/issueRecommendation";
@@ -66,8 +67,11 @@ function renderTextParts(parts: readonly IssueRecommendationTextPart[], current?
  */
 function RecommendationDisclosure({ view, current }: { view: IssueRecommendationView; current?: ManagerHrefParams }) {
   return (
-    <details className="mt-1 text-xs">
-      <summary className="cursor-pointer font-medium text-muted-2">פעולה מומלצת</summary>
+    <details className="mt-1.5 text-xs">
+      <summary className="inline-flex cursor-pointer items-center gap-1 font-medium text-warning">
+        <Lightbulb className="h-3.5 w-3.5 shrink-0" aria-hidden="true" strokeWidth={1.75} />
+        פעולה מומלצת
+      </summary>
       <div className="mt-1 space-y-1 text-muted">
         <p>{renderTextParts(view.primaryText, current)}</p>
         {view.disclaimer ? <p className="text-muted-2">{view.disclaimer}</p> : null}
@@ -91,14 +95,15 @@ function RecommendationDisclosure({ view, current }: { view: IssueRecommendation
  * a critical finding never turns the whole page red.
  *
  * Two layouts, chosen purely by whether `view.personName` is set (never a
- * separate prop): with a name (the manager's everyone-wide view) it leads
- * with "who, then their own role/shift", and the finding renders separately
- * below as its own severity-tinted callout, so a reader never has to guess
- * which line is the person's own role and which is what's missing. Without
- * a name (a person's own issues) the finding itself leads as plain text --
- * there's no one else to name first. Both layouts are pixel-identical to
- * the two components this one replaces (`/conflicts`'s `IssueRow` and the
- * manager's `ManagerIssueRow`).
+ * separate prop): with a name (the manager's everyone-wide view) the
+ * PROBLEM itself leads -- a severity-tinted callout is the row's primary
+ * visual message, since that's what actually requires the manager's
+ * attention -- with who/what shift/when following underneath as plain
+ * supporting context. A person's name leading a critical-severity row used
+ * to read as if the person themselves were the problem; they're context,
+ * not the finding. Without a name (a person's own issues) the finding
+ * itself already leads as plain text -- there's no one else to name first,
+ * so that layout is unchanged.
  */
 export function IssueRow({ view, current }: IssueRowProps) {
   if (view.personName) {
@@ -106,24 +111,23 @@ export function IssueRow({ view, current }: IssueRowProps) {
       <li className="flex items-start gap-3 py-3">
         <IssueSeverityBadge severity={view.severity} className="mt-0.5 h-4 w-4 shrink-0" />
         <div className="min-w-0 flex-1 space-y-1.5">
-          <div>
-            <p className="text-sm font-semibold text-foreground">
-              {view.personName}
-              {view.targetTitle ? (
-                <span className="font-normal text-muted">
-                  {" · "}
-                  {view.targetEmoji ? <span aria-hidden="true">{view.targetEmoji} </span> : null}
-                  {view.targetTitle}
-                </span>
-              ) : null}
-            </p>
-            <p className="text-xs text-muted">{view.dateLabel}</p>
-          </div>
-
           <p
-            className={`inline-flex w-fit items-center rounded-lg px-2 py-1 text-xs font-semibold ${ISSUE_SEVERITY_TEXT_CLASS[view.severity]} ${ISSUE_SEVERITY_BG_CLASS[view.severity]}`}
+            className={`inline-flex w-fit items-center rounded-lg px-2 py-1 text-sm font-semibold ${ISSUE_SEVERITY_TEXT_CLASS[view.severity]} ${ISSUE_SEVERITY_BG_CLASS[view.severity]}`}
           >
             {view.reasonLabel}
+          </p>
+
+          <p className="text-xs text-muted">
+            <span className="font-medium text-foreground">{view.personName}</span>
+            {view.targetTitle ? (
+              <>
+                {" · "}
+                {view.targetEmoji ? <span aria-hidden="true">{view.targetEmoji} </span> : null}
+                {view.targetTitle}
+              </>
+            ) : null}
+            {" · "}
+            {view.dateLabel}
           </p>
 
           {view.missingIntervalLabels && view.missingIntervalLabels.length > 0 ? (

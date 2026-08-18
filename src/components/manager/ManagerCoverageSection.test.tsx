@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { ManagerCoverageSection } from "./ManagerCoverageSection";
-import type { ManagerRoleCoverageRowView, ManagerShiftGroupView } from "./types";
+import type { ManagerRoleCoverageRowView, ManagerShiftDayView, ManagerShiftGroupView } from "./types";
 
 afterEach(() => {
   cleanup();
@@ -29,21 +29,32 @@ function group(overrides: Partial<ManagerShiftGroupView> = {}): ManagerShiftGrou
   };
 }
 
+function dayView(overrides: Partial<ManagerShiftDayView> = {}): ManagerShiftDayView {
+  return {
+    key: "2026-08-13",
+    date: "2026-08-13",
+    dateLabel: "היום",
+    day: group(),
+    night: null,
+    ...overrides,
+  };
+}
+
 describe("ManagerCoverageSection", () => {
-  it("shows an empty message when there are no shift groups", () => {
-    render(<ManagerCoverageSection groups={[]} />);
+  it("shows an empty message when there are no days with shift data", () => {
+    render(<ManagerCoverageSection days={[]} />);
     expect(screen.getByText("אין משמרות בטווח שנבחר.")).toBeInTheDocument();
   });
 
-  it("preserves multiple technicians in one group, never collapsed to one", () => {
-    render(<ManagerCoverageSection groups={[group({ technicianNames: ["מרטין בדיקה", "נועה דוגמה"] })]} />);
+  it("preserves multiple technicians in one period, never collapsed to one", () => {
+    render(<ManagerCoverageSection days={[dayView({ day: group({ technicianNames: ["מרטין בדיקה", "נועה דוגמה"] }) })]} />);
     expect(screen.getByText(/מרטין בדיקה, נועה דוגמה/)).toBeInTheDocument();
   });
 
   it("keeps shadow people in their own separate line", () => {
     render(
       <ManagerCoverageSection
-        groups={[group({ technicianNames: ["מרטין בדיקה"], shadowTechnicianNames: ["איתן דוגמה"] })]}
+        days={[dayView({ day: group({ technicianNames: ["מרטין בדיקה"], shadowTechnicianNames: ["איתן דוגמה"] }) })]}
       />,
     );
     expect(screen.getByText(/צל טכנאי/)).toBeInTheDocument();
@@ -52,10 +63,9 @@ describe("ManagerCoverageSection", () => {
   it('explicitly states "חסר טכנאי" for a fully missing technician role, never inferred from an empty name list', () => {
     render(
       <ManagerCoverageSection
-        groups={[
-          group({
-            coverageStatus: "missing",
-            technicianCoverage: coverage({ status: "missing", message: "חסר טכנאי" }),
+        days={[
+          dayView({
+            day: group({ coverageStatus: "missing", technicianCoverage: coverage({ status: "missing", message: "חסר טכנאי" }) }),
           }),
         ]}
       />,
@@ -66,10 +76,9 @@ describe("ManagerCoverageSection", () => {
   it('explicitly states "חסר אחמ״ש" for a fully missing supervisor role', () => {
     render(
       <ManagerCoverageSection
-        groups={[
-          group({
-            coverageStatus: "missing",
-            supervisorCoverage: coverage({ status: "missing", message: "חסר אחמ״ש" }),
+        days={[
+          dayView({
+            day: group({ coverageStatus: "missing", supervisorCoverage: coverage({ status: "missing", message: "חסר אחמ״ש" }) }),
           }),
         ]}
       />,
@@ -80,14 +89,13 @@ describe("ManagerCoverageSection", () => {
   it("shows the partial interval message for a partially covered role", () => {
     render(
       <ManagerCoverageSection
-        groups={[
-          group({
-            coverageStatus: "partial",
-            technicianCoverage: coverage({
-              status: "partial",
-              message: "כיסוי טכנאי חלקי · 05:30–07:30",
+        days={[
+          dayView({
+            day: group({
+              coverageStatus: "partial",
+              technicianCoverage: coverage({ status: "partial", message: "כיסוי טכנאי חלקי · 05:30–07:30" }),
+              technicianNames: ["מרטין בדיקה"],
             }),
-            technicianNames: ["מרטין בדיקה"],
           }),
         ]}
       />,
@@ -99,10 +107,12 @@ describe("ManagerCoverageSection", () => {
   it("never claims a role missing when it is not_evaluable -- shows the truthful unknown message instead", () => {
     render(
       <ManagerCoverageSection
-        groups={[
-          group({
-            coverageStatus: "not_evaluable",
-            technicianCoverage: coverage({ status: "not_evaluable", message: "לא ניתן להעריך כיסוי טכנאי" }),
+        days={[
+          dayView({
+            day: group({
+              coverageStatus: "not_evaluable",
+              technicianCoverage: coverage({ status: "not_evaluable", message: "לא ניתן להעריך כיסוי טכנאי" }),
+            }),
           }),
         ]}
       />,
@@ -112,16 +122,50 @@ describe("ManagerCoverageSection", () => {
   });
 
   it("shows a calm names-only line for a fully covered role, no extra message", () => {
-    render(<ManagerCoverageSection groups={[group({ supervisorNames: ["דני כהן"] })]} />);
+    render(<ManagerCoverageSection days={[dayView({ day: group({ supervisorNames: ["דני כהן"] }) })]} />);
     expect(screen.getByText(/דני כהן/)).toBeInTheDocument();
   });
 
-  it("renders every group, one per date+period", () => {
+  it("renders one card per date, with day and night paired inside the same card", () => {
     const { container } = render(
       <ManagerCoverageSection
-        groups={[group({ key: "a" }), group({ key: "b", periodLabel: "לילה", emoji: "🌙" })]}
+        days={[
+          dayView({ key: "2026-08-13", date: "2026-08-13", day: group(), night: group({ periodLabel: "לילה", emoji: "🌙" }) }),
+          dayView({ key: "2026-08-14", date: "2026-08-14", day: group(), night: null }),
+        ]}
       />,
     );
-    expect(container.querySelectorAll("h3").length).toBe(2);
+    // One card per date (both columns always render, "אין נתוני שיבוץ" for a period with no data).
+    expect(container.querySelectorAll('[href^="/schedule?person=all"]').length).toBe(2);
+    expect(screen.getAllByText("יום").length).toBe(2);
+    expect(screen.getAllByText("לילה").length).toBe(2);
+    expect(screen.getAllByText("אין נתוני שיבוץ").length).toBe(1);
+  });
+
+  it("a period with no shift data at all reads as 'no data', never a fabricated missing verdict", () => {
+    render(<ManagerCoverageSection days={[dayView({ day: group(), night: null })]} />);
+    expect(screen.getByText("אין נתוני שיבוץ")).toBeInTheDocument();
+  });
+
+  it("each card links into the real team calendar for that exact date", () => {
+    render(<ManagerCoverageSection days={[dayView({ date: "2026-08-19" })]} />);
+    expect(screen.getByRole("link", { name: "ללוח ←" })).toHaveAttribute(
+      "href",
+      "/schedule?person=all&date=2026-08-19",
+    );
+  });
+
+  it("a problematic date carries a visible accent, a fully-covered date does not", () => {
+    const { container } = render(
+      <ManagerCoverageSection
+        days={[
+          dayView({ key: "ok", date: "2026-08-13", day: group({ coverageStatus: "full" }) }),
+          dayView({ key: "bad", date: "2026-08-14", day: group({ coverageStatus: "missing" }) }),
+        ]}
+      />,
+    );
+    const cards = container.querySelectorAll(".rounded-xl.bg-surface-1");
+    const withAccent = [...cards].filter((card) => card.className.includes("border-s-critical"));
+    expect(withAccent.length).toBe(1);
   });
 });

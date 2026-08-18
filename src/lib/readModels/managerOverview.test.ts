@@ -53,11 +53,12 @@ function managerSnapshot(overrides: Partial<{ personnel: (string | boolean)[][] 
   };
 }
 
-const DEFAULT_PARAMS: ManagerOverviewParams = { personId: null, range: "7d", month: null, problemsOnly: false };
+const DEFAULT_PARAMS: ManagerOverviewParams = { personId: null, range: "7d", month: null };
 
-function okPersonalResult(isManager: boolean) {
+function okPersonalResult(isManager: boolean, avatarUrl: string | null = null) {
   return {
     status: "ok" as const,
+    avatarUrl,
     model: {
       person: {
         id: "p_dani",
@@ -216,18 +217,25 @@ describe("loadManagerOverviewReadModel — success", () => {
     }
   });
 
-  it("passes the requested range/person/problems-only params through to the model", async () => {
+  it("passes the requested range/person params through to the model", async () => {
     getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(true));
     const result = await loadManagerOverviewReadModel({
       personId: null,
       range: "month",
       month: "2026-02",
-      problemsOnly: true,
     });
     expect(result.status).toBe("ok");
     if (result.status === "ok") {
       expect(result.model.range.month).toEqual({ year: 2026, month: 2 });
-      expect(result.model.problemsOnly).toBe(true);
+    }
+  });
+
+  it("threads the manager's own avatarUrl through, never a new lookup", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(true, "https://example.invalid/photo.jpg"));
+    const result = await loadManagerOverviewReadModel(DEFAULT_PARAMS);
+    expect(result.status).toBe("ok");
+    if (result.status === "ok") {
+      expect(result.model.manager.avatarUrl).toBe("https://example.invalid/photo.jpg");
     }
   });
 
@@ -258,7 +266,6 @@ describe("loadManagerOverviewReadModel — PR #40 notification readiness wiring"
       personId: "p_dani",
       range: "7d",
       month: null,
-      problemsOnly: false,
     });
     expect(computeNotificationReadiness).not.toHaveBeenCalled();
     expect(result.status).toBe("ok");

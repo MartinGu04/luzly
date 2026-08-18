@@ -38,7 +38,7 @@ describe("ManagerDutiesAbsencesSection", () => {
   });
 
   it("groups שמירה 1 and שמירה 2 (same family, different slot) under one שמירה group", () => {
-    render(
+    const { container } = render(
       <ManagerDutiesAbsencesSection
         duties={[
           duty({ key: "a", title: "שמירה 1", dutyFamily: "guard" }),
@@ -47,22 +47,39 @@ describe("ManagerDutiesAbsencesSection", () => {
         absences={[]}
       />,
     );
-    expect(screen.getByRole("heading", { level: 4, name: /שמירה/ })).toBeInTheDocument();
+    // Exactly one group -- one <details>/<summary> pair, containing both rows.
+    expect(container.querySelectorAll("details").length).toBe(1);
     expect(screen.getByText("שמירה 1")).toBeInTheDocument();
     expect(screen.getByText("שמירה 2")).toBeInTheDocument();
-    // The group heading shows a count of 2, proving it's one group, not two.
+    // The group summary shows a count of 2, proving it's one group, not two.
     expect(screen.getByText("· 2")).toBeInTheDocument();
   });
 
   it("keeps different duty families in separate groups", () => {
-    render(
+    const { container } = render(
       <ManagerDutiesAbsencesSection
         duties={[duty({ key: "a", title: "שמירה 1", dutyFamily: "guard" }), duty({ key: "b", title: "אוקסיד", dutyFamily: "oxid" })]}
         absences={[]}
       />,
     );
-    expect(screen.getByRole("heading", { level: 4, name: /שמירה/ })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 4, name: /אוקסיד/ })).toBeInTheDocument();
+    const summaries = [...container.querySelectorAll("details > summary")].map((el) => el.textContent ?? "");
+    expect(summaries.some((text) => text.includes("שמירה"))).toBe(true);
+    expect(summaries.some((text) => text.includes("אוקסיד"))).toBe(true);
+  });
+
+  it("a small group (≤3 rows) starts expanded, so the everyday case needs no extra click", () => {
+    const { container } = render(<ManagerDutiesAbsencesSection duties={[duty({ key: "a" })]} absences={[]} />);
+    expect(container.querySelector("details")).toHaveAttribute("open");
+  });
+
+  it("a large group (>3 rows) starts collapsed, staying scannable at the summary alone", () => {
+    const { container } = render(
+      <ManagerDutiesAbsencesSection
+        duties={[1, 2, 3, 4].map((n) => duty({ key: `k${n}`, title: `שמירה ${n}` }))}
+        absences={[]}
+      />,
+    );
+    expect(container.querySelector("details")).not.toHaveAttribute("open");
   });
 
   it("groups absences by absenceKind", () => {

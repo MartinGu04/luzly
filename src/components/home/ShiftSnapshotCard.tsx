@@ -106,7 +106,7 @@ export function ShiftSnapshotCard({ label, shift, todayDate, current }: ShiftSna
 
       {hasCoverageProblem ? (
         <a
-          href={buildManagerHref({ personId: null, range: "today", month: null, problemsOnly: true })}
+          href={buildManagerHref({ personId: null, range: "today", month: null, category: "overview" })}
           className="relative mt-4 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
         >
           לטיפול בבעיית הכיסוי ב&quot;דורש טיפול&quot; →

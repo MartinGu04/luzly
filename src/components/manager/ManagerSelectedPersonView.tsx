@@ -1,7 +1,11 @@
+import Link from "next/link";
+import { Avatar } from "@/components/ui/Avatar";
 import { Panel } from "@/components/ui/Panel";
 import { IssueSeverityGroup } from "@/components/issues/IssueSeverityGroup";
 import type { IssueRowView } from "@/components/issues/types";
 import type { IssueSeverity } from "@/lib/domain/operationalIssues";
+import { fairnessShiftsHref } from "@/lib/presentation/fairnessUrl";
+import { schedulePersonHref } from "@/lib/presentation/scheduleUrl";
 import type { ManagerAbsenceRowView, ManagerDutyRowView } from "./types";
 
 export interface ManagerSelectedPersonHeaderInfo {
@@ -19,7 +23,10 @@ export interface ManagerSelectedPersonAssignmentView {
 }
 
 interface ManagerSelectedPersonViewProps {
+  personId: string;
   person: ManagerSelectedPersonHeaderInfo;
+  /** The manager's own photo, shown ONLY when this drill-down IS the manager's own row -- see `ManagerRosterSection` for the same rule. `null` for every other person (no photo data available without a new lookup). */
+  avatarUrl: string | null;
   currentAssignments: ManagerSelectedPersonAssignmentView[];
   nextAssignments: ManagerSelectedPersonAssignmentView[];
   issues: IssueRowView[];
@@ -39,7 +46,9 @@ const SEVERITY_GROUP_ORDER: IssueSeverity[] = ["critical", "review", "info"];
  * own identity never changes.
  */
 export function ManagerSelectedPersonView({
+  personId,
   person,
+  avatarUrl,
   currentAssignments,
   nextAssignments,
   issues,
@@ -48,12 +57,38 @@ export function ManagerSelectedPersonView({
 }: ManagerSelectedPersonViewProps) {
   return (
     <div className="flex flex-col gap-6">
-      <div className="min-w-0">
-        <h2 className="flex items-center gap-2 text-xl font-semibold text-foreground">מבט על {person.name}</h2>
-        <div className="mt-1.5 flex flex-wrap gap-1.5">
-          {person.isManager ? <RoleBadge label="מנהל/ת" /> : null}
-          {person.isSupervisor ? <RoleBadge label='אחמ"ש' /> : null}
-          {person.isTechnician ? <RoleBadge label="טכנאי" /> : null}
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex min-w-0 items-center gap-3">
+          <Avatar name={person.name} size="md" avatarUrl={avatarUrl} />
+          <div className="min-w-0">
+            <h2 className="truncate text-xl font-semibold text-foreground">מבט על {person.name}</h2>
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {person.isManager ? <RoleBadge label="מנהל/ת" /> : null}
+              {person.isSupervisor ? <RoleBadge label='אחמ"ש' /> : null}
+              {person.isTechnician ? <RoleBadge label="טכנאי" /> : null}
+            </div>
+          </div>
+        </div>
+
+        {/* A gateway into the two existing detailed views this drill-down
+            deliberately never reproduces -- the person's real calendar
+            (the manager-only `/schedule?person=` perspective) and their
+            Fairness standing (`/fairness?person=`, already a real deep
+            link). Neither fetches anything extra here; both are plain
+            navigation into already-built routes. */}
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <Link
+            href={schedulePersonHref({ personId })}
+            className="inline-flex items-center gap-1 rounded-full bg-overlay-soft px-3 py-1.5 text-xs font-medium text-foreground transition-colors duration-200 hover:bg-overlay-strong"
+          >
+            לוח מלא ←
+          </Link>
+          <Link
+            href={fairnessShiftsHref({ personId })}
+            className="inline-flex items-center gap-1 rounded-full bg-overlay-soft px-3 py-1.5 text-xs font-medium text-foreground transition-colors duration-200 hover:bg-overlay-strong"
+          >
+            מצב הוגנות ←
+          </Link>
         </div>
       </div>
 

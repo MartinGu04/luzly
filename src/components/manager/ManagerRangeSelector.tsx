@@ -21,10 +21,18 @@ const TAB_BASE =
 
 /**
  * Server-rendered range switch, plain `Link`s only (no client JS) --
- * every other param (`person`/`problems`) is preserved via
+ * every other param (`person`/`category`) is preserved via
  * `buildManagerHref`. When the active range is "month", previous/next
  * month controls appear alongside it, computed via the existing
  * `shiftCalendarMonth` domain helper -- never Date/UTC.
+ *
+ * The active tab carries a real `ring-1 ring-border` (not just its own
+ * `bg-surface-1` against the container's `bg-overlay-soft`) -- a filled
+ * white/dark pill on a barely-tinted container of the same family reads as
+ * almost the same color in light mode, especially at this "surface-1 on
+ * overlay-soft" flatness where the underlying hue is identical and only
+ * opacity differs. The ring gives the selected state a real edge in both
+ * themes, the same fix `DutyViewToggle`'s active tab already uses.
  */
 export function ManagerRangeSelector({ current, currentMonth }: ManagerRangeSelectorProps) {
   return (
@@ -43,7 +51,7 @@ export function ManagerRangeSelector({ current, currentMonth }: ManagerRangeSele
               key={option.key}
               href={href}
               aria-current={isActive ? "page" : undefined}
-              className={`${TAB_BASE} ${isActive ? "bg-surface-1 text-primary" : "text-muted hover:text-foreground"}`}
+              className={`${TAB_BASE} ${isActive ? "bg-surface-1 text-primary ring-1 ring-border" : "text-muted hover:text-foreground"}`}
             >
               {option.label}
             </Link>

@@ -5,7 +5,7 @@ import type { ManagerAttentionItem, ManagerPotentialRowView } from "./types";
 import type { IssueRowView } from "@/components/issues/types";
 import type { ManagerHrefParams } from "@/lib/presentation/managerUrl";
 
-const CURRENT: ManagerHrefParams = { personId: null, range: "7d", month: null, problemsOnly: false };
+const CURRENT: ManagerHrefParams = { personId: null, range: "7d", month: null, category: "overview" };
 
 afterEach(() => {
   cleanup();
