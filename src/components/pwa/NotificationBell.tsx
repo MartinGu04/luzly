@@ -20,19 +20,25 @@ const TRIGGER_CLASSES: Record<NotificationBellProps["variant"], string> = {
 };
 
 /**
- * The popover's anchor side. `sidebar`/`mobile` keep the original `end-0`
- * (in RTL: flush with the trigger's physical LEFT edge, growing further
- * left into open content area) -- safe there since neither trigger sits at
- * the true physical left edge of the viewport. `shell` sits at the
- * header's own physical left edge (header polish pass), where `end-0`
- * would grow the popover further left and off-screen (the same class of
- * bug already fixed once for the Fairness card's info popover) -- `start-0`
- * instead grows it back to the right, into the bar.
+ * The popover's anchor side, as a LOGICAL `inset-inline-*` side -- under
+ * `dir="rtl"`, `inset-inline-end` maps to physical `left` (pins the panel's
+ * LEFT edge, growing further RIGHT/inward from there) and
+ * `inset-inline-start` maps to physical `right` (pins the RIGHT edge,
+ * growing further LEFT/outward). `sidebar`/`mobile` use `end-0` -- their
+ * trigger never sits at the true physical left edge, so growing rightward
+ * from a pinned left edge stays safely inside the viewport. `shell` sits
+ * at the header's own physical LEFT edge (header polish pass): it also
+ * needs `end-0` (pin left, grow right/inward) for the same reason -- an
+ * earlier version of this used `start-0` here on the (incorrect) belief
+ * that it would grow back into the bar; verified in a real browser that it
+ * actually did the opposite (grew further left, off-screen, clipping the
+ * panel entirely). Kept as its own map (rather than collapsing to one
+ * constant) so a future variant anchored elsewhere can still differ.
  */
 const PANEL_POSITION_CLASSES: Record<NotificationBellProps["variant"], string> = {
   sidebar: "end-0",
   mobile: "end-0",
-  shell: "start-0",
+  shell: "end-0",
 };
 
 /**

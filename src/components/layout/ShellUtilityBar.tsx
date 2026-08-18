@@ -30,6 +30,10 @@ interface ShellUtilityBarProps {
  * calibrated per logo (measured from each file's actual opaque-pixel
  * bounding box) so the two marks read as the same size, not just the same
  * bounding box -- see the two call sites below for the exact values.
+ * Follow-up visual pass: both marks read as too small/icon-like at their
+ * original sizes, so both grew ~50% (60px/78px, up from 40px/52px) while
+ * keeping the SAME measured ratio (≈1.3) between them, so the calibration
+ * itself is unchanged -- only the overall scale.
  */
 function OrgLogoImage({ logo, heightClassName }: { logo: OrgLogo; heightClassName: string }) {
   return (
@@ -77,7 +81,7 @@ export function ShellUtilityBar({ initialClockTime, dateLabel }: ShellUtilityBar
         <div aria-hidden="true" />
 
         <div className="flex items-center justify-center gap-5 sm:gap-8">
-          <OrgLogoImage logo={ORG_LOGO_TAKSHAL} heightClassName="h-[52px]" />
+          <OrgLogoImage logo={ORG_LOGO_TAKSHAL} heightClassName="h-[78px]" />
 
           <div className="flex flex-col items-center gap-1 rounded-2xl bg-surface-1 px-6 py-2.5 ring-1 ring-border">
             <div className="flex items-center gap-2">
@@ -87,7 +91,7 @@ export function ShellUtilityBar({ initialClockTime, dateLabel }: ShellUtilityBar
             {dateLabel ? <span className="text-xs font-medium text-muted">{dateLabel}</span> : null}
           </div>
 
-          <OrgLogoImage logo={ORG_LOGO_STRATEGIC_COMMUNICATION} heightClassName="h-10" />
+          <OrgLogoImage logo={ORG_LOGO_STRATEGIC_COMMUNICATION} heightClassName="h-[60px]" />
         </div>
 
         <div className="flex items-center justify-self-end">

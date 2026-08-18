@@ -59,4 +59,16 @@ describe("ShellUtilityBar", () => {
     render(<ShellUtilityBar initialClockTime="10:00:00" dateLabel={null} />);
     expect(screen.getAllByRole("button", { name: /התראות/ })).toHaveLength(1);
   });
+
+  it("renders both organizational logos at their calibrated, visually-substantial sizes (follow-up visual pass) -- never shrunk back to icon scale", () => {
+    render(<ShellUtilityBar initialClockTime="10:00:00" dateLabel={null} />);
+    const takshal = screen.getByAltText('תקש"ל');
+    const strategic = screen.getByAltText("תקשורת אסטרטגית");
+    // Calibrated per each logo's own measured emblem bounding box (see the
+    // component's own docstring) -- takshal renders taller than strategic
+    // to compensate for its more generous canvas margin, so the two
+    // emblems read as the same PERCEIVED size, not the same box.
+    expect(takshal.className).toMatch(/h-\[78px\]/);
+    expect(strategic.className).toMatch(/h-\[60px\]/);
+  });
 });

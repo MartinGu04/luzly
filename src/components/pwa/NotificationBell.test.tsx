@@ -293,3 +293,18 @@ describe("NotificationBell — real test notification, never a fake browser Noti
     await waitFor(() => expect(screen.getByText(/נכשלה/)).toBeInTheDocument());
   });
 });
+
+describe("NotificationBell — popover anchor side (header polish follow-up)", () => {
+  it.each(["sidebar", "mobile", "shell"] as const)(
+    "the %s variant's open panel is anchored with end-0 (RTL: pins the panel's physical LEFT edge, growing rightward/inward) -- never start-0, which grows further left and off-screen for a trigger near the physical left edge",
+    async (variant) => {
+      render(<NotificationBell variant={variant} />);
+      await act(async () => {});
+      fireEvent.click(screen.getByRole("button", { name: /התראות/ }));
+
+      const panel = await screen.findByRole("dialog", { name: "הגדרות התראות" });
+      expect(panel.className).toMatch(/\bend-0\b/);
+      expect(panel.className).not.toMatch(/\bstart-0\b/);
+    },
+  );
+});
