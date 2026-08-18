@@ -6,6 +6,7 @@ import { AccessDeniedScreen } from "@/components/auth/AccessDeniedScreen";
 import { SearchPaletteProvider } from "@/components/search/SearchPaletteProvider";
 import { getRequestPersonalSchedule } from "@/lib/readModels/getRequestPersonalSchedule";
 import { getRequestSearchReadModel } from "@/lib/readModels/getRequestSearchReadModel";
+import { formatHebrewWeekdayAndDate } from "@/lib/presentation/hebrewDate";
 import { formatScheduleMinute } from "@/lib/presentation/scheduleTime";
 
 /**
@@ -96,6 +97,10 @@ export default async function ProtectedLayout({ children }: { children: ReactNod
   // until the client's own first tick, never a `Date.now()` guess here).
   const initialClockTime =
     result.status === "ok" ? `${formatScheduleMinute(result.model.localNow.minuteOfDay)}:00` : null;
+  // Same "ok"-only availability as initialClockTime above -- the SAME
+  // already-resolved localNow, just the date half of it, formatted once
+  // here (server) rather than passed raw for a client component to format.
+  const dateLabel = result.status === "ok" ? formatHebrewWeekdayAndDate(result.model.localNow.date) : null;
 
   const searchReadModel = searchResult.status === "ok" ? searchResult.model : null;
 
@@ -106,6 +111,7 @@ export default async function ProtectedLayout({ children }: { children: ReactNod
         <AppShell
           person={{ name: person.name, isManager: person.isManager, avatarUrl }}
           initialClockTime={initialClockTime}
+          dateLabel={dateLabel}
         >
           {children}
         </AppShell>

@@ -5,7 +5,6 @@ import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { BrandMark } from "@/components/brand/BrandMark";
-import { NotificationBell } from "@/components/pwa/NotificationBell";
 import { SearchTriggerButton } from "@/components/search/SearchTriggerButton";
 import { visibleNavItems, type NavItem } from "./nav-items";
 import { IdentityFooter } from "./IdentityFooter";
@@ -98,6 +97,11 @@ function SidebarLink({ item, isActive }: SidebarLinkProps) {
  * as part of the account/personal controls next to the user block instead
  * of a top-of-rail utility. There is exactly one theme control in the
  * sidebar at any time (never duplicated between top and bottom).
+ *
+ * The top row used to also hold `NotificationBell` (`variant="sidebar"`);
+ * header polish pass moved the desktop bell into `ShellUtilityBar`
+ * (`variant="shell"`) instead, alongside the shell's clock/date and the
+ * organizational logos -- this row is BrandMark alone now.
  */
 export function Sidebar({ person }: SidebarProps) {
   const pathname = usePathname();
@@ -105,9 +109,8 @@ export function Sidebar({ person }: SidebarProps) {
 
   return (
     <aside className="sticky top-0 hidden h-dvh w-[320px] shrink-0 flex-col border-e border-sidebar-border bg-sidebar text-sidebar-foreground lg:flex">
-      <div className="flex items-center justify-between gap-3 px-6 pt-8 pb-6">
+      <div className="flex items-center px-6 pt-8 pb-6">
         <BrandMark size="md" className="text-sidebar-foreground" />
-        <NotificationBell variant="sidebar" />
       </div>
 
       <div className="px-4 pb-2">

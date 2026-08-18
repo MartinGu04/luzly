@@ -31,18 +31,26 @@ export const BRAND_LOGO_WORDMARK = { src: "/brand/logo-wordmark.png", width: 996
  */
 export const BRAND_LOGO_FULL = { src: "/brand/logo-full.webp", width: 1536, height: 1024 } as const;
 
+/** Shared shape for a supplied organizational logo asset -- `src`/`width`/`height` for `next/image`, `alt` for the real Hebrew name (never decorative/empty, unlike `BRAND_SYMBOL`, since these mark a specific real organization, not a repeated product name). */
+export interface OrgLogo {
+  src: string;
+  width: number;
+  height: number;
+  alt: string;
+}
+
 /** תקש"ל organizational logo, unmodified/uncropped. */
-export const ORG_LOGO_TAKSHAL = {
+export const ORG_LOGO_TAKSHAL: OrgLogo = {
   src: "/brand/org-logo-takshal.webp",
   width: 1024,
   height: 1536,
   alt: 'תקש"ל',
-} as const;
+};
 
 /** תקשורת אסטרטגית organizational logo, unmodified/uncropped. */
-export const ORG_LOGO_STRATEGIC_COMMUNICATION = {
+export const ORG_LOGO_STRATEGIC_COMMUNICATION: OrgLogo = {
   src: "/brand/org-logo-strategic-communication.webp",
   width: 1024,
   height: 1024,
   alt: "תקשורת אסטרטגית",
-} as const;
+};

@@ -1,29 +1,97 @@
 import { Clock } from "lucide-react";
+import Image from "next/image";
+import { NotificationBell } from "@/components/pwa/NotificationBell";
 import { LiveClock } from "@/components/ui/LiveClock";
+import { ORG_LOGO_STRATEGIC_COMMUNICATION, ORG_LOGO_TAKSHAL, type OrgLogo } from "@/lib/config/brandAssets";
 
 interface ShellUtilityBarProps {
   /** Same "HH:mm:ss" (or `null`) contract as `LiveClock.initialTime` -- see there for why it can be `null`. */
   initialClockTime: string | null;
+  /**
+   * Pre-formatted Hebrew weekday+date (`formatHebrewWeekdayAndDate`), e.g.
+   * "יום רביעי · 12 באוגוסט" -- same "server formats, component only
+   * renders" convention every other date label in this app already
+   * follows (see `MonthNav.monthLabel`). `null` exactly when
+   * `initialClockTime` is `null` (no server-derived `localNow` to format
+   * from) -- the date line is simply omitted then, never guessed
+   * client-side.
+   */
+  dateLabel: string | null;
 }
 
 /**
- * Restrained desktop-only top utility row for the app shell's main column
- * (Design Pass PR #19) -- the ONE place the live Jerusalem clock lives now,
- * so it reads as shell chrome rather than a dashboard-only decoration.
- * Deliberately quiet: a single small pill, right-aligned (the natural
- * reading-start edge under RTL), with room to grow -- a future utility
- * action would join it here rather than spawning a second row. Hidden
- * below `lg`, matching the desktop-only `Sidebar` -- mobile already has
- * `MobileIdentityBar`/`BottomNav` and gains nothing from a second chrome
- * row, so it stays out of both entirely (no clock, no overflow risk).
+ * Both supplied org marks have a genuinely transparent background (not a
+ * baked-in white square), so they composite cleanly on either theme with
+ * no extra "chip" container. Their SOURCE canvases are not equally tight
+ * crops around the visible emblem, though (תקש"ל's is a portrait canvas
+ * with generous top/bottom margin; the 502 mark's is a near-full-bleed
+ * square) -- rendering both at the same outer height would make the
+ * תקש"ל emblem look visibly smaller. `heightClassName` is therefore
+ * calibrated per logo (measured from each file's actual opaque-pixel
+ * bounding box) so the two marks read as the same size, not just the same
+ * bounding box -- see the two call sites below for the exact values.
  */
-export function ShellUtilityBar({ initialClockTime }: ShellUtilityBarProps) {
+function OrgLogoImage({ logo, heightClassName }: { logo: OrgLogo; heightClassName: string }) {
+  return (
+    <Image
+      src={logo.src}
+      alt={logo.alt}
+      width={logo.width}
+      height={logo.height}
+      className={`w-auto shrink-0 object-contain ${heightClassName}`}
+    />
+  );
+}
+
+/**
+ * The global app shell's top utility bar (Design Pass PR #19, redesigned in
+ * the "header polish" pass) -- desktop-only (`lg:`, matching the desktop
+ * `Sidebar`; mobile/tablet keep their own `MobileIdentityBar`, which
+ * already carries its own bell and needs no change here). Three-zone
+ * layout via CSS grid so the CENTER group (the two organizational marks
+ * flanking the live clock/date) stays mathematically centered regardless
+ * of what sits in the left/right cells:
+ *
+ *   [ bell ]   [ תקש"ל  ·  clock + date  ·  502/תקש"אס ]   [ (balance) ]
+ *
+ * The clock is the one deliberate FOCAL element -- its own bordered pill
+ * (bigger digits than the old bare "sm" readout, plus the date as a clear
+ * secondary line underneath) so it reads as real shell chrome instead of
+ * a loose timestamp. The two logos are real supplied institutional marks
+ * (`lib/config/brandAssets.ts`), used exactly as provided -- deliberately
+ * smaller/quieter than the clock pill so they frame it rather than compete
+ * with it. The bell (`NotificationBell` `variant="shell"`) sits at the
+ * bar's own physical left, replacing its old spot in `Sidebar`'s top row --
+ * same component, same push-notification behavior, purely relocated.
+ */
+export function ShellUtilityBar({ initialClockTime, dateLabel }: ShellUtilityBarProps) {
   return (
     <div className="hidden shrink-0 border-b border-border lg:block">
-      <div className="mx-auto flex w-full max-w-[1440px] items-center justify-end px-10 py-2">
-        <div className="flex items-center gap-1.5 rounded-full bg-overlay-soft px-3 py-1 ring-1 ring-border">
-          <Clock className="h-3.5 w-3.5 text-muted" aria-hidden="true" strokeWidth={1.75} />
-          <LiveClock initialTime={initialClockTime} size="sm" />
+      <div className="mx-auto grid w-full max-w-[1440px] grid-cols-[1fr_auto_1fr] items-center gap-4 px-10 py-3">
+        {/* CSS Grid columns mirror under RTL exactly like a flex row does --
+            the FIRST-defined column ends up on the PHYSICAL right, the LAST
+            on the physical left. The bell is therefore the LAST grid child
+            here (not the first), so it actually lands on the bar's physical
+            left edge, matching the requested composition -- confirmed via a
+            real rendered screenshot, not just this comment's own logic. */}
+        <div aria-hidden="true" />
+
+        <div className="flex items-center justify-center gap-5 sm:gap-8">
+          <OrgLogoImage logo={ORG_LOGO_TAKSHAL} heightClassName="h-[52px]" />
+
+          <div className="flex flex-col items-center gap-1 rounded-2xl bg-surface-1 px-6 py-2.5 ring-1 ring-border">
+            <div className="flex items-center gap-2">
+              <Clock className="h-4 w-4 text-primary" aria-hidden="true" strokeWidth={1.75} />
+              <LiveClock initialTime={initialClockTime} size="md" />
+            </div>
+            {dateLabel ? <span className="text-xs font-medium text-muted">{dateLabel}</span> : null}
+          </div>
+
+          <OrgLogoImage logo={ORG_LOGO_STRATEGIC_COMMUNICATION} heightClassName="h-10" />
+        </div>
+
+        <div className="flex items-center justify-self-end">
+          <NotificationBell variant="shell" />
         </div>
       </div>
     </div>

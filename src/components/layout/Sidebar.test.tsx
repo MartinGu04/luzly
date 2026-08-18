@@ -120,6 +120,13 @@ describe("Sidebar — brand identity (PR #23)", () => {
   });
 });
 
+describe("Sidebar — notification bell relocated (header polish pass)", () => {
+  it("no longer renders its own notification bell -- it now lives in ShellUtilityBar", () => {
+    renderWithTheme(<Sidebar />);
+    expect(screen.queryByRole("button", { name: /התראות/ })).toBeNull();
+  });
+});
+
 describe("Sidebar — pending navigation feedback (PR #38 desktop nav performance)", () => {
   it("a non-pending link is not aria-busy and shows its normal icon, never a spinner", () => {
     const { container } = renderWithTheme(<Sidebar />);
