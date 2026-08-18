@@ -24,10 +24,16 @@ const METRIC_EXPLANATIONS: readonly { term: string; meaning: string }[] = [
  * `NotificationBell` popover pattern (`components/pwa/NotificationBell.tsx`)
  * rather than inventing a new one or pulling in a tooltip library.
  *
- * This control lives INSIDE the card's own `<Link>` (`ShiftFairnessCard`),
- * so every interaction here -- the trigger AND anything clicked inside the
- * open panel -- calls `preventDefault`/`stopPropagation`: opening the
- * explanation must never also navigate into the person detail overlay.
+ * `ShiftFairnessCard` renders this as a SIBLING of the card's own person-
+ * detail `<Link>`, never a descendant -- a `<button>` nested inside an
+ * `<a>` is invalid, inaccessible interactive-in-interactive markup. The
+ * Link is an absolutely-positioned overlay spanning the whole card
+ * (lower z-index); this control's own root carries a HIGHER z-index
+ * (`z-20` below) so it -- and its popover -- visually sit in the exact
+ * same spot they always have, while actually receiving the click/tap
+ * instead of the Link underneath. `preventDefault`/`stopPropagation` are
+ * kept anyway as a defensive belt-and-suspenders measure, not because
+ * sibling markup can bubble into the Link (it can't).
  */
 export function ShiftFairnessCardInfo() {
   const [open, setOpen] = useState(false);
@@ -61,11 +67,11 @@ export function ShiftFairnessCardInfo() {
   return (
     <span
       ref={containerRef}
-      className="relative inline-flex"
-      // Catches a click on ANYTHING inside this control (the panel's own
-      // text included) that isn't already handled by the trigger's own
-      // handler below -- the card underneath is a `<Link>`, and without
-      // this every click here would otherwise navigate into it.
+      className="relative z-20 inline-flex"
+      // Defensive belt-and-suspenders: this control is a SIBLING of the
+      // card's <Link>, not a descendant, so a click here has no DOM path
+      // to bubble into the Link's own navigation in the first place. Kept
+      // anyway in case this is ever reused somewhere it IS nested.
       onClick={(event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -83,7 +89,7 @@ export function ShiftFairnessCardInfo() {
           event.stopPropagation();
           setOpen((prev) => !prev);
         }}
-        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-muted-2 transition-colors duration-150 hover:bg-overlay-soft hover:text-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-2 transition-colors duration-150 hover:bg-overlay-soft hover:text-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
       >
         <Info className="h-3.5 w-3.5" aria-hidden="true" strokeWidth={2} />
       </button>

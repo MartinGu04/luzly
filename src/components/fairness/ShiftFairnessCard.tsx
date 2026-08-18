@@ -18,16 +18,24 @@ import { ShiftFairnessCardInfo } from "./ShiftFairnessCardInfo";
  *
  * `ShiftFairnessCardInfo` is the single explanatory affordance for every
  * metric on this card -- deliberately not one info icon per metric.
+ *
+ * STRUCTURE (PR #51 follow-up): the visible card content sits in a plain
+ * `<div>`, with the navigable `<Link>` as an absolutely-positioned overlay
+ * spanning the whole card -- NOT a wrapper around the content -- so
+ * `ShiftFairnessCardInfo`'s real `<button>` is a SIBLING of the Link,
+ * never a descendant. A `<button>` nested inside an `<a>` is invalid,
+ * inaccessible interactive-in-interactive markup; this "stretched link"
+ * shape keeps the whole card clickable/tappable exactly as before while
+ * the info control's own higher z-index lets it (and its popover) receive
+ * clicks instead of the Link underneath, at the same spot it's always
+ * visually been.
  */
 export function ShiftFairnessCard({ view }: { view: ShiftFairnessCardView }) {
   return (
-    <li>
-      <Link
-        href={view.href}
-        className="block rounded-2xl bg-surface-1 p-4 ring-1 ring-border transition-colors duration-200 hover:bg-overlay-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-      >
+    <li className="relative">
+      <div className="rounded-2xl bg-surface-1 p-4 ring-1 ring-border">
         <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1.5">
-          <div className="flex min-w-0 items-center gap-1.5">
+          <div className="flex min-w-0 items-center gap-1">
             <p className="min-w-0 truncate text-sm font-semibold text-foreground">{view.personName}</p>
             <ShiftFairnessCardInfo />
           </div>
@@ -61,7 +69,17 @@ export function ShiftFairnessCard({ view }: { view: ShiftFairnessCardView }) {
             </span>
           ) : null}
         </div>
-      </Link>
+      </div>
+
+      {/* Stretched-link overlay: covers the whole card (z-10), so clicking/
+          tapping anywhere except the elevated info control (z-20) navigates
+          to the person detail. Transparent, with its own hover/focus tint
+          since it -- not the content div above -- is the top layer. */}
+      <Link
+        href={view.href}
+        aria-label={view.personName}
+        className="absolute inset-0 z-10 rounded-2xl transition-colors duration-200 hover:bg-overlay-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+      />
     </li>
   );
 }

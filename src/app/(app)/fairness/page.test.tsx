@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { COMPLETE_FAIRNESS_DATA, fairnessDataCompleteness } from "@/lib/domain/fairnessFoundation";
 import type { DutyFairnessPersonRowView, DutyFairnessReadModel } from "@/lib/readModels/dutyFairnessTypes";
 import type { ShiftFairnessPersonRowView, ShiftFairnessReadModel } from "@/lib/readModels/shiftFairnessTypes";
@@ -293,6 +293,34 @@ describe("/fairness — Shift card-level info control", () => {
     expect(trigger).toHaveFocus();
     fireEvent.click(trigger); // native <button> semantics fire the same click handler for Enter/Space activation
     expect(screen.getByRole("dialog", { name: "הסבר על מדדי הכרטיס" })).toBeInTheDocument();
+  });
+
+  it("the info button is NEVER a descendant of the person-detail link -- no invalid nested interactive markup", async () => {
+    getRequestShiftFairness.mockResolvedValue({ status: "ok", model: shiftModel() });
+    await renderFairnessPage();
+
+    const personLink = screen.getByRole("link", { name: "טל טכנאי" });
+    expect(within(personLink).queryByRole("button", { name: "הסבר על מדדי הכרטיס" })).toBeNull();
+
+    // Conversely, the link is not nested inside the info control's own subtree either -- true siblings.
+    const infoButton = screen.getByRole("button", { name: "הסבר על מדדי הכרטיס" });
+    expect(infoButton.closest("a")).toBeNull();
+  });
+
+  it("the normal card area is still a real, independently focusable link to the person detail", async () => {
+    getRequestShiftFairness.mockResolvedValue({ status: "ok", model: shiftModel() });
+    await renderFairnessPage();
+
+    const personLink = screen.getByRole("link", { name: "טל טכנאי" });
+    expect(personLink).toHaveAttribute("href", "/fairness?month=2026-08&person=p_tech");
+    // A real <a href>, not tabindex="-1" or a non-interactive lookalike.
+    expect(personLink.getAttribute("tabindex")).not.toBe("-1");
+
+    const infoButton = screen.getByRole("button", { name: "הסבר על מדדי הכרטיס" });
+    infoButton.focus();
+    expect(infoButton).toHaveFocus();
+    personLink.focus();
+    expect(personLink).toHaveFocus();
   });
 });
 
