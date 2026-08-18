@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildShiftSchedule } from "@/lib/domain/shiftSchedule";
 import type { Event } from "@/lib/domain/event";
 import type { LocalNow } from "@/lib/domain/localNow";
+import type { PotentialAllocation } from "@/lib/domain/potentialAllocation";
 import type { Person } from "@/lib/domain/types";
 import { buildPersonalScheduleReadModel } from "./buildPersonalScheduleReadModel";
 import type { PersonalScheduleReadModel } from "./types";
@@ -107,6 +108,21 @@ function colleagueShift(overrides: Partial<Event> = {}): Event {
   });
 }
 
+function allocation(overrides: Partial<PotentialAllocation> = {}): PotentialAllocation {
+  return {
+    date: "2026-08-20",
+    dutyFamily: "guard",
+    slot: 1,
+    sourceSlot: 1,
+    columnLabel: "שומר 1",
+    sourceAllocationLabel: "דני בדיקה",
+    resolvedSourcePersonId: null,
+    sourceSheet: 'פוטנציאל תקש"אס 7-12/2026',
+    sourceCell: nextCell(),
+    ...overrides,
+  };
+}
+
 function localNow(overrides: Partial<LocalNow> = {}): LocalNow {
   return { date: "2026-08-12", minuteOfDay: 10 * 60, ...overrides }; // 10:00
 }
@@ -116,6 +132,7 @@ function build(opts: {
   people?: Person[];
   events?: Event[];
   now?: LocalNow;
+  potentialAllocations?: PotentialAllocation[];
 }): PersonalScheduleReadModel {
   const person = opts.person ?? me();
   const people = opts.people ?? [person];
@@ -126,6 +143,7 @@ function build(opts: {
     shiftSchedule: schedule,
     fetchedAt: "2026-08-12T08:00:00.000Z",
     now: opts.now ?? localNow(),
+    potentialAllocations: opts.potentialAllocations,
   });
 }
 
@@ -1034,6 +1052,92 @@ describe("dutyBlocks / dutyActions", () => {
     expect(model.dutyActions[0]).not.toHaveProperty("personId");
     expect(model.dutyActions[0]).not.toHaveProperty("dutyBlock");
     expect(model.dutyActions[0]).not.toHaveProperty("sourceEvents");
+  });
+});
+
+describe("dutyBlocks — תקשא\"ס period (Potential) sources", () => {
+  it("a normal department person's duty (already a real Event) is completely unaffected -- no duplicate from an overlapping Potential allocation", () => {
+    const events = [myDuty({ date: "2026-08-20", dutyFamily: "guard", slot: 1 })];
+    const potentialAllocations = [allocation({ date: "2026-08-20", dutyFamily: "guard", slot: 1 })];
+    const model = build({ events, potentialAllocations });
+    expect(model.dutyBlocks).toHaveLength(1);
+    expect(model.dutyBlocks[0].certainty).toBe("confirmed");
+  });
+
+  it("a non-department person with NO internal Event at all still gets their תקשא\"ס duty on their own Duties page (upcoming)", () => {
+    const potentialAllocations = [allocation({ date: "2026-08-20", dutyFamily: "guard", slot: 1 })];
+    const model = build({ events: [], potentialAllocations });
+    expect(model.dutyBlocks).toEqual([
+      expect.objectContaining({
+        dutyFamily: "guard",
+        slot: 1,
+        startDate: "2026-08-20",
+        endDate: "2026-08-20",
+        certainty: "tentative",
+      }),
+    ]);
+  });
+
+  it("the same works for history -- a past-dated allocation still produces a real block with a past endDate", () => {
+    const potentialAllocations = [allocation({ date: "2026-08-01", dutyFamily: "guard", slot: 1 })];
+    const model = build({ events: [], potentialAllocations }); // localNow defaults to 2026-08-12
+    expect(model.dutyBlocks).toEqual([
+      expect.objectContaining({ startDate: "2026-08-01", endDate: "2026-08-01" }),
+    ]);
+  });
+
+  it("short-name attribution works only through the existing safe resolver -- resolves a bare first name uniquely", () => {
+    const potentialAllocations = [allocation({ sourceAllocationLabel: "דני" })];
+    const model = build({ events: [], potentialAllocations, people: [me(), colleague()] });
+    expect(model.dutyBlocks).toHaveLength(1);
+  });
+
+  it("ambiguous short-name ownership is never guessed -- two personnel sharing a leading token produce no duty for either", () => {
+    const sharedFirstNamePerson = colleague({ id: "p_other", name: "דני אחר" });
+    const potentialAllocations = [allocation({ sourceAllocationLabel: "דני" })];
+    const model = build({
+      events: [],
+      potentialAllocations,
+      people: [me(), sharedFirstNamePerson],
+    });
+    expect(model.dutyBlocks).toHaveLength(0);
+  });
+
+  it("adding a תקשא\"ס-only duty never classifies the person as a shift worker -- Person capability flags are untouched", () => {
+    const nonShiftPerson = me({ isTechnician: false, isSupervisor: false });
+    const potentialAllocations = [
+      allocation({ sourceAllocationLabel: nonShiftPerson.name, date: "2026-08-20" }),
+    ];
+    const model = build({ person: nonShiftPerson, events: [], potentialAllocations });
+    expect(model.dutyBlocks).toHaveLength(1);
+    expect(model.person.isTechnician).toBe(false);
+    expect(model.person.isSupervisor).toBe(false);
+  });
+
+  it("a duty spanning both sources on consecutive dates merges into ONE block via the existing buildDutyBlocks grouping, not two", () => {
+    const events = [myDuty({ date: "2026-08-20", dutyFamily: "guard", slot: 1 })];
+    const potentialAllocations = [allocation({ date: "2026-08-21", dutyFamily: "guard", slot: 1 })];
+    const model = build({ events, potentialAllocations });
+    expect(model.dutyBlocks).toHaveLength(1);
+    expect(model.dutyBlocks[0]).toMatchObject({
+      startDate: "2026-08-20",
+      endDate: "2026-08-21",
+      dayCount: 2,
+      certainty: "mixed",
+    });
+  });
+
+  it("omitting potentialAllocations entirely keeps existing callers/tests working unchanged", () => {
+    const events = [myDuty({ date: "2026-08-20", dutyFamily: "guard", slot: 1 })];
+    const model = buildPersonalScheduleReadModel({
+      person: me(),
+      people: [me()],
+      events,
+      shiftSchedule: schedule,
+      fetchedAt: "2026-08-12T08:00:00.000Z",
+      now: localNow(),
+    });
+    expect(model.dutyBlocks).toHaveLength(1);
   });
 });
 

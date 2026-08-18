@@ -6,6 +6,7 @@ import { ShiftConfigurationError, buildShiftSchedule, type ShiftSchedule } from 
 import { SHEET_SOURCES, type RawSheet, type RawWorkbookSnapshot, type SheetSourceKey } from "@/lib/google";
 import { parseEvent } from "@/lib/parsers/event";
 import { parsePersonnelSheet } from "@/lib/parsers/personnel";
+import { parsePotentialSheet } from "@/lib/parsers/potential";
 import { parseScheduleSheet } from "@/lib/parsers/schedule";
 import { parseSettingsSheet } from "@/lib/parsers/settings";
 import { getWorkbookSnapshot } from "@/lib/sync";
@@ -38,11 +39,16 @@ export type PersonalScheduleLoadResult =
   | { status: "ok"; model: PersonalScheduleReadModel; avatarUrl: string | null };
 
 /**
- * Everything this read model needs from the workbook, and nothing more —
- * potential-duty reconciliation belongs to a later manager feature and is
- * never fetched here.
+ * Everything this read model needs from the workbook. `potentialH1`/
+ * `potentialH2` (תקשא"ס period allocations) are fetched alongside the core
+ * three sources -- same fixed set `FAIRNESS_WORKBOOK_SOURCES` already
+ * establishes (`fairnessWorkbookContext.ts`) -- so a person whose duties
+ * exist only in a תקשא"ס period source (never in "משמרות + תורנויות") still
+ * shows up on their own Duties page. Both periods (not just the current
+ * one) are fetched so the page's own history rules can reach back into an
+ * already-closed period, not merely the currently-active one.
  */
-const REQUIRED_SOURCES: SheetSourceKey[] = ["personnel", "schedule", "settings"];
+const REQUIRED_SOURCES: SheetSourceKey[] = ["personnel", "schedule", "settings", "potentialH1", "potentialH2"];
 
 /** Looks a sheet up by its logical source name rather than trusting snapshot array order. */
 function getSheetByKey(snapshot: RawWorkbookSnapshot, key: SheetSourceKey): RawSheet {
@@ -60,20 +66,24 @@ function getSheetByKey(snapshot: RawWorkbookSnapshot, key: SheetSourceKey): RawS
  *
  * 1. Resolves the Supabase identity; a non-authenticated session never
  *    triggers a Google request at all.
- * 2. Gets personnel + schedule + settings via `lib/sync`'s
- *    `getWorkbookSnapshot` -- a short-TTL cached wrapper around the single
- *    underlying `fetchRawWorkbookSnapshot` batchGet call (never
- *    potentialH1/H2) -- so navigating between pages moments apart reuses
- *    the same recent snapshot instead of re-reading Google every time.
+ * 2. Gets personnel + schedule + settings + potentialH1 + potentialH2 via
+ *    `lib/sync`'s `getWorkbookSnapshot` -- a short-TTL cached wrapper
+ *    around the single underlying `fetchRawWorkbookSnapshot` batchGet call
+ *    -- so navigating between pages moments apart reuses the same recent
+ *    snapshot instead of re-reading Google every time.
  * 3. Parses personnel and resolves the authenticated Person via the same
  *    fail-closed `resolveIdentityAgainstPeople` behavior `resolveCurrentPerson`
  *    uses — no second personnel fetch/parse.
  * 4. On any non-"ok" identity result, returns the same safe typed state
  *    without ever parsing/projecting a personal schedule.
- * 5. Parses the schedule into Events and settings into a `ShiftSchedule`
- *    (fails closed as `configuration_error` — never a default start time).
+ * 5. Parses the schedule into Events, settings into a `ShiftSchedule`
+ *    (fails closed as `configuration_error` — never a default start time),
+ *    and both Potential periods into `PotentialAllocation[]` — the SAME
+ *    structural parser Manager Overview already uses, unchanged.
  * 6. Delegates all read-model construction to the pure, independently
- *    testable `buildPersonalScheduleReadModel`.
+ *    testable `buildPersonalScheduleReadModel`, which is the one place
+ *    that resolves which allocations belong to this person and folds them
+ *    into `dutyBlocks`/`dutyActions` (see `buildPotentialDutyEvents`).
  *
  * Wrapped in `timedStage("personalSchedule.total", ...)` so its total
  * duration is directly comparable against each of its own sub-stages'
@@ -119,6 +129,11 @@ async function loadPersonalScheduleReadModelInner(): Promise<PersonalScheduleLoa
     return rawAssignments.map(parseEvent);
   });
 
+  const potentialAllocations = timedSyncStage("potential.parse", () => [
+    ...parsePotentialSheet(getSheetByKey(snapshot, "potentialH1"), people),
+    ...parsePotentialSheet(getSheetByKey(snapshot, "potentialH2"), people),
+  ]);
+
   const model = timedSyncStage("readModel.build", () =>
     buildPersonalScheduleReadModel({
       person: identityResult.person,
@@ -127,6 +142,7 @@ async function loadPersonalScheduleReadModelInner(): Promise<PersonalScheduleLoa
       shiftSchedule,
       fetchedAt: snapshot.fetchedAt,
       now: getJerusalemLocalNow(),
+      potentialAllocations,
     }),
   );
 
