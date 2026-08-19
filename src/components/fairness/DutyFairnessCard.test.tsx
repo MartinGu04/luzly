@@ -120,3 +120,35 @@ describe("DutyFairnessCard — primary metric grid order and content", () => {
     expect(screen.getByTestId("metric-duty-completed")).toHaveTextContent("—");
   });
 });
+
+describe("DutyFairnessCard — density and responsive row/2x2 layout", () => {
+  it("the card root establishes a CSS container-query context (@container), so the primary grid responds to the CARD's own width, never the viewport", () => {
+    render(
+      <ul>
+        <DutyFairnessCard view={view()} />
+      </ul>,
+    );
+    expect(screen.getByRole("link")).toHaveClass("@container");
+  });
+
+  it("the primary metric grid is a compact 2-column fallback that expands to one 4-column row once the card itself is wide enough", () => {
+    render(
+      <ul>
+        <DutyFairnessCard view={view()} />
+      </ul>,
+    );
+    const grid = screen.getByTestId("metric-duty-completed").parentElement;
+    expect(grid).toHaveClass("grid-cols-2");
+    expect(grid).toHaveClass("@[380px]:grid-cols-4");
+  });
+
+  it("never lays the primary grid out as 3 columns", () => {
+    render(
+      <ul>
+        <DutyFairnessCard view={view()} />
+      </ul>,
+    );
+    const grid = screen.getByTestId("metric-duty-completed").parentElement;
+    expect(grid?.className).not.toMatch(/grid-cols-3/);
+  });
+});
