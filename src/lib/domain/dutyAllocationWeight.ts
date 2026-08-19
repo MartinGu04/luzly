@@ -97,7 +97,15 @@ export const DUTY_ALLOCATION_WEIGHT_BY_FAMILY: Readonly<Record<Exclude<DutyFamil
  * `numberOfDays × rate`:
  *
  * - `single_day`: exactly 1 day.
- * - `half_week`: exactly 3 consecutive days, starting Monday (Mon-Tue-Wed).
+ * - `half_week`: ANY 3 consecutive days, regardless of starting weekday --
+ *   verified against the real workbook (real H2 3-day reserve/guard blocks
+ *   do not all start Monday). Corrected from an earlier, too-strict
+ *   "must start Monday" assumption that wrongly classified real
+ *   Mon-start-only 3-day blocks as `half_week` and every OTHER real 3-day
+ *   block (regardless of which weekdays it actually covers) as
+ *   unsupported -- silently nulling those people's entire completed-
+ *   allocation total. Never re-tighten this without a newly confirmed
+ *   business rule.
  * - `weekend`: exactly 4 consecutive days, starting Thursday
  *   (Thu-Fri-Sat-Sun) -- the same real weekend allocation pattern the
  *   comparison target's own "weekend" concept refers to elsewhere in
@@ -105,7 +113,9 @@ export const DUTY_ALLOCATION_WEIGHT_BY_FAMILY: Readonly<Record<Exclude<DutyFamil
  *   (NOT the same 3-day Thu-Fri-Sat span `dutyBlocks.ts`'s
  *   `computeWeekendCompleteness` uses for `weekend_kitchen` -- the two
  *   families have different confirmed weekend spans, deliberately kept as
- *   two separate constants rather than one shared "weekend" shape).
+ *   two separate constants rather than one shared "weekend" shape). This
+ *   weekday requirement is confirmed and, unlike half_week's, has NOT been
+ *   relaxed.
  *
  * A REAL block matching none of these three (e.g. 2 days, 5 days, or a
  * 4-day span not starting Thursday) is a genuine, currently-unsupported
@@ -122,32 +132,35 @@ const GUARD_RESERVE_BLOCK_WEIGHT: Readonly<Record<GuardReserveBlockShape, number
 };
 
 /** 0=Sunday .. 6=Saturday (`dayOfWeek`'s own convention). */
-const MONDAY = 1;
 const THURSDAY = 4;
 
 /**
  * Classifies a guard/reserve `DutyBlock`'s shape from its FULL real span
- * (`dayCount` + the weekday its `startDate` falls on) -- never from a
- * range-truncated partial view. This is why callers must build blocks from
- * a person's COMPLETE event history before ever intersecting with an
- * effective date range: a real Thursday-Sunday weekend block that is only
- * half over as of today must still be recognized AS a weekend block (and
- * therefore contribute nothing until the whole thing is done), never
- * misread as a 1- or 2-day allocation just because only part of it has
- * happened yet.
+ * (`dayCount` + -- `weekend` only -- the weekday its `startDate` falls on)
+ * -- never from a range-truncated partial view. This is why callers must
+ * build blocks from a person's COMPLETE event history before ever
+ * intersecting with an effective date range: a real Thursday-Sunday
+ * weekend block that is only half over as of today must still be
+ * recognized AS a weekend block (and therefore contribute nothing until
+ * the whole thing is done), never misread as a 1- or 2-day allocation
+ * just because only part of it has happened yet.
+ *
+ * `half_week` (any 3 consecutive days) never inspects the weekday at all
+ * -- only `weekend` (which must start Thursday) does.
  *
  * Returns `null` for any real shape outside the three confirmed ones --
  * deliberately never a guessed/default weight.
  */
 export function resolveGuardReserveBlockShape(dayCount: number, startDate: string): GuardReserveBlockShape | null {
   if (dayCount === 1) return "single_day";
+  if (dayCount === 3) return "half_week";
+
+  if (dayCount !== 4) return null;
 
   const start = parseCalendarDate(startDate);
   if (!start) return null;
 
-  if (dayCount === 3 && dayOfWeek(start) === MONDAY) return "half_week";
-  if (dayCount === 4 && dayOfWeek(start) === THURSDAY) return "weekend";
-  return null;
+  return dayOfWeek(start) === THURSDAY ? "weekend" : null;
 }
 
 /** Enough to identify exactly which real block couldn't be classified -- never the raw `Event[]` (see `DutyBlock`'s own privacy convention). */

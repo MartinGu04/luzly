@@ -54,8 +54,11 @@ describe("resolveGuardReserveBlockShape — the three confirmed business-rule sh
     expect(resolveGuardReserveBlockShape(3, "2026-01-05")).toBe("half_week");
   });
 
-  it("3 days NOT starting Monday -> unsupported (null), never guessed as half_week", () => {
-    expect(resolveGuardReserveBlockShape(3, "2026-01-06")).toBeNull(); // starts Tuesday
+  it("REGRESSION (real-workbook correction): ANY 3 consecutive days -> half_week, regardless of starting weekday -- the earlier 'must start Monday' assumption was too strict and did not match the real workbook", () => {
+    expect(resolveGuardReserveBlockShape(3, "2026-01-06")).toBe("half_week"); // starts Tuesday
+    expect(resolveGuardReserveBlockShape(3, "2026-01-01")).toBe("half_week"); // starts Thursday
+    expect(resolveGuardReserveBlockShape(3, "2026-01-04")).toBe("half_week"); // starts Sunday
+    expect(resolveGuardReserveBlockShape(3, "2026-01-03")).toBe("half_week"); // starts Saturday
   });
 
   it("exactly 4 days starting Thursday -> weekend", () => {
@@ -373,6 +376,75 @@ describe("computeCompletedDutyAllocation — a multi-duty person: score is the S
     const result = computeCompletedDutyAllocation(events, "p1", H1_START, H1_END);
     // 1.0 + 0.25 + 0.5 + 0.4 + 0.4 = 2.55
     expect(result.total).toBeCloseTo(2.55);
+  });
+});
+
+describe("computeCompletedDutyAllocation — real H2 shapes verified against the workbook (synthetic fixtures, never the real people's names), through the 2026-08-19 cutoff", () => {
+  const PERIOD_START = "2026-07-01";
+  const CUTOFF = "2026-08-19"; // "through 2026-08-19"
+
+  const events: Event[] = [
+    // Person A (Gideon-shaped): two completed 3-day reserve blocks, NEITHER
+    // starting Monday -- exactly the real shape the too-strict "half_week
+    // must start Monday" assumption misclassified as unsupported (nulling
+    // the whole total) before this fix.
+    ...block("reserve", ["2026-07-09", "2026-07-10", "2026-07-11"], { personId: "p_a" }), // Thu-Sat
+    ...block("reserve", ["2026-07-30", "2026-07-31", "2026-08-01"], { personId: "p_a" }), // Thu-Sat
+
+    // Person B (Itay-shaped): two completed 3-day reserve blocks (same
+    // non-Monday shape) PLUS one completed daily_kitchen day.
+    ...block("reserve", ["2026-07-16", "2026-07-17", "2026-07-18"], { personId: "p_b" }), // Thu-Sat
+    ...block("reserve", ["2026-08-06", "2026-08-07", "2026-08-08"], { personId: "p_b" }), // Thu-Sat
+    ...block("daily_kitchen", ["2026-07-02"], { slot: null, personId: "p_b" }),
+
+    // Person C (Eitan-shaped): four completed 3-day GUARD blocks, mixing
+    // Monday-start and non-Monday-start spans -- guard follows the exact
+    // same shape rules as reserve.
+    ...block("guard", ["2026-07-02", "2026-07-03", "2026-07-04"], { personId: "p_c" }), // Thu-Sat
+    ...block("guard", ["2026-07-13", "2026-07-14", "2026-07-15"], { personId: "p_c" }), // Mon-Wed
+    ...block("guard", ["2026-07-23", "2026-07-24", "2026-07-25"], { personId: "p_c" }), // Thu-Sat
+    ...block("guard", ["2026-08-03", "2026-08-04", "2026-08-05"], { personId: "p_c" }), // Mon-Wed
+
+    // Person D (Steven-shaped): six completed rasar days, ZERO guard/
+    // reserve duty at all -- proves computeCompletedDutyAllocation itself
+    // cannot null a person who has no guard/reserve block whatsoever.
+    ...block("rasar", ["2026-07-03", "2026-07-10", "2026-07-17", "2026-07-24", "2026-07-31", "2026-08-07"], {
+      slot: null,
+      personId: "p_d",
+    }),
+
+    // Person E (Lihi-shaped): no duties at all this period.
+  ];
+
+  it("Person A: two completed 3-day reserve blocks -> 0.5 + 0.5 = 1.0", () => {
+    const result = computeCompletedDutyAllocation(events, "p_a", PERIOD_START, CUTOFF);
+    expect(result.unsupportedBlocks).toEqual([]);
+    expect(result.total).toBeCloseTo(1.0);
+  });
+
+  it("Person B: two completed 3-day reserve blocks + one daily_kitchen day -> 0.5 + 0.5 + 0.2 = 1.2", () => {
+    const result = computeCompletedDutyAllocation(events, "p_b", PERIOD_START, CUTOFF);
+    expect(result.unsupportedBlocks).toEqual([]);
+    expect(result.total).toBeCloseTo(1.2);
+  });
+
+  it("Person C: four completed 3-day guard blocks -> 0.5 x 4 = 2.0", () => {
+    const result = computeCompletedDutyAllocation(events, "p_c", PERIOD_START, CUTOFF);
+    expect(result.unsupportedBlocks).toEqual([]);
+    expect(result.total).toBeCloseTo(2.0);
+  });
+
+  it("Person D: six completed rasar days, ZERO guard/reserve duty -> 0.2 x 6 = 1.2, NEVER null -- proves the aggregation engine itself is not the source of a rasar-only person's null total", () => {
+    const result = computeCompletedDutyAllocation(events, "p_d", PERIOD_START, CUTOFF);
+    expect(result.unsupportedBlocks).toEqual([]);
+    expect(result.total).not.toBeNull();
+    expect(result.total).toBeCloseTo(1.2);
+  });
+
+  it("Person E: no duties this period -> a real 0, never null", () => {
+    const result = computeCompletedDutyAllocation(events, "p_e", PERIOD_START, CUTOFF);
+    expect(result.unsupportedBlocks).toEqual([]);
+    expect(result.total).toBe(0);
   });
 });
 
