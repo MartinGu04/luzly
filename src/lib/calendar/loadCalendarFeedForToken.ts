@@ -103,8 +103,15 @@ export async function loadCalendarFeedForToken(token: string): Promise<CalendarF
   const calendarEvents = [...personEvents, ...potentialDutyEvents]
     .filter(isCalendarDisplayEvent)
     .filter((event) => isWithinIcsFeedWindow(event.date, now));
+  // `allEvents` (every person, unfiltered) is what the shift-roster
+  // description (`icsRoster.ts`) needs to find OTHER people's Events on
+  // the same date+period -- never the window-filtered `calendarEvents`,
+  // and never just this person's own `personEvents`. Synthetic Potential-
+  // duty Events are never shift Events (see `buildPotentialDutyEvents`),
+  // so they're never relevant to a roster lookup and are correctly left
+  // out of this set.
   const items = calendarEvents
-    .map((event) => buildCalendarItem(event, shiftSchedule))
+    .map((event) => buildCalendarItem(event, shiftSchedule, allEvents))
     .filter((item) => item !== null);
 
   const icsText = renderIcsFeed({ personName: person.name, items, generatedAt: new Date() });

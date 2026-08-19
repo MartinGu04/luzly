@@ -65,7 +65,7 @@ describe("calendarEventUid", () => {
 describe("buildCalendarItem -- shift events", () => {
   it("resolves a day shift to a timed item with the canonical schedule interval", () => {
     const event = baseEvent({ category: "shift", role: "supervisor", period: "day" });
-    const item = buildCalendarItem(event, SCHEDULE);
+    const item = buildCalendarItem(event, SCHEDULE, []);
     expect(item).not.toBeNull();
     expect(item!.timing.kind).toBe("timed");
     if (item!.timing.kind === "timed") {
@@ -77,7 +77,7 @@ describe("buildCalendarItem -- shift events", () => {
 
   it("an overnight night shift's end lands on the NEXT calendar date", () => {
     const event = baseEvent({ category: "shift", role: "technician", period: "night" });
-    const item = buildCalendarItem(event, SCHEDULE);
+    const item = buildCalendarItem(event, SCHEDULE, []);
     expect(item!.timing.kind).toBe("timed");
     if (item!.timing.kind === "timed") {
       // night shift: 19:30 on 2026-08-19 -> 07:30 on 2026-08-20.
@@ -88,60 +88,156 @@ describe("buildCalendarItem -- shift events", () => {
 
   it("returns null (never an invented time) for an unresolvable shift (unspecified period)", () => {
     const event = baseEvent({ category: "shift", period: "unspecified" });
-    expect(buildCalendarItem(event, SCHEDULE)).toBeNull();
+    expect(buildCalendarItem(event, SCHEDULE, [])).toBeNull();
   });
 
   it("returns null for a shift when schedule is null (broken shift-time configuration)", () => {
     const event = baseEvent({ category: "shift" });
-    expect(buildCalendarItem(event, null)).toBeNull();
+    expect(buildCalendarItem(event, null, [])).toBeNull();
   });
 
-  it("summary combines role + period labels", () => {
+  it("summary combines role + period labels, prefixed with the shift's emoji", () => {
     const event = baseEvent({ category: "shift", role: "supervisor", period: "day" });
-    const item = buildCalendarItem(event, SCHEDULE);
-    expect(item!.summary).toBe('אחמ"ש יום');
+    const item = buildCalendarItem(event, SCHEDULE, []);
+    expect(item!.summary).toBe('☀️ אחמ"ש יום');
   });
 
-  it("summary marks a shadow shift", () => {
+  it("summary marks a shadow shift, emoji still applies to the whole (role + period + shadow) text", () => {
     const event = baseEvent({ category: "shift", role: "technician", period: "night", shadow: true });
-    const item = buildCalendarItem(event, SCHEDULE);
-    expect(item!.summary).toBe("טכנאי לילה (צל)");
+    const item = buildCalendarItem(event, SCHEDULE, []);
+    expect(item!.summary).toBe("🌙 טכנאי לילה (צל)");
   });
 
   it("description flags a tentative assignment and an overridden time, omits nothing invented", () => {
     const tentative = baseEvent({ category: "shift", certainty: "tentative" });
-    expect(buildCalendarItem(tentative, SCHEDULE)!.description).toContain("משוער");
+    expect(buildCalendarItem(tentative, SCHEDULE, [])!.description).toContain("משוער");
 
     const confirmed = baseEvent({ category: "shift", certainty: "confirmed" });
-    expect(buildCalendarItem(confirmed, SCHEDULE)!.description).toBeNull();
+    expect(buildCalendarItem(confirmed, SCHEDULE, [])!.description).toBeNull();
+  });
+});
+
+describe("buildCalendarItem -- shift emoji by period", () => {
+  it("day -> sun, night -> moon, morning -> sunrise, unspecified -> no emoji (unreachable via buildCalendarItem itself, checked at the icsEventEmoji level)", () => {
+    expect(buildCalendarItem(baseEvent({ period: "day" }), SCHEDULE, [])!.summary.startsWith("☀️")).toBe(true);
+    expect(buildCalendarItem(baseEvent({ period: "night" }), SCHEDULE, [])!.summary.startsWith("🌙")).toBe(true);
+  });
+});
+
+describe("buildCalendarItem -- shift roster in DESCRIPTION", () => {
+  it("includes the roster, grouped by role, when colleagues share the same date+period", () => {
+    const target = baseEvent();
+    const noa = baseEvent({ personId: "p2", personName: "נועה דוגמה", role: "technician", sourceCell: "D15" });
+    const item = buildCalendarItem(target, SCHEDULE, [target, noa]);
+    expect(item!.description).toBe("איתך במשמרת:\nטכנאים: נועה דוגמה");
+  });
+
+  it("omits the roster block entirely (never an empty header) when nobody else is on the shift", () => {
+    const target = baseEvent();
+    const item = buildCalendarItem(target, SCHEDULE, [target]);
+    expect(item!.description).toBeNull();
+  });
+
+  it("combines the roster with existing tentative/override/change-note lines, separated by a blank line", () => {
+    const target = baseEvent({ certainty: "tentative" });
+    const noa = baseEvent({ personId: "p2", personName: "נועה דוגמה", role: "technician", sourceCell: "D15" });
+    const item = buildCalendarItem(target, SCHEDULE, [target, noa]);
+    expect(item!.description).toBe("משובץ באופן משוער -- טרם אושר סופית\n\nאיתך במשמרת:\nטכנאים: נועה דוגמה");
+  });
+
+  it("never leaks a colleague from an unrelated shift (different date) into the description", () => {
+    const target = baseEvent();
+    const otherDateColleague = baseEvent({
+      personId: "p2",
+      personName: "נועה דוגמה",
+      role: "technician",
+      date: "2026-08-20",
+      sourceCell: "D16",
+    });
+    const item = buildCalendarItem(target, SCHEDULE, [target, otherDateColleague]);
+    expect(item!.description).toBeNull();
+  });
+
+  it("is rebuilt dynamically from allEvents on every call -- removing/reassigning a colleague changes the description", () => {
+    const target = baseEvent();
+    const noa = baseEvent({ personId: "p2", personName: "נועה דוגמה", role: "technician", sourceCell: "D15" });
+
+    const withNoa = buildCalendarItem(target, SCHEDULE, [target, noa]);
+    expect(withNoa!.description).toContain("נועה דוגמה");
+
+    const withoutNoa = buildCalendarItem(target, SCHEDULE, [target]);
+    expect(withoutNoa!.description).toBeNull();
+
+    const eitan = baseEvent({ personId: "p3", personName: "איתן דוגמה", role: "technician", sourceCell: "D15" });
+    const withEitan = buildCalendarItem(target, SCHEDULE, [target, eitan]);
+    expect(withEitan!.description).toContain("איתן דוגמה");
+    expect(withEitan!.description).not.toContain("נועה דוגמה");
+  });
+
+  it("a roster change alone (adding/removing a colleague) NEVER changes the UID -- only sourceSheet+sourceCell of the target itself does", () => {
+    const target = baseEvent();
+    const noa = baseEvent({ personId: "p2", personName: "נועה דוגמה", role: "technician", sourceCell: "D15" });
+
+    const withNoa = buildCalendarItem(target, SCHEDULE, [target, noa]);
+    const withoutNoa = buildCalendarItem(target, SCHEDULE, [target]);
+
+    expect(withNoa!.uid).toBe(withoutNoa!.uid);
+    expect(withNoa!.uid).toBe(calendarEventUid(target));
   });
 });
 
 describe("buildCalendarItem -- duty events", () => {
   it("is an all-day item on the event's own date, independent of shiftSchedule", () => {
     const event = baseEvent({ category: "duty", dutyFamily: "guard", slot: 2, role: null, period: "unspecified" });
-    const withSchedule = buildCalendarItem(event, SCHEDULE);
-    const withoutSchedule = buildCalendarItem(event, null);
+    const withSchedule = buildCalendarItem(event, SCHEDULE, []);
+    const withoutSchedule = buildCalendarItem(event, null, []);
     expect(withSchedule).toEqual(withoutSchedule);
     expect(withSchedule!.timing).toEqual({ kind: "allDay", date: "2026-08-19" });
   });
 
-  it("summary is the duty family label + slot", () => {
+  it("summary is the duty family label + slot, prefixed with the duty family's emoji", () => {
     const event = baseEvent({ category: "duty", dutyFamily: "guard", slot: 2 });
-    expect(buildCalendarItem(event, SCHEDULE)!.summary).toBe("שמירה 2");
+    expect(buildCalendarItem(event, SCHEDULE, [])!.summary).toBe("🛡️ שמירה 2");
   });
 
-  it("summary omits the slot when the duty family has none", () => {
+  it("summary omits the slot when the duty family has none, and has no emoji prefix for an unmapped family (oxid)", () => {
     const event = baseEvent({ category: "duty", dutyFamily: "oxid", slot: null });
-    expect(buildCalendarItem(event, SCHEDULE)!.summary).toBe("אוקסיד");
+    expect(buildCalendarItem(event, SCHEDULE, [])!.summary).toBe("אוקסיד");
+  });
+
+  it("never gets a roster/'who's with me' description, even when another duty Event shares the exact same date+family+slot", () => {
+    const event = baseEvent({ category: "duty", dutyFamily: "guard", slot: 1, role: null, period: "unspecified" });
+    const anotherGuard = baseEvent({
+      category: "duty",
+      dutyFamily: "guard",
+      slot: 1,
+      role: null,
+      period: "unspecified",
+      personId: "p2",
+      personName: "נועה דוגמה",
+      sourceCell: "D15",
+    });
+    const item = buildCalendarItem(event, SCHEDULE, [event, anotherGuard]);
+    expect(item!.description).toBeNull();
   });
 });
 
 describe("buildCalendarItem -- absence events", () => {
-  it("is an all-day item, summary is the absence-kind label", () => {
+  it("is an all-day item, summary is the absence-kind label prefixed with its emoji", () => {
     const event = baseEvent({ category: "absence", absenceKind: "vacation", role: null, period: "unspecified" });
-    const item = buildCalendarItem(event, SCHEDULE);
+    const item = buildCalendarItem(event, SCHEDULE, []);
     expect(item!.timing).toEqual({ kind: "allDay", date: "2026-08-19" });
-    expect(item!.summary).toBe("חופש");
+    expect(item!.summary).toBe("🏖️ חופש");
+  });
+
+  it("never gets a roster description", () => {
+    const event = baseEvent({ category: "absence", absenceKind: "vacation", role: null, period: "unspecified" });
+    const someone = baseEvent({ category: "absence", personId: "p2", personName: "נועה דוגמה", sourceCell: "D15" });
+    expect(buildCalendarItem(event, SCHEDULE, [event, someone])!.description).toBeNull();
+  });
+
+  it("has no emoji prefix for an absence kind with no fitting symbol (medical)", () => {
+    const event = baseEvent({ category: "absence", absenceKind: "medical", role: null, period: "unspecified" });
+    expect(buildCalendarItem(event, SCHEDULE, [])!.summary).toBe("גימלים");
   });
 });
