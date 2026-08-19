@@ -10,7 +10,9 @@ import { parseScheduleSheet } from "@/lib/parsers/schedule";
 import { parseSettingsSheet } from "@/lib/parsers/settings";
 import { isCalendarDisplayEvent } from "@/lib/readModels/buildPersonalScheduleReadModel";
 import { getWorkbookSnapshot } from "@/lib/sync";
+import { getJerusalemLocalNow } from "@/lib/time/jerusalemClock";
 import { resolveCalendarFeedOwnerByToken } from "./feedOwnerLookup";
+import { isWithinIcsFeedWindow } from "./icsWindow";
 import { buildCalendarItem } from "./icsItems";
 import { renderIcsFeed } from "./icsRender";
 
@@ -56,6 +58,18 @@ export type CalendarFeedLoadResult = { status: "not_found" } | { status: "ok"; i
  * stays `null` and every shift Event is silently skipped (never given an
  * invented time) while duty/absence Events -- entirely schedule-
  * independent -- are still included; see `icsItems.ts`'s `buildCalendarItem`.
+ *
+ * The feed's date window (`icsWindow.ts`) is applied HERE ONLY, as the
+ * final filter before rendering -- `now - ICS_FEED_PAST_WINDOW_DAYS`
+ * through unbounded future. It runs AFTER `buildPotentialDutyEvents`
+ * (never before): that function's own "already covered by a real duty
+ * Event" dedup needs the person's FULL, unwindowed Event history to stay
+ * correct -- windowing `personEvents` first could let an old (out-of-
+ * window) real duty Event stop shadowing a Potential allocation on that
+ * same date, producing a spurious duplicate for a date that will end up
+ * excluded anyway. This window is exclusive to the external feed --
+ * `lib/readModels/buildPersonalScheduleReadModel.ts`'s own `calendarEvents`
+ * (the in-app "הלוח שלי" personal calendar) is never touched by it.
  */
 export async function loadCalendarFeedForToken(token: string): Promise<CalendarFeedLoadResult> {
   const owner = await resolveCalendarFeedOwnerByToken(token);
@@ -85,7 +99,10 @@ export async function loadCalendarFeedForToken(token: string): Promise<CalendarF
   ];
   const potentialDutyEvents = buildPotentialDutyEvents(potentialAllocations, person, people, personEvents);
 
-  const calendarEvents = [...personEvents, ...potentialDutyEvents].filter(isCalendarDisplayEvent);
+  const now = getJerusalemLocalNow();
+  const calendarEvents = [...personEvents, ...potentialDutyEvents]
+    .filter(isCalendarDisplayEvent)
+    .filter((event) => isWithinIcsFeedWindow(event.date, now));
   const items = calendarEvents
     .map((event) => buildCalendarItem(event, shiftSchedule))
     .filter((item) => item !== null);

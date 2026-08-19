@@ -32,6 +32,14 @@ model, only the calendar-feed-specific plumbing around it.
   pipeline: token -> owner's email -> matching כ"א `Person` (same
   fail-closed email-only match `resolveCurrentPerson` uses for a normal
   session) -> that person's own Events -> rendered ICS text.
+- `icsWindow.ts` (pure) -- the feed's date window: the last
+  `ICS_FEED_PAST_WINDOW_DAYS` (30) days of history through unbounded
+  future. Applied ONLY in `loadCalendarFeedForToken.ts`, as the very last
+  filter before rendering -- `lib/readModels/buildPersonalScheduleReadModel.ts`'s
+  own `calendarEvents` (the in-app "הלוח שלי" personal calendar) stays
+  exactly as unbounded as it's always been; this is not a change to that
+  read model or a second data source, just a feed-only cutoff layered on
+  top of it.
 - `icsItems.ts` (server-only) -- `buildCalendarItem`, turning one
   shift/duty/absence `Event` into a stable-UID, correctly-timed
   `IcsCalendarItem`. `calendarEventUid` is keyed on the Event's own
@@ -67,3 +75,19 @@ model, only the calendar-feed-specific plumbing around it.
   From URL screen is the safe, reliable fallback on every platform.
 - **Apple's `webcal://` scheme has no such limitation** -- it triggers
   the native "Add Subscription" sheet directly on macOS/iOS.
+
+## Known follow-up (not addressed in this PR)
+
+`SHEET_SOURCES.potentialH1`/`potentialH2` (`lib/google/sheetSources.ts`)
+are hardcoded to the two `פוטנציאל תקש"אס ...` tab names for calendar year
+**2026** specifically (`1-6/2026`, `7-12/2026`) -- this is pre-existing,
+not introduced here (the personal schedule read model has the exact same
+hardcoding), but it means the ICS feed's synthetic Potential-duty entries
+(via `buildPotentialDutyEvents`) will silently stop finding any 2027 data
+once those two tabs are renamed/replaced for the next year, unless
+`SHEET_SOURCES` (and every other caller of it) is updated for the
+rollover. Real internal `משמרות + תורנויות` duty/shift Events are
+unaffected -- only the Potential/תקשא"ס-period synthetic entries. Flagged
+here deliberately rather than fixed, since resolving it properly (a
+dynamic/rolling year resolution) is a cross-cutting change well beyond
+this feature's scope.
