@@ -138,6 +138,15 @@ describe("MobileProfileMenu — single-button theme toggle", () => {
   });
 });
 
+describe("MobileProfileMenu — settings link", () => {
+  it('every user sees "הגדרות", linking to /settings', () => {
+    renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} avatarUrl={null} />);
+    fireEvent.click(screen.getByRole("button", { name: /תפריט פרופיל/ }));
+    const link = screen.getByRole("menuitem", { name: "הגדרות" });
+    expect(link).toHaveAttribute("href", "/settings");
+  });
+});
+
 describe("MobileProfileMenu — logout", () => {
   it("logout remains reachable inside the menu", () => {
     renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} avatarUrl={null} />);

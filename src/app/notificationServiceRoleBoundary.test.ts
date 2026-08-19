@@ -12,9 +12,13 @@ import path from "node:path";
  *
  * Two invariants:
  *  1. `createSupabaseServiceRoleClient` is referenced by name in exactly
- *     two files: its own definition, and
- *     `src/lib/notifications/engine/serviceClient.ts` (the engine's
- *     single call site). No other file -- not a route, not a Server
+ *     three files: its own definition,
+ *     `src/lib/notifications/engine/serviceClient.ts` (the notification
+ *     worker's call site -- no session exists for a Cron-triggered
+ *     request), and `src/lib/calendar/serviceClient.ts` (the personal
+ *     calendar feed's call site -- no session exists for an external
+ *     calendar client's token-authenticated request either, see that
+ *     file's own docstring). No other file -- not a route, not a Server
  *     Component/Action, not a client component -- may import or call it
  *     directly.
  *  2. No "use client" component, and no file under `src/app` reachable
@@ -41,18 +45,20 @@ const srcRoot = path.resolve(__dirname, "..");
 const sourceFiles = findSourceFiles(srcRoot);
 
 const SERVICE_ROLE_DEFINITION_FILE = path.join(srcRoot, "lib", "supabase", "serviceRoleClient.ts");
-const SERVICE_ROLE_CALL_SITE_FILE = path.join(srcRoot, "lib", "notifications", "engine", "serviceClient.ts");
+const NOTIFICATION_SERVICE_ROLE_CALL_SITE_FILE = path.join(srcRoot, "lib", "notifications", "engine", "serviceClient.ts");
+const CALENDAR_SERVICE_ROLE_CALL_SITE_FILE = path.join(srcRoot, "lib", "calendar", "serviceClient.ts");
 const ALLOWED_SERVICE_ROLE_REFERENCE_FILES = new Set([
   SERVICE_ROLE_DEFINITION_FILE,
-  SERVICE_ROLE_CALL_SITE_FILE,
+  NOTIFICATION_SERVICE_ROLE_CALL_SITE_FILE,
+  CALENDAR_SERVICE_ROLE_CALL_SITE_FILE,
 ]);
 
-describe("notification worker service-role boundary guard", () => {
+describe("notification worker + calendar feed service-role boundary guard", () => {
   it("finds source files (sanity check the scan itself works)", () => {
     expect(sourceFiles.length).toBeGreaterThan(0);
   });
 
-  it("createSupabaseServiceRoleClient is referenced by name only in its definition and the engine's single call site", () => {
+  it("createSupabaseServiceRoleClient is referenced by name only in its definition and the two engines' single call sites", () => {
     const referencingFiles = sourceFiles.filter((file) =>
       /createSupabaseServiceRoleClient/.test(fs.readFileSync(file, "utf8")),
     );

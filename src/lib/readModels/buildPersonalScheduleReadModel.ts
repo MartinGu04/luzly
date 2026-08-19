@@ -185,8 +185,14 @@ function isAssignmentEvent(event: Event): boolean {
   return event.category === "shift" || event.category === "duty";
 }
 
-/** "הלוח שלי"'s calendar-worthy categories -- shift, duty, and absence. Every other `EventCategory` is internal bookkeeping, never a calendar entry on its own. */
-function isCalendarDisplayEvent(event: Event): boolean {
+/**
+ * "הלוח שלי"'s calendar-worthy categories -- shift, duty, and absence.
+ * Every other `EventCategory` is internal bookkeeping, never a calendar
+ * entry on its own. Exported so `lib/calendar/icsItems.ts` (the personal
+ * ICS feed) reuses the exact same definition rather than risking a second
+ * one drifting out of sync.
+ */
+export function isCalendarDisplayEvent(event: Event): boolean {
   return event.category === "shift" || event.category === "duty" || event.category === "absence";
 }
 

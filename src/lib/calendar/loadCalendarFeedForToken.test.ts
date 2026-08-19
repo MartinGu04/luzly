@@ -1,0 +1,219 @@
+import { describe, expect, it, vi } from "vitest";
+import type { RawSheet, RawWorkbookSnapshot } from "@/lib/google";
+import { SHEET_SOURCES } from "@/lib/google";
+
+const resolveCalendarFeedOwnerByToken = vi.fn();
+vi.mock("./feedOwnerLookup", () => ({ resolveCalendarFeedOwnerByToken: (token: string) => resolveCalendarFeedOwnerByToken(token) }));
+
+const getWorkbookSnapshot = vi.fn();
+vi.mock("@/lib/sync", () => ({ getWorkbookSnapshot: (sources: unknown) => getWorkbookSnapshot(sources) }));
+
+/** Fixed "now" for every test -- never the real system clock, so the 30-day window's boundary tests stay exact regardless of when this suite actually runs. Partial mock: `jerusalemLocalTimeToInstant` (used by icsItems.ts for real shift timing) stays the real implementation -- only `getJerusalemLocalNow` (the window's "now") is overridden. */
+const NOW = { date: "2026-08-19", minuteOfDay: 600 };
+const getJerusalemLocalNow = vi.fn(() => NOW);
+vi.mock("@/lib/time/jerusalemClock", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/time/jerusalemClock")>();
+  return { ...actual, getJerusalemLocalNow: () => getJerusalemLocalNow() };
+});
+
+const { loadCalendarFeedForToken } = await import("./loadCalendarFeedForToken");
+
+const PERSONNEL_SHEET: RawSheet = {
+  name: SHEET_SOURCES.personnel,
+  values: [
+    ["שם", "מייל", "מנהל", "טכנאי", 'אחמ"ש', 'סוג כ"א'],
+    ["דני בדיקה", "dani@example.com", "false", "false", "true", "קבוע"],
+    ["נועה דוגמה", "noa@example.com", "false", "true", "false", "קבוע"],
+  ],
+};
+
+const SCHEDULE_SHEET: RawSheet = {
+  name: SHEET_SOURCES.schedule,
+  values: [
+    ["תאריך", "יום", "דני בדיקה", "נועה דוגמה"],
+    ["19/08/2026", "ד", 'אחמ"ש יום', "טכנאי לילה"],
+    ["20/08/2026", "ה", "שומר 1", "חופש"],
+  ],
+};
+
+const SETTINGS_SHEET: RawSheet = {
+  name: SHEET_SOURCES.settings,
+  values: [
+    ["הגדרה", "ערך"],
+    ["תחילת משמרת יום", "07:30"],
+  ],
+};
+
+const EMPTY_POTENTIAL_SHEET = (name: string): RawSheet => ({ name, values: [["תאריך", "יום"]] });
+
+/**
+ * Spans the 30-day window's boundary (relative to NOW = 2026-08-19, cutoff
+ * = 2026-07-20): one date well before the cutoff, one exactly one day
+ * before it, one exactly ON it, one on "today", and one far in the
+ * future -- each a distinct guard slot so the assertions can pin down
+ * exactly which dates survived.
+ */
+const HISTORY_SCHEDULE_SHEET: RawSheet = {
+  name: SHEET_SOURCES.schedule,
+  values: [
+    ["תאריך", "יום", "דני בדיקה"],
+    ["01/06/2026", "ב", "שומר 1"], // well before cutoff
+    ["19/07/2026", "א", "שומר 2"], // cutoff - 1 day
+    ["20/07/2026", "ב", "שומר 3"], // exactly at cutoff (inclusive)
+    ["19/08/2026", "ד", "שומר 4"], // today
+    ["01/01/2027", "ו", "שומר 5"], // far future
+  ],
+};
+
+function makeHistorySnapshot(): RawWorkbookSnapshot {
+  return {
+    fetchedAt: "2026-08-19T00:00:00.000Z",
+    sheets: [
+      PERSONNEL_SHEET,
+      HISTORY_SCHEDULE_SHEET,
+      SETTINGS_SHEET,
+      EMPTY_POTENTIAL_SHEET(SHEET_SOURCES.potentialH1),
+      EMPTY_POTENTIAL_SHEET(SHEET_SOURCES.potentialH2),
+    ],
+  };
+}
+
+function makeSnapshot(): RawWorkbookSnapshot {
+  return {
+    fetchedAt: "2026-08-19T00:00:00.000Z",
+    sheets: [
+      PERSONNEL_SHEET,
+      SCHEDULE_SHEET,
+      SETTINGS_SHEET,
+      EMPTY_POTENTIAL_SHEET(SHEET_SOURCES.potentialH1),
+      EMPTY_POTENTIAL_SHEET(SHEET_SOURCES.potentialH2),
+    ],
+  };
+}
+
+describe("loadCalendarFeedForToken", () => {
+  it("returns not_found without ever fetching the workbook when the token doesn't resolve", async () => {
+    resolveCalendarFeedOwnerByToken.mockReset().mockResolvedValue({ status: "not_found" });
+    getWorkbookSnapshot.mockReset();
+
+    const result = await loadCalendarFeedForToken("bad-token");
+
+    expect(result).toEqual({ status: "not_found" });
+    expect(getWorkbookSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("returns not_found when the owner's email doesn't map to any כ\"א person", async () => {
+    resolveCalendarFeedOwnerByToken.mockReset().mockResolvedValue({ status: "ok", email: "stranger@example.com" });
+    getWorkbookSnapshot.mockReset().mockResolvedValue(makeSnapshot());
+
+    expect(await loadCalendarFeedForToken("tok")).toEqual({ status: "not_found" });
+  });
+
+  it("renders only the resolved person's own shift/duty/absence events, never a colleague's", async () => {
+    resolveCalendarFeedOwnerByToken.mockReset().mockResolvedValue({ status: "ok", email: "dani@example.com" });
+    getWorkbookSnapshot.mockReset().mockResolvedValue(makeSnapshot());
+
+    const result = await loadCalendarFeedForToken("tok");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+
+    expect(result.icsText).toContain('SUMMARY:אחמ"ש יום');
+    expect(result.icsText).toContain("SUMMARY:שמירה 1");
+    expect(result.icsText).not.toContain("טכנאי לילה");
+    expect(result.icsText).not.toContain("SUMMARY:חופש");
+  });
+
+  it("a different person's own token sees only THEIR events", async () => {
+    resolveCalendarFeedOwnerByToken.mockReset().mockResolvedValue({ status: "ok", email: "noa@example.com" });
+    getWorkbookSnapshot.mockReset().mockResolvedValue(makeSnapshot());
+
+    const result = await loadCalendarFeedForToken("tok");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+
+    expect(result.icsText).toContain("טכנאי לילה");
+    expect(result.icsText).toContain("SUMMARY:חופש");
+    expect(result.icsText).not.toContain('אחמ"ש יום');
+    expect(result.icsText).not.toContain("שמירה 1");
+  });
+
+  it("produces a valid, non-empty VCALENDAR document", async () => {
+    resolveCalendarFeedOwnerByToken.mockReset().mockResolvedValue({ status: "ok", email: "dani@example.com" });
+    getWorkbookSnapshot.mockReset().mockResolvedValue(makeSnapshot());
+
+    const result = await loadCalendarFeedForToken("tok");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.icsText.startsWith("BEGIN:VCALENDAR\r\n")).toBe(true);
+    expect(result.icsText.trim().endsWith("END:VCALENDAR")).toBe(true);
+  });
+
+  it("still returns a feed (skipping shift events, keeping duties) when the shift-time configuration is broken", async () => {
+    resolveCalendarFeedOwnerByToken.mockReset().mockResolvedValue({ status: "ok", email: "dani@example.com" });
+    getWorkbookSnapshot.mockReset().mockResolvedValue({
+      ...makeSnapshot(),
+      sheets: makeSnapshot().sheets.map((sheet) =>
+        sheet.name === SHEET_SOURCES.settings ? { name: SHEET_SOURCES.settings, values: [["הגדרה", "ערך"]] } : sheet,
+      ),
+    });
+
+    const result = await loadCalendarFeedForToken("tok");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.icsText).not.toContain('אחמ"ש יום');
+    expect(result.icsText).toContain("SUMMARY:שמירה 1");
+  });
+});
+
+describe("loadCalendarFeedForToken -- 30-day past window (future unbounded)", () => {
+  it("excludes an event well before the cutoff, and the day immediately before it", async () => {
+    resolveCalendarFeedOwnerByToken.mockReset().mockResolvedValue({ status: "ok", email: "dani@example.com" });
+    getWorkbookSnapshot.mockReset().mockResolvedValue(makeHistorySnapshot());
+
+    const result = await loadCalendarFeedForToken("tok");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+
+    expect(result.icsText).not.toContain("SUMMARY:שמירה 1"); // 2026-06-01, well before cutoff
+    expect(result.icsText).not.toContain("SUMMARY:שמירה 2"); // 2026-07-19, cutoff - 1 day
+  });
+
+  it("includes the cutoff date itself (inclusive lower bound), today, and any future date (no upper bound)", async () => {
+    resolveCalendarFeedOwnerByToken.mockReset().mockResolvedValue({ status: "ok", email: "dani@example.com" });
+    getWorkbookSnapshot.mockReset().mockResolvedValue(makeHistorySnapshot());
+
+    const result = await loadCalendarFeedForToken("tok");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+
+    expect(result.icsText).toContain("SUMMARY:שמירה 3"); // 2026-07-20, exactly the cutoff
+    expect(result.icsText).toContain("SUMMARY:שמירה 4"); // 2026-08-19, today
+    expect(result.icsText).toContain("SUMMARY:שמירה 5"); // 2027-01-01, far future
+  });
+
+  it("produces exactly 3 VEVENTs -- the 2 out-of-window dates never even reach ICS rendering", async () => {
+    resolveCalendarFeedOwnerByToken.mockReset().mockResolvedValue({ status: "ok", email: "dani@example.com" });
+    getWorkbookSnapshot.mockReset().mockResolvedValue(makeHistorySnapshot());
+
+    const result = await loadCalendarFeedForToken("tok");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+
+    expect(result.icsText.match(/BEGIN:VEVENT/g)).toHaveLength(3);
+  });
+
+  it("the in-app personal schedule's own calendar-worthy category filter is reused unchanged -- this window is layered on top of it, not a replacement", async () => {
+    // Sanity check that windowing doesn't accidentally also filter by
+    // category: an old, out-of-window date and a same-day-as-cutoff date
+    // are both still real "shift"/"duty" Events, distinguished ONLY by
+    // date here -- see icsWindow.ts's own docstring for why this is
+    // layered on top of (never inside) isCalendarDisplayEvent.
+    resolveCalendarFeedOwnerByToken.mockReset().mockResolvedValue({ status: "ok", email: "dani@example.com" });
+    getWorkbookSnapshot.mockReset().mockResolvedValue(makeHistorySnapshot());
+
+    const result = await loadCalendarFeedForToken("tok");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.icsText).toContain("DTSTART;VALUE=DATE:20260720");
+  });
+});

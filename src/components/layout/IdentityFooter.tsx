@@ -1,3 +1,5 @@
+import Link from "next/link";
+import { Settings } from "lucide-react";
 import { signOutAction } from "@/lib/auth/actions";
 import { Avatar } from "@/components/ui/Avatar";
 import { PushEndpointHiddenField } from "@/components/pwa/PushEndpointHiddenField";
@@ -31,7 +33,17 @@ export function IdentityFooter({ name, isManager, avatarUrl }: IdentityFooterPro
     <div className="border-t border-sidebar-border px-5 py-5">
       <div className="flex items-center justify-between gap-2 px-1">
         <p className="text-[11px] text-sidebar-muted">גרסה {APP_VERSION}</p>
-        <IdentityFooterThemeAction />
+        <div className="flex items-center gap-1">
+          <Link
+            href="/settings"
+            aria-label="הגדרות"
+            title="הגדרות"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-sidebar-muted transition-colors duration-200 hover:bg-sidebar-hover hover:text-sidebar-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+          >
+            <Settings className="h-[16px] w-[16px]" aria-hidden="true" strokeWidth={1.75} />
+          </Link>
+          <IdentityFooterThemeAction />
+        </div>
       </div>
       <div className="mt-3.5 flex items-center gap-3 rounded-xl px-1 py-1.5">
         <Avatar name={name} size="md" avatarUrl={avatarUrl} />
