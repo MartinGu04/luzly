@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { TabLink } from "@/components/ui/TabLink";
 import { fairnessDutiesHref, fairnessShiftsHref, type FairnessMode } from "@/lib/presentation/fairnessUrl";
 
 interface FairnessModeToggleProps {
@@ -24,26 +24,31 @@ const TAB_BASE =
  * name beyond color alone; `flex-1` on mobile keeps both pills equal width
  * and full-bleed (compact, no dead space), `sm:flex-initial` lets them
  * settle to their natural width on larger screens instead of stretching.
+ *
+ * Each tab is a `TabLink` (`components/ui/`) -- real per-tab pending-
+ * navigation feedback (instant spinner + `aria-busy` on click, a second
+ * click on an already-pending tab is a no-op) via the same `useLinkStatus`
+ * mechanism the app's main Sidebar/BottomNav already use, shared with
+ * `ManagerCategoryNav`'s identical tab idiom rather than reimplemented
+ * here.
  */
 export function FairnessModeToggle({ active }: FairnessModeToggleProps) {
   return (
     <div role="tablist" aria-label="מצב תצוגה" className="flex items-stretch gap-1 rounded-full bg-overlay-soft p-1">
-      <Link
+      <TabLink
         href={fairnessShiftsHref()}
-        role="tab"
-        aria-selected={active === "shifts"}
+        isActive={active === "shifts"}
         className={`${TAB_BASE} ${active === "shifts" ? "bg-surface-1 text-primary" : "text-muted hover:text-foreground"}`}
       >
         משמרות
-      </Link>
-      <Link
+      </TabLink>
+      <TabLink
         href={fairnessDutiesHref()}
-        role="tab"
-        aria-selected={active === "duties"}
+        isActive={active === "duties"}
         className={`${TAB_BASE} ${active === "duties" ? "bg-surface-1 text-primary" : "text-muted hover:text-foreground"}`}
       >
         תורנויות
-      </Link>
+      </TabLink>
     </div>
   );
 }

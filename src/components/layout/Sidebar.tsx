@@ -1,31 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import Link, { useLinkStatus } from "next/link";
+import { useState } from "react";
+import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { BrandMark } from "@/components/brand/BrandMark";
 import { SearchTriggerButton } from "@/components/search/SearchTriggerButton";
+import { LinkPendingWatcher } from "@/components/ui/LinkPendingWatcher";
 import { visibleNavItems, type NavItem } from "./nav-items";
 import { IdentityFooter } from "./IdentityFooter";
 
 interface SidebarProps {
   person?: { name: string; isManager: boolean; avatarUrl: string | null };
-}
-
-/**
- * Reports the enclosing `<Link>`'s own pending-navigation state up to
- * `SidebarLink`, same bridging pattern `BottomNav`'s `LinkPendingWatcher`
- * uses -- `useLinkStatus` must be called from a component that is itself a
- * DESCENDANT of `<Link>`, never the `<Link>` (or an ancestor) directly.
- * Renders nothing.
- */
-function LinkPendingWatcher({ onPendingChange }: { onPendingChange: (pending: boolean) => void }) {
-  const { pending } = useLinkStatus();
-  useEffect(() => {
-    onPendingChange(pending);
-  }, [pending, onPendingChange]);
-  return null;
 }
 
 interface SidebarLinkProps {
