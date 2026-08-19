@@ -89,6 +89,29 @@ connection proofs of the `for update`/`for update skip locked` claiming
 behavior — same self-skipping-when-no-database convention as
 `upsertPushSubscriptionRpc.integration.test.ts`.
 
+## `migrations/20260820090000_create_calendar_feeds.sql` (personal calendar subscription)
+
+`public.calendar_feeds` -- one row per user with personal calendar sync
+enabled (`token` authorizes `GET /calendar/<token>.ics`, see
+`src/lib/calendar/README.md`). Apply it the same way as above, to every
+Supabase project this app talks to; it has no dependency on either prior
+migration and can be applied independently.
+
+Unlike `push_subscriptions`, this table needs no `SECURITY DEFINER` RPC:
+there is no shared-device/cross-user reassignment case here (`user_id` is
+unique, and every write is already scoped to `auth.uid()`), so plain
+RLS-scoped INSERT/UPDATE/DELETE policies are sufficient for the
+enable/reset/disable actions (`src/lib/calendar/feedStore.ts`, all run
+from the feed owner's own authenticated session). The service-role client
+is still used, but only by the ICS route's token -> owner lookup
+(`src/lib/calendar/feedOwnerLookup.ts`, the SECOND legitimate
+service-role call site alongside the notification worker's own -- see
+`src/app/notificationServiceRoleBoundary.test.ts`), since an external
+calendar client fetching that URL carries no Supabase session at all.
+
+`src/lib/calendar/migration.test.ts` is this migration's text-level
+security-shape guard (same pattern as `lib/push/migration.test.ts`).
+
 ## Extending this later
 
 Any future migration goes in this same directory, named

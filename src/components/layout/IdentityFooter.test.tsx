@@ -139,6 +139,13 @@ describe("IdentityFooter — footer hierarchy (PR #38 desktop shell polish)", ()
   });
 });
 
+describe("IdentityFooter — settings link", () => {
+  it("links to /settings", () => {
+    renderWithTheme(<IdentityFooter name="דני בדיקה" isManager={false} avatarUrl={null} />);
+    expect(screen.getByRole("link", { name: "הגדרות" })).toHaveAttribute("href", "/settings");
+  });
+});
+
 describe("IdentityFooter — avatar photo", () => {
   it("passes avatarUrl through to the Avatar (image element present when given a photo)", () => {
     const { container } = renderWithTheme(
