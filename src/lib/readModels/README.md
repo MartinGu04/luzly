@@ -354,7 +354,7 @@ questions a manager actually asks instead of one collapsed engine enum.
   (`components/manager/`), rendered only for `category === "logins"` in
   `app/(app)/manager/page.tsx`.
 
-## Manager Area shift snapshot ("המשמרת שלי")
+## Manager Area shift snapshot ("תמונת מצב משמרות")
 
 A compact previous/current/next department shift snapshot inside the
 Manager Area's own Overview category, for a manager who is themselves

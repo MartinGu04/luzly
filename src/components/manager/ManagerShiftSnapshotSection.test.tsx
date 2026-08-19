@@ -51,7 +51,7 @@ function triad(overrides: Partial<ShiftSnapshotTriad> = {}): ShiftSnapshotTriad 
 describe("ManagerShiftSnapshotSection — composition", () => {
   it("renders the section heading and all three shift cards in chronological order", () => {
     render(<ManagerShiftSnapshotSection snapshot={triad()} todayDate="2026-08-12" fetchedAt="2026-08-12T08:00:00.000Z" />);
-    expect(screen.getByText("המשמרת שלי")).toBeInTheDocument();
+    expect(screen.getByText("תמונת מצב משמרות")).toBeInTheDocument();
     expect(screen.getByText("הקודמת")).toBeInTheDocument();
     expect(screen.getByText("עכשיו")).toBeInTheDocument();
     expect(screen.getByText("הבאה")).toBeInTheDocument();

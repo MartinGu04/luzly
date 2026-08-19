@@ -390,7 +390,7 @@ describe("ManagerPage — Overview: managerShiftSnapshot section (shift-capable 
   it("renders the shift snapshot section when the read model provides one (a shift-capable manager)", async () => {
     getRequestManagerOverview.mockResolvedValue(okResult(model({ managerShiftSnapshot: shiftSnapshotTriad() })));
     await renderPage();
-    expect(screen.getByText("המשמרת שלי")).toBeInTheDocument();
+    expect(screen.getByText("תמונת מצב משמרות")).toBeInTheDocument();
     expect(screen.getByText("הקודמת")).toBeInTheDocument();
     expect(screen.getByText("עכשיו")).toBeInTheDocument();
     expect(screen.getByText("הבאה")).toBeInTheDocument();
@@ -399,13 +399,13 @@ describe("ManagerPage — Overview: managerShiftSnapshot section (shift-capable 
   it("does not render the shift snapshot section for a permanent/non-shift manager (managerShiftSnapshot: null)", async () => {
     getRequestManagerOverview.mockResolvedValue(okResult(model({ managerShiftSnapshot: null })));
     await renderPage();
-    expect(screen.queryByText("המשמרת שלי")).toBeNull();
+    expect(screen.queryByText("תמונת מצב משמרות")).toBeNull();
   });
 
   it("only renders on the Overview category, never on Shifts/Personnel/Duties/Logins", async () => {
     getRequestManagerOverview.mockResolvedValue(okResult(model({ managerShiftSnapshot: shiftSnapshotTriad() })));
     await renderPage({ category: "shifts" });
-    expect(screen.queryByText("המשמרת שלי")).toBeNull();
+    expect(screen.queryByText("תמונת מצב משמרות")).toBeNull();
   });
 
   it("still renders the rest of the Overview (attention section) alongside the shift snapshot", async () => {
@@ -413,7 +413,7 @@ describe("ManagerPage — Overview: managerShiftSnapshot section (shift-capable 
       okResult(model({ managerShiftSnapshot: shiftSnapshotTriad(), issues: [issue()] })),
     );
     await renderPage();
-    expect(screen.getByText("המשמרת שלי")).toBeInTheDocument();
+    expect(screen.getByText("תמונת מצב משמרות")).toBeInTheDocument();
     expect(screen.getByText("דורש טיפול")).toBeInTheDocument();
   });
 });

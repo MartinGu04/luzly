@@ -8,7 +8,7 @@ interface ManagerShiftSnapshotSectionProps {
 }
 
 /**
- * "המשמרת שלי" -- a compact operational section inside the Manager Area's
+ * "תמונת מצב משמרות" -- a compact operational section inside the Manager Area's
  * own Overview category, for a manager who is themselves shift-capable
  * (e.g. an אחמ״ש with manager access; see `isShiftCapable`,
  * `lib/domain/personnelType.ts`). Reuses `ShiftSnapshotCard` (the exact
@@ -33,7 +33,7 @@ interface ManagerShiftSnapshotSectionProps {
 export function ManagerShiftSnapshotSection({ snapshot, todayDate, fetchedAt }: ManagerShiftSnapshotSectionProps) {
   return (
     <div>
-      <h2 className="mb-3 text-base font-semibold text-foreground">המשמרת שלי</h2>
+      <h2 className="mb-3 text-base font-semibold text-foreground">תמונת מצב משמרות</h2>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <ShiftSnapshotCard label="הקודמת" shift={snapshot.previousShift} todayDate={todayDate} />
         <ShiftSnapshotCard

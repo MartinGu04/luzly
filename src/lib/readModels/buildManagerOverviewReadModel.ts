@@ -189,7 +189,7 @@ export function buildManagerOverviewReadModel(
 
   const adoption = toManagerAdoptionState(rawAdoption, peopleById);
 
-  // "המשמרת שלי" -- only for a manager who is themselves shift-capable
+  // "תמונת מצב משמרות" -- only for a manager who is themselves shift-capable
   // (isSupervisor/isTechnician, never a title-string check). Computed
   // unconditionally regardless of `range`/`selectedPersonId` -- this is the
   // manager's own live "what's happening around me now" snapshot, never

@@ -323,7 +323,7 @@ export interface ManagerOverviewReadModel {
   selectedPersonRangeAbsences: ManagerAbsenceEntry[];
 
   /**
-   * The department-wide previous/current/next shift ("המשמרת שלי"), for a
+   * The department-wide previous/current/next shift ("תמונת מצב משמרות"), for a
    * manager who is themselves shift-capable (`isShiftCapable`,
    * `lib/domain/personnelType.ts` -- `isSupervisor`/`isTechnician`, never a
    * title-string check) -- e.g. an אחמ״ש with manager access. `null` for a
