@@ -19,7 +19,7 @@ import { parseScheduleSheet } from "@/lib/parsers/schedule";
 import { getJerusalemLocalNow } from "@/lib/time/jerusalemClock";
 import { buildShiftFairnessReadModel } from "./buildShiftFairnessReadModel";
 import { getFairnessWorkbookSheet, loadFairnessWorkbookContext } from "./fairnessWorkbookContext";
-import type { ShiftFairnessReadModel } from "./shiftFairnessTypes";
+import type { ShiftFairnessGroupView, ShiftFairnessReadModel } from "./shiftFairnessTypes";
 
 export type ShiftFairnessLoadResult =
   | { status: "unauthenticated" }
@@ -59,7 +59,7 @@ export async function loadShiftFairnessReadModel(rawMonth: string | null): Promi
   const contextResult = await loadFairnessWorkbookContext();
   if (contextResult.status !== "ok") return contextResult;
 
-  const { person, people, snapshot } = contextResult.context;
+  const { person, people, snapshot, avatarByPersonId } = contextResult.context;
   // `people` (the roster) stays local to this loader -- only used to
   // resolve events/reserve-participation evidence below, never returned.
 
@@ -83,5 +83,26 @@ export async function loadShiftFairnessReadModel(rawMonth: string | null): Promi
 
   const model = buildShiftFairnessReadModel(people, events, month, now, snapshot.fetchedAt, reserveParticipation);
 
-  return { status: "ok", model, person };
+  return { status: "ok", model: withAvatars(model, avatarByPersonId), person };
+}
+
+/**
+ * Stamps `avatarUrl` onto every row of an already-built
+ * `ShiftFairnessReadModel`, purely a presentation enrichment -- never
+ * touches `buildShiftFairnessReadModel`'s own calculation/sorting/
+ * eligibility logic, which this runs strictly AFTER and does not re-derive
+ * in any way. `avatarByPersonId.get(row.personId)` is `undefined` for a
+ * person with no known photo (no email, ambiguous email, or no matching
+ * Supabase account) -- normalized to `null` here, same "no photo" meaning
+ * either way.
+ */
+function withAvatars(
+  model: ShiftFairnessReadModel,
+  avatarByPersonId: ReadonlyMap<string, string | null>,
+): ShiftFairnessReadModel {
+  const groups: ShiftFairnessGroupView[] = model.groups.map((group) => ({
+    ...group,
+    rows: group.rows.map((row) => ({ ...row, avatarUrl: avatarByPersonId.get(row.personId) ?? null })),
+  }));
+  return { ...model, groups };
 }

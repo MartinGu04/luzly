@@ -53,13 +53,22 @@ function scheduleSheet(): RawSheet {
   return { name: "משמרות + תורנויות", values: [] };
 }
 
-function okContext(overrides: Partial<{ people: Person[]; events: Event[]; potentialH1: RawSheet; potentialH2: RawSheet }> = {}) {
+function okContext(
+  overrides: Partial<{
+    people: Person[];
+    events: Event[];
+    potentialH1: RawSheet;
+    potentialH2: RawSheet;
+    avatarByPersonId: ReadonlyMap<string, string | null>;
+  }> = {},
+) {
   const people = overrides.people ?? [person()];
   return {
     status: "ok" as const,
     context: {
       person: people[0],
       people,
+      avatarByPersonId: overrides.avatarByPersonId ?? new Map<string, string | null>(),
       snapshot: {
         fetchedAt: "2026-08-15T10:00:00.000Z",
         sheets: [
@@ -165,5 +174,76 @@ describe("loadShiftFairnessReadModel — reserveParticipation wiring for closed 
     const technicianGroup = result.model.groups.find((group) => group.role === "technician");
     expect(technicianGroup?.rows[0]?.actualShifts).toBe(1);
     expect(technicianGroup?.rows[0]?.target).toBeNull();
+  });
+});
+
+describe("loadShiftFairnessReadModel — avatar enrichment (never touches calculations)", () => {
+  it("stamps each row's avatarUrl from the context's avatarByPersonId map, keyed by personId", async () => {
+    loadFairnessWorkbookContext.mockResolvedValue(
+      okContext({ avatarByPersonId: new Map([["p_tech", "https://lh3.googleusercontent.com/a/tal.jpg"]]) }),
+    );
+    const result = await loadShiftFairnessReadModel(null);
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    const technicianGroup = result.model.groups.find((group) => group.role === "technician");
+    expect(technicianGroup?.rows[0]?.avatarUrl).toBe("https://lh3.googleusercontent.com/a/tal.jpg");
+  });
+
+  it("falls back to null (never undefined, never a crash) when the person has no entry in the map", async () => {
+    loadFairnessWorkbookContext.mockResolvedValue(okContext({ avatarByPersonId: new Map() }));
+    const result = await loadShiftFairnessReadModel(null);
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    const technicianGroup = result.model.groups.find((group) => group.role === "technician");
+    expect(technicianGroup?.rows[0]?.avatarUrl).toBeNull();
+  });
+
+  it("never leaks one person's photo onto a different person's row", async () => {
+    parseScheduleSheet.mockReturnValue([
+      shiftEvent({ personId: "p_tech", date: "2026-08-05", role: "technician" }),
+      shiftEvent({ personId: "p_sup", date: "2026-08-05", role: "supervisor" }),
+    ]);
+    loadFairnessWorkbookContext.mockResolvedValue(
+      okContext({
+        people: [person(), person({ id: "p_sup", name: "שרה אחמ״שית", isTechnician: false, isSupervisor: true })],
+        avatarByPersonId: new Map([
+          ["p_tech", "https://lh3.googleusercontent.com/a/tal.jpg"],
+          ["p_sup", "https://lh3.googleusercontent.com/a/sara.jpg"],
+        ]),
+      }),
+    );
+
+    const result = await loadShiftFairnessReadModel("2026-08");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+
+    const technicianRow = result.model.groups.find((g) => g.role === "technician")?.rows[0];
+    const supervisorRow = result.model.groups.find((g) => g.role === "supervisor")?.rows[0];
+    expect(technicianRow?.avatarUrl).toBe("https://lh3.googleusercontent.com/a/tal.jpg");
+    expect(supervisorRow?.avatarUrl).toBe("https://lh3.googleusercontent.com/a/sara.jpg");
+  });
+
+  it("changes nothing else about the model -- same actualShifts/target/status as without avatar data", async () => {
+    parseScheduleSheet.mockReturnValue([shiftEvent({ personId: "p_tech", date: "2026-08-05", role: "technician" })]);
+    loadFairnessWorkbookContext.mockResolvedValue(okContext());
+    const withoutAvatars = await loadShiftFairnessReadModel("2026-08");
+
+    loadFairnessWorkbookContext.mockResolvedValue(
+      okContext({ avatarByPersonId: new Map([["p_tech", "https://lh3.googleusercontent.com/a/tal.jpg"]]) }),
+    );
+    const withAvatars = await loadShiftFairnessReadModel("2026-08");
+
+    expect(withoutAvatars.status).toBe("ok");
+    expect(withAvatars.status).toBe("ok");
+    if (withoutAvatars.status !== "ok" || withAvatars.status !== "ok") return;
+
+    const stripAvatar = (row: unknown) => {
+      const clone = { ...(row as Record<string, unknown>) };
+      delete clone.avatarUrl;
+      return clone;
+    };
+    expect(withAvatars.model.groups.map((g) => g.rows.map(stripAvatar))).toEqual(
+      withoutAvatars.model.groups.map((g) => g.rows.map(stripAvatar)),
+    );
   });
 });

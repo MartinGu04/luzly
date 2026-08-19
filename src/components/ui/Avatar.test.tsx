@@ -74,6 +74,35 @@ describe("Avatar — broken image falls back to initials, never a broken-image i
   });
 });
 
+describe("Avatar — xs size (dense table rows, e.g. Fairness)", () => {
+  it("renders smaller than the default (md) size", () => {
+    const { container: xsContainer } = render(<Avatar name="דני בדיקה" size="xs" avatarUrl={null} />);
+    const xsRoot = xsContainer.firstElementChild as HTMLElement;
+    expect(xsRoot.className).toContain("h-6");
+    expect(xsRoot.className).toContain("w-6");
+    cleanup();
+
+    const { container: mdContainer } = render(<Avatar name="דני בדיקה" avatarUrl={null} />);
+    const mdRoot = mdContainer.firstElementChild as HTMLElement;
+    expect(mdRoot.className).toContain("h-10");
+  });
+
+  it("still shows the photo when available, and still falls back to initials otherwise", () => {
+    const { container, getByText } = render(<Avatar name="דני בדיקה" size="xs" avatarUrl={null} />);
+    expect(container.querySelector("img")).toBeNull();
+    expect(getByText("דב")).toBeInTheDocument();
+    cleanup();
+
+    const { container: photoContainer } = render(
+      <Avatar name="דני בדיקה" size="xs" avatarUrl="https://lh3.googleusercontent.com/a/photo.jpg" />,
+    );
+    expect(photoContainer.querySelector("img")).toHaveAttribute(
+      "src",
+      "https://lh3.googleusercontent.com/a/photo.jpg",
+    );
+  });
+});
+
 describe("Avatar — identity independence", () => {
   it("avatarUrl never changes which name/initials would be computed -- purely a presentation swap", () => {
     const { getByText: getByTextNoPhoto } = render(<Avatar name="נועה דוגמה" avatarUrl={null} />);

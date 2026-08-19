@@ -75,6 +75,18 @@ export interface DutyFairnessPersonRowView {
   exemptions: readonly DutyFairnessExemptionView[];
   /** Only ever non-empty for a genuinely verified gap (unresolved identity, or a target-bearing role missing its period target note) -- never noise on every row. */
   dataCompleteness: FairnessDataCompleteness;
+  /**
+   * The person's presentation-only Google avatar photo, when known --
+   * `undefined`/`null` both mean "no photo, fall back to initials", and
+   * always `null`/absent when `personId` itself is `null` (an unresolved
+   * source name has no person to look a photo up for). Never required by
+   * `buildDutyFairnessReadModel` itself (which never sets it --
+   * calculations/sorting/eligibility are entirely untouched by this
+   * field). Stamped on AFTER the read model is built, by
+   * `loadDutyFairnessReadModel` (`dutyFairness.ts`), from
+   * `FairnessWorkbookContext.avatarByPersonId`.
+   */
+  avatarUrl?: string | null;
 }
 
 export interface DutyFairnessGroupView {

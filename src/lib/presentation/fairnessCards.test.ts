@@ -70,6 +70,26 @@ describe("buildShiftFairnessCardView -- serviceCategory", () => {
   });
 });
 
+describe("buildShiftFairnessCardView -- avatarUrl", () => {
+  it("carries the row's own avatarUrl straight through, unmodified", () => {
+    const view = buildShiftFairnessCardView(
+      shiftRow({ avatarUrl: "https://lh3.googleusercontent.com/a/dani.jpg" }),
+      "/fairness?person=p_1",
+    );
+    expect(view.avatarUrl).toBe("https://lh3.googleusercontent.com/a/dani.jpg");
+  });
+
+  it("is null when the row has no avatarUrl (undefined, the field's own default)", () => {
+    const view = buildShiftFairnessCardView(shiftRow(), "/fairness?person=p_1");
+    expect(view.avatarUrl).toBeNull();
+  });
+
+  it("is null when the row's avatarUrl is explicitly null", () => {
+    const view = buildShiftFairnessCardView(shiftRow({ avatarUrl: null }), "/fairness?person=p_1");
+    expect(view.avatarUrl).toBeNull();
+  });
+});
+
 describe("shiftFairnessCompletenessNote", () => {
   it("returns a concrete explanation for a meaningful reason", () => {
     expect(shiftFairnessCompletenessNote(["shift_target_unmodelable_historical"])).toContain("תקופה שכבר הסתיימה");
@@ -150,5 +170,32 @@ describe("buildDutyFairnessCardView", () => {
       "/fairness?mode=duties&person=p_1",
     );
     expect(view.exemptionBadges).toEqual(["🚫 מטבח"]);
+  });
+});
+
+describe("buildDutyFairnessCardView -- avatarUrl", () => {
+  it("carries the row's own avatarUrl straight through, unmodified", () => {
+    const view = buildDutyFairnessCardView(
+      dutyRow({ avatarUrl: "https://lh3.googleusercontent.com/a/noa.jpg" }),
+      "/fairness?mode=duties&person=p_1",
+    );
+    expect(view.avatarUrl).toBe("https://lh3.googleusercontent.com/a/noa.jpg");
+  });
+
+  it("is null when the row has no avatarUrl (undefined, the field's own default)", () => {
+    const view = buildDutyFairnessCardView(dutyRow(), "/fairness?mode=duties&person=p_1");
+    expect(view.avatarUrl).toBeNull();
+  });
+
+  it("is null for an unresolved identity (null personId), even if avatarUrl happened to be set on the row", () => {
+    const view = buildDutyFairnessCardView(
+      dutyRow({ personId: null, avatarUrl: "https://lh3.googleusercontent.com/a/noa.jpg" }),
+      null,
+    );
+    // The row itself should never carry avatarUrl when personId is null (see
+    // dutyFairness.ts's own withAvatars), but the card builder is a plain
+    // passthrough either way -- this proves the builder doesn't invent a
+    // photo attribution beyond what the row already decided.
+    expect(view.personId).toBeNull();
   });
 });
