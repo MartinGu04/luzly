@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { TabLink } from "@/components/ui/TabLink";
 import { buildManagerHref, type ManagerCategory, type ManagerHrefParams } from "@/lib/presentation/managerUrl";
 
 interface ManagerCategoryNavProps {
@@ -40,6 +40,16 @@ const TAB_BASE =
  * `overflow-x-auto` on the `nav` kick in as horizontal scroll instead of a
  * wrapped second row. Desktop is unaffected: the strip already fits on one
  * row there with no scrolling needed.
+ *
+ * Each tab is a `TabLink` (`components/ui/`) -- real per-tab pending-
+ * navigation feedback (instant spinner + `aria-busy` on click, a second
+ * click on an already-pending tab is a no-op) via the same `useLinkStatus`
+ * mechanism the app's main Sidebar/BottomNav already use, shared with
+ * `FairnessModeToggle`'s identical tab idiom rather than reimplemented
+ * here. A category switch stays on the SAME `/manager` route segment
+ * (only `?category=` changes), which is exactly the case the route's own
+ * `loading.tsx` Suspense boundary can never fire for -- this is what
+ * fills that gap.
  */
 export function ManagerCategoryNav({ active, current }: ManagerCategoryNavProps) {
   return (
@@ -48,17 +58,16 @@ export function ManagerCategoryNav({ active, current }: ManagerCategoryNavProps)
         {CATEGORY_OPTIONS.map((option) => {
           const isActive = active === option.key;
           return (
-            <Link
+            <TabLink
               key={option.key}
               href={buildManagerHref({ ...current, personId: null, category: option.key })}
-              role="tab"
-              aria-selected={isActive}
+              isActive={isActive}
               className={`${TAB_BASE} ${
                 isActive ? "bg-surface-1 text-primary ring-1 ring-border" : "text-muted hover:text-foreground"
               }`}
             >
               {option.label}
-            </Link>
+            </TabLink>
           );
         })}
       </div>

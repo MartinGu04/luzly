@@ -1,9 +1,16 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { FairnessModeToggle } from "./FairnessModeToggle";
+
+const linkStatus = { pending: false };
+vi.mock("next/link", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("next/link")>();
+  return { ...actual, useLinkStatus: () => linkStatus };
+});
 
 afterEach(() => {
   cleanup();
+  linkStatus.pending = false;
 });
 
 describe("FairnessModeToggle", () => {
@@ -31,5 +38,48 @@ describe("FairnessModeToggle", () => {
   it("never renders a combined/משולב option", () => {
     render(<FairnessModeToggle active="shifts" />);
     expect(screen.queryByText("משולב")).toBeNull();
+  });
+});
+
+describe("FairnessModeToggle — pending navigation feedback", () => {
+  it("a non-pending tab is not aria-busy and shows no spinner", () => {
+    const { container } = render(<FairnessModeToggle active="shifts" />);
+    expect(screen.getByRole("tab", { name: "תורנויות" })).toHaveAttribute("aria-busy", "false");
+    expect(container.querySelector(".animate-spin")).toBeNull();
+  });
+
+  it("a click immediately enters pending state: the clicked destination becomes aria-busy and shows a spinner", () => {
+    linkStatus.pending = true;
+    const { container } = render(<FairnessModeToggle active="shifts" />);
+    const dutiesTab = screen.getByRole("tab", { name: "תורנויות" });
+    expect(dutiesTab).toHaveAttribute("aria-busy", "true");
+    expect(container.querySelector(".animate-spin")).toBeInTheDocument();
+  });
+
+  it("the tab's own label stays visible while pending", () => {
+    linkStatus.pending = true;
+    render(<FairnessModeToggle active="shifts" />);
+    expect(screen.getByRole("tab", { name: "תורנויות" })).toHaveTextContent("תורנויות");
+  });
+
+  it("clicking an already-pending tab does not fire a second, redundant navigation", () => {
+    linkStatus.pending = true;
+    render(<FairnessModeToggle active="shifts" />);
+    const dutiesTab = screen.getByRole("tab", { name: "תורנויות" });
+    const notPrevented = fireEvent.click(dutiesTab);
+    expect(notPrevented).toBe(false);
+  });
+
+  it("active/aria-selected styling is unaffected by pending state", () => {
+    linkStatus.pending = true;
+    render(<FairnessModeToggle active="duties" />);
+    expect(screen.getByRole("tab", { name: "משמרות" })).toHaveAttribute("aria-selected", "false");
+    expect(screen.getByRole("tab", { name: "תורנויות" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("href/URL semantics are unaffected by pending state", () => {
+    linkStatus.pending = true;
+    render(<FairnessModeToggle active="shifts" />);
+    expect(screen.getByRole("tab", { name: "תורנויות" })).toHaveAttribute("href", "/fairness?mode=duties");
   });
 });

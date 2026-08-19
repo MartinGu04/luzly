@@ -4,6 +4,25 @@ Small, generic building blocks reused across feature areas: `Panel`
 surface variants, `Badge`, `Avatar`, `Card`, `CoverageBadge`,
 `IssueSeverityBadge`, `LiveClock`.
 
+- `LinkPendingWatcher.tsx` — a tiny bridge component (renders nothing)
+  that reports the enclosing `next/link` `<Link>`'s own pending-navigation
+  state (`useLinkStatus`) up to a parent via callback. Extracted from
+  `layout/Sidebar.tsx`/`layout/BottomNav.tsx`, which previously each
+  defined an identical local copy; now the ONE shared primitive, also
+  used by `TabLink.tsx`. Pure de-duplication, no behavior change.
+- `TabLink.tsx` — one `role="tab"` pill link with real per-tab pending-
+  navigation feedback (instant `aria-busy` + small inline spinner on
+  click, using `LinkPendingWatcher` above; a second click on an
+  already-pending tab is a no-op via `preventDefault`, same idiom
+  Sidebar/BottomNav already use for the app's main navigation). Used by
+  `manager/ManagerCategoryNav.tsx` and `fairness/FairnessModeToggle.tsx`
+  so both tab strips share ONE pending-state implementation instead of
+  two independent copies — added because a category/mode switch stays on
+  the SAME route segment (only a searchParam changes), which is exactly
+  the case a route's own `loading.tsx` Suspense boundary can never fire
+  for. The spinner never replaces the tab's label text (the destination
+  stays nameable, no layout-shifting skeleton) and never changes
+  `href`/`aria-selected`/active-styling semantics.
 - `LiveClock.tsx` — the one live Asia/Jerusalem clock in the app (Design
   Pass PR #19; previously dashboard-only). Its only current caller is
   `layout/ShellUtilityBar.tsx` (the app shell's desktop-only top utility
