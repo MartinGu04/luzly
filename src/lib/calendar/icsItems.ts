@@ -6,6 +6,8 @@ import type { Event } from "@/lib/domain/event";
 import { MINUTES_PER_DAY, resolveEventShiftInterval, type ShiftSchedule } from "@/lib/domain/shiftSchedule";
 import { absenceKindLabel, dutyFamilyLabel, periodLabel, roleLabel } from "@/lib/presentation/labels";
 import { jerusalemLocalTimeToInstant } from "@/lib/time/jerusalemClock";
+import { icsEventEmoji, withEmojiPrefix } from "./icsEmoji";
+import { buildShiftRosterDescription } from "./icsRoster";
 import type { IcsCalendarItem } from "./icsRender";
 
 /**
@@ -50,8 +52,17 @@ export function calendarEventUid(event: Pick<Event, "sourceSheet" | "sourceCell"
  * Returns `null` for a shift Event whose interval can't be resolved
  * (unspecified period, an out-of-range override) -- never a guessed
  * start/end, matching every other timing computation in this codebase.
+ *
+ * `allEvents` -- the FULL, unfiltered, every-person Event set for the
+ * shift-roster description (see `icsRoster.ts`) -- is only ever read for
+ * `category === "shift"`; duty/absence Events never receive a roster
+ * (PR spec §5: no meaningful "who's with me" for those categories).
  */
-export function buildCalendarItem(event: Event, schedule: ShiftSchedule | null): IcsCalendarItem | null {
+export function buildCalendarItem(
+  event: Event,
+  schedule: ShiftSchedule | null,
+  allEvents: readonly Event[],
+): IcsCalendarItem | null {
   if (event.category === "shift") {
     if (schedule === null) return null;
     const resolution = resolveEventShiftInterval(event, schedule);
@@ -60,7 +71,7 @@ export function buildCalendarItem(event: Event, schedule: ShiftSchedule | null):
     return {
       uid: calendarEventUid(event),
       summary: buildShiftSummary(event),
-      description: buildShiftDescription(event),
+      description: buildShiftDescription(event, allEvents),
       timing: {
         kind: "timed",
         startUtc: minuteOnDateToInstant(event.date, resolution.interval.startMinute),
@@ -121,27 +132,41 @@ function buildShiftSummary(event: Event): string {
   const period = periodLabel(event.period);
   const base = [role, period].filter((part): part is string => part !== null).join(" ");
   const summary = base !== "" ? base : event.title;
-  return event.shadow ? `${summary} (צל)` : summary;
+  const withShadow = event.shadow ? `${summary} (צל)` : summary;
+  return withEmojiPrefix(icsEventEmoji(event), withShadow);
 }
 
-function buildShiftDescription(event: Event): string | null {
+/**
+ * `allEvents` feeds `buildShiftRosterDescription` -- see that function's
+ * own docstring for why it must be the full, unfiltered, every-person set.
+ * The roster block (when non-null) is appended AFTER the existing
+ * tentative/override/change-note lines, separated by a blank line, so
+ * neither block's presence/absence shifts the other's meaning.
+ */
+function buildShiftDescription(event: Event, allEvents: readonly Event[]): string | null {
   const lines: string[] = [];
   if (event.certainty === "tentative") lines.push("משובץ באופן משוער -- טרם אושר סופית");
   if (event.startTimeOverride !== null || event.endTimeOverride !== null) {
     lines.push("שעות המשמרת חורגות מהשעון הרגיל");
   }
   if (event.changeNote !== null) lines.push(event.changeNote);
-  return lines.length > 0 ? lines.join("\n") : null;
+
+  const roster = buildShiftRosterDescription(event, allEvents);
+
+  if (lines.length === 0) return roster;
+  if (roster === null) return lines.join("\n");
+  return [lines.join("\n"), roster].join("\n\n");
 }
 
 function buildDutySummary(event: Event): string {
-  if (event.dutyFamily === null) return event.title;
-  const label = dutyFamilyLabel(event.dutyFamily);
-  return event.slot !== null ? `${label} ${event.slot}` : label;
+  const label = event.dutyFamily === null ? event.title : dutyFamilyLabel(event.dutyFamily);
+  const withSlot = event.dutyFamily !== null && event.slot !== null ? `${label} ${event.slot}` : label;
+  return withEmojiPrefix(icsEventEmoji(event), withSlot);
 }
 
 function buildAbsenceSummary(event: Event): string {
-  return event.absenceKind !== null ? absenceKindLabel(event.absenceKind) : event.title;
+  const label = event.absenceKind !== null ? absenceKindLabel(event.absenceKind) : event.title;
+  return withEmojiPrefix(icsEventEmoji(event), label);
 }
 
 function buildDutyOrAbsenceDescription(event: Event): string | null {

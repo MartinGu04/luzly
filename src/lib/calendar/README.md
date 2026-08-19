@@ -44,9 +44,32 @@ model, only the calendar-feed-specific plumbing around it.
   shift/duty/absence `Event` into a stable-UID, correctly-timed
   `IcsCalendarItem`. `calendarEventUid` is keyed on the Event's own
   spreadsheet origin (`sourceSheet`+`sourceCell`) -- this is what makes
-  the feed a real subscription: editing an assignment's text keeps the
-  same UID (an update, not a duplicate), and a removed/reassigned cell
-  simply stops appearing in the next generation.
+  the feed a real subscription: editing an assignment's text (or its
+  DESCRIPTION/roster, see `icsRoster.ts` below) keeps the same UID (an
+  update, not a duplicate), and a removed/reassigned cell simply stops
+  appearing in the next generation.
+- `icsEmoji.ts` (pure) -- `icsEventEmoji`, ONE centralized `SUMMARY`-emoji
+  mapping for this feed, keyed on typed `category`/`period`/`dutyFamily`/
+  `absenceKind` fields (never raw text). Deliberately a SEPARATE table
+  from `lib/presentation/emoji.ts`'s own `assignmentEmoji` (the in-app
+  UI's mapping) -- a few of this feed's requested symbols intentionally
+  differ from the UI's existing choices; see the file's own docstring for
+  exactly which, and for every duty family/absence kind with no
+  requested/fitting symbol (left unmapped -- the summary simply has no
+  emoji prefix, never a guess). Has zero effect on the in-app "הלוח שלי"
+  UI, which is untouched and still goes through `lib/presentation/emoji.ts`
+  alone.
+- `icsRoster.ts` (pure) -- `buildShiftRosterDescription`, the "איתך
+  במשמרת:" roster block appended to a SHIFT Event's `DESCRIPTION` (never
+  duty/absence -- those have no shift-roster concept). Reuses
+  `buildShiftRoster` (`lib/domain/shiftCoverage.ts`), the SAME roster
+  query the in-app "מי איתי?" panel is already built on -- no second
+  roster/coverage computation. Computed fresh from the full, unfiltered,
+  every-person Event set on every feed request (never persisted/
+  snapshotted), so an added/removed/reassigned colleague or a role change
+  is reflected on the very next fetch -- entirely independent of
+  `calendarEventUid`, so a roster-only change updates the existing VEVENT,
+  never creates a duplicate.
 - `icsRender.ts` / `icsEncoding.ts` (pure) -- RFC 5545 VCALENDAR/VEVENT
   text rendering and escaping/line-folding, independently testable with
   no Supabase/Google/domain dependency at all.

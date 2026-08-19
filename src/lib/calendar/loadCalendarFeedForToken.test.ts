@@ -117,10 +117,10 @@ describe("loadCalendarFeedForToken", () => {
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
 
-    expect(result.icsText).toContain('SUMMARY:אחמ"ש יום');
-    expect(result.icsText).toContain("SUMMARY:שמירה 1");
+    expect(result.icsText).toContain('SUMMARY:☀️ אחמ"ש יום');
+    expect(result.icsText).toContain("SUMMARY:🛡️ שמירה 1");
     expect(result.icsText).not.toContain("טכנאי לילה");
-    expect(result.icsText).not.toContain("SUMMARY:חופש");
+    expect(result.icsText).not.toContain("SUMMARY:🏖️ חופש");
   });
 
   it("a different person's own token sees only THEIR events", async () => {
@@ -132,7 +132,7 @@ describe("loadCalendarFeedForToken", () => {
     if (result.status !== "ok") return;
 
     expect(result.icsText).toContain("טכנאי לילה");
-    expect(result.icsText).toContain("SUMMARY:חופש");
+    expect(result.icsText).toContain("SUMMARY:🏖️ חופש");
     expect(result.icsText).not.toContain('אחמ"ש יום');
     expect(result.icsText).not.toContain("שמירה 1");
   });
@@ -161,7 +161,7 @@ describe("loadCalendarFeedForToken", () => {
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
     expect(result.icsText).not.toContain('אחמ"ש יום');
-    expect(result.icsText).toContain("SUMMARY:שמירה 1");
+    expect(result.icsText).toContain("SUMMARY:🛡️ שמירה 1");
   });
 });
 
@@ -174,8 +174,8 @@ describe("loadCalendarFeedForToken -- 30-day past window (future unbounded)", ()
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
 
-    expect(result.icsText).not.toContain("SUMMARY:שמירה 1"); // 2026-06-01, well before cutoff
-    expect(result.icsText).not.toContain("SUMMARY:שמירה 2"); // 2026-07-19, cutoff - 1 day
+    expect(result.icsText).not.toContain("שמירה 1"); // 2026-06-01, well before cutoff
+    expect(result.icsText).not.toContain("שמירה 2"); // 2026-07-19, cutoff - 1 day
   });
 
   it("includes the cutoff date itself (inclusive lower bound), today, and any future date (no upper bound)", async () => {
@@ -186,9 +186,9 @@ describe("loadCalendarFeedForToken -- 30-day past window (future unbounded)", ()
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
 
-    expect(result.icsText).toContain("SUMMARY:שמירה 3"); // 2026-07-20, exactly the cutoff
-    expect(result.icsText).toContain("SUMMARY:שמירה 4"); // 2026-08-19, today
-    expect(result.icsText).toContain("SUMMARY:שמירה 5"); // 2027-01-01, far future
+    expect(result.icsText).toContain("SUMMARY:🛡️ שמירה 3"); // 2026-07-20, exactly the cutoff
+    expect(result.icsText).toContain("SUMMARY:🛡️ שמירה 4"); // 2026-08-19, today
+    expect(result.icsText).toContain("SUMMARY:🛡️ שמירה 5"); // 2027-01-01, far future
   });
 
   it("produces exactly 3 VEVENTs -- the 2 out-of-window dates never even reach ICS rendering", async () => {
@@ -215,5 +215,118 @@ describe("loadCalendarFeedForToken -- 30-day past window (future unbounded)", ()
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
     expect(result.icsText).toContain("DTSTART;VALUE=DATE:20260720");
+  });
+});
+
+describe("loadCalendarFeedForToken -- shift roster in DESCRIPTION (end-to-end, dynamic)", () => {
+  const ROSTER_PERSONNEL_SHEET: RawSheet = {
+    name: SHEET_SOURCES.personnel,
+    values: [
+      ["שם", "מייל", "מנהל", "טכנאי", 'אחמ"ש', 'סוג כ"א'],
+      ["דני בדיקה", "dani@example.com", "false", "false", "true", "קבוע"],
+      ["נועה דוגמה", "noa@example.com", "false", "true", "false", "קבוע"],
+      ["איתן דוגמה", "eitan@example.com", "false", "false", "true", "קבוע"],
+    ],
+  };
+
+  /** Dani (supervisor) and Noa (technician) share the SAME day shift; Eitan (supervisor) is on the NIGHT shift the same date -- an unrelated shift that must never leak into the day shift's roster. */
+  function rosterScheduleSheet(noaAssignment: string): RawSheet {
+    return {
+      name: SHEET_SOURCES.schedule,
+      values: [
+        ["תאריך", "יום", "דני בדיקה", "נועה דוגמה", "איתן דוגמה"],
+        ["19/08/2026", "ד", 'אחמ"ש יום', noaAssignment, 'אחמ"ש לילה'],
+      ],
+    };
+  }
+
+  function rosterSnapshot(noaAssignment: string): RawWorkbookSnapshot {
+    return {
+      fetchedAt: "2026-08-19T00:00:00.000Z",
+      sheets: [
+        ROSTER_PERSONNEL_SHEET,
+        rosterScheduleSheet(noaAssignment),
+        SETTINGS_SHEET,
+        EMPTY_POTENTIAL_SHEET(SHEET_SOURCES.potentialH1),
+        EMPTY_POTENTIAL_SHEET(SHEET_SOURCES.potentialH2),
+      ],
+    };
+  }
+
+  it("includes the day-shift colleague in the DESCRIPTION, grouped by role", async () => {
+    resolveCalendarFeedOwnerByToken.mockReset().mockResolvedValue({ status: "ok", email: "dani@example.com" });
+    getWorkbookSnapshot.mockReset().mockResolvedValue(rosterSnapshot("טכנאי יום"));
+
+    const result = await loadCalendarFeedForToken("tok");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+
+    expect(result.icsText).toContain("DESCRIPTION:איתך במשמרת:\\nטכנאים: נועה דוגמה");
+  });
+
+  it("is symmetric: the technician's own feed lists the supervisor", async () => {
+    resolveCalendarFeedOwnerByToken.mockReset().mockResolvedValue({ status: "ok", email: "noa@example.com" });
+    getWorkbookSnapshot.mockReset().mockResolvedValue(rosterSnapshot("טכנאי יום"));
+
+    const result = await loadCalendarFeedForToken("tok");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+
+    expect(result.icsText).toContain('DESCRIPTION:איתך במשמרת:\\nאחמ"ש: דני בדיקה');
+  });
+
+  it("never leaks the night-shift supervisor (same date, different period) into the day shift's roster", async () => {
+    resolveCalendarFeedOwnerByToken.mockReset().mockResolvedValue({ status: "ok", email: "dani@example.com" });
+    getWorkbookSnapshot.mockReset().mockResolvedValue(rosterSnapshot("טכנאי יום"));
+
+    const result = await loadCalendarFeedForToken("tok");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+
+    expect(result.icsText).not.toContain("איתן דוגמה");
+  });
+
+  it("is rebuilt on every request: reassigning the colleague away updates the DESCRIPTION on the next fetch", async () => {
+    resolveCalendarFeedOwnerByToken.mockReset().mockResolvedValue({ status: "ok", email: "dani@example.com" });
+
+    getWorkbookSnapshot.mockResolvedValueOnce(rosterSnapshot("טכנאי יום"));
+    const before = await loadCalendarFeedForToken("tok");
+    expect(before.status).toBe("ok");
+    if (before.status !== "ok") return;
+    expect(before.icsText).toContain("נועה דוגמה");
+
+    // Noa is reassigned off this shift (now on vacation instead) -- a fresh fetch of the SAME token/person.
+    getWorkbookSnapshot.mockResolvedValueOnce(rosterSnapshot("חופש"));
+    const after = await loadCalendarFeedForToken("tok");
+    expect(after.status).toBe("ok");
+    if (after.status !== "ok") return;
+    expect(after.icsText).not.toContain("נועה דוגמה");
+    // No roster left at all (Eitan is on a different shift) -- DESCRIPTION is simply absent for this VEVENT.
+    expect(after.icsText).not.toContain("DESCRIPTION");
+  });
+
+  it("preserves the exact same UID across the roster change above -- an update, never a duplicate VEVENT", async () => {
+    resolveCalendarFeedOwnerByToken.mockReset().mockResolvedValue({ status: "ok", email: "dani@example.com" });
+
+    getWorkbookSnapshot.mockResolvedValueOnce(rosterSnapshot("טכנאי יום"));
+    const before = await loadCalendarFeedForToken("tok");
+    getWorkbookSnapshot.mockResolvedValueOnce(rosterSnapshot("חופש"));
+    const after = await loadCalendarFeedForToken("tok");
+    expect(before.status).toBe("ok");
+    expect(after.status).toBe("ok");
+    if (before.status !== "ok" || after.status !== "ok") return;
+
+    // RFC 5545 unfolding (reverse of icsEncoding.ts's foldIcsLine): a CRLF
+    // immediately followed by a single space is a fold point, not a real
+    // line break -- the UID's 64-hex-char hash + "@mi-ma-mo.app" suffix
+    // together exceed the 75-octet line limit, so it's genuinely folded
+    // across two physical lines in real output; this must be undone
+    // before comparing the logical UID value.
+    const uidOf = (icsText: string) => icsText.replace(/\r\n /g, "").match(/UID:([0-9a-f]{64}@[^\r\n]+)/)?.[1];
+    expect(uidOf(before.icsText)).toBeDefined();
+    expect(uidOf(before.icsText)).toBe(uidOf(after.icsText));
+    // Exactly one VEVENT throughout -- the roster/description change never produced a second, duplicate entry.
+    expect(before.icsText.match(/BEGIN:VEVENT/g)).toHaveLength(1);
+    expect(after.icsText.match(/BEGIN:VEVENT/g)).toHaveLength(1);
   });
 });
