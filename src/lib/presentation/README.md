@@ -24,6 +24,23 @@ own pure calendar functions (`lib/domain/dutyBlocks.ts`'s
   `CoverageStatus`. The UI must never render a raw machine value from
   these enums directly.
 - `avatar.ts` — `initialsOf`, for the generated circular avatar.
+- `eventColor.ts` — `eventColorKey`/`eventColorBgClassName`: a small, FIXED
+  8-slot semantic color palette (shift day/night, vacation, after,
+  referral, evacuation on-call, guard, kitchen) for calendar events, keyed
+  only off typed `category`/`period`/`dutyFamily`/`absenceKind` fields --
+  same input contract and precedence order as `emoji.ts`'s
+  `assignmentEmoji`, but its own separately-reasoned mapping. Deliberately
+  not every `DutyFamily`/`AbsenceKind` gets a slot (reserve/callup/rasar/
+  oxid, medical/day_off stay unmapped, same graceful-degradation contract
+  as the emoji map) -- "a small, coherent palette", not a color per raw
+  enum value. `eventColorBgClassName` returns a Tailwind soft-tint
+  background class (the `--event-*-soft` tokens in `globals.css`, reusing
+  this repo's dataviz categorical-color method) or `null`; used ONLY by
+  `calendarDayIndicator.ts`'s personal "הלוח שלי" indicators (never
+  `EveryoneMonthGrid`'s "כולם" grid, which stays on its own existing
+  coverage-status coloring). `lib/calendar/icsColor.ts` reuses
+  `eventColorKey` outright for the ICS feed's best-effort `COLOR`
+  property -- one semantic mapping decision, two renderings.
 - `dataFreshness.ts` — `formatDataFreshnessLabel(fetchedAt, now)` (PR
   #17): a deterministic relative-age label ("עודכן עכשיו" / "עודכן לפני 4
   דקות" / "עודכן לפני שעה") for a read model's `fetchedAt` -- explicitly

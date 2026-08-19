@@ -49,12 +49,17 @@ function IndicatorChips({ indicators }: { indicators: CalendarDayIndicator[] }) 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-hidden">
       {visibleIndicators[0] ? (
-        <IndicatorChip emoji={visibleIndicators[0].emoji} label={visibleIndicators[0].label} />
+        <IndicatorChip
+          emoji={visibleIndicators[0].emoji}
+          label={visibleIndicators[0].label}
+          categoryBgClassName={visibleIndicators[0].colorClassName ?? undefined}
+        />
       ) : null}
       {visibleIndicators[1] ? (
         <IndicatorChip
           emoji={visibleIndicators[1].emoji}
           label={visibleIndicators[1].label}
+          categoryBgClassName={visibleIndicators[1].colorClassName ?? undefined}
           className="hidden sm:flex"
         />
       ) : null}
@@ -87,6 +92,16 @@ function IndicatorChips({ indicators }: { indicators: CalendarDayIndicator[] }) 
  * so the two calendar surfaces can never drift into different geometry.
  * Only the CONTENT this component feeds into that shell (personal event
  * indicators, via `buildDayIndicators`) is its own.
+ *
+ * Each indicator's chip also carries a semantic per-event-type soft color
+ * tint (`CalendarDayIndicator.colorClassName`, from
+ * `lib/presentation/eventColor.ts`) -- this is what makes "הלוח שלי"
+ * (always a single person: the viewer themselves or a manager's selected
+ * person) visually distinguish shift/duty/absence TYPES, never applied to
+ * `EveryoneMonthGrid`'s own department-wide "כולם" grid, which stays on its
+ * existing coverage-status coloring untouched (this component and that one
+ * are simply never rendered for the same perspective -- see
+ * `app/(app)/schedule/page.tsx`).
  */
 export function CalendarGrid({
   grid,

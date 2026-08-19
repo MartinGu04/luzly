@@ -75,6 +75,32 @@ describe("eventIndicator", () => {
     const indicator = eventIndicator(baseEvent({ certainty: "confirmed" }), "k");
     expect(indicator.tentative).toBe(false);
   });
+
+  it("carries the semantic color class for a day shift", () => {
+    const indicator = eventIndicator(baseEvent({ category: "shift", period: "day" }), "k");
+    expect(indicator.colorClassName).toBe("bg-event-shift-day-soft");
+  });
+
+  it("carries a distinct semantic color class for a night shift", () => {
+    const indicator = eventIndicator(baseEvent({ category: "shift", period: "night" }), "k");
+    expect(indicator.colorClassName).toBe("bg-event-shift-night-soft");
+  });
+
+  it("carries the semantic color class for a mapped absence kind", () => {
+    const indicator = eventIndicator(
+      baseEvent({ category: "absence", role: null, period: "unspecified", absenceKind: "referral" }),
+      "k",
+    );
+    expect(indicator.colorClassName).toBe("bg-event-referral-soft");
+  });
+
+  it("colorClassName is null for an unmapped duty family (rasar) -- degrades safely, no guessed color", () => {
+    const indicator = eventIndicator(
+      baseEvent({ category: "duty", role: null, period: "unspecified", dutyFamily: "rasar" }),
+      "k",
+    );
+    expect(indicator.colorClassName).toBeNull();
+  });
 });
 
 describe("buildDayIndicators", () => {

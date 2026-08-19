@@ -124,6 +124,54 @@ describe("buildCalendarItem -- shift emoji by period", () => {
   });
 });
 
+describe("buildCalendarItem -- best-effort COLOR (RFC 7986)", () => {
+  it("a day shift gets its semantic color keyword", () => {
+    const item = buildCalendarItem(baseEvent({ category: "shift", period: "day" }), SCHEDULE, []);
+    expect(item!.color).toBe("goldenrod");
+  });
+
+  it("a night shift gets a different keyword than day", () => {
+    const item = buildCalendarItem(baseEvent({ category: "shift", period: "night" }), SCHEDULE, []);
+    expect(item!.color).toBe("royalblue");
+  });
+
+  it("a mapped duty family gets its semantic color", () => {
+    const item = buildCalendarItem(
+      baseEvent({ category: "duty", role: null, period: "unspecified", dutyFamily: "guard", slot: 1 }),
+      SCHEDULE,
+      [],
+    );
+    expect(item!.color).toBe("darkslateblue");
+  });
+
+  it("a mapped absence kind gets its semantic color", () => {
+    const item = buildCalendarItem(
+      baseEvent({ category: "absence", role: null, period: "unspecified", absenceKind: "vacation" }),
+      SCHEDULE,
+      [],
+    );
+    expect(item!.color).toBe("seagreen");
+  });
+
+  it("an unmapped duty family (rasar) has no color, never a guessed one", () => {
+    const item = buildCalendarItem(
+      baseEvent({ category: "duty", role: null, period: "unspecified", dutyFamily: "rasar" }),
+      SCHEDULE,
+      [],
+    );
+    expect(item!.color).toBeNull();
+  });
+
+  it("an unmapped absence kind (medical) has no color", () => {
+    const item = buildCalendarItem(
+      baseEvent({ category: "absence", role: null, period: "unspecified", absenceKind: "medical" }),
+      SCHEDULE,
+      [],
+    );
+    expect(item!.color).toBeNull();
+  });
+});
+
 describe("buildCalendarItem -- shift roster in DESCRIPTION", () => {
   it("includes the roster, grouped by role, when colleagues share the same date+period", () => {
     const target = baseEvent();

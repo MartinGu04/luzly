@@ -75,6 +75,26 @@
   --critical: #dc2626;
   --critical-foreground: #ffffff;
 
+  /* Semantic per-event-type calendar colors ("הלוח שלי" single-person
+     view only -- never the shared "כולם" calendar, see
+     `lib/presentation/eventColor.ts`). The fixed 8-slot categorical hue
+     set/order from this repo's dataviz color methodology (blue/orange/
+     aqua/yellow/magenta/green/violet/red), validated against BOTH of
+     mi-ma-mo's real calendar surfaces (light `--surface-1` #ffffff, dark
+     `--surface-1` #161d24) for CVD separation and contrast -- reused
+     as-is rather than hand-picked, then assigned to the 8 event meanings
+     the palette needs to distinguish. Applied only as a soft background
+     tint (see the derived `--event-*-soft` tokens below) -- never as
+     text color. */
+  --event-shift-day: #eda100;
+  --event-shift-night: #2a78d6;
+  --event-vacation: #1baf7a;
+  --event-after: #eb6834;
+  --event-referral: #e87ba4;
+  --event-evacuation: #e34948;
+  --event-guard: #4a3aa7;
+  --event-kitchen: #008300;
+
   /* Restrained, neutral elevation shadow for surfaces that are physically
      ABOVE the page -- popovers, menus, dialogs, drawers, the command
      palette. Never used for normal in-page cards/panels, and never
@@ -126,6 +146,15 @@
     --critical: #f77272;
     --critical-foreground: #2b0a0a;
 
+    --event-shift-day: #c98500;
+    --event-shift-night: #3987e5;
+    --event-vacation: #199e70;
+    --event-after: #d95926;
+    --event-referral: #d55181;
+    --event-evacuation: #e66767;
+    --event-guard: #9085e9;
+    --event-kitchen: #008300;
+
     --shadow-elevated: 0 16px 36px -14px rgba(0, 0, 0, 0.55);
   }
 }
@@ -169,6 +198,15 @@
   --warning-foreground: #2c1c02;
   --critical: #f77272;
   --critical-foreground: #2b0a0a;
+
+  --event-shift-day: #c98500;
+  --event-shift-night: #3987e5;
+  --event-vacation: #199e70;
+  --event-after: #d95926;
+  --event-referral: #d55181;
+  --event-evacuation: #e66767;
+  --event-guard: #9085e9;
+  --event-kitchen: #008300;
 
   --shadow-elevated: 0 16px 36px -14px rgba(0, 0, 0, 0.55);
 }
@@ -239,6 +277,22 @@
   --status-above: var(--warning);
   --status-above-soft: color-mix(in srgb, var(--warning) 14%, var(--surface-1));
   --status-above-border: color-mix(in srgb, var(--warning) 32%, transparent);
+
+  /* Soft background tints for the semantic per-event-type calendar colors
+     above -- same 12%-into-surface formula as the Fairness `--status-*-soft`
+     tokens, so a calendar indicator chip's tint reads as the same restrained
+     "descriptive tag" language as the rest of the app, never a louder/more
+     alarming color block. Only a soft tint exists (no `-border` variant --
+     see `lib/presentation/eventColor.ts`, this never gets a border/ring
+     treatment, only a chip background). */
+  --event-shift-day-soft: color-mix(in srgb, var(--event-shift-day) 14%, var(--surface-1));
+  --event-shift-night-soft: color-mix(in srgb, var(--event-shift-night) 14%, var(--surface-1));
+  --event-vacation-soft: color-mix(in srgb, var(--event-vacation) 14%, var(--surface-1));
+  --event-after-soft: color-mix(in srgb, var(--event-after) 14%, var(--surface-1));
+  --event-referral-soft: color-mix(in srgb, var(--event-referral) 14%, var(--surface-1));
+  --event-evacuation-soft: color-mix(in srgb, var(--event-evacuation) 14%, var(--surface-1));
+  --event-guard-soft: color-mix(in srgb, var(--event-guard) 14%, var(--surface-1));
+  --event-kitchen-soft: color-mix(in srgb, var(--event-kitchen) 14%, var(--surface-1));
 }
 
 @theme inline {
@@ -295,6 +349,23 @@
   --color-status-above: var(--status-above);
   --color-status-above-soft: var(--status-above-soft);
   --color-status-above-border: var(--status-above-border);
+
+  --color-event-shift-day: var(--event-shift-day);
+  --color-event-shift-day-soft: var(--event-shift-day-soft);
+  --color-event-shift-night: var(--event-shift-night);
+  --color-event-shift-night-soft: var(--event-shift-night-soft);
+  --color-event-vacation: var(--event-vacation);
+  --color-event-vacation-soft: var(--event-vacation-soft);
+  --color-event-after: var(--event-after);
+  --color-event-after-soft: var(--event-after-soft);
+  --color-event-referral: var(--event-referral);
+  --color-event-referral-soft: var(--event-referral-soft);
+  --color-event-evacuation: var(--event-evacuation);
+  --color-event-evacuation-soft: var(--event-evacuation-soft);
+  --color-event-guard: var(--event-guard);
+  --color-event-guard-soft: var(--event-guard-soft);
+  --color-event-kitchen: var(--event-kitchen);
+  --color-event-kitchen-soft: var(--event-kitchen-soft);
 
   --font-sans: var(--font-heebo);
 }

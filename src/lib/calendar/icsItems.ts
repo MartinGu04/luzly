@@ -6,6 +6,7 @@ import type { Event } from "@/lib/domain/event";
 import { MINUTES_PER_DAY, resolveEventShiftInterval, type ShiftSchedule } from "@/lib/domain/shiftSchedule";
 import { absenceKindLabel, dutyFamilyLabel, periodLabel, roleLabel } from "@/lib/presentation/labels";
 import { jerusalemLocalTimeToInstant } from "@/lib/time/jerusalemClock";
+import { icsEventColor } from "./icsColor";
 import { icsEventEmoji, withEmojiPrefix } from "./icsEmoji";
 import { buildShiftRosterDescription } from "./icsRoster";
 import type { IcsCalendarItem } from "./icsRender";
@@ -77,6 +78,7 @@ export function buildCalendarItem(
         startUtc: minuteOnDateToInstant(event.date, resolution.interval.startMinute),
         endUtc: minuteOnDateToInstant(event.date, resolution.interval.endMinute),
       },
+      color: icsEventColor(event),
     };
   }
 
@@ -86,6 +88,7 @@ export function buildCalendarItem(
       summary: buildDutySummary(event),
       description: buildDutyOrAbsenceDescription(event),
       timing: { kind: "allDay", date: event.date },
+      color: icsEventColor(event),
     };
   }
 
@@ -95,6 +98,7 @@ export function buildCalendarItem(
     summary: buildAbsenceSummary(event),
     description: buildDutyOrAbsenceDescription(event),
     timing: { kind: "allDay", date: event.date },
+    color: icsEventColor(event),
   };
 }
 
