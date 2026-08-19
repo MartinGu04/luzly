@@ -73,21 +73,32 @@ export interface DutyFairnessPersonRowView {
   status: DutyFairnessStatus | null;
   weekendCount: number | null;
   /**
-   * Raw, UNWEIGHTED count of duties this person has ACTUALLY COMPLETED in
-   * this period, up to and including today -- a DIFFERENT fact from
-   * `currentScore` (the workbook's weighted score, where different duty
-   * families/weekend duties can contribute different weights). Derived from
-   * real schedule Events (`category === "duty"`, confirmed only -- see
-   * `lib/domain/fairnessAnalysis.ts`'s `countCompletedDutiesForPerson`),
-   * never from the workbook's own score cell. `null` ONLY when `personId`
-   * itself is `null` (an unresolved source name has no person to join
-   * schedule Events against) -- unlike `comparisonTarget`, this does NOT
-   * depend on having a comparison target: a person who "cannot be compared"
-   * (no target-bearing allocation label, `status: null`) still gets a real
-   * count here whenever their identity is resolved, since it's a plain
-   * factual count, not an analysis result.
+   * "הקצאות שבוצעו" -- the WEIGHTED total allocation value of duties this
+   * person has ACTUALLY COMPLETED in this period, up to the effective
+   * cutoff (`min(today, period end)`). A DIFFERENT fact from `currentScore`
+   * (the workbook's own opaque Fairness score) -- this is derived purely
+   * from real schedule Events, using the confirmed canonical business-rule
+   * weights in `lib/domain/dutyAllocationWeight.ts`'s
+   * `computeCompletedDutyAllocation` (day-based weight per family, except
+   * guard/reserve which are block-shaped fixed-value allocations). Never a
+   * raw event count -- a single 0.25/0.5/1 guard block is ONE allocation
+   * regardless of how many days it spans, and different duty families
+   * contribute different weights, so this total can differ substantially
+   * from a naive count of completed duty events.
+   *
+   * `null` for TWO distinct reasons, both flagged via `dataCompleteness`:
+   * `personId` itself is `null` (`duty_identity_unresolved` -- no person to
+   * join schedule Events against), OR a real guard/reserve block's shape
+   * doesn't match any of the three confirmed business rules
+   * (`duty_allocation_unsupported_block_shape` -- the true total is
+   * genuinely unknown, never a partial sum that silently drops it). Unlike
+   * `comparisonTarget`, this does NOT depend on having a comparison target:
+   * a person who "cannot be compared" (no target-bearing allocation label,
+   * `status: null`) still gets a real total here whenever their identity is
+   * resolved and every relevant block is classifiable, since it's a plain
+   * factual total, not an analysis result.
    */
-  completedDutyCount: number | null;
+  completedAllocationTotal: number | null;
   exemptions: readonly DutyFairnessExemptionView[];
   /** Only ever non-empty for a genuinely verified gap (unresolved identity, or a target-bearing role missing its period target note) -- never noise on every row. */
   dataCompleteness: FairnessDataCompleteness;

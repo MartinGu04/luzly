@@ -42,7 +42,7 @@ function dutyFairnessRow(overrides: Partial<DutyFairnessPersonRowView> = {}): Du
     normalizedLoad: null,
     status: null,
     weekendCount: null,
-    completedDutyCount: null,
+    completedAllocationTotal: null,
     exemptions: [],
     dataCompleteness: { status: "complete", reasons: [] },
     ...overrides,

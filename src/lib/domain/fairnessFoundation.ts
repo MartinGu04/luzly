@@ -149,6 +149,15 @@ export function resolveFairnessPeriodStatus(periodEndDate: string, now: LocalNow
  *   label) -- a non-target-bearing row having `comparisonTarget: null` is
  *   the normal, complete, expected outcome, not a gap (never noise on
  *   every row).
+ * - `duty_allocation_unsupported_block_shape` -- the "הקצאות שבוצעו" weighted
+ *   allocation total (`lib/domain/dutyAllocationWeight.ts`'s
+ *   `computeCompletedDutyAllocation`): this person has at least one real,
+ *   CONFIRMED guard/reserve block overlapping the effective range whose
+ *   shape matches none of the three confirmed business-rule shapes
+ *   (single-day, 3-day Mon-Wed half-week, 4-day Thu-Sun weekend) --
+ *   `computeCompletedDutyAllocation` deliberately refuses to guess a weight
+ *   for it, so the WHOLE total is `null` rather than a partial sum that
+ *   silently drops the unclassifiable block's real contribution.
  */
 export type FairnessDataCompletenessReason =
   | "participation_assumed_full_period"
@@ -161,7 +170,8 @@ export type FairnessDataCompletenessReason =
   | "shift_target_unmodelable_historical"
   | "shift_target_no_group_opportunities"
   | "duty_identity_unresolved"
-  | "duty_target_unavailable";
+  | "duty_target_unavailable"
+  | "duty_allocation_unsupported_block_shape";
 
 export interface FairnessDataCompleteness {
   status: "complete" | "partial";

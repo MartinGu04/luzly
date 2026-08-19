@@ -7,18 +7,19 @@ import { FairnessStatusBadge, fairnessStatusTintTextClass } from "./FairnessStat
 /**
  * One Duty Fairness person card (PR #4 §12, redesigned PR #51 follow-up,
  * densified follow-up) -- name/allocation + status, then a compact self-
- * explanatory PRIMARY metric grid (תורנויות שבוצעו / ניקוד נוכחי / יעד
- * השוואה / פער מהיעד, the raw completed-duty count leading since it's the
- * intuitive fact, followed by the fairness-scoring metrics, the gap tinted
- * with the same restrained status color as the badge), then a smaller
- * SECONDARY row for the previous-period change, weekend count, and any
- * exemption badges. Deliberately a compact subset -- normalized load lives
- * in the detail overlay, not every read-model field crammed onto the card.
- * An unavailable target never fakes a gap/normalizedLoad/status -- a
- * `'ר"צ'` card, for example, can sit in the אחמ״שים section showing a real
- * score/weekend/exemptions with no comparison target at all, which is
- * expected, not an error; the completed-duty count stays visible either
- * way, since it never depends on having a comparison target.
+ * explanatory PRIMARY metric grid (הקצאות שבוצעו / ניקוד נוכחי / יעד
+ * השוואה / פער מהיעד, the weighted completed-allocation total leading
+ * since it's the intuitive fact, followed by the fairness-scoring metrics,
+ * the gap tinted with the same restrained status color as the badge), then
+ * a smaller SECONDARY row for the previous-period change, weekend count,
+ * and any exemption badges. Deliberately a compact subset -- normalized
+ * load lives in the detail overlay, not every read-model field crammed
+ * onto the card. An unavailable target never fakes a gap/normalizedLoad/
+ * status -- a `'ר"צ'` card, for example, can sit in the אחמ״שים section
+ * showing a real score/weekend/exemptions with no comparison target at
+ * all, which is expected, not an error; the completed-allocation total
+ * stays visible either way, since it never depends on having a comparison
+ * target.
  *
  * The PRIMARY grid is a CSS container query (`@container` on the card root,
  * `@[380px]:grid-cols-4` on the grid itself), not a viewport breakpoint --
@@ -51,7 +52,7 @@ export function DutyFairnessCard({ view }: { view: DutyFairnessCardView }) {
       </div>
 
       <div className="mt-2 grid grid-cols-2 gap-x-2 gap-y-1 rounded-lg bg-overlay-faint px-2.5 py-2 @[380px]:grid-cols-4">
-        <FairnessMetric testId="metric-duty-completed" label="תורנויות שבוצעו" value={view.completedDutyLabel} />
+        <FairnessMetric testId="metric-duty-allocation" label="הקצאות שבוצעו" value={view.completedAllocationLabel} />
         <FairnessMetric testId="metric-duty-current" label="ניקוד נוכחי" value={view.currentLabel} />
         <FairnessMetric testId="metric-duty-target" label="יעד השוואה" value={view.targetLabel ?? "—"} />
         <FairnessMetric

@@ -87,7 +87,7 @@ function dutyRow(overrides: Partial<DutyFairnessPersonRowView> = {}): DutyFairne
     normalizedLoad: 0.75,
     status: "below",
     weekendCount: 2,
-    completedDutyCount: 5,
+    completedAllocationTotal: 5,
     exemptions: [],
     dataCompleteness: COMPLETE_FAIRNESS_DATA,
     ...overrides,

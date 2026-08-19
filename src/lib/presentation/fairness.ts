@@ -14,11 +14,6 @@ export function formatFairnessWeekendCount(value: number | null): string {
   return value === null ? "—" : String(value);
 }
 
-/** Plain raw-count display -- "—" for an unavailable (null) value, never a fabricated 0. Same shape as `formatFairnessWeekendCount`, generalized for any raw Fairness count (e.g. the completed-duty count, "תורנויות שבוצעו") that isn't specifically a weekend count. */
-export function formatFairnessCount(value: number | null): string {
-  return value === null ? "—" : String(value);
-}
-
 /** "פער מהיעד" -- context, never framed as a violation regardless of sign. */
 export function formatFairnessGap(value: number | null): string {
   if (value === null) return "—";

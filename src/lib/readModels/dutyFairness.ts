@@ -36,9 +36,9 @@ const PERIOD_SHEET_KEYS: Record<"h1" | "h2", SheetSourceKey> = {
  *
  * Also parses the `schedule` sheet into real `Event`s (the SAME sheet/
  * parse call `shiftFairness.ts` already makes) purely to feed each row's
- * raw `completedDutyCount` -- `FAIRNESS_WORKBOOK_SOURCES` already includes
- * `schedule` for both Fairness modes, so this is no extra Google fetch.
- * Never used for anything score/target/status-related, which stay entirely
+ * weighted `completedAllocationTotal` -- `FAIRNESS_WORKBOOK_SOURCES` already
+ * includes `schedule` for both Fairness modes, so this is no extra Google
+ * fetch. Never used for anything score/target/status-related, which stay entirely
  * workbook-sourced.
  */
 export async function loadDutyFairnessReadModel(rawPeriod: string | null): Promise<DutyFairnessLoadResult> {

@@ -198,8 +198,8 @@ describe("loadDutyFairnessReadModel — avatar enrichment (never touches calcula
   });
 });
 
-describe("loadDutyFairnessReadModel — completedDutyCount: derived from the real schedule sheet, end-to-end", () => {
-  it("counts confirmed guard-duty ('שומר 1') schedule entries for the row's own person, within the selected H1 period", async () => {
+describe("loadDutyFairnessReadModel — completedAllocationTotal: derived from the real schedule sheet, end-to-end", () => {
+  it("weighs confirmed guard-duty ('שומר 1') schedule entries for the row's own person, within the selected H1 period -- each isolated day is its own single-day 0.25 allocation, never a raw count", async () => {
     loadFairnessWorkbookContext.mockResolvedValue(
       okContext({
         h1Rows: [["טל טכנאי", "טכנאי", "5", "6", "1", "-"]],
@@ -213,7 +213,8 @@ describe("loadDutyFairnessReadModel — completedDutyCount: derived from the rea
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
     const technicianRow = result.model.groups.find((g) => g.key === "technician")?.rows[0];
-    expect(technicianRow?.completedDutyCount).toBe(2);
+    // Two isolated (non-consecutive) single-day guard blocks -> 0.25 + 0.25.
+    expect(technicianRow?.completedAllocationTotal).toBeCloseTo(0.5);
     // A different, unrelated fact from the workbook's own weighted score.
     expect(technicianRow?.currentScore).toBe(6);
   });
@@ -232,7 +233,7 @@ describe("loadDutyFairnessReadModel — completedDutyCount: derived from the rea
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
     const technicianRow = result.model.groups.find((g) => g.key === "technician")?.rows[0];
-    expect(technicianRow?.completedDutyCount).toBe(1);
+    expect(technicianRow?.completedAllocationTotal).toBeCloseTo(0.25);
   });
 
   it("never counts a future duty -- NOW is mocked to 2026-08-15, so a schedule entry dated after that is excluded even inside the selected H2 period", async () => {
@@ -249,10 +250,10 @@ describe("loadDutyFairnessReadModel — completedDutyCount: derived from the rea
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
     const technicianRow = result.model.groups.find((g) => g.key === "technician")?.rows[0];
-    expect(technicianRow?.completedDutyCount).toBe(1);
+    expect(technicianRow?.completedAllocationTotal).toBeCloseTo(0.25);
   });
 
-  it('a non-comparable person (\'ר"צ\', null target/status) still shows a real completed-duty count', async () => {
+  it('a non-comparable person (\'ר"צ\', null target/status) still shows a real completed-allocation total', async () => {
     loadFairnessWorkbookContext.mockResolvedValue(
       okContext({
         people: [person({ id: "p_ratz", name: "רוני רצ" })],
@@ -266,7 +267,7 @@ describe("loadDutyFairnessReadModel — completedDutyCount: derived from the rea
     const row = result.model.groups[0].rows[0];
     expect(row.status).toBeNull();
     expect(row.comparisonTarget).toBeNull();
-    expect(row.completedDutyCount).toBe(1);
+    expect(row.completedAllocationTotal).toBeCloseTo(0.25);
   });
 
   it("no schedule data at all -> a real 0, never null, for a resolved person", async () => {
@@ -275,6 +276,6 @@ describe("loadDutyFairnessReadModel — completedDutyCount: derived from the rea
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
     const technicianRow = result.model.groups.find((g) => g.key === "technician")?.rows[0];
-    expect(technicianRow?.completedDutyCount).toBe(0);
+    expect(technicianRow?.completedAllocationTotal).toBe(0);
   });
 });

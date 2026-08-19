@@ -9,8 +9,8 @@ function dutyEvent(overrides: Partial<Event> = {}): Event {
     personId: "p1",
     personName: "מרטין בדיקה",
     date: "2026-03-10",
-    title: "שמירה",
-    rawValue: "שמירה",
+    title: 'רס"ר',
+    rawValue: 'רס"ר',
     category: "duty",
     certainty: "confirmed",
     role: null,
@@ -22,10 +22,14 @@ function dutyEvent(overrides: Partial<Event> = {}): Event {
     startTimeOverride: null,
     endTimeOverride: null,
     changeNote: null,
-    dutyFamily: "guard",
+    dutyFamily: "rasar",
     absenceKind: null,
     ...overrides,
   };
+}
+
+function guardEvent(date: string, overrides: Partial<Event> = {}): Event {
+  return dutyEvent({ date, title: "שומר 1", rawValue: "שומר 1", dutyFamily: "guard", slot: 1, ...overrides });
 }
 
 function personRow(overrides: Partial<FairnessPersonRow> = {}): FairnessPersonRow {
@@ -442,14 +446,12 @@ describe("buildDutyFairnessReadModel — sorting: established ordering preserved
   });
 });
 
-describe("buildDutyFairnessReadModel — completedDutyCount: raw, unweighted, independent of the workbook score", () => {
-  it("derives the count from real schedule Events for the row's resolved person, distinct from the weighted currentScore", () => {
+describe("buildDutyFairnessReadModel — completedAllocationTotal: weighted, independent of the workbook score", () => {
+  it("derives the weighted total from real schedule Events for the row's resolved person, distinct from the workbook's own currentScore", () => {
     const events: Event[] = [
-      dutyEvent({ personId: "p1", date: "2026-01-10" }),
-      dutyEvent({ personId: "p1", date: "2026-02-15" }),
-      dutyEvent({ personId: "p1", date: "2026-03-20" }),
-      dutyEvent({ personId: "p1", date: "2026-04-25" }),
-      dutyEvent({ personId: "p1", date: "2026-05-30" }),
+      dutyEvent({ personId: "p1", date: "2026-01-10" }), // rasar 0.2
+      dutyEvent({ personId: "p1", date: "2026-02-15" }), // rasar 0.2
+      dutyEvent({ personId: "p1", date: "2026-03-20" }), // rasar 0.2
     ];
     const model = buildDutyFairnessReadModel({
       parseResult: parseResult({
@@ -462,9 +464,48 @@ describe("buildDutyFairnessReadModel — completedDutyCount: raw, unweighted, in
       events,
     });
     const row = model.groups.find((g) => g.key === "technician")?.rows[0];
-    expect(row?.completedDutyCount).toBe(5);
+    expect(row?.completedAllocationTotal).toBeCloseTo(0.6);
+    // Untouched workbook score, exactly as PR #3 already established -- this PR never recomputes it.
     expect(row?.currentScore).toBe(6);
-    expect(row?.completedDutyCount).not.toBe(row?.currentScore);
+    expect(row?.completedAllocationTotal).not.toBe(row?.currentScore);
+  });
+
+  it("a raw guard block flows through the block-based rules end to end: a 4-day Thu-Sun weekend block is ONE 1.0 allocation, never 4 x a per-day rate", () => {
+    // 2026-01-01 is a real Thursday.
+    const events: Event[] = [
+      guardEvent("2026-01-01"),
+      guardEvent("2026-01-02"),
+      guardEvent("2026-01-03"),
+      guardEvent("2026-01-04"),
+    ];
+    const model = buildDutyFairnessReadModel({
+      parseResult: parseResult({
+        personRows: [personRow({ resolvedPersonId: "p1", allocationLabel: "טכנאי" })],
+      }),
+      periodIdentity: { key: "h1", year: 2026 },
+      fetchedAt: "2026-08-15T10:00:00.000Z",
+      now: NOW,
+      events,
+    });
+    const row = model.groups.find((g) => g.key === "technician")?.rows[0];
+    expect(row?.completedAllocationTotal).toBe(1);
+  });
+
+  it("an unsupported guard/reserve block shape makes the total null and flags duty_allocation_unsupported_block_shape, never a guessed weight", () => {
+    const events: Event[] = [guardEvent("2026-01-05"), guardEvent("2026-01-06")]; // a real 2-day block -- no matching business rule
+    const model = buildDutyFairnessReadModel({
+      parseResult: parseResult({
+        personRows: [personRow({ resolvedPersonId: "p1", allocationLabel: "טכנאי" })],
+      }),
+      periodIdentity: { key: "h1", year: 2026 },
+      fetchedAt: "2026-08-15T10:00:00.000Z",
+      now: NOW,
+      events,
+    });
+    const row = model.groups.find((g) => g.key === "technician")?.rows[0];
+    expect(row?.completedAllocationTotal).toBeNull();
+    expect(row?.dataCompleteness.status).toBe("partial");
+    expect(row?.dataCompleteness.reasons).toContain("duty_allocation_unsupported_block_shape");
   });
 
   it("never counts a future/planned duty, even inside the selected period", () => {
@@ -482,7 +523,7 @@ describe("buildDutyFairnessReadModel — completedDutyCount: raw, unweighted, in
       events,
     });
     const row = model.groups.find((g) => g.key === "technician")?.rows[0];
-    expect(row?.completedDutyCount).toBe(1);
+    expect(row?.completedAllocationTotal).toBeCloseTo(0.2);
   });
 
   it("respects the SELECTED fairness period -- a duty from the other half-year is excluded", () => {
@@ -500,10 +541,10 @@ describe("buildDutyFairnessReadModel — completedDutyCount: raw, unweighted, in
       events,
     });
     const row = model.groups.find((g) => g.key === "technician")?.rows[0];
-    expect(row?.completedDutyCount).toBe(1);
+    expect(row?.completedAllocationTotal).toBeCloseTo(0.2);
   });
 
-  it('a non-comparable person (e.g. \'ר"צ\', null target/status) still shows a real completed-duty count when the identity is resolved', () => {
+  it('a non-comparable person (e.g. \'ר"צ\', null target/status) still shows a real completed-allocation total when the identity is resolved', () => {
     const events: Event[] = [dutyEvent({ personId: "p_rats", date: "2026-02-01" }), dutyEvent({ personId: "p_rats", date: "2026-03-01" })];
     const model = buildDutyFairnessReadModel({
       parseResult: parseResult({
@@ -518,10 +559,10 @@ describe("buildDutyFairnessReadModel — completedDutyCount: raw, unweighted, in
     const row = model.groups.find((g) => g.key === "supervisor")?.rows[0];
     expect(row?.status).toBeNull();
     expect(row?.comparisonTarget).toBeNull();
-    expect(row?.completedDutyCount).toBe(2);
+    expect(row?.completedAllocationTotal).toBeCloseTo(0.4);
   });
 
-  it("an unresolved source name (personId null) gets a null completedDutyCount, never a fabricated 0", () => {
+  it("an unresolved source name (personId null) gets a null completedAllocationTotal, never a fabricated 0", () => {
     const events: Event[] = [dutyEvent({ personId: "p1", date: "2026-02-01" })];
     const model = buildDutyFairnessReadModel({
       parseResult: parseResult({
@@ -535,7 +576,7 @@ describe("buildDutyFairnessReadModel — completedDutyCount: raw, unweighted, in
     });
     const row = model.groups.find((g) => g.key === "technician")?.rows[0];
     expect(row?.personId).toBeNull();
-    expect(row?.completedDutyCount).toBeNull();
+    expect(row?.completedAllocationTotal).toBeNull();
   });
 
   it("no events supplied (default []) -> 0 for a resolved person, never a crash", () => {
@@ -548,6 +589,6 @@ describe("buildDutyFairnessReadModel — completedDutyCount: raw, unweighted, in
       now: NOW,
     });
     const row = model.groups.find((g) => g.key === "technician")?.rows[0];
-    expect(row?.completedDutyCount).toBe(0);
+    expect(row?.completedAllocationTotal).toBe(0);
   });
 });

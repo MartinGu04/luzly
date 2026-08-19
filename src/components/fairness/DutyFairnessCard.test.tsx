@@ -15,7 +15,7 @@ function view(overrides: Partial<DutyFairnessCardView> = {}): DutyFairnessCardVi
     avatarUrl: null,
     href: "/fairness?mode=duties&person=p_1",
     allocationLabel: "טכנאי",
-    completedDutyLabel: "5",
+    completedAllocationLabel: "2.9",
     currentLabel: "6",
     targetLabel: "8",
     deltaLabel: "+1.00",
@@ -77,47 +77,47 @@ describe("DutyFairnessCard — avatar", () => {
 });
 
 describe("DutyFairnessCard — primary metric grid order and content", () => {
-  it("renders the four primary metrics in the required order: תורנויות שבוצעו, ניקוד נוכחי, יעד השוואה, פער מהיעד", () => {
+  it("renders the four primary metrics in the required order: הקצאות שבוצעו, ניקוד נוכחי, יעד השוואה, פער מהיעד", () => {
     render(
       <ul>
-        <DutyFairnessCard view={view({ completedDutyLabel: "5", currentLabel: "6", targetLabel: "8", gapLabel: "-2.00" })} />
+        <DutyFairnessCard view={view({ completedAllocationLabel: "2.9", currentLabel: "6", targetLabel: "8", gapLabel: "-2.00" })} />
       </ul>,
     );
-    const grid = screen.getByTestId("metric-duty-completed").parentElement;
+    const grid = screen.getByTestId("metric-duty-allocation").parentElement;
     const gridChildIds = Array.from(grid?.children ?? []).map((child) => child.getAttribute("data-testid"));
-    expect(gridChildIds).toEqual(["metric-duty-completed", "metric-duty-current", "metric-duty-target", "metric-duty-gap"]);
+    expect(gridChildIds).toEqual(["metric-duty-allocation", "metric-duty-current", "metric-duty-target", "metric-duty-gap"]);
   });
 
-  it("shows the raw completed-duty count as a plain value, distinct from the weighted current score", () => {
+  it("shows the weighted completed-allocation total as a plain value, distinct from the workbook current score", () => {
     render(
       <ul>
-        <DutyFairnessCard view={view({ completedDutyLabel: "5", currentLabel: "6" })} />
+        <DutyFairnessCard view={view({ completedAllocationLabel: "2.9", currentLabel: "6" })} />
       </ul>,
     );
-    expect(screen.getByTestId("metric-duty-completed")).toHaveTextContent("תורנויות שבוצעו");
-    expect(screen.getByTestId("metric-duty-completed")).toHaveTextContent("5");
+    expect(screen.getByTestId("metric-duty-allocation")).toHaveTextContent("הקצאות שבוצעו");
+    expect(screen.getByTestId("metric-duty-allocation")).toHaveTextContent("2.9");
     expect(screen.getByTestId("metric-duty-current")).toHaveTextContent("6");
   });
 
-  it("still renders a completed-duty count for a non-comparable person (null target/status/gap)", () => {
+  it("still renders a completed-allocation total for a non-comparable person (null target/status/gap)", () => {
     render(
       <ul>
         <DutyFairnessCard
-          view={view({ completedDutyLabel: "3", targetLabel: null, gapLabel: null, status: null })}
+          view={view({ completedAllocationLabel: "0.5", targetLabel: null, gapLabel: null, status: null })}
         />
       </ul>,
     );
-    expect(screen.getByTestId("metric-duty-completed")).toHaveTextContent("3");
+    expect(screen.getByTestId("metric-duty-allocation")).toHaveTextContent("0.5");
     expect(screen.getByTestId("metric-duty-target")).toHaveTextContent("—");
   });
 
-  it("renders \"—\" for an unresolved identity's completed-duty count, never a fabricated 0", () => {
+  it("renders \"—\" for an unresolved identity's (or unsupported block shape's) completed-allocation total, never a fabricated 0", () => {
     render(
       <ul>
-        <DutyFairnessCard view={view({ completedDutyLabel: "—" })} />
+        <DutyFairnessCard view={view({ completedAllocationLabel: "—" })} />
       </ul>,
     );
-    expect(screen.getByTestId("metric-duty-completed")).toHaveTextContent("—");
+    expect(screen.getByTestId("metric-duty-allocation")).toHaveTextContent("—");
   });
 });
 
@@ -137,7 +137,7 @@ describe("DutyFairnessCard — density and responsive row/2x2 layout", () => {
         <DutyFairnessCard view={view()} />
       </ul>,
     );
-    const grid = screen.getByTestId("metric-duty-completed").parentElement;
+    const grid = screen.getByTestId("metric-duty-allocation").parentElement;
     expect(grid).toHaveClass("grid-cols-2");
     expect(grid).toHaveClass("@[380px]:grid-cols-4");
   });
@@ -148,7 +148,7 @@ describe("DutyFairnessCard — density and responsive row/2x2 layout", () => {
         <DutyFairnessCard view={view()} />
       </ul>,
     );
-    const grid = screen.getByTestId("metric-duty-completed").parentElement;
+    const grid = screen.getByTestId("metric-duty-allocation").parentElement;
     expect(grid?.className).not.toMatch(/grid-cols-3/);
   });
 });

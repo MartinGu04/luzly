@@ -124,7 +124,7 @@ function dutyRow(overrides: Partial<DutyFairnessPersonRowView> = {}): DutyFairne
     normalizedLoad: 0.75,
     status: "below",
     weekendCount: 2,
-    completedDutyCount: 5,
+    completedAllocationTotal: 5,
     exemptions: [],
     dataCompleteness: COMPLETE_FAIRNESS_DATA,
     ...overrides,
@@ -140,7 +140,7 @@ describe("buildDutyFairnessCardView", () => {
       personName: "נועה טכנאית",
       href: "/fairness?mode=duties&person=p_1",
       allocationLabel: "טכנאי",
-      completedDutyLabel: "5",
+      completedAllocationLabel: "5",
       currentLabel: "6",
       targetLabel: "8",
       deltaLabel: "+1.00",
@@ -175,41 +175,63 @@ describe("buildDutyFairnessCardView", () => {
   });
 });
 
-describe("buildDutyFairnessCardView -- completedDutyLabel is a raw count, independent of the comparison target", () => {
-  it("formats a real completed-duty count as a plain integer -- a DIFFERENT fact from the weighted currentLabel", () => {
+describe("buildDutyFairnessCardView -- completedAllocationLabel is the weighted allocation total, independent of the comparison target", () => {
+  it("formats a real completed-allocation total as a clean number -- a DIFFERENT fact from the weighted currentLabel", () => {
     const view = buildDutyFairnessCardView(
-      dutyRow({ completedDutyCount: 5, currentScore: 6 }),
+      dutyRow({ completedAllocationTotal: 5, currentScore: 6 }),
       "/fairness?mode=duties&person=p_1",
     );
-    expect(view.completedDutyLabel).toBe("5");
+    expect(view.completedAllocationLabel).toBe("5");
     expect(view.currentLabel).toBe("6");
-    expect(view.completedDutyLabel).not.toBe(view.currentLabel);
+    expect(view.completedAllocationLabel).not.toBe(view.currentLabel);
   });
 
-  it('a ר"צ / non-comparable row (null target/status) still shows a real completed-duty count when the identity is resolved', () => {
+  it('a ר"צ / non-comparable row (null target/status) still shows a real completed-allocation total when the identity is resolved', () => {
     const view = buildDutyFairnessCardView(
       dutyRow({
         allocationLabel: 'ר"צ',
         comparisonTarget: null,
         gapToTarget: null,
         status: null,
-        completedDutyCount: 3,
+        completedAllocationTotal: 0.5,
       }),
       "/fairness?mode=duties&person=p_1",
     );
     expect(view.status).toBeNull();
     expect(view.targetLabel).toBeNull();
-    expect(view.completedDutyLabel).toBe("3");
+    expect(view.completedAllocationLabel).toBe("0.5");
   });
 
-  it("unresolved identity (null completedDutyCount from the read model) renders as \"—\", never a fabricated 0", () => {
-    const view = buildDutyFairnessCardView(dutyRow({ personId: null, completedDutyCount: null }), null);
-    expect(view.completedDutyLabel).toBe("—");
+  it("unresolved identity (null completedAllocationTotal from the read model) renders as \"—\", never a fabricated 0", () => {
+    const view = buildDutyFairnessCardView(dutyRow({ personId: null, completedAllocationTotal: null }), null);
+    expect(view.completedAllocationLabel).toBe("—");
   });
 
-  it("a real zero completed-duty count renders as \"0\", never as unavailable", () => {
-    const view = buildDutyFairnessCardView(dutyRow({ completedDutyCount: 0 }), "/fairness?mode=duties&person=p_1");
-    expect(view.completedDutyLabel).toBe("0");
+  it("an unsupported guard/reserve block shape (null completedAllocationTotal even with a resolved identity) also renders as \"—\"", () => {
+    const view = buildDutyFairnessCardView(
+      dutyRow({
+        completedAllocationTotal: null,
+        dataCompleteness: { status: "partial", reasons: ["duty_allocation_unsupported_block_shape"] },
+      }),
+      "/fairness?mode=duties&person=p_1",
+    );
+    expect(view.completedAllocationLabel).toBe("—");
+  });
+
+  it("a real zero completed-allocation total renders as \"0\", never as unavailable", () => {
+    const view = buildDutyFairnessCardView(dutyRow({ completedAllocationTotal: 0 }), "/fairness?mode=duties&person=p_1");
+    expect(view.completedAllocationLabel).toBe("0");
+  });
+
+  it.each([
+    [2.9, "2.9"],
+    [0.25, "0.25"],
+    [0.2, "0.2"],
+    [4.25, "4.25"],
+    [1, "1"],
+  ])("formats %s cleanly as %s, never forced trailing zeros or floating-point noise", (value, expected) => {
+    const view = buildDutyFairnessCardView(dutyRow({ completedAllocationTotal: value }), "/fairness?mode=duties&person=p_1");
+    expect(view.completedAllocationLabel).toBe(expected);
   });
 });
 
