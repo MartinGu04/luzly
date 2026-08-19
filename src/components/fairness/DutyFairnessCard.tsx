@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { DutyFairnessCardView } from "@/lib/presentation/fairnessCards";
+import { Avatar } from "@/components/ui/Avatar";
 import { FairnessMetric } from "./FairnessMetric";
 import { FairnessStatusBadge, fairnessStatusTintTextClass } from "./FairnessStatusBadge";
 
@@ -24,9 +25,12 @@ export function DutyFairnessCard({ view }: { view: DutyFairnessCardView }) {
   const content = (
     <>
       <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1.5">
-        <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-foreground">{view.personName}</p>
-          <p className="text-xs text-muted">{view.allocationLabel || "—"}</p>
+        <div className="flex min-w-0 items-center gap-2">
+          <Avatar name={view.personName} size="xs" avatarUrl={view.avatarUrl} />
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold text-foreground">{view.personName}</p>
+            <p className="text-xs text-muted">{view.allocationLabel || "—"}</p>
+          </div>
         </div>
         <FairnessStatusBadge status={view.status} />
       </div>

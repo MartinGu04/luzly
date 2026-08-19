@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { ShiftFairnessCardView } from "@/lib/presentation/fairnessCards";
+import { Avatar } from "@/components/ui/Avatar";
 import { FairnessMetric } from "./FairnessMetric";
 import { FairnessStatusBadge, fairnessStatusTintTextClass } from "./FairnessStatusBadge";
 import { ShiftFairnessCardInfo } from "./ShiftFairnessCardInfo";
@@ -35,7 +36,8 @@ export function ShiftFairnessCard({ view }: { view: ShiftFairnessCardView }) {
     <li className="relative">
       <div className="rounded-xl bg-surface-1 p-4 ring-1 ring-border">
         <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1.5">
-          <div className="flex min-w-0 items-center gap-1">
+          <div className="flex min-w-0 items-center gap-2">
+            <Avatar name={view.personName} size="xs" avatarUrl={view.avatarUrl} />
             <p className="min-w-0 truncate text-sm font-semibold text-foreground">{view.personName}</p>
             <ShiftFairnessCardInfo />
           </div>

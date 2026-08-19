@@ -5,7 +5,7 @@ import type { SheetSourceKey } from "@/lib/google";
 import { parseFairnessTable } from "@/lib/parsers/fairness";
 import { getJerusalemLocalNow } from "@/lib/time/jerusalemClock";
 import { buildDutyFairnessReadModel } from "./buildDutyFairnessReadModel";
-import type { DutyFairnessReadModel } from "./dutyFairnessTypes";
+import type { DutyFairnessGroupView, DutyFairnessReadModel } from "./dutyFairnessTypes";
 import { getFairnessWorkbookSheet, loadFairnessWorkbookContext } from "./fairnessWorkbookContext";
 
 export type DutyFairnessLoadResult =
@@ -36,7 +36,7 @@ export async function loadDutyFairnessReadModel(rawPeriod: string | null): Promi
   const contextResult = await loadFairnessWorkbookContext();
   if (contextResult.status !== "ok") return contextResult;
 
-  const { person, people, snapshot } = contextResult.context;
+  const { person, people, snapshot, avatarByPersonId } = contextResult.context;
 
   const now = getJerusalemLocalNow();
   const periodIdentity = resolveFairnessPeriodIdentity(rawPeriod, now);
@@ -46,5 +46,27 @@ export async function loadDutyFairnessReadModel(rawPeriod: string | null): Promi
 
   const model = buildDutyFairnessReadModel({ parseResult, periodIdentity, fetchedAt: snapshot.fetchedAt, now });
 
-  return { status: "ok", model, person };
+  return { status: "ok", model: withAvatars(model, avatarByPersonId), person };
+}
+
+/**
+ * Stamps `avatarUrl` onto every row of an already-built
+ * `DutyFairnessReadModel`, purely a presentation enrichment -- never
+ * touches `buildDutyFairnessReadModel`'s own calculation/sorting/
+ * eligibility logic, which this runs strictly AFTER. A row with
+ * `personId === null` (unresolved source name) always gets `avatarUrl:
+ * null` -- there is no person to look a photo up for.
+ */
+function withAvatars(
+  model: DutyFairnessReadModel,
+  avatarByPersonId: ReadonlyMap<string, string | null>,
+): DutyFairnessReadModel {
+  const groups: DutyFairnessGroupView[] = model.groups.map((group) => ({
+    ...group,
+    rows: group.rows.map((row) => ({
+      ...row,
+      avatarUrl: row.personId !== null ? (avatarByPersonId.get(row.personId) ?? null) : null,
+    })),
+  }));
+  return { ...model, groups };
 }

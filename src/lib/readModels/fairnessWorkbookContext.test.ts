@@ -4,10 +4,13 @@ import type { RawSheet } from "@/lib/google";
 const getRequestPersonalSchedule = vi.fn();
 const getAuthenticatedIdentity = vi.fn();
 const getWorkbookSnapshot = vi.fn();
+const fetchEmailToAvatarUrl = vi.fn();
+const resolveAvatarUrlsByPersonId = vi.fn();
 
 vi.mock("./getRequestPersonalSchedule", () => ({ getRequestPersonalSchedule }));
 vi.mock("@/lib/auth/currentUser", () => ({ getAuthenticatedIdentity }));
 vi.mock("@/lib/sync", () => ({ getWorkbookSnapshot }));
+vi.mock("./fairnessAvatarLookup", () => ({ fetchEmailToAvatarUrl, resolveAvatarUrlsByPersonId }));
 
 const { loadFairnessWorkbookContext, getFairnessWorkbookSheet, FAIRNESS_WORKBOOK_SOURCES } = await import(
   "./fairnessWorkbookContext"
@@ -66,8 +69,12 @@ beforeEach(() => {
   getRequestPersonalSchedule.mockReset();
   getAuthenticatedIdentity.mockReset();
   getWorkbookSnapshot.mockReset();
+  fetchEmailToAvatarUrl.mockReset();
+  resolveAvatarUrlsByPersonId.mockReset();
   getAuthenticatedIdentity.mockResolvedValue({ status: "ok", email: "dani@example.invalid", avatarUrl: null });
   getWorkbookSnapshot.mockResolvedValue(fairnessSnapshot());
+  fetchEmailToAvatarUrl.mockResolvedValue(new Map());
+  resolveAvatarUrlsByPersonId.mockReturnValue(new Map());
 });
 
 describe("loadFairnessWorkbookContext — A. non-manager-only access", () => {
@@ -219,6 +226,43 @@ describe("loadFairnessWorkbookContext — defense in depth re-verification", () 
 
     const result = await loadFairnessWorkbookContext();
     expect(result).toEqual({ status: "ambiguous_identity" });
+  });
+});
+
+describe("loadFairnessWorkbookContext — avatar resolution", () => {
+  it("passes the resolved people + avatar map through to avatarByPersonId", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(okPersonalResult());
+    const emailMap = new Map([["dani@example.invalid", "https://lh3.googleusercontent.com/a/dani.jpg"]]);
+    const personMap = new Map([["p_dani", "https://lh3.googleusercontent.com/a/dani.jpg"]]);
+    fetchEmailToAvatarUrl.mockResolvedValue(emailMap);
+    resolveAvatarUrlsByPersonId.mockReturnValue(personMap);
+
+    const result = await loadFairnessWorkbookContext();
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(resolveAvatarUrlsByPersonId).toHaveBeenCalledWith(result.context.people, emailMap);
+    expect(result.context.avatarByPersonId).toBe(personMap);
+  });
+
+  it("degrades to an empty avatar map (never fails the whole page) when the bulk lookup rejects", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(okPersonalResult());
+    fetchEmailToAvatarUrl.mockRejectedValue(new Error("Admin API unavailable"));
+
+    const result = await loadFairnessWorkbookContext();
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.context.avatarByPersonId).toEqual(new Map());
+  });
+
+  it("never fetches avatars at all for an early auth failure (unauthenticated/missing_email/unmapped/ambiguous_identity)", async () => {
+    for (const status of ["unauthenticated", "missing_email", "unmapped", "ambiguous_identity"] as const) {
+      fetchEmailToAvatarUrl.mockClear();
+      getRequestPersonalSchedule.mockResolvedValue({ status });
+      await loadFairnessWorkbookContext();
+      expect(fetchEmailToAvatarUrl).not.toHaveBeenCalled();
+    }
   });
 });
 

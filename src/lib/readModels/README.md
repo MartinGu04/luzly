@@ -353,3 +353,49 @@ questions a manager actually asks instead of one collapsed engine enum.
 - **UI** — `ManagerAdoptionSummary`/`ManagerAdoptionSection`
   (`components/manager/`), rendered only for `category === "logins"` in
   `app/(app)/manager/page.tsx`.
+
+## Fairness table avatars
+
+Both standalone Fairness modes (`shiftFairness.ts`/`dutyFairness.ts`, via
+`loadFairnessWorkbookContext()`) now carry each row's Google profile
+photo, so `/fairness`'s cards can show it next to the person's name.
+
+- **`fairnessAvatarLookup.ts`** — `fetchEmailToAvatarUrl()` (account-wide,
+  roster-independent, reuses the SAME Supabase Admin API bulk
+  `listUsers()` primitive `lib/notifications/engine/recipients.ts`'s
+  `fetchAllUserIdsByEmail` already established for the notification worker
+  and the manager-only adoption view above — never a second lookup
+  mechanism) and `resolveAvatarUrlsByPersonId()` (pure, matches that map
+  against one specific roster, failing closed on an ambiguous email
+  exactly like every other identity resolution in this codebase). Split
+  in two specifically so `fairnessWorkbookContext.ts` can kick the fetch
+  off CONCURRENTLY with its own workbook fetch, instead of waiting for the
+  roster to resolve first.
+
+  This is genuinely NEW traffic to a privileged, RLS-bypassing Admin API
+  call: every prior caller was either the Cron-triggered worker (no live
+  user request at all) or a manager-only view. `/fairness` is a normal
+  main-navigation destination every mapped user can load, so
+  `fetchEmailToAvatarUrl` is wrapped in a short (30s) `unstable_cache` —
+  the same TTL/convention `lib/sync/workbookSnapshotCache.ts` already
+  established — so a burst of different users loading Fairness within a
+  few seconds reuses one Admin API call rather than one each. Never fails
+  the whole page: `fairnessWorkbookContext.ts` catches a rejected lookup
+  and degrades to an empty map (every row falls back to initials).
+- **`fairnessWorkbookContext.ts`** — `FairnessWorkbookContext.avatarByPersonId`
+  carries the resolved map through to both `shiftFairness.ts` and
+  `dutyFairness.ts`.
+- **`shiftFairness.ts`/`dutyFairness.ts`** — each stamps `avatarUrl` onto
+  its already-built read model's rows via a small `withAvatars()`
+  post-processing step that runs strictly AFTER
+  `buildShiftFairnessReadModel`/`buildDutyFairnessReadModel` — neither
+  builder itself ever sets or reads `avatarUrl`, so this can never affect
+  calculations, sorting, eligibility, or historical logic.
+- **`lib/presentation/fairnessCards.ts`** — `ShiftFairnessCardView`/
+  `DutyFairnessCardView` both carry `avatarUrl` straight through from the
+  row, unchanged.
+- **UI** — `ShiftFairnessCard`/`DutyFairnessCard` (`components/fairness/`)
+  render it via the shared `Avatar` component (`components/ui/Avatar.tsx`,
+  new `size="xs"` variant for this dense-row context) immediately beside
+  the person's name — Google photo when available, initials otherwise,
+  graceful fallback on a failed image load.

@@ -23,13 +23,21 @@ function person(overrides: Partial<Person> = {}): Person {
   return { id: "p_tech", name: "טל טכנאי", email: null, isManager: false, isTechnician: true, isSupervisor: false, personnelType: null, ...overrides };
 }
 
-function okContext(overrides: Partial<{ people: Person[]; h1Rows: string[][]; h2Rows: string[][] }> = {}) {
+function okContext(
+  overrides: Partial<{
+    people: Person[];
+    h1Rows: string[][];
+    h2Rows: string[][];
+    avatarByPersonId: ReadonlyMap<string, string | null>;
+  }> = {},
+) {
   const people = overrides.people ?? [person()];
   return {
     status: "ok" as const,
     context: {
       person: people[0],
       people,
+      avatarByPersonId: overrides.avatarByPersonId ?? new Map<string, string | null>(),
       snapshot: {
         fetchedAt: "2026-08-15T10:00:00.000Z",
         sheets: [
@@ -116,5 +124,72 @@ describe('loadDutyFairnessReadModel — ר"צ grouping preserved end-to-end', ()
     expect(row.currentScore).toBe(5);
     expect(row.comparisonTarget).toBeNull();
     expect(row.status).toBeNull();
+  });
+});
+
+describe("loadDutyFairnessReadModel — avatar enrichment (never touches calculations)", () => {
+  it("stamps each row's avatarUrl from the context's avatarByPersonId map, keyed by personId", async () => {
+    loadFairnessWorkbookContext.mockResolvedValue(
+      okContext({
+        h2Rows: [["טל טכנאי", "טכנאי", "5", "6", "1", "-"]],
+        avatarByPersonId: new Map([["p_tech", "https://lh3.googleusercontent.com/a/tal.jpg"]]),
+      }),
+    );
+    const result = await loadDutyFairnessReadModel("h2");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    const technicianGroup = result.model.groups.find((group) => group.key === "technician");
+    expect(technicianGroup?.rows[0]?.avatarUrl).toBe("https://lh3.googleusercontent.com/a/tal.jpg");
+  });
+
+  it("falls back to null when the person has no entry in the map", async () => {
+    loadFairnessWorkbookContext.mockResolvedValue(
+      okContext({ h2Rows: [["טל טכנאי", "טכנאי", "5", "6", "1", "-"]] }),
+    );
+    const result = await loadDutyFairnessReadModel("h2");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    const technicianGroup = result.model.groups.find((group) => group.key === "technician");
+    expect(technicianGroup?.rows[0]?.avatarUrl).toBeNull();
+  });
+
+  it("an unresolved source name (personId: null) always gets avatarUrl: null, even if the map happens to have an entry under a coincidental key", async () => {
+    loadFairnessWorkbookContext.mockResolvedValue(
+      okContext({
+        h2Rows: [["מישהו לא ידוע", "טכנאי", "5", "6", "1", "-"]],
+        avatarByPersonId: new Map([["p_tech", "https://lh3.googleusercontent.com/a/tal.jpg"]]),
+      }),
+    );
+    const result = await loadDutyFairnessReadModel("h2");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    const technicianGroup = result.model.groups.find((group) => group.key === "technician");
+    const unresolvedRow = technicianGroup?.rows.find((row) => row.personId === null);
+    expect(unresolvedRow).toBeDefined();
+    expect(unresolvedRow?.avatarUrl).toBeNull();
+  });
+
+  it("never leaks one person's photo onto a different person's row", async () => {
+    loadFairnessWorkbookContext.mockResolvedValue(
+      okContext({
+        people: [person(), person({ id: "p_ratz", name: "רוני רצ" })],
+        h2Rows: [
+          ["טל טכנאי", "טכנאי", "5", "6", "1", "-"],
+          ["רוני רצ", 'ר"צ', "5", "5", "1", "-"],
+        ],
+        avatarByPersonId: new Map([
+          ["p_tech", "https://lh3.googleusercontent.com/a/tal.jpg"],
+          ["p_ratz", "https://lh3.googleusercontent.com/a/roni.jpg"],
+        ]),
+      }),
+    );
+    const result = await loadDutyFairnessReadModel("h2");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+
+    const technicianRow = result.model.groups.find((g) => g.key === "technician")?.rows[0];
+    const supervisorRow = result.model.groups.find((g) => g.key === "supervisor")?.rows[0];
+    expect(technicianRow?.avatarUrl).toBe("https://lh3.googleusercontent.com/a/tal.jpg");
+    expect(supervisorRow?.avatarUrl).toBe("https://lh3.googleusercontent.com/a/roni.jpg");
   });
 });

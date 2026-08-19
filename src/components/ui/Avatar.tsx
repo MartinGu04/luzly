@@ -5,7 +5,8 @@ import { initialsOf } from "@/lib/presentation/avatar";
 
 interface AvatarProps {
   name: string;
-  size?: "sm" | "md";
+  /** "xs" (24px) is for dense table rows -- e.g. the Fairness tables, where the avatar must stay visually secondary to the name and never materially add to row height. */
+  size?: "xs" | "sm" | "md";
   className?: string;
   /**
    * The Google account's profile photo (presentation-only -- see
@@ -38,7 +39,8 @@ export function Avatar({ name, size = "md", className = "", avatarUrl = null }: 
   }
 
   const initials = initialsOf(name);
-  const sizeClasses = size === "sm" ? "h-8 w-8 text-[11px]" : "h-10 w-10 text-sm";
+  const sizeClasses =
+    size === "xs" ? "h-6 w-6 text-[9px]" : size === "sm" ? "h-8 w-8 text-[11px]" : "h-10 w-10 text-sm";
   const showPhoto = avatarUrl !== null && !imageFailed;
 
   return (

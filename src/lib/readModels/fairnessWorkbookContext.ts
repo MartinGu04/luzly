@@ -5,6 +5,7 @@ import { SHEET_SOURCES, type RawSheet, type RawWorkbookSnapshot, type SheetSourc
 import type { Person } from "@/lib/domain/types";
 import { parsePersonnelSheet } from "@/lib/parsers/personnel";
 import { getWorkbookSnapshot } from "@/lib/sync";
+import { fetchEmailToAvatarUrl, resolveAvatarUrlsByPersonId } from "./fairnessAvatarLookup";
 import { getRequestPersonalSchedule } from "./getRequestPersonalSchedule";
 
 export type FairnessWorkbookContextResult =
@@ -14,11 +15,24 @@ export type FairnessWorkbookContextResult =
   | { status: "ambiguous_identity" }
   | { status: "ok"; context: FairnessWorkbookContext };
 
-/** Everything the standalone Fairness experience needs on top of the shared fetch: the freshly re-verified viewer, the full parsed roster, and the raw snapshot to parse further sheets from. */
+/** Everything the standalone Fairness experience needs on top of the shared fetch: the freshly re-verified viewer, the full parsed roster, the raw snapshot to parse further sheets from, and each roster member's Google avatar photo (see `avatarByPersonId`). */
 export interface FairnessWorkbookContext {
   person: Person;
   people: Person[];
   snapshot: RawWorkbookSnapshot;
+  /**
+   * Every roster person's presentation-only Google avatar photo, keyed by
+   * `Person.id` -- resolved via `fairnessAvatarLookup.ts` (the same
+   * Supabase Admin API bulk `listUsers()` primitive `fetchAllUserIdsByEmail`
+   * already established for the notification worker and the manager-only
+   * adoption view, cached and reused here rather than a second lookup
+   * mechanism). A person absent from this map, or present with `null`/
+   * `undefined`, simply has no known photo -- callers fall back to
+   * initials, never a broken image. Never fails the whole Fairness page:
+   * an Admin API error here degrades to an empty map (every row falls
+   * back to initials) rather than propagating.
+   */
+  avatarByPersonId: ReadonlyMap<string, string | null>;
 }
 
 /**
@@ -105,6 +119,20 @@ export async function loadFairnessWorkbookContext(): Promise<FairnessWorkbookCon
   if (personalResult.status === "unmapped") return { status: "unmapped" };
   if (personalResult.status === "ambiguous_identity") return { status: "ambiguous_identity" };
 
+  // Started now, concurrently with the workbook fetch below -- it depends
+  // on no roster/identity data (see `fairnessAvatarLookup.ts`'s own docs),
+  // so there's no reason to wait for either to resolve first. Caught here
+  // (never left to reject into the `await` below) so a Supabase Admin API
+  // hiccup degrades to "nobody has a known photo yet" rather than failing
+  // the whole Fairness page -- profile-photo availability must never be a
+  // page-blocking dependency, same defensive convention
+  // `loadAdoptionReadiness` (manager overview) already established for
+  // this exact same underlying Admin API call.
+  const emailToAvatarUrlPromise = fetchEmailToAvatarUrl().catch(() => {
+    console.error("[fairness] avatar lookup failed");
+    return new Map<string, string | null>();
+  });
+
   // "ok" and "configuration_error" both continue -- see step 1 above.
   const snapshot = await getWorkbookSnapshot(FAIRNESS_WORKBOOK_SOURCES);
 
@@ -118,5 +146,7 @@ export async function loadFairnessWorkbookContext(): Promise<FairnessWorkbookCon
   if (identityResult.status === "unmapped") return { status: "unmapped" };
   if (identityResult.status === "ambiguous_identity") return { status: "ambiguous_identity" };
 
-  return { status: "ok", context: { person: identityResult.person, people, snapshot } };
+  const avatarByPersonId = resolveAvatarUrlsByPersonId(people, await emailToAvatarUrlPromise);
+
+  return { status: "ok", context: { person: identityResult.person, people, snapshot, avatarByPersonId } };
 }

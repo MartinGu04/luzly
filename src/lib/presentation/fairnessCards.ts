@@ -19,6 +19,8 @@ export interface ShiftFairnessCardView {
   key: string;
   personId: string;
   personName: string;
+  /** Presentation-only Google avatar photo, `null` when none is known -- the card falls back to initials either way (see `components/ui/Avatar`). */
+  avatarUrl: string | null;
   /** Carried straight from the row (PR #51 follow-up) so the service-type presentation subgrouping can be built from cards alone, with no separate roster lookup. */
   serviceCategory: PersonnelServiceCategory;
   href: string;
@@ -58,6 +60,7 @@ export function buildShiftFairnessCardView(row: ShiftFairnessPersonRowView, href
     key: row.personId,
     personId: row.personId,
     personName: row.personName,
+    avatarUrl: row.avatarUrl ?? null,
     serviceCategory: row.serviceCategory,
     href,
     actualLabel: String(row.actualShifts),
@@ -89,6 +92,8 @@ export interface DutyFairnessCardView {
   key: string;
   personId: string | null;
   personName: string;
+  /** Presentation-only Google avatar photo, `null` when none is known (including every row with `personId === null`) -- the card falls back to initials either way. */
+  avatarUrl: string | null;
   href: string | null;
   allocationLabel: string;
   currentLabel: string;
@@ -108,6 +113,7 @@ export function buildDutyFairnessCardView(
     key: row.key,
     personId: row.personId,
     personName: row.sourceName,
+    avatarUrl: row.avatarUrl ?? null,
     href,
     allocationLabel: row.allocationLabel,
     currentLabel: formatFairnessScore(row.currentScore),

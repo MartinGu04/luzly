@@ -39,6 +39,16 @@ export interface ShiftFairnessPersonRowView {
   weekendDeviation: number | null;
   weekendStatus: FairnessShiftStatus | null;
   dataCompleteness: FairnessDataCompleteness;
+  /**
+   * The person's presentation-only Google avatar photo, when known --
+   * `undefined`/`null` both mean "no photo, fall back to initials"; never
+   * required by `buildShiftFairnessReadModel` itself (which never sets it
+   * -- calculations/sorting/eligibility are entirely untouched by this
+   * field). Stamped on AFTER the read model is built, by
+   * `loadShiftFairnessReadModel` (`shiftFairness.ts`), from
+   * `FairnessWorkbookContext.avatarByPersonId`.
+   */
+  avatarUrl?: string | null;
 }
 
 export interface ShiftFairnessGroupView {
