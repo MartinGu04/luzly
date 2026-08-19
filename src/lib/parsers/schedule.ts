@@ -35,30 +35,14 @@ interface PersonColumn {
  * (see findScheduleDateColumns below).
  */
 export function parseScheduleSheet(sheet: RawSheet, personnel: Person[]): RawAssignment[] {
-  const headerRowIndex = sheet.values.findIndex((row) =>
-    row.some((cell) => {
-      const text = cellToTrimmedString(cell);
-      return DATE_HEADER_LABELS.includes(text) || DAY_HEADER_LABELS.includes(text);
-    }),
-  );
-  if (headerRowIndex === -1) return [];
-
-  const headerRow = sheet.values[headerRowIndex] ?? [];
-  const width = Math.max(gridWidth(sheet.values), headerRow.length);
-
-  const dateCols = findScheduleDateColumns(sheet.values, headerRowIndex, headerRow);
+  const resolved = resolveScheduleBlocks(sheet);
+  if (!resolved) return [];
+  const { headerRowIndex, headerRow, blocks } = resolved;
 
   const personByHeaderName = new Map<string, Person>();
   for (const person of personnel) {
     personByHeaderName.set(normalizeHeaderText(person.name), person);
   }
-
-  const blocks: ScheduleBlock[] = dateCols.map((dateCol, index) => {
-    const hasDayCol = DAY_HEADER_LABELS.includes(cellToTrimmedString(headerRow[dateCol + 1]));
-    const personZoneStart = dateCol + (hasDayCol ? 2 : 1);
-    const personZoneEnd = index + 1 < dateCols.length ? dateCols[index + 1] : width;
-    return { dateCol, personZoneStart, personZoneEnd };
-  });
 
   const assignments: RawAssignment[] = [];
 
@@ -126,6 +110,61 @@ function resolvePersonColumns(
 
 function normalizeHeaderText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Finds the header row and every date/person-zone block, shared by
+ * `parseScheduleSheet` and `findScheduleColumnHeaderTexts` so block/header
+ * detection is only ever implemented once. Returns null when no header row
+ * can be located at all (mirrors the old inline early-return).
+ */
+function resolveScheduleBlocks(
+  sheet: RawSheet,
+): { headerRowIndex: number; headerRow: RawCellValue[]; blocks: ScheduleBlock[] } | null {
+  const headerRowIndex = sheet.values.findIndex((row) =>
+    row.some((cell) => {
+      const text = cellToTrimmedString(cell);
+      return DATE_HEADER_LABELS.includes(text) || DAY_HEADER_LABELS.includes(text);
+    }),
+  );
+  if (headerRowIndex === -1) return null;
+
+  const headerRow = sheet.values[headerRowIndex] ?? [];
+  const width = Math.max(gridWidth(sheet.values), headerRow.length);
+
+  const dateCols = findScheduleDateColumns(sheet.values, headerRowIndex, headerRow);
+
+  const blocks: ScheduleBlock[] = dateCols.map((dateCol, index) => {
+    const hasDayCol = DAY_HEADER_LABELS.includes(cellToTrimmedString(headerRow[dateCol + 1]));
+    const personZoneStart = dateCol + (hasDayCol ? 2 : 1);
+    const personZoneEnd = index + 1 < dateCols.length ? dateCols[index + 1] : width;
+    return { dateCol, personZoneStart, personZoneEnd };
+  });
+
+  return { headerRowIndex, headerRow, blocks };
+}
+
+/**
+ * Every distinct, non-blank person-zone column header across all blocks --
+ * including names that don't match anyone in the current roster. Used to
+ * corroborate a former employee's historical Duty Fairness attribution
+ * (see `lib/parsers/historicalDutyPersonnel.ts`) without ever parsing raw
+ * cells outside this module.
+ */
+export function findScheduleColumnHeaderTexts(sheet: RawSheet): string[] {
+  const resolved = resolveScheduleBlocks(sheet);
+  if (!resolved) return [];
+  const { headerRow, blocks } = resolved;
+
+  const headerTexts = new Set<string>();
+  for (const block of blocks) {
+    for (let col = block.personZoneStart; col < block.personZoneEnd; col++) {
+      const text = cellToTrimmedString(headerRow[col]);
+      if (text !== "") headerTexts.add(text);
+    }
+  }
+
+  return [...headerTexts];
 }
 
 /**
