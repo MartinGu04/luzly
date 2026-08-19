@@ -8,6 +8,7 @@ import type {
   ManagerPotentialRequirementView,
   ManagerShiftOverviewEntry,
 } from "@/lib/readModels/managerTypes";
+import type { ShiftSnapshotTriad } from "@/lib/readModels/shiftSnapshot";
 import type { PersonalScheduleReadModel } from "@/lib/readModels/types";
 
 const getRequestManagerOverview = vi.fn();
@@ -108,6 +109,45 @@ function potentialRow(overrides: Partial<ManagerPotentialRequirementView> = {}):
   };
 }
 
+function shiftSnapshotShift(overrides: Partial<ShiftSnapshotTriad["previousShift"]> = {}): ShiftSnapshotTriad["previousShift"] {
+  return {
+    date: "2026-08-13",
+    period: "day",
+    startLocalTime: "07:30",
+    endLocalTime: "19:30",
+    supervisors: [],
+    technicians: [],
+    coverageStatus: "full",
+    missingIntervals: [],
+    roleCoverage: {
+      technician: { status: "full", missingIntervals: [] },
+      supervisor: { status: "full", missingIntervals: [] },
+    },
+    ...overrides,
+  };
+}
+
+function shiftSnapshotTriad(overrides: Partial<ShiftSnapshotTriad> = {}): ShiftSnapshotTriad {
+  return {
+    previousShift: shiftSnapshotShift({ date: "2026-08-12", period: "night", startLocalTime: "19:30", endLocalTime: "07:30" }),
+    currentShift: {
+      ...shiftSnapshotShift(),
+      timing: {
+        status: "resolved",
+        startLocalTime: "07:30",
+        endLocalTime: "19:30",
+        durationMinutes: 720,
+        elapsedMinutesAtLoad: 30,
+        remainingMinutesAtLoad: 690,
+        progressPercentAtLoad: 4,
+        minutesUntilStartAtLoad: 0,
+      },
+    },
+    nextShift: shiftSnapshotShift({ period: "night", startLocalTime: "19:30", endLocalTime: "07:30" }),
+    ...overrides,
+  };
+}
+
 function personalModel(overrides: Partial<PersonalScheduleReadModel> = {}): PersonalScheduleReadModel {
   return {
     person: { id: "p_martin", name: "מרטין בדיקה", isManager: false, isTechnician: true, isSupervisor: false, personnelType: null },
@@ -150,6 +190,7 @@ function model(overrides: Partial<ManagerOverviewReadModel> = {}): ManagerOvervi
     selectedPerson: null,
     selectedPersonRangeAbsences: [],
     adoption: { status: "skipped" },
+    managerShiftSnapshot: null,
     ...overrides,
   };
 }
@@ -342,6 +383,38 @@ describe("ManagerPage — Overview: אזור מנהל identity", () => {
     getRequestManagerOverview.mockResolvedValue(okResult(model({ issues: [issue()] })));
     const { container } = await renderPage();
     expect(container.textContent).not.toContain("שלך");
+  });
+});
+
+describe("ManagerPage — Overview: managerShiftSnapshot section (shift-capable manager only)", () => {
+  it("renders the shift snapshot section when the read model provides one (a shift-capable manager)", async () => {
+    getRequestManagerOverview.mockResolvedValue(okResult(model({ managerShiftSnapshot: shiftSnapshotTriad() })));
+    await renderPage();
+    expect(screen.getByText("תמונת מצב משמרות")).toBeInTheDocument();
+    expect(screen.getByText("הקודמת")).toBeInTheDocument();
+    expect(screen.getByText("עכשיו")).toBeInTheDocument();
+    expect(screen.getByText("הבאה")).toBeInTheDocument();
+  });
+
+  it("does not render the shift snapshot section for a permanent/non-shift manager (managerShiftSnapshot: null)", async () => {
+    getRequestManagerOverview.mockResolvedValue(okResult(model({ managerShiftSnapshot: null })));
+    await renderPage();
+    expect(screen.queryByText("תמונת מצב משמרות")).toBeNull();
+  });
+
+  it("only renders on the Overview category, never on Shifts/Personnel/Duties/Logins", async () => {
+    getRequestManagerOverview.mockResolvedValue(okResult(model({ managerShiftSnapshot: shiftSnapshotTriad() })));
+    await renderPage({ category: "shifts" });
+    expect(screen.queryByText("תמונת מצב משמרות")).toBeNull();
+  });
+
+  it("still renders the rest of the Overview (attention section) alongside the shift snapshot", async () => {
+    getRequestManagerOverview.mockResolvedValue(
+      okResult(model({ managerShiftSnapshot: shiftSnapshotTriad(), issues: [issue()] })),
+    );
+    await renderPage();
+    expect(screen.getByText("תמונת מצב משמרות")).toBeInTheDocument();
+    expect(screen.getByText("דורש טיפול")).toBeInTheDocument();
   });
 });
 

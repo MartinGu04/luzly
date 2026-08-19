@@ -253,7 +253,11 @@ shift-fairness period without collision.
   string) — co-located with `classifyPersonnelType` for the same reason
   that function lives here: `lib/presentation/roster.ts`'s
   `classifyRegularRole` and this PR's `fairnessGroups.ts` both need the
-  EXACT same rule, defined once.
+  EXACT same rule, defined once. Also exports `isShiftCapable` (same
+  `isSupervisor`/`isTechnician` flags, boolean form) — the eligibility
+  signal for the Manager Area's own shift snapshot section
+  (`lib/readModels/shiftSnapshot.ts`), independent of
+  `classifyPersonnelType`'s employment-category axis.
 - `fairnessFoundation.ts` — the foundation-wide primitives: `FAIRNESS_MODEL_VERSION`
   (for a future stored historical snapshot to trust without recalculating);
   `resolveFairnessPeriodStatus` (`"current"` vs `"closed"`, from a plain

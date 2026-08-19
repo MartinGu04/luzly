@@ -1,26 +1,15 @@
-import { computeIntervalTiming, type AssignmentTiming } from "@/lib/domain/assignmentTiming";
 import type { Event } from "@/lib/domain/event";
 import type { LocalNow } from "@/lib/domain/localNow";
-import { analyzeUnitShiftCoverage } from "@/lib/domain/shiftCoverage";
-import {
-  nextShiftPeriod,
-  previousShiftPeriod,
-  resolveCurrentShiftPeriod,
-  type AdjacentShiftPeriod,
-  type MinuteInterval,
-  type ShiftSchedule,
-} from "@/lib/domain/shiftSchedule";
+import type { ShiftSchedule } from "@/lib/domain/shiftSchedule";
 import type { Person } from "@/lib/domain/types";
 import { toPersonalProfile } from "./buildPersonalScheduleReadModel";
-import { buildManagerAbsenceEntries, buildManagerDutyEntries, buildShiftStaffingOverview } from "./managerEventProjections";
-import type { ManagerShiftOverviewEntry } from "./managerTypes";
+import { buildManagerAbsenceEntries, buildManagerDutyEntries } from "./managerEventProjections";
 import type {
   PermanentManagerHomeAbsence,
-  PermanentManagerHomeCurrentShift,
   PermanentManagerHomeDuty,
   PermanentManagerHomeReadModel,
-  PermanentManagerHomeShift,
 } from "./permanentManagerHomeTypes";
+import { resolveShiftSnapshotTriad } from "./shiftSnapshot";
 
 export interface BuildPermanentManagerHomeReadModelInput {
   /** The authenticated permanent-manager Person this read model is being built for. */
@@ -32,64 +21,6 @@ export interface BuildPermanentManagerHomeReadModelInput {
   shiftSchedule: ShiftSchedule;
   fetchedAt: string;
   now: LocalNow;
-}
-
-/** `schedule.dayStartMinute`/`dayEndMinute` or `nightStartMinute`/`nightEndMinute` -- the same two-field mapping `resolveEventShiftInterval` already inlines, packaged here so it's computed once per shift instead of three times. */
-function canonicalInterval(period: "day" | "night", schedule: ShiftSchedule): MinuteInterval {
-  return period === "day"
-    ? { startMinute: schedule.dayStartMinute, endMinute: schedule.dayEndMinute }
-    : { startMinute: schedule.nightStartMinute, endMinute: schedule.nightEndMinute };
-}
-
-/**
- * The unit-wide staffing+coverage entry for one canonical shift, whether or
- * not `buildShiftStaffingOverview` produced one. That helper deliberately
- * omits an entry for a date+period with ZERO shift Events at all (its own
- * "not yet scheduled" convention, safe for an arbitrary future date range).
- * For the department's own previous/current/next shift, "zero Events" is a
- * genuinely meaningful "nobody is staffed on this shift" fact, not merely
- * unscheduled -- so this falls back to calling `analyzeUnitShiftCoverage`
- * directly with an empty group, the exact same coverage engine call
- * `buildShiftStaffingOverview` itself makes internally.
- */
-function resolveShiftOverviewEntry(
-  ref: AdjacentShiftPeriod,
-  overviewByKey: ReadonlyMap<string, ManagerShiftOverviewEntry>,
-  schedule: ShiftSchedule,
-): ManagerShiftOverviewEntry {
-  const existing = overviewByKey.get(`${ref.date}|${ref.period}`);
-  if (existing) return existing;
-
-  const analysis = analyzeUnitShiftCoverage(ref.period, [], schedule);
-  return {
-    date: ref.date,
-    period: ref.period,
-    technicians: [],
-    supervisors: [],
-    shadowTechnicians: [],
-    shadowSupervisors: [],
-    coverageStatus: analysis.coverageStatus,
-    missingIntervals: analysis.missingIntervals,
-    roleCoverage: analysis.roleCoverage,
-  };
-}
-
-function toShift(
-  ref: AdjacentShiftPeriod,
-  entry: ManagerShiftOverviewEntry,
-  timing: Extract<AssignmentTiming, { status: "resolved" }>,
-): PermanentManagerHomeShift {
-  return {
-    date: ref.date,
-    period: ref.period,
-    startLocalTime: timing.startLocalTime,
-    endLocalTime: timing.endLocalTime,
-    supervisors: entry.supervisors,
-    technicians: entry.technicians,
-    coverageStatus: entry.coverageStatus,
-    missingIntervals: entry.missingIntervals,
-    roleCoverage: entry.roleCoverage,
-  };
 }
 
 function toDutyView(duty: { personId: string; personName: string; dutyFamily: NonNullable<Event["dutyFamily"]>; slot: number | null }): PermanentManagerHomeDuty {
@@ -106,39 +37,19 @@ function toAbsenceView(absence: { personId: string; personName: string; absenceK
  * `buildPersonalScheduleReadModel`'s conventions (explicit `now`, never
  * mutates input, every array deterministically ordered by the domain
  * functions it reuses).
+ *
+ * The previous/current/next shift resolution itself is
+ * `resolveShiftSnapshotTriad` (`shiftSnapshot.ts`), shared with the Manager
+ * Area's own shift-working-manager snapshot section -- this function only
+ * adds what's specific to the permanent-manager Home: the viewer's own
+ * safe profile and today's department-wide duties/absences.
  */
 export function buildPermanentManagerHomeReadModel(
   input: BuildPermanentManagerHomeReadModelInput,
 ): PermanentManagerHomeReadModel {
   const { person, people, events, shiftSchedule, fetchedAt, now } = input;
 
-  const currentRef = resolveCurrentShiftPeriod(now, shiftSchedule);
-  // Always non-null: resolveCurrentShiftPeriod only ever returns "day"/"night", which always has a canonical adjacency.
-  const previousRef = previousShiftPeriod(currentRef.date, currentRef.period) as AdjacentShiftPeriod;
-  const nextRef = nextShiftPeriod(currentRef.date, currentRef.period) as AdjacentShiftPeriod;
-
-  const dates = new Set([previousRef.date, currentRef.date, nextRef.date]);
-  const overviewByKey = new Map(
-    buildShiftStaffingOverview(events, shiftSchedule, dates).map((entry) => [`${entry.date}|${entry.period}`, entry]),
-  );
-
-  const previousEntry = resolveShiftOverviewEntry(previousRef, overviewByKey, shiftSchedule);
-  const currentEntry = resolveShiftOverviewEntry(currentRef, overviewByKey, shiftSchedule);
-  const nextEntry = resolveShiftOverviewEntry(nextRef, overviewByKey, shiftSchedule);
-
-  const previousTiming = computeIntervalTiming(canonicalInterval(previousRef.period, shiftSchedule), previousRef.date, now);
-  const currentTiming = computeIntervalTiming(canonicalInterval(currentRef.period, shiftSchedule), currentRef.date, now);
-  const nextTiming = computeIntervalTiming(canonicalInterval(nextRef.period, shiftSchedule), nextRef.date, now);
-
-  // computeIntervalTiming always resolves for a canonical (never overridden) interval -- start < end is guaranteed by buildShiftSchedule.
-  if (previousTiming.status !== "resolved" || currentTiming.status !== "resolved" || nextTiming.status !== "resolved") {
-    throw new Error("Unexpected unresolved canonical shift timing.");
-  }
-
-  const currentShift: PermanentManagerHomeCurrentShift = {
-    ...toShift(currentRef, currentEntry, currentTiming),
-    timing: currentTiming,
-  };
+  const { previousShift, currentShift, nextShift } = resolveShiftSnapshotTriad(events, shiftSchedule, now);
 
   const peopleById = new Map(people.map((p) => [p.id, p]));
   const todayDates = new Set([now.date]);
@@ -149,9 +60,9 @@ export function buildPermanentManagerHomeReadModel(
     person: toPersonalProfile(person),
     fetchedAt,
     localNow: now,
-    previousShift: toShift(previousRef, previousEntry, previousTiming),
+    previousShift,
     currentShift,
-    nextShift: toShift(nextRef, nextEntry, nextTiming),
+    nextShift,
     todayDuties,
     todayAbsences,
   };

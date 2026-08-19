@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyPersonnelType, classifyRoleGroup } from "./personnelType";
+import { classifyPersonnelType, classifyRoleGroup, isShiftCapable } from "./personnelType";
 
 describe("classifyPersonnelType", () => {
   it("קבע -> permanent", () => {
@@ -45,5 +45,23 @@ describe("classifyRoleGroup", () => {
 
   it("neither flag resolves to other", () => {
     expect(classifyRoleGroup({ isSupervisor: false, isTechnician: false })).toBe("other");
+  });
+});
+
+describe("isShiftCapable", () => {
+  it("a supervisor (אחמ״ש) is shift-capable", () => {
+    expect(isShiftCapable({ isSupervisor: true, isTechnician: false })).toBe(true);
+  });
+
+  it("a technician is shift-capable", () => {
+    expect(isShiftCapable({ isSupervisor: false, isTechnician: true })).toBe(true);
+  });
+
+  it("a person with neither capability flag is not shift-capable", () => {
+    expect(isShiftCapable({ isSupervisor: false, isTechnician: false })).toBe(false);
+  });
+
+  it("both flags set is still shift-capable", () => {
+    expect(isShiftCapable({ isSupervisor: true, isTechnician: true })).toBe(true);
   });
 });

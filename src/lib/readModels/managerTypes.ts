@@ -6,6 +6,7 @@ import type { ManagerRequirementStatus, ManagerSourceConflict } from "@/lib/doma
 import type { MissingCoverageRole } from "@/lib/domain/shiftCoverageRecommendation";
 import type { CoverageStatus } from "@/lib/domain/shiftCoverage";
 import type { MinuteInterval } from "@/lib/domain/shiftSchedule";
+import type { ShiftSnapshotTriad } from "./shiftSnapshot";
 import type { PersonalIssueTargetSummary, PersonalScheduleReadModel } from "./types";
 
 /**
@@ -320,4 +321,21 @@ export interface ManagerOverviewReadModel {
   selectedPerson: PersonalScheduleReadModel | null;
   /** The selected person's own absences within the selected range -- `selectedPerson` itself doesn't carry a dedicated absences list. Empty in the "everyone" scope. */
   selectedPersonRangeAbsences: ManagerAbsenceEntry[];
+
+  /**
+   * The department-wide previous/current/next shift ("תמונת מצב משמרות"), for a
+   * manager who is themselves shift-capable (`isShiftCapable`,
+   * `lib/domain/personnelType.ts` -- `isSupervisor`/`isTechnician`, never a
+   * title-string check) -- e.g. an אחמ״ש with manager access. `null` for a
+   * manager with neither capability flag (a permanent/non-shift manager),
+   * who already gets this exact same operational picture as their own Home
+   * screen instead (`PermanentManagerHomeReadModel`, unaffected by this
+   * field). Reuses `resolveShiftSnapshotTriad` (`shiftSnapshot.ts`)
+   * outright -- the SAME previous/current/next resolution, roster/coverage
+   * lookup, and progress timing that read model already computes, never a
+   * second implementation. Always the actual neighboring department shifts
+   * in chronological order, never filtered down to this manager's own
+   * personal assignments.
+   */
+  managerShiftSnapshot: ShiftSnapshotTriad | null;
 }
