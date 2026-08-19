@@ -16,6 +16,7 @@ import {
   ManagerSelectedPersonView,
   type ManagerSelectedPersonAssignmentView,
 } from "@/components/manager/ManagerSelectedPersonView";
+import { ManagerShiftSnapshotSection } from "@/components/manager/ManagerShiftSnapshotSection";
 import { ManagerSourceOfTruthNote } from "@/components/manager/ManagerSourceOfTruthNote";
 import { ManagerSummaryStrip } from "@/components/manager/ManagerSummaryStrip";
 import type {
@@ -420,6 +421,13 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
       {category === "overview" ? (
         <>
           {summary ? <ManagerSummaryStrip summary={summary} /> : null}
+          {model.managerShiftSnapshot ? (
+            <ManagerShiftSnapshotSection
+              snapshot={model.managerShiftSnapshot}
+              todayDate={todayDate}
+              fetchedAt={model.fetchedAt}
+            />
+          ) : null}
           <ManagerAttentionSection criticalItems={criticalItems} reviewItems={reviewItems} current={hrefParams} />
         </>
       ) : null}

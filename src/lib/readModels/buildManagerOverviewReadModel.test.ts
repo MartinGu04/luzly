@@ -1192,3 +1192,42 @@ describe("buildManagerOverviewReadModel — adoption (התחברויות והת�
     });
   });
 });
+
+describe("buildManagerOverviewReadModel — managerShiftSnapshot eligibility", () => {
+  it("is null for a permanent/non-shift manager (no isTechnician/isSupervisor capability flags)", () => {
+    const model = buildModel({ manager: MANAGER });
+    expect(model.managerShiftSnapshot).toBeNull();
+  });
+
+  it("is populated for a shift-capable manager who is a technician", () => {
+    const technicianManager = { ...MANAGER, isTechnician: true };
+    const model = buildModel({ manager: technicianManager, people: [technicianManager, MARTIN, EITAN, NOA] });
+    expect(model.managerShiftSnapshot).not.toBeNull();
+  });
+
+  it("is populated for a shift-capable manager who is a supervisor (e.g. an אחמ״ש with manager access)", () => {
+    const supervisorManager = { ...MANAGER, isSupervisor: true };
+    const model = buildModel({ manager: supervisorManager, people: [supervisorManager, MARTIN, EITAN, NOA] });
+    expect(model.managerShiftSnapshot).not.toBeNull();
+  });
+
+  it("eligibility is never a title-string check -- a manager named with 'אחמ״ש' but lacking the capability flags is still ineligible", () => {
+    const titledManager = { ...MANAGER, name: 'אחמ"ש דני' };
+    const model = buildModel({ manager: titledManager, people: [titledManager, MARTIN, EITAN, NOA] });
+    expect(model.managerShiftSnapshot).toBeNull();
+  });
+
+  it("when populated, reflects the actual department-wide current shift, not the manager's personal assignment", () => {
+    const technicianManager = { ...MANAGER, id: "p_manager", isTechnician: true };
+    // A different person (not the manager) staffs the current day shift.
+    const events = [event({ personId: MARTIN.id, personName: MARTIN.name, date: now.date, role: "technician", period: "day" })];
+    const model = buildModel({
+      manager: technicianManager,
+      people: [technicianManager, MARTIN, EITAN, NOA],
+      events,
+    });
+
+    expect(model.managerShiftSnapshot).not.toBeNull();
+    expect(model.managerShiftSnapshot?.currentShift.technicians.map((p) => p.personId)).toContain(MARTIN.id);
+  });
+});

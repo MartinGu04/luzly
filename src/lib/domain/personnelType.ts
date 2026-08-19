@@ -54,3 +54,20 @@ export function classifyRoleGroup(person: RoleGroupable): FairnessRoleGroupKey {
   if (person.isTechnician) return "technician";
   return "other";
 }
+
+/**
+ * Whether a person can be assigned to shifts at all -- the ONLY structural
+ * signal this codebase uses for "does this person work shifts themselves",
+ * reusing the same capability flags `classifyRoleGroup` already reads.
+ * Deliberately never a title-string check (e.g. matching "אחמ״ש") and
+ * deliberately independent of `classifyPersonnelType` -- a permanent (קבע)
+ * person could technically carry these flags too, though in practice
+ * doesn't; personnelType answers "what's their employment category",
+ * this answers "can they be rostered onto a shift", and the two are never
+ * conflated. Used to gate the Manager Area's own shift snapshot section
+ * (`lib/readModels/shiftSnapshot.ts`) onto exactly the manager population
+ * that has personal shifts to see "what's happening around me" for.
+ */
+export function isShiftCapable(person: RoleGroupable): boolean {
+  return person.isSupervisor || person.isTechnician;
+}

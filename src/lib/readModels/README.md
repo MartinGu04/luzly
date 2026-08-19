@@ -354,6 +354,62 @@ questions a manager actually asks instead of one collapsed engine enum.
   (`components/manager/`), rendered only for `category === "logins"` in
   `app/(app)/manager/page.tsx`.
 
+## Manager Area shift snapshot ("המשמרת שלי")
+
+A compact previous/current/next department shift snapshot inside the
+Manager Area's own Overview category, for a manager who is themselves
+shift-capable (e.g. an אחמ״ש with manager access) — as distinct from a
+permanent/non-shift manager, who already gets this exact same operational
+picture as their own dedicated `PermanentManagerHome` Home screen instead.
+Neither existing Home experience (`PermanentManagerHome`, the normal
+personal dashboard) changes; this section is additive, inside `/manager`
+only.
+
+- **`shiftSnapshot.ts`** — `resolveShiftSnapshotTriad(events, shiftSchedule,
+  now)`, extracted from what was previously inlined logic in
+  `buildPermanentManagerHomeReadModel.ts`. Resolves the canonical
+  previous/current/next day/night shift via `resolveCurrentShiftPeriod`/
+  `previousShiftPeriod`/`nextShiftPeriod` (`lib/domain/shiftSchedule.ts` —
+  back-to-back 12h blocks with no gaps, so "current" always resolves for
+  any valid `ShiftSchedule`), looks up each shift's roster/coverage via
+  `buildShiftStaffingOverview` (falling back to an explicitly "missing,
+  nobody assigned" entry via `analyzeUnitShiftCoverage([], ...)` for a
+  shift with zero events, never an omitted/undefined shift), and computes
+  each shift's elapsed/remaining/progress timing via
+  `computeIntervalTiming` (`lib/domain/assignmentTiming.ts`) against the
+  shift's own canonical hours — DST-safe, overnight/date-boundary-safe,
+  never reimplemented. This is genuinely department-wide: `events` is the
+  full parsed schedule, never filtered to one person, so previous/current/
+  next are the actual neighboring shifts regardless of who is viewing.
+  Both `buildPermanentManagerHomeReadModel.ts` and
+  `buildManagerOverviewReadModel.ts` call this SAME function — zero
+  duplication of shift resolution, roster/coverage lookup, or progress
+  timing between the permanent-manager Home and the Manager Area section.
+- **`lib/domain/personnelType.ts`'s `isShiftCapable`** — the eligibility
+  signal for this section: `person.isSupervisor || person.isTechnician`,
+  the same capability flags `classifyRoleGroup` already reads. Deliberately
+  NOT a title-string check (e.g. matching "אחמ״ש") and deliberately
+  independent of `classifyPersonnelType` (employment category, used to
+  route the permanent-manager Home) — a manager can be shift-capable
+  regardless of their `personnelType`.
+- **`managerTypes.ts`** — `ManagerOverviewReadModel.managerShiftSnapshot:
+  ShiftSnapshotTriad | null`. `buildManagerOverviewReadModel.ts` sets it via
+  `isShiftCapable(manager) ? resolveShiftSnapshotTriad(events,
+  shiftSchedule, now) : null` — purely in-memory over the SAME
+  `events`/`shiftSchedule`/`now` Manager Overview already fetches for
+  coverage/issues, so eligible managers cost zero additional Google/Supabase
+  fetches.
+- **UI** — `components/manager/ManagerShiftSnapshotSection.tsx` renders
+  the triad via the SAME `ShiftSnapshotCard` component
+  (`components/home/`) the permanent-manager Home uses, completely
+  unmodified — but in a plain, equal three-column grid rather than the
+  Home's hero-weighted layout with mobile reordering, so it reads as one
+  compact operational section inside the Overview page rather than a
+  second Home screen. Rendered in `app/(app)/manager/page.tsx` only when
+  `category === "overview"` and `model.managerShiftSnapshot` is non-null;
+  `null` (a permanent/non-shift manager) renders nothing extra, and every
+  other Manager Area category/behavior is unaffected.
+
 ## Fairness table avatars
 
 Both standalone Fairness modes (`shiftFairness.ts`/`dutyFairness.ts`, via

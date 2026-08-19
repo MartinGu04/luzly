@@ -13,6 +13,7 @@ import {
   reconcilePotentialAllocations,
   type ManagerRequirementReconciliation,
 } from "@/lib/domain/potentialReconciliation";
+import { isShiftCapable } from "@/lib/domain/personnelType";
 import { scopeManagerPotentialAllocation } from "@/lib/domain/potentialSourceOwnership";
 import { resolveReserveRoleParticipation, type ReserveRoleParticipationByPeriod } from "@/lib/domain/reserveParticipation";
 import { buildShiftCoverageRecommendation } from "@/lib/domain/shiftCoverageRecommendation";
@@ -21,6 +22,7 @@ import type { Person } from "@/lib/domain/types";
 import type { PersonReadinessResult } from "@/lib/notifications/engine/readiness";
 import { buildPersonalScheduleReadModel } from "./buildPersonalScheduleReadModel";
 import { buildManagerAbsenceEntries, buildManagerDutyEntries, buildShiftStaffingOverview } from "./managerEventProjections";
+import { resolveShiftSnapshotTriad } from "./shiftSnapshot";
 import type {
   ManagerAdoptionPersonView,
   ManagerAdoptionState,
@@ -187,6 +189,16 @@ export function buildManagerOverviewReadModel(
 
   const adoption = toManagerAdoptionState(rawAdoption, peopleById);
 
+  // "המשמרת שלי" -- only for a manager who is themselves shift-capable
+  // (isSupervisor/isTechnician, never a title-string check). Computed
+  // unconditionally regardless of `range`/`selectedPersonId` -- this is the
+  // manager's own live "what's happening around me now" snapshot, never
+  // scoped to the page's own date-range navigation or a drilled-into
+  // person, same "always now" convention `PermanentManagerHomeReadModel`
+  // already established. Purely in-memory (no extra Google/Supabase call):
+  // `events`/`shiftSchedule`/`now` are already this function's own inputs.
+  const managerShiftSnapshot = isShiftCapable(manager) ? resolveShiftSnapshotTriad(events, shiftSchedule, now) : null;
+
   return {
     manager: { id: manager.id, name: manager.name, avatarUrl: managerAvatarUrl },
     fetchedAt,
@@ -202,6 +214,7 @@ export function buildManagerOverviewReadModel(
     selectedPerson,
     selectedPersonRangeAbsences,
     adoption,
+    managerShiftSnapshot,
   };
 }
 
