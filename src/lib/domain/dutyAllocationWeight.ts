@@ -20,29 +20,44 @@ import type { DutyFamily, Event } from "./event";
  * than hold its own copy.
  *
  * THREE genuinely different shapes of rule exist here -- confirmed by
- * business rules TWICE now (the second pass specifically corrected an
- * earlier bug where every non-guard/reserve family, including the kitchen
- * families, was wrongly treated as day-multiplied):
+ * business rules multiple times now. The second pass corrected an earlier
+ * bug where every non-guard/reserve family, including the kitchen
+ * families, was wrongly treated as day-multiplied; THIS pass corrected a
+ * follow-up bug where `daily_kitchen` was left grouped with `full_kitchen`/
+ * `weekend_kitchen` as a "flat per-allocation BLOCK" -- i.e. calendar-
+ * adjacent `daily_kitchen` days were silently merged into one run
+ * (`buildDutyBlocks` groups by consecutive date, same person/family/slot),
+ * so a real, ALREADY-COMPLETED `daily_kitchen` day immediately followed by
+ * a future/not-yet-happened `daily_kitchen` day for the same person got
+ * merged into one block whose end extends past the cutoff -- silently
+ * zeroing out credit for the day that genuinely already happened. "מטבח
+ * יומי" (daily kitchen) means literally per-DAY, the same as `rasar`, not
+ * "per allocation run" -- confirmed root cause of a real production report
+ * (a person's recently-performed daily_kitchen duty not reflected in their
+ * score).
  *
- * - DAY-BASED (`rasar` ONLY): each real, CONFIRMED, in-range duty Event
- *   independently contributes `0.2` -- a 3-day rasar stretch is 3 separate
- *   0.2 contributions (`0.6` total), never one lump `0.2`.
- * - FLAT PER-ALLOCATION BLOCKS (`daily_kitchen`/`full_kitchen`/
- *   `weekend_kitchen`/`oxid`/`evacuation_on_call`/`callup`): a
- *   `numberOfDays × rate` calculation is WRONG for these -- "per
- *   allocation/duty" means each real, CONFIRMED, consecutive-day run is
- *   ONE allocation, contributing its family's flat weight EXACTLY ONCE no
- *   matter how many days it spans. `weekend_kitchen` additionally only
- *   counts once the run matches the codebase's own already-established
- *   "complete weekend" shape (`DutyBlock.weekendCompleteness`, Thu-Fri-Sat
- *   -- see `dutyBlocks.ts`'s `computeWeekendCompleteness`, reused here
- *   outright, never re-derived) -- a still-in-progress or irregularly-
- *   shaped weekend_kitchen run simply hasn't happened yet, so it
- *   contributes `0` for now, same as any other incomplete allocation.
- *   `oxid`/`evacuation_on_call`/`callup` are real, confirmed duties too;
- *   they simply carry a weight of `0` -- never omitted from the table, so
- *   their "worth nothing" status is an explicit, documented fact rather
- *   than an accidental gap.
+ * - DAY-BASED (`rasar`, `daily_kitchen`): each real, CONFIRMED, in-range
+ *   duty Event independently contributes its family's weight -- a 3-day
+ *   rasar stretch is 3 separate 0.2 contributions (`0.6` total), never one
+ *   lump `0.2`; two SEPARATE calendar-adjacent daily_kitchen days are two
+ *   separate 0.2 contributions, never merged into one. Never gated on
+ *   "the whole run must be complete" -- each day stands on its own, so an
+ *   already-completed day is never swallowed by an adjacent future day.
+ * - FLAT PER-ALLOCATION BLOCKS (`full_kitchen`/`weekend_kitchen`/`oxid`/
+ *   `evacuation_on_call`/`callup`): a `numberOfDays × rate` calculation is
+ *   WRONG for these -- "per allocation/duty" means each real, CONFIRMED,
+ *   consecutive-day run is ONE allocation, contributing its family's flat
+ *   weight EXACTLY ONCE no matter how many days it spans. `weekend_kitchen`
+ *   additionally only counts once the run matches the codebase's own
+ *   already-established "complete weekend" shape
+ *   (`DutyBlock.weekendCompleteness`, Thu-Fri-Sat -- see `dutyBlocks.ts`'s
+ *   `computeWeekendCompleteness`, reused here outright, never re-derived)
+ *   -- a still-in-progress or irregularly-shaped weekend_kitchen run simply
+ *   hasn't happened yet, so it contributes `0` for now, same as any other
+ *   incomplete allocation. `oxid`/`evacuation_on_call`/`callup` are real,
+ *   confirmed duties too; they simply carry a weight of `0` -- never
+ *   omitted from the table, so their "worth nothing" status is an explicit,
+ *   documented fact rather than an accidental gap.
  * - BLOCK-BASED WITH SHAPE CLASSIFICATION (guard/reserve ONLY): the same
  *   "never `numberOfDays × rate`" principle as the flat-allocation
  *   families above, but with THREE distinct fixed weights depending on
@@ -50,19 +65,21 @@ import type { DutyFamily, Event } from "./event";
  *   `resolveGuardReserveBlockShape` below is the one place that decides
  *   which shape (or "unsupported") a real consecutive-day block matches.
  */
-export type FlatAllocationDutyFamily = Exclude<DutyFamily, "guard" | "reserve" | "rasar">;
+export type DayBasedDutyFamily = "rasar" | "daily_kitchen";
+
+export type FlatAllocationDutyFamily = Exclude<DutyFamily, "guard" | "reserve" | DayBasedDutyFamily>;
 
 /**
  * The canonical weight for every duty family EXCEPT guard/reserve (which
  * are block-based with three distinct shapes -- see
- * `GUARD_RESERVE_BLOCK_WEIGHT` below). `rasar` is applied PER DAY;
- * every other family here is applied ONCE PER CONSECUTIVE-DAY ALLOCATION
- * BLOCK, never multiplied by how many days that block spans -- see this
- * module's own top-of-file docs for the full day-based vs flat-per-
- * allocation distinction. `oxid`/`evacuation_on_call`/`callup` are listed
- * explicitly at `0` -- confirmed business rule, not an omission:
- * "zero-value duties are still real duties, but they contribute 0 to
- * הקצאות שבוצעו."
+ * `GUARD_RESERVE_BLOCK_WEIGHT` below). `rasar`/`daily_kitchen` are applied
+ * PER DAY; every other family here is applied ONCE PER CONSECUTIVE-DAY
+ * ALLOCATION BLOCK, never multiplied by how many days that block spans --
+ * see this module's own top-of-file docs for the full day-based vs
+ * flat-per-allocation distinction. `oxid`/`evacuation_on_call`/`callup`
+ * are listed explicitly at `0` -- confirmed business rule, not an
+ * omission: "zero-value duties are still real duties, but they contribute
+ * 0 to הקצאות שבוצעו."
  */
 export const DUTY_ALLOCATION_WEIGHT_BY_FAMILY: Readonly<Record<Exclude<DutyFamily, "guard" | "reserve">, number>> = {
   rasar: 0.2,
@@ -174,8 +191,12 @@ function isGuardOrReserve(dutyFamily: DutyFamily): dutyFamily is "guard" | "rese
   return dutyFamily === "guard" || dutyFamily === "reserve";
 }
 
+function isDayBasedFamily(dutyFamily: DutyFamily): dutyFamily is DayBasedDutyFamily {
+  return dutyFamily === "rasar" || dutyFamily === "daily_kitchen";
+}
+
 function isFlatAllocationFamily(dutyFamily: DutyFamily): dutyFamily is FlatAllocationDutyFamily {
-  return dutyFamily !== "guard" && dutyFamily !== "reserve" && dutyFamily !== "rasar";
+  return dutyFamily !== "guard" && dutyFamily !== "reserve" && !isDayBasedFamily(dutyFamily);
 }
 
 function datesOverlap(startA: string, endA: string, startB: string, endB: string): boolean {
@@ -188,20 +209,25 @@ function isFullyWithinRange(block: Pick<DutyBlock, "startDate" | "endDate">, per
 }
 
 /**
- * The person's real "הקצאות שבוצעו" total: `rasar`'s per-day contributions,
- * PLUS each flat-allocation family's per-BLOCK contribution, PLUS each
- * guard/reserve block's shape-classified fixed weight.
- * `[periodStartDate, effectiveEndDate]` is the caller's already-resolved
- * effective range (period start through `min(today, period end)` -- see
- * `buildDutyFairnessReadModel.ts`); this function never re-derives it and
- * never looks at "now" itself.
+ * The person's real "הקצאות שבוצעו" total: `rasar`/`daily_kitchen`'s
+ * per-day contributions, PLUS each flat-allocation family's per-BLOCK
+ * contribution, PLUS each guard/reserve block's shape-classified fixed
+ * weight. `[periodStartDate, effectiveEndDate]` is the caller's
+ * already-resolved effective range (period start through
+ * `min(today, period end)` -- see `buildDutyFairnessReadModel.ts`); this
+ * function never re-derives it and never looks at "now" itself.
  *
- * `rasar` (the ONLY day-based family): each event independently gated on
- * `periodStartDate <= event.date <= effectiveEndDate` -- a multi-day rasar
- * stretch that starts before the period or is still ongoing past the
- * cutoff still contributes for exactly the days genuinely inside the
- * range, never the whole stretch, never zero days just because part of it
- * falls outside.
+ * DAY-BASED families (`rasar`, `daily_kitchen`): each event independently
+ * gated on `periodStartDate <= event.date <= effectiveEndDate` -- a
+ * multi-day rasar stretch, or two separate calendar-adjacent daily_kitchen
+ * days, still contribute for exactly the days genuinely inside the range,
+ * never the whole stretch, never zero days just because part of it (or an
+ * adjacent future day) falls outside. Deliberately NEVER routed through
+ * `buildDutyBlocks` -- a real, already-completed day must never be
+ * swallowed by a calendar-adjacent FUTURE day of the same family merging
+ * into one block whose end extends past the cutoff (the confirmed root
+ * cause of a real production report: a person's recently-performed
+ * daily_kitchen duty not reflected in their score).
  *
  * Every other family (flat-allocation AND guard/reserve): blocks are built
  * from `personId`'s ENTIRE event history (never date-filtered first -- see
@@ -230,12 +256,12 @@ export function computeCompletedDutyAllocation(
 
   let total = 0;
 
-  // rasar -- the ONLY day-based family: partial credit for exactly the in-range days.
+  // rasar/daily_kitchen -- day-based: partial credit for exactly the in-range days, never merged into a block.
   for (const event of personEvents) {
     if (!isSettledDutyEvent(event)) continue;
-    if (event.dutyFamily !== "rasar") continue;
+    if (!isDayBasedFamily(event.dutyFamily)) continue;
     if (event.date < periodStartDate || event.date > effectiveEndDate) continue;
-    total += DUTY_ALLOCATION_WEIGHT_BY_FAMILY.rasar;
+    total += DUTY_ALLOCATION_WEIGHT_BY_FAMILY[event.dutyFamily];
   }
 
   const blocks = buildDutyBlocks(personEvents);

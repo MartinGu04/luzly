@@ -195,18 +195,7 @@ describe("computeCompletedDutyAllocation — unsupported guard/reserve block sha
   });
 });
 
-describe("computeCompletedDutyAllocation — flat per-allocation families (daily_kitchen/full_kitchen/oxid/evacuation_on_call/callup): ONE block = ONE contribution, never numberOfDays × rate", () => {
-  it("daily_kitchen (single day) = 0.2", () => {
-    const events = block("daily_kitchen", ["2026-01-06"], { slot: null });
-    expect(computeCompletedDutyAllocation(events, "p1", H1_START, H1_END).total).toBe(0.2);
-  });
-
-  it("REGRESSION: a multi-day daily_kitchen allocation still contributes exactly 0.2 ONCE, never dayCount x 0.2", () => {
-    const events = block("daily_kitchen", ["2026-01-05", "2026-01-06", "2026-01-07"], { slot: null }); // one 3-day block
-    expect(events).toHaveLength(3);
-    expect(computeCompletedDutyAllocation(events, "p1", H1_START, H1_END).total).toBe(0.2);
-  });
-
+describe("computeCompletedDutyAllocation — flat per-allocation families (full_kitchen/oxid/evacuation_on_call/callup): ONE block = ONE contribution, never numberOfDays × rate", () => {
   it("full_kitchen (single day) = 0.5", () => {
     const events = block("full_kitchen", ["2026-01-06"], { slot: null });
     expect(computeCompletedDutyAllocation(events, "p1", H1_START, H1_END).total).toBe(0.5);
@@ -293,6 +282,97 @@ describe("computeCompletedDutyAllocation — rasar: the ONLY day-based family, 0
     const events = block("rasar", ["2025-12-30", "2025-12-31", "2026-01-01", "2026-01-02"], { slot: null });
     const result = computeCompletedDutyAllocation(events, "p1", H1_START, H1_END);
     expect(result.total).toBeCloseTo(0.4); // only 01-01 and 01-02 are inside H1
+  });
+});
+
+describe("computeCompletedDutyAllocation — daily_kitchen: day-based (0.2 per actual completed day), NOT a per-allocation block", () => {
+  it("daily_kitchen (single day) = 0.2", () => {
+    const events = block("daily_kitchen", ["2026-01-06"], { slot: null });
+    expect(computeCompletedDutyAllocation(events, "p1", H1_START, H1_END).total).toBe(0.2);
+  });
+
+  it("REGRESSION (root-cause fix): TWO separate calendar-adjacent daily_kitchen days contribute 0.2 EACH (0.4 total), never merged into one 0.2 block", () => {
+    const events = block("daily_kitchen", ["2026-01-05", "2026-01-06"], { slot: null }); // two real, consecutive days
+    expect(events).toHaveLength(2);
+    expect(computeCompletedDutyAllocation(events, "p1", H1_START, H1_END).total).toBeCloseTo(0.4);
+  });
+
+  it("REGRESSION (root-cause fix): a 3-day daily_kitchen stretch is 3 x 0.2 = 0.6, never a flat 0.2 lump", () => {
+    const events = block("daily_kitchen", ["2026-01-05", "2026-01-06", "2026-01-07"], { slot: null });
+    expect(computeCompletedDutyAllocation(events, "p1", H1_START, H1_END).total).toBeCloseTo(0.6);
+  });
+
+  it("REGRESSION (root-cause fix): an already-COMPLETED daily_kitchen day is never zeroed out by a calendar-adjacent FUTURE daily_kitchen day for the same person", () => {
+    const events = block("daily_kitchen", ["2026-08-14", "2026-08-15", "2026-08-16"], { slot: null }); // 08-14/08-15 already happened, 08-16 is still scheduled/future
+    // Cutoff (today) is 2026-08-15 -- under the OLD block-based bug, this
+    // 3-day run's endDate (08-16) would extend past the cutoff, failing
+    // the "fully within range" block check and zeroing ALL three days,
+    // including the two that genuinely already happened.
+    const result = computeCompletedDutyAllocation(events, "p1", "2026-07-01", "2026-08-15");
+    expect(result.total).toBeCloseTo(0.4); // 08-14 and 08-15 count; 08-16 (future) does not
+  });
+
+  it("rasar events crossing the cutoff boundary: only the in-range days contribute (same day-based rule as rasar)", () => {
+    const events = block("daily_kitchen", ["2026-01-03", "2026-01-04", "2026-01-05"], { slot: null });
+    const result = computeCompletedDutyAllocation(events, "p1", H1_START, "2026-01-04");
+    expect(result.total).toBeCloseTo(0.4);
+  });
+
+  it("respects the selected period -- a daily_kitchen duty outside [periodStartDate, effectiveEndDate] is excluded even if it already happened", () => {
+    const events = [
+      ...block("daily_kitchen", ["2026-03-01"], { slot: null }), // inside H1
+      ...block("daily_kitchen", ["2025-12-20"], { slot: null }), // before H1 -- a prior period
+    ];
+    expect(computeCompletedDutyAllocation(events, "p1", H1_START, H1_END).total).toBeCloseTo(0.2);
+  });
+
+  it("a tentative daily_kitchen day is a plan, not yet settled -- never counted", () => {
+    const events = block("daily_kitchen", ["2026-03-01"], { slot: null, certainty: "tentative" });
+    expect(computeCompletedDutyAllocation(events, "p1", H1_START, H1_END).total).toBe(0);
+  });
+});
+
+describe("computeCompletedDutyAllocation — regression case reproducing the real production report (fixture data, never the real person)", () => {
+  it("a person who recently performed a daily_kitchen duty AND a single-day reserve/standby duty gets BOTH reflected, summed correctly", () => {
+    // Modeled on a real triage report: a person's recently-performed daily
+    // kitchen duty and reserve/standby duty were not correctly reflected in
+    // their fairness score. Reproduced here with synthetic fixture data,
+    // never the real person's name/id.
+    const events: Event[] = [
+      ...block("daily_kitchen", ["2026-08-12"], { slot: null, personId: "p_fixture" }), // 0.2, a single completed kitchen day
+      ...block("reserve", ["2026-08-13"], { personId: "p_fixture" }), // 0.25, a single completed reserve day
+    ];
+    const result = computeCompletedDutyAllocation(events, "p_fixture", "2026-07-01", "2026-08-15");
+    expect(result.total).toBeCloseTo(0.45);
+    expect(result.unsupportedBlocks).toEqual([]);
+  });
+
+  it("the SAME person's daily_kitchen duty still counts even when immediately followed by a future daily_kitchen day (the confirmed root cause)", () => {
+    const events: Event[] = [
+      ...block("daily_kitchen", ["2026-08-14", "2026-08-15"], { slot: null, personId: "p_fixture" }), // completed
+      ...block("daily_kitchen", ["2026-08-16"], { slot: null, personId: "p_fixture" }), // future, calendar-adjacent
+      ...block("reserve", ["2026-08-10"], { personId: "p_fixture" }), // an unrelated, already-completed single-day reserve duty
+    ];
+    const result = computeCompletedDutyAllocation(events, "p_fixture", "2026-07-01", "2026-08-15");
+    // 0.2 + 0.2 (two completed kitchen days) + 0.25 (reserve) = 0.65 -- the
+    // future 08-16 day contributes nothing yet, and critically does NOT
+    // zero out the two days that already happened.
+    expect(result.total).toBeCloseTo(0.65);
+  });
+});
+
+describe("computeCompletedDutyAllocation — a multi-duty person: score is the SUM of several different duty types", () => {
+  it("guard (weekend) + reserve (single day) + full_kitchen + rasar (2 days) + daily_kitchen (2 days) all sum correctly", () => {
+    const events: Event[] = [
+      ...block("guard", WEEKEND_BLOCK_DATES), // Thu-Sun -> 1.0
+      ...block("reserve", ["2026-02-16"]), // single day -> 0.25 (2026-02-16 is a Monday, irrelevant for single_day)
+      ...block("full_kitchen", ["2026-03-01"], { slot: null }), // 0.5
+      ...block("rasar", ["2026-03-10", "2026-03-11"], { slot: null }), // 0.2 x 2 = 0.4
+      ...block("daily_kitchen", ["2026-04-01", "2026-04-02"], { slot: null }), // 0.2 x 2 = 0.4
+    ];
+    const result = computeCompletedDutyAllocation(events, "p1", H1_START, H1_END);
+    // 1.0 + 0.25 + 0.5 + 0.4 + 0.4 = 2.55
+    expect(result.total).toBeCloseTo(2.55);
   });
 });
 
