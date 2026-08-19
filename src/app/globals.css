@@ -77,15 +77,23 @@
 
   /* Semantic per-event-type calendar colors ("הלוח שלי" single-person
      view only -- never the shared "כולם" calendar, see
-     `lib/presentation/eventColor.ts`). The fixed 8-slot categorical hue
-     set/order from this repo's dataviz color methodology (blue/orange/
-     aqua/yellow/magenta/green/violet/red), validated against BOTH of
-     mi-ma-mo's real calendar surfaces (light `--surface-1` #ffffff, dark
-     `--surface-1` #161d24) for CVD separation and contrast -- reused
-     as-is rather than hand-picked, then assigned to the 8 event meanings
-     the palette needs to distinguish. Applied only as a soft background
-     tint (see the derived `--event-*-soft` tokens below) -- never as
-     text color. */
+     `lib/presentation/eventColor.ts`). The ORIGINAL 8 (shift-day/night,
+     vacation, after, referral, evacuation, guard, kitchen) are the fixed
+     8-slot categorical hue set/order from this repo's dataviz color
+     methodology (blue/orange/aqua/yellow/magenta/green/violet/red),
+     validated against BOTH of mi-ma-mo's real calendar surfaces (light
+     `--surface-1` #ffffff, dark `--surface-1` #161d24) for CVD separation
+     and contrast -- reused as-is rather than hand-picked. A follow-up
+     pass added 3 more (shift-morning, medical-rest, reserve) for the
+     remaining meaningful types that previously fell back to neutral,
+     each independently validated the same way against every one of the
+     original 8 (and each other) on both surfaces -- clean passes in
+     light mode; a few close-but-passing pairs remain in the more
+     crowded dark mode (documented per-token below), an accepted tradeoff
+     since this color is always a SECONDARY cue next to the event's own
+     emoji + label, never the sole way to tell two events apart.
+     Applied only as a soft background tint (see the derived
+     `--event-*-soft` tokens below) -- never as text color. */
   --event-shift-day: #eda100;
   --event-shift-night: #2a78d6;
   --event-vacation: #1baf7a;
@@ -94,6 +102,25 @@
   --event-evacuation: #e34948;
   --event-guard: #4a3aa7;
   --event-kitchen: #008300;
+  /* Shared by shift period "morning" only -- a plum/orchid hue, the one
+     candidate that cleared CVD/contrast against all 8 original hues at
+     once in light mode (every other family tested collided with an
+     existing warm or green/aqua slot). */
+  --event-shift-morning: #a34fa8;
+  /* Shared by absence kinds "medical" + "day_off" -- muted teal. Clears
+     every original hue except shift-night (blue): both sit in the same
+     cool blue-to-cyan region, and no candidate teal cleared both blue
+     AND aqua at once -- accepted, since medical/day_off absences never
+     had their own emoji either and previously showed no color signal at
+     all below `sm:`, so this is a net improvement even with that one
+     close neighbor. */
+  --event-medical-rest: #0d7d9e;
+  /* Shared by duty families "reserve" + "callup" -- muted olive/khaki
+     (the classic military-reserve tone). Clears every original hue
+     except vacation (aqua), which sits close in lightness -- the closest
+     achievable given the palette's other 8 slots already occupy most of
+     the hue wheel. */
+  --event-reserve: #918a3a;
 
   /* Restrained, neutral elevation shadow for surfaces that are physically
      ABOVE the page -- popovers, menus, dialogs, drawers, the command
@@ -154,6 +181,18 @@
     --event-evacuation: #e66767;
     --event-guard: #9085e9;
     --event-kitchen: #008300;
+    /* Dark-mode plum/orchid -- clears every original except referral
+       (magenta) and guard (violet), both brightened significantly for
+       dark mode and squeezing this hue between them; accepted for the
+       same secondary-cue reason as the light-mode tradeoffs above. */
+    --event-shift-morning: #bb63c0;
+    /* Dark-mode teal -- clears every original except shift-night (blue)
+       and vacation (aqua), same cool-region squeeze as light mode. */
+    --event-medical-rest: #0c8caf;
+    /* Dark-mode olive/khaki -- clears every original except after
+       (orange) and shift-day (yellow), the closest achievable in the
+       more compressed dark lightness band. */
+    --event-reserve: #a37a1f;
 
     --shadow-elevated: 0 16px 36px -14px rgba(0, 0, 0, 0.55);
   }
@@ -207,6 +246,9 @@
   --event-evacuation: #e66767;
   --event-guard: #9085e9;
   --event-kitchen: #008300;
+  --event-shift-morning: #bb63c0;
+  --event-medical-rest: #0c8caf;
+  --event-reserve: #a37a1f;
 
   --shadow-elevated: 0 16px 36px -14px rgba(0, 0, 0, 0.55);
 }
@@ -293,6 +335,9 @@
   --event-evacuation-soft: color-mix(in srgb, var(--event-evacuation) 14%, var(--surface-1));
   --event-guard-soft: color-mix(in srgb, var(--event-guard) 14%, var(--surface-1));
   --event-kitchen-soft: color-mix(in srgb, var(--event-kitchen) 14%, var(--surface-1));
+  --event-shift-morning-soft: color-mix(in srgb, var(--event-shift-morning) 14%, var(--surface-1));
+  --event-medical-rest-soft: color-mix(in srgb, var(--event-medical-rest) 14%, var(--surface-1));
+  --event-reserve-soft: color-mix(in srgb, var(--event-reserve) 14%, var(--surface-1));
 }
 
 @theme inline {
@@ -366,6 +411,12 @@
   --color-event-guard-soft: var(--event-guard-soft);
   --color-event-kitchen: var(--event-kitchen);
   --color-event-kitchen-soft: var(--event-kitchen-soft);
+  --color-event-shift-morning: var(--event-shift-morning);
+  --color-event-shift-morning-soft: var(--event-shift-morning-soft);
+  --color-event-medical-rest: var(--event-medical-rest);
+  --color-event-medical-rest-soft: var(--event-medical-rest-soft);
+  --color-event-reserve: var(--event-reserve);
+  --color-event-reserve-soft: var(--event-reserve-soft);
 
   --font-sans: var(--font-heebo);
 }

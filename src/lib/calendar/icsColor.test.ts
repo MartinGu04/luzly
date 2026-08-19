@@ -17,6 +17,9 @@ describe("icsEventColor", () => {
       baseInput({ category: "duty", period: "unspecified", dutyFamily: "evacuation_on_call" }),
       baseInput({ category: "duty", period: "unspecified", dutyFamily: "guard" }),
       baseInput({ category: "duty", period: "unspecified", dutyFamily: "full_kitchen" }),
+      baseInput({ category: "shift", period: "morning" }),
+      baseInput({ category: "absence", period: "unspecified", absenceKind: "medical" }),
+      baseInput({ category: "duty", period: "unspecified", dutyFamily: "reserve" }),
     ];
     for (const input of cases) {
       const key = eventColorKey(input);
@@ -30,9 +33,24 @@ describe("icsEventColor", () => {
     expect(color).toMatch(/^[a-z]+$/);
   });
 
+  it("reserve and callup get the exact same keyword -- one shared color, not two", () => {
+    const reserve = icsEventColor(baseInput({ category: "duty", period: "unspecified", dutyFamily: "reserve" }));
+    const callup = icsEventColor(baseInput({ category: "duty", period: "unspecified", dutyFamily: "callup" }));
+    expect(reserve).not.toBeNull();
+    expect(reserve).toBe(callup);
+  });
+
+  it("medical and day_off get the exact same keyword -- one shared color, not two", () => {
+    const medical = icsEventColor(baseInput({ category: "absence", period: "unspecified", absenceKind: "medical" }));
+    const dayOff = icsEventColor(baseInput({ category: "absence", period: "unspecified", absenceKind: "day_off" }));
+    expect(medical).not.toBeNull();
+    expect(medical).toBe(dayOff);
+  });
+
   it("degrades to null for an unmapped event, same as the in-app mapping", () => {
     expect(icsEventColor(baseInput({ category: "duty", period: "unspecified", dutyFamily: "rasar" }))).toBeNull();
-    expect(icsEventColor(baseInput({ category: "absence", period: "unspecified", absenceKind: "medical" }))).toBeNull();
+    expect(icsEventColor(baseInput({ category: "duty", period: "unspecified", dutyFamily: "oxid" }))).toBeNull();
+    expect(icsEventColor(baseInput({ category: "shift", period: "unspecified" }))).toBeNull();
   });
 
   it("night shift and day shift get different keywords", () => {

@@ -65,7 +65,7 @@ model, only the calendar-feed-specific plumbing around it.
   semantic slot decision the in-app single-person calendar uses), rather
   than keeping a second, separately-reasoned mapping -- only the output
   FORMAT differs (a CSS3 extended color keyword, per RFC 7986, mapped from
-  each of the 8 palette slots' hex). Best-effort only: `COLOR` is a SHOULD,
+  each of the 11 palette slots' hex). Best-effort only: `COLOR` is a SHOULD,
   not a MUST, and Apple Calendar reads it while Google Calendar's ICS
   subscription import ignores it -- an ignoring client sees an otherwise
   completely unaffected feed, since no other field (`UID`/timing/

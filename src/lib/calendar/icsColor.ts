@@ -19,7 +19,7 @@ export interface IcsColorInput {
  *
  * What differs here is only the output FORMAT: RFC 7986 requires `COLOR`'s
  * value to be a CSS3 extended color keyword (TEXT), never an arbitrary hex
- * -- so each of the 8 palette slots is mapped to its closest keyword below,
+ * -- so each of the 11 palette slots is mapped to its closest keyword below,
  * an approximation of the same hue, not a re-decision of which category
  * means which color.
  *
@@ -34,15 +34,18 @@ export interface IcsColorInput {
 const EVENT_COLOR_KEYWORD: Record<EventColorKey, string> = {
   "shift-day": "goldenrod",
   "shift-night": "royalblue",
+  "shift-morning": "mediumorchid",
   vacation: "seagreen",
   after: "chocolate",
   referral: "palevioletred",
+  "medical-rest": "teal",
   evacuation: "indianred",
   guard: "darkslateblue",
+  reserve: "olive",
   kitchen: "green",
 };
 
-/** The `COLOR` keyword for one event, or `null` when it's outside the 8-slot palette -- the caller then omits the property entirely, never a default/guessed color. */
+/** The `COLOR` keyword for one event, or `null` when it's outside the 11-slot palette -- the caller then omits the property entirely, never a default/guessed color. */
 export function icsEventColor(input: IcsColorInput): string | null {
   const key = eventColorKey(input);
   return key ? EVENT_COLOR_KEYWORD[key] : null;

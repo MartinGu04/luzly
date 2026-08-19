@@ -153,22 +153,49 @@ describe("buildCalendarItem -- best-effort COLOR (RFC 7986)", () => {
     expect(item!.color).toBe("seagreen");
   });
 
-  it("an unmapped duty family (rasar) has no color, never a guessed one", () => {
-    const item = buildCalendarItem(
-      baseEvent({ category: "duty", role: null, period: "unspecified", dutyFamily: "rasar" }),
+  it("reserve and callup duty families share the same semantic color", () => {
+    const reserve = buildCalendarItem(
+      baseEvent({ category: "duty", role: null, period: "unspecified", dutyFamily: "reserve" }),
       SCHEDULE,
       [],
     );
-    expect(item!.color).toBeNull();
+    const callup = buildCalendarItem(
+      baseEvent({ category: "duty", role: null, period: "unspecified", dutyFamily: "callup" }),
+      SCHEDULE,
+      [],
+    );
+    expect(reserve!.color).not.toBeNull();
+    expect(reserve!.color).toBe(callup!.color);
   });
 
-  it("an unmapped absence kind (medical) has no color", () => {
-    const item = buildCalendarItem(
+  it("medical and day_off absence kinds share the same semantic color", () => {
+    const medical = buildCalendarItem(
       baseEvent({ category: "absence", role: null, period: "unspecified", absenceKind: "medical" }),
       SCHEDULE,
       [],
     );
-    expect(item!.color).toBeNull();
+    const dayOff = buildCalendarItem(
+      baseEvent({ category: "absence", role: null, period: "unspecified", absenceKind: "day_off" }),
+      SCHEDULE,
+      [],
+    );
+    expect(medical!.color).not.toBeNull();
+    expect(medical!.color).toBe(dayOff!.color);
+  });
+
+  it("an unmapped duty family (rasar/oxid) has no color, never a guessed one", () => {
+    const rasar = buildCalendarItem(
+      baseEvent({ category: "duty", role: null, period: "unspecified", dutyFamily: "rasar" }),
+      SCHEDULE,
+      [],
+    );
+    const oxid = buildCalendarItem(
+      baseEvent({ category: "duty", role: null, period: "unspecified", dutyFamily: "oxid" }),
+      SCHEDULE,
+      [],
+    );
+    expect(rasar!.color).toBeNull();
+    expect(oxid!.color).toBeNull();
   });
 });
 
