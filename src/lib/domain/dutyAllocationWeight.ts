@@ -19,31 +19,52 @@ import type { DutyFamily, Event } from "./event";
  * layer (read model, presentation, UI) must go through this module rather
  * than hold its own copy.
  *
- * Two genuinely different shapes of rule exist here:
+ * THREE genuinely different shapes of rule exist here -- confirmed by
+ * business rules TWICE now (the second pass specifically corrected an
+ * earlier bug where every non-guard/reserve family, including the kitchen
+ * families, was wrongly treated as day-multiplied):
  *
- * - DAY-BASED families (every family below except guard/reserve): each
- *   real, CONFIRMED, in-range duty Event independently contributes its
- *   family's flat weight -- a 3-day rasar stretch is 3 separate 0.2
- *   contributions, never one lump 0.2. `oxid`/`evacuation_on_call`/`callup`
- *   are real, confirmed duties too; they simply carry a weight of `0` --
- *   never omitted from the table, so their "worth nothing" status is an
- *   explicit, documented fact rather than an accidental gap.
- * - BLOCK-BASED (guard/reserve ONLY): a `numberOfDays × rate` calculation
- *   is explicitly WRONG for these two families -- they are discrete
- *   allocation types, not a per-day rate. `resolveGuardReserveBlockShape`
- *   below is the one place that decides which of the three known shapes
- *   (or "unsupported") a real consecutive-day block matches.
+ * - DAY-BASED (`rasar` ONLY): each real, CONFIRMED, in-range duty Event
+ *   independently contributes `0.2` -- a 3-day rasar stretch is 3 separate
+ *   0.2 contributions (`0.6` total), never one lump `0.2`.
+ * - FLAT PER-ALLOCATION BLOCKS (`daily_kitchen`/`full_kitchen`/
+ *   `weekend_kitchen`/`oxid`/`evacuation_on_call`/`callup`): a
+ *   `numberOfDays × rate` calculation is WRONG for these -- "per
+ *   allocation/duty" means each real, CONFIRMED, consecutive-day run is
+ *   ONE allocation, contributing its family's flat weight EXACTLY ONCE no
+ *   matter how many days it spans. `weekend_kitchen` additionally only
+ *   counts once the run matches the codebase's own already-established
+ *   "complete weekend" shape (`DutyBlock.weekendCompleteness`, Thu-Fri-Sat
+ *   -- see `dutyBlocks.ts`'s `computeWeekendCompleteness`, reused here
+ *   outright, never re-derived) -- a still-in-progress or irregularly-
+ *   shaped weekend_kitchen run simply hasn't happened yet, so it
+ *   contributes `0` for now, same as any other incomplete allocation.
+ *   `oxid`/`evacuation_on_call`/`callup` are real, confirmed duties too;
+ *   they simply carry a weight of `0` -- never omitted from the table, so
+ *   their "worth nothing" status is an explicit, documented fact rather
+ *   than an accidental gap.
+ * - BLOCK-BASED WITH SHAPE CLASSIFICATION (guard/reserve ONLY): the same
+ *   "never `numberOfDays × rate`" principle as the flat-allocation
+ *   families above, but with THREE distinct fixed weights depending on
+ *   which of three confirmed shapes the block matches --
+ *   `resolveGuardReserveBlockShape` below is the one place that decides
+ *   which shape (or "unsupported") a real consecutive-day block matches.
  */
-export type DayBasedDutyFamily = Exclude<DutyFamily, "guard" | "reserve">;
+export type FlatAllocationDutyFamily = Exclude<DutyFamily, "guard" | "reserve" | "rasar">;
 
 /**
- * The canonical per-day weight for every duty family EXCEPT guard/reserve
- * (which are block-based -- see `GUARD_RESERVE_BLOCK_WEIGHT` below).
- * `oxid`/`evacuation_on_call`/`callup` are listed explicitly at `0` --
- * confirmed business rule, not an omission: "zero-value duties are still
- * real duties, but they contribute 0 to הקצאות שבוצעו."
+ * The canonical weight for every duty family EXCEPT guard/reserve (which
+ * are block-based with three distinct shapes -- see
+ * `GUARD_RESERVE_BLOCK_WEIGHT` below). `rasar` is applied PER DAY;
+ * every other family here is applied ONCE PER CONSECUTIVE-DAY ALLOCATION
+ * BLOCK, never multiplied by how many days that block spans -- see this
+ * module's own top-of-file docs for the full day-based vs flat-per-
+ * allocation distinction. `oxid`/`evacuation_on_call`/`callup` are listed
+ * explicitly at `0` -- confirmed business rule, not an omission:
+ * "zero-value duties are still real duties, but they contribute 0 to
+ * הקצאות שבוצעו."
  */
-export const DUTY_ALLOCATION_WEIGHT_BY_FAMILY: Readonly<Record<DayBasedDutyFamily, number>> = {
+export const DUTY_ALLOCATION_WEIGHT_BY_FAMILY: Readonly<Record<Exclude<DutyFamily, "guard" | "reserve">, number>> = {
   rasar: 0.2,
   daily_kitchen: 0.2,
   full_kitchen: 0.5,
@@ -149,45 +170,55 @@ function isSettledDutyEvent(event: Event): event is Event & { dutyFamily: DutyFa
   return event.category === "duty" && event.dutyFamily !== null && event.certainty === "confirmed";
 }
 
-function isDayBasedFamily(dutyFamily: DutyFamily): dutyFamily is DayBasedDutyFamily {
-  return dutyFamily !== "guard" && dutyFamily !== "reserve";
-}
-
 function isGuardOrReserve(dutyFamily: DutyFamily): dutyFamily is "guard" | "reserve" {
   return dutyFamily === "guard" || dutyFamily === "reserve";
+}
+
+function isFlatAllocationFamily(dutyFamily: DutyFamily): dutyFamily is FlatAllocationDutyFamily {
+  return dutyFamily !== "guard" && dutyFamily !== "reserve" && dutyFamily !== "rasar";
 }
 
 function datesOverlap(startA: string, endA: string, startB: string, endB: string): boolean {
   return startA <= endB && endA >= startB;
 }
 
+/** A block is COMPLETELY inside `[periodStartDate, effectiveEndDate]` -- the shared "no partial credit for an in-progress/boundary-straddling block" rule every block-based family (flat-allocation and guard/reserve alike) uses. */
+function isFullyWithinRange(block: Pick<DutyBlock, "startDate" | "endDate">, periodStartDate: string, effectiveEndDate: string): boolean {
+  return block.startDate >= periodStartDate && block.endDate <= effectiveEndDate;
+}
+
 /**
- * The person's real "הקצאות שבוצעו" total: the sum of every DAY-BASED
- * family's flat weight for each real, confirmed, in-range duty day, PLUS
- * each real, confirmed, FULLY-in-range guard/reserve block's fixed
- * allocation weight. `[periodStartDate, effectiveEndDate]` is the caller's
- * already-resolved effective range (period start through
- * `min(today, period end)` -- see `buildDutyFairnessReadModel.ts`); this
- * function never re-derives it and never looks at "now" itself.
+ * The person's real "הקצאות שבוצעו" total: `rasar`'s per-day contributions,
+ * PLUS each flat-allocation family's per-BLOCK contribution, PLUS each
+ * guard/reserve block's shape-classified fixed weight.
+ * `[periodStartDate, effectiveEndDate]` is the caller's already-resolved
+ * effective range (period start through `min(today, period end)` -- see
+ * `buildDutyFairnessReadModel.ts`); this function never re-derives it and
+ * never looks at "now" itself.
  *
- * Day-based families: each event independently gated on
+ * `rasar` (the ONLY day-based family): each event independently gated on
  * `periodStartDate <= event.date <= effectiveEndDate` -- a multi-day rasar
  * stretch that starts before the period or is still ongoing past the
  * cutoff still contributes for exactly the days genuinely inside the
  * range, never the whole stretch, never zero days just because part of it
  * falls outside.
  *
- * Guard/reserve: blocks are built from `personId`'s ENTIRE event history
- * (never date-filtered first -- see `resolveGuardReserveBlockShape`'s own
- * docs for why), then a block only contributes its shape's fixed weight
- * when it (a) overlaps the effective range at all, (b) is fully CONFIRMED
+ * Every other family (flat-allocation AND guard/reserve): blocks are built
+ * from `personId`'s ENTIRE event history (never date-filtered first -- see
+ * `resolveGuardReserveBlockShape`'s own docs for why this matters for
+ * shape classification, and equally for `weekend_kitchen`'s
+ * `weekendCompleteness`), then a block only contributes when it (a)
+ * overlaps the effective range at all, (b) is fully CONFIRMED
  * (`DutyBlock.certainty`; a tentative/mixed block is not yet a settled
- * fact and never taints the total either), (c) has a classifiable shape,
- * and (d) is COMPLETELY contained in `[periodStartDate, effectiveEndDate]`
- * -- a block still partially in the future (or straddling the period
- * boundary) contributes `0` for now, exactly like any other future/
- * incomplete duty, never a partial/prorated credit (block-based rules are
- * never `numberOfDays × rate`).
+ * fact and never taints the total either), (c) -- guard/reserve only --
+ * has a classifiable shape, (d) -- weekend_kitchen only -- matches the
+ * established complete Thu-Fri-Sat weekend shape, and (e) is COMPLETELY
+ * contained in `[periodStartDate, effectiveEndDate]` -- a block still
+ * partially in the future (or straddling the period boundary) contributes
+ * `0` for now, exactly like any other future/incomplete duty, never a
+ * partial/prorated credit. Each qualifying block then contributes its
+ * family's flat weight EXACTLY ONCE, regardless of `dayCount` -- never
+ * `numberOfDays × rate`.
  */
 export function computeCompletedDutyAllocation(
   events: readonly Event[],
@@ -199,20 +230,31 @@ export function computeCompletedDutyAllocation(
 
   let total = 0;
 
+  // rasar -- the ONLY day-based family: partial credit for exactly the in-range days.
   for (const event of personEvents) {
     if (!isSettledDutyEvent(event)) continue;
-    if (!isDayBasedFamily(event.dutyFamily)) continue;
+    if (event.dutyFamily !== "rasar") continue;
     if (event.date < periodStartDate || event.date > effectiveEndDate) continue;
-    total += DUTY_ALLOCATION_WEIGHT_BY_FAMILY[event.dutyFamily];
+    total += DUTY_ALLOCATION_WEIGHT_BY_FAMILY.rasar;
   }
 
-  const guardReserveBlocks = buildDutyBlocks(personEvents).filter(
-    (block): block is DutyBlock & { dutyFamily: "guard" | "reserve" } => isGuardOrReserve(block.dutyFamily),
-  );
-
+  const blocks = buildDutyBlocks(personEvents);
   const unsupportedBlocks: UnsupportedGuardReserveBlock[] = [];
 
-  for (const block of guardReserveBlocks) {
+  // Flat-allocation families -- one qualifying consecutive-day block = ONE fixed contribution, never numberOfDays x rate.
+  for (const block of blocks) {
+    if (!isFlatAllocationFamily(block.dutyFamily)) continue;
+    if (block.certainty !== "confirmed") continue;
+    if (!datesOverlap(block.startDate, block.endDate, periodStartDate, effectiveEndDate)) continue;
+    if (block.dutyFamily === "weekend_kitchen" && block.weekendCompleteness !== "complete") continue;
+    if (!isFullyWithinRange(block, periodStartDate, effectiveEndDate)) continue;
+
+    total += DUTY_ALLOCATION_WEIGHT_BY_FAMILY[block.dutyFamily];
+  }
+
+  // Guard/reserve -- shape-classified fixed weight, or unresolved if the real shape matches none of the three confirmed ones.
+  for (const block of blocks) {
+    if (!isGuardOrReserve(block.dutyFamily)) continue;
     if (block.certainty !== "confirmed") continue;
     if (!datesOverlap(block.startDate, block.endDate, periodStartDate, effectiveEndDate)) continue;
 
@@ -228,8 +270,7 @@ export function computeCompletedDutyAllocation(
       continue;
     }
 
-    const fullyWithinRange = block.startDate >= periodStartDate && block.endDate <= effectiveEndDate;
-    if (!fullyWithinRange) continue;
+    if (!isFullyWithinRange(block, periodStartDate, effectiveEndDate)) continue;
 
     total += GUARD_RESERVE_BLOCK_WEIGHT[shape];
   }

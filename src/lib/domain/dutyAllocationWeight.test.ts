@@ -39,6 +39,8 @@ function block(dutyFamily: DutyFamily, dates: readonly string[], overrides: Part
 // Thu 1, Fri 2, Sat 3, Sun 4, Mon 5, Tue 6, Wed 7, Thu 8, Fri 9, Sat 10, Sun 11, Mon 12, Tue 13.
 const WEEKEND_BLOCK_DATES = ["2026-01-01", "2026-01-02", "2026-01-03", "2026-01-04"]; // Thu-Sun
 const HALF_WEEK_BLOCK_DATES = ["2026-01-05", "2026-01-06", "2026-01-07"]; // Mon-Wed
+// weekend_kitchen's OWN established "complete weekend" span (dutyBlocks.ts's computeWeekendCompleteness) is Thu-Fri-Sat -- 3 days, NOT the same 4-day Thu-Sun span guard/reserve uses.
+const WEEKEND_KITCHEN_COMPLETE_DATES = ["2026-01-01", "2026-01-02", "2026-01-03"]; // Thu-Fri-Sat
 const H1_START = "2026-01-01";
 const H1_END = "2026-06-30";
 
@@ -70,7 +72,7 @@ describe("resolveGuardReserveBlockShape — the three confirmed business-rule sh
 });
 
 describe("DUTY_ALLOCATION_WEIGHT_BY_FAMILY — the one canonical weight table", () => {
-  it("carries every confirmed day-based family's business-rule weight", () => {
+  it("carries every non-guard/reserve family's business-rule weight (rasar per day, every other family per allocation block)", () => {
     expect(DUTY_ALLOCATION_WEIGHT_BY_FAMILY).toEqual({
       rasar: 0.2,
       daily_kitchen: 0.2,
@@ -193,20 +195,27 @@ describe("computeCompletedDutyAllocation — unsupported guard/reserve block sha
   });
 });
 
-describe("computeCompletedDutyAllocation — other duty families (day-based, per actual completed day)", () => {
-  it("daily_kitchen = 0.2", () => {
+describe("computeCompletedDutyAllocation — flat per-allocation families (daily_kitchen/full_kitchen/oxid/evacuation_on_call/callup): ONE block = ONE contribution, never numberOfDays × rate", () => {
+  it("daily_kitchen (single day) = 0.2", () => {
     const events = block("daily_kitchen", ["2026-01-06"], { slot: null });
     expect(computeCompletedDutyAllocation(events, "p1", H1_START, H1_END).total).toBe(0.2);
   });
 
-  it("full_kitchen = 0.5", () => {
+  it("REGRESSION: a multi-day daily_kitchen allocation still contributes exactly 0.2 ONCE, never dayCount x 0.2", () => {
+    const events = block("daily_kitchen", ["2026-01-05", "2026-01-06", "2026-01-07"], { slot: null }); // one 3-day block
+    expect(events).toHaveLength(3);
+    expect(computeCompletedDutyAllocation(events, "p1", H1_START, H1_END).total).toBe(0.2);
+  });
+
+  it("full_kitchen (single day) = 0.5", () => {
     const events = block("full_kitchen", ["2026-01-06"], { slot: null });
     expect(computeCompletedDutyAllocation(events, "p1", H1_START, H1_END).total).toBe(0.5);
   });
 
-  it("weekend_kitchen = 1", () => {
-    const events = block("weekend_kitchen", ["2026-01-01"], { slot: null });
-    expect(computeCompletedDutyAllocation(events, "p1", H1_START, H1_END).total).toBe(1);
+  it("REGRESSION: a multi-day full_kitchen allocation still contributes exactly 0.5 ONCE, never dayCount x 0.5", () => {
+    const events = block("full_kitchen", ["2026-01-05", "2026-01-06", "2026-01-07", "2026-01-08"], { slot: null }); // one 4-day block
+    expect(events).toHaveLength(4);
+    expect(computeCompletedDutyAllocation(events, "p1", H1_START, H1_END).total).toBe(0.5);
   });
 
   it("oxid = 0 -- a real, confirmed duty that simply contributes nothing", () => {
@@ -224,6 +233,50 @@ describe("computeCompletedDutyAllocation — other duty families (day-based, per
     expect(computeCompletedDutyAllocation(events, "p1", H1_START, H1_END).total).toBe(0);
   });
 
+  it("an in-progress (not yet fully completed) full_kitchen block contributes 0 for now, no partial credit", () => {
+    const events = block("full_kitchen", ["2026-01-05", "2026-01-06", "2026-01-07"], { slot: null }); // Mon-Wed
+    const result = computeCompletedDutyAllocation(events, "p1", H1_START, "2026-01-06"); // cutoff mid-block
+    expect(result.total).toBe(0);
+  });
+});
+
+describe("computeCompletedDutyAllocation — weekend_kitchen: ONE fixed 1.0 for the whole completed weekend allocation, never per day", () => {
+  it("a complete 3-day Thu-Fri-Sat weekend_kitchen block = 1.0, never dayCount x 1.0", () => {
+    const events = block("weekend_kitchen", WEEKEND_KITCHEN_COMPLETE_DATES, { slot: null });
+    expect(events).toHaveLength(3);
+    expect(computeCompletedDutyAllocation(events, "p1", H1_START, H1_END).total).toBe(1);
+  });
+
+  it("REGRESSION: the SAME 3-day block never contributes 3 x 1.0 = 3", () => {
+    const events = block("weekend_kitchen", WEEKEND_KITCHEN_COMPLETE_DATES, { slot: null });
+    const total = computeCompletedDutyAllocation(events, "p1", H1_START, H1_END).total;
+    expect(total).not.toBe(3);
+    expect(total).toBe(1);
+  });
+
+  it("an incomplete weekend_kitchen run (e.g. only 2 of the 3 days) contributes 0 -- not yet the established complete weekend shape", () => {
+    const events = block("weekend_kitchen", ["2026-01-01", "2026-01-02"], { slot: null }); // Thu-Fri only
+    expect(computeCompletedDutyAllocation(events, "p1", H1_START, H1_END).total).toBe(0);
+  });
+
+  it("a misaligned 3-day run (not starting Thursday) contributes 0 -- never silently treated as complete", () => {
+    const events = block("weekend_kitchen", ["2026-01-05", "2026-01-06", "2026-01-07"], { slot: null }); // Mon-Wed
+    expect(computeCompletedDutyAllocation(events, "p1", H1_START, H1_END).total).toBe(0);
+  });
+
+  it("a weekend_kitchen block still in progress as of the cutoff contributes 0 for now, same as guard/reserve's own boundary rule", () => {
+    const events = block("weekend_kitchen", WEEKEND_KITCHEN_COMPLETE_DATES, { slot: null });
+    const result = computeCompletedDutyAllocation(events, "p1", H1_START, "2026-01-02"); // cutoff mid-block (Friday)
+    expect(result.total).toBe(0);
+  });
+
+  it("the SAME weekend_kitchen block contributes its full 1.0 once the cutoff reaches its last day", () => {
+    const events = block("weekend_kitchen", WEEKEND_KITCHEN_COMPLETE_DATES, { slot: null });
+    expect(computeCompletedDutyAllocation(events, "p1", H1_START, "2026-01-03").total).toBe(1);
+  });
+});
+
+describe("computeCompletedDutyAllocation — rasar: the ONLY day-based family, 0.2 per actual completed day", () => {
   it("rasar = 0.2 PER ACTUAL COMPLETED DAY -- never assuming one multi-day event group = 0.2 flat", () => {
     const events = block("rasar", ["2026-01-05", "2026-01-06", "2026-01-07"], { slot: null });
     expect(computeCompletedDutyAllocation(events, "p1", H1_START, H1_END).total).toBeCloseTo(0.6);
