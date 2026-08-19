@@ -185,6 +185,73 @@ describe("SchedulePage — everyone mode renders team staffing (PR #24 §14/§15
   });
 });
 
+describe("SchedulePage — semantic event colors: single-person mode vs. 'כולם' (calendar color feature)", () => {
+  function dayShiftEvent(): PersonalScheduleReadModel["calendarEvents"][number] {
+    return {
+      date: "2026-08-12",
+      title: "טכנאי יום",
+      rawValue: "טכנאי יום",
+      category: "shift",
+      certainty: "confirmed",
+      role: "technician",
+      period: "day",
+      slot: null,
+      shadow: false,
+      startTimeOverride: null,
+      endTimeOverride: null,
+      dutyFamily: null,
+      absenceKind: null,
+      changeNote: null,
+      timing: { status: "not_evaluable" },
+    };
+  }
+
+  it("'self' perspective (a normal user's own calendar) shows the semantic color for a day shift", async () => {
+    getRequestSchedule.mockResolvedValue(
+      okResult(scheduleModel({ personal: personalModel({ calendarEvents: [dayShiftEvent()] }) })),
+    );
+    const element = await SchedulePage({ searchParams: searchParams({ month: "2026-08" }) });
+    render(element);
+    const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+    expect(cell.innerHTML).toMatch(/bg-event-shift-day-soft/);
+  });
+
+  it("'person' perspective (a manager viewing another person) shows the EXACT same semantic color as 'self' -- no special-casing of 'me'", async () => {
+    getRequestSchedule.mockResolvedValue(
+      okResult(
+        managerSelfModel({
+          perspective: "person",
+          selectedPersonId: "p_daniel",
+          selectedPersonName: "דניאל כהן",
+          personal: personalModel({
+            person: { id: "p_daniel", name: "דניאל כהן", isManager: false, isTechnician: true, isSupervisor: false, personnelType: null },
+            calendarEvents: [dayShiftEvent()],
+          }),
+        }),
+      ),
+    );
+    const element = await SchedulePage({ searchParams: searchParams({ month: "2026-08", person: "p_daniel" }) });
+    render(element);
+    const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+    expect(cell.innerHTML).toMatch(/bg-event-shift-day-soft/);
+  });
+
+  it("'all' perspective ('כולם') never shows any semantic per-event-type color, even with the same underlying staffing", async () => {
+    getRequestSchedule.mockResolvedValue(
+      okResult(
+        managerSelfModel({
+          perspective: "all",
+          personal: null,
+          everyone: { staffing: [staffingEntry()], duties: [], absences: [] },
+        }),
+      ),
+    );
+    const element = await SchedulePage({ searchParams: searchParams({ month: "2026-08", person: "all" }) });
+    const { container } = render(element);
+    expect(container.innerHTML).not.toMatch(/bg-event-/);
+  });
+});
+
 describe("SchedulePage — selected-person empty month (PR #24 §12)", () => {
   it("shows the calm contextual note and still renders the calendar", async () => {
     getRequestSchedule.mockResolvedValue(

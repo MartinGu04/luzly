@@ -59,6 +59,17 @@ model, only the calendar-feed-specific plumbing around it.
   emoji prefix, never a guess). Has zero effect on the in-app "הלוח שלי"
   UI, which is untouched and still goes through `lib/presentation/emoji.ts`
   alone.
+- `icsColor.ts` (pure) -- `icsEventColor`, the feed's best-effort RFC 7986
+  §5.9 `COLOR` value. Unlike `icsEmoji.ts` above, this deliberately REUSES
+  `lib/presentation/eventColor.ts`'s `eventColorKey` outright (the same
+  semantic slot decision the in-app single-person calendar uses), rather
+  than keeping a second, separately-reasoned mapping -- only the output
+  FORMAT differs (a CSS3 extended color keyword, per RFC 7986, mapped from
+  each of the 11 palette slots' hex). Best-effort only: `COLOR` is a SHOULD,
+  not a MUST, and Apple Calendar reads it while Google Calendar's ICS
+  subscription import ignores it -- an ignoring client sees an otherwise
+  completely unaffected feed, since no other field (`UID`/timing/
+  `SUMMARY`/`DESCRIPTION`) depends on it.
 - `icsRoster.ts` (pure) -- `buildShiftRosterDescription`, the "איתך
   במשמרת:" roster block appended to a SHIFT Event's `DESCRIPTION` (never
   duty/absence -- those have no shift-roster concept). Reuses
@@ -72,7 +83,9 @@ model, only the calendar-feed-specific plumbing around it.
   never creates a duplicate.
 - `icsRender.ts` / `icsEncoding.ts` (pure) -- RFC 5545 VCALENDAR/VEVENT
   text rendering and escaping/line-folding, independently testable with
-  no Supabase/Google/domain dependency at all.
+  no Supabase/Google/domain dependency at all. `IcsCalendarItem.color`
+  (from `icsColor.ts`) emits an optional `COLOR` line per VEVENT when
+  non-null, omitted entirely otherwise -- never a default/guessed value.
 - `feedUrl.ts` (pure) / `requestOrigin.ts` (server-only) -- the feed's
   HTTPS/`webcal://`/Google-"add by URL" link shapes, and resolving the
   current request's own origin to build them.

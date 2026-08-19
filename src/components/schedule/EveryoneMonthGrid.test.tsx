@@ -218,6 +218,43 @@ describe("EveryoneMonthGrid", () => {
       };
     }
 
+    it("never applies any per-event-type semantic color class -- the shared 'כולם' calendar keeps its existing coverage-status styling exactly, unaffected by the single-person calendar's new color system", () => {
+      const { container } = render(
+        <EveryoneMonthGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          dayViews={{
+            "2026-08-12": dayView({
+              day: {
+                period: "day",
+                label: "יום",
+                emoji: "☀️",
+                technicians: { people: [{ key: "p1", name: "דניאל כהן", tentative: false }], status: "full", message: null },
+                supervisors: { people: [], status: "not_evaluable", message: null },
+                shadowTechnicianNames: [],
+                shadowSupervisorNames: [],
+                coverageStatus: "full",
+              },
+              night: {
+                period: "night",
+                label: "לילה",
+                emoji: "🌙",
+                technicians: { people: [], status: "missing", message: null },
+                supervisors: { people: [], status: "missing", message: null },
+                shadowTechnicianNames: [],
+                shadowSupervisorNames: [],
+                coverageStatus: "missing",
+              },
+              duties: [{ key: "d1", personName: "דניאל כהן", title: "שומר 1", emoji: "💂" }],
+            }),
+          }}
+          selectedDate={null}
+          onSelectDate={noop}
+        />,
+      );
+      expect(container.innerHTML).not.toMatch(/bg-event-/);
+    });
+
     it("shows the day-period staffing summary text inside the cell", () => {
       render(
         <EveryoneMonthGrid

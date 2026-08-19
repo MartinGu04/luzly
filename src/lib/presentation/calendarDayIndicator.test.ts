@@ -75,6 +75,69 @@ describe("eventIndicator", () => {
     const indicator = eventIndicator(baseEvent({ certainty: "confirmed" }), "k");
     expect(indicator.tentative).toBe(false);
   });
+
+  it("carries the semantic color class for a day shift", () => {
+    const indicator = eventIndicator(baseEvent({ category: "shift", period: "day" }), "k");
+    expect(indicator.colorClassName).toBe("bg-event-shift-day-soft");
+  });
+
+  it("carries a distinct semantic color class for a night shift", () => {
+    const indicator = eventIndicator(baseEvent({ category: "shift", period: "night" }), "k");
+    expect(indicator.colorClassName).toBe("bg-event-shift-night-soft");
+  });
+
+  it("carries the semantic color class for a mapped absence kind", () => {
+    const indicator = eventIndicator(
+      baseEvent({ category: "absence", role: null, period: "unspecified", absenceKind: "referral" }),
+      "k",
+    );
+    expect(indicator.colorClassName).toBe("bg-event-referral-soft");
+  });
+
+  it("colorClassName is null for an unmapped duty family (rasar) -- degrades safely, no guessed color", () => {
+    const indicator = eventIndicator(
+      baseEvent({ category: "duty", role: null, period: "unspecified", dutyFamily: "rasar" }),
+      "k",
+    );
+    expect(indicator.colorClassName).toBeNull();
+  });
+
+  it("carries the shared reserve color class for a reserve duty", () => {
+    const indicator = eventIndicator(
+      baseEvent({ category: "duty", role: null, period: "unspecified", dutyFamily: "reserve" }),
+      "k",
+    );
+    expect(indicator.colorClassName).toBe("bg-event-reserve-soft");
+  });
+
+  it("carries the SAME shared reserve color class for a callup duty as for reserve", () => {
+    const indicator = eventIndicator(
+      baseEvent({ category: "duty", role: null, period: "unspecified", dutyFamily: "callup" }),
+      "k",
+    );
+    expect(indicator.colorClassName).toBe("bg-event-reserve-soft");
+  });
+
+  it("carries the shared medical-rest color class for a medical absence", () => {
+    const indicator = eventIndicator(
+      baseEvent({ category: "absence", role: null, period: "unspecified", absenceKind: "medical" }),
+      "k",
+    );
+    expect(indicator.colorClassName).toBe("bg-event-medical-rest-soft");
+  });
+
+  it("carries the SAME shared medical-rest color class for a day_off absence as for medical", () => {
+    const indicator = eventIndicator(
+      baseEvent({ category: "absence", role: null, period: "unspecified", absenceKind: "day_off" }),
+      "k",
+    );
+    expect(indicator.colorClassName).toBe("bg-event-medical-rest-soft");
+  });
+
+  it("carries the shift-morning color class for a morning shift", () => {
+    const indicator = eventIndicator(baseEvent({ category: "shift", period: "morning" }), "k");
+    expect(indicator.colorClassName).toBe("bg-event-shift-morning-soft");
+  });
 });
 
 describe("buildDayIndicators", () => {

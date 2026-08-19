@@ -20,6 +20,13 @@ export interface IcsCalendarItem {
   summary: string;
   description: string | null;
   timing: IcsEventTiming;
+  /**
+   * RFC 7986 §5.9 `COLOR` value (a CSS3 extended color keyword, e.g.
+   * "royalblue") -- `null` omits the property entirely rather than
+   * emitting an empty/guessed one. Best-effort: see `icsColor.ts`'s own
+   * docstring for why an ignoring client is never a problem.
+   */
+  color: string | null;
 }
 
 export interface IcsFeedInput {
@@ -70,6 +77,9 @@ function renderEvent(item: IcsCalendarItem, generatedAt: Date): string {
   text += buildIcsLine("SUMMARY", escapeIcsText(item.summary));
   if (item.description !== null && item.description !== "") {
     text += buildIcsLine("DESCRIPTION", escapeIcsText(item.description));
+  }
+  if (item.color !== null) {
+    text += buildIcsLine("COLOR", item.color);
   }
   text += "END:VEVENT\r\n";
   return text;

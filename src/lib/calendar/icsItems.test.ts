@@ -124,6 +124,81 @@ describe("buildCalendarItem -- shift emoji by period", () => {
   });
 });
 
+describe("buildCalendarItem -- best-effort COLOR (RFC 7986)", () => {
+  it("a day shift gets its semantic color keyword", () => {
+    const item = buildCalendarItem(baseEvent({ category: "shift", period: "day" }), SCHEDULE, []);
+    expect(item!.color).toBe("goldenrod");
+  });
+
+  it("a night shift gets a different keyword than day", () => {
+    const item = buildCalendarItem(baseEvent({ category: "shift", period: "night" }), SCHEDULE, []);
+    expect(item!.color).toBe("royalblue");
+  });
+
+  it("a mapped duty family gets its semantic color", () => {
+    const item = buildCalendarItem(
+      baseEvent({ category: "duty", role: null, period: "unspecified", dutyFamily: "guard", slot: 1 }),
+      SCHEDULE,
+      [],
+    );
+    expect(item!.color).toBe("darkslateblue");
+  });
+
+  it("a mapped absence kind gets its semantic color", () => {
+    const item = buildCalendarItem(
+      baseEvent({ category: "absence", role: null, period: "unspecified", absenceKind: "vacation" }),
+      SCHEDULE,
+      [],
+    );
+    expect(item!.color).toBe("seagreen");
+  });
+
+  it("reserve and callup duty families share the same semantic color", () => {
+    const reserve = buildCalendarItem(
+      baseEvent({ category: "duty", role: null, period: "unspecified", dutyFamily: "reserve" }),
+      SCHEDULE,
+      [],
+    );
+    const callup = buildCalendarItem(
+      baseEvent({ category: "duty", role: null, period: "unspecified", dutyFamily: "callup" }),
+      SCHEDULE,
+      [],
+    );
+    expect(reserve!.color).not.toBeNull();
+    expect(reserve!.color).toBe(callup!.color);
+  });
+
+  it("medical and day_off absence kinds share the same semantic color", () => {
+    const medical = buildCalendarItem(
+      baseEvent({ category: "absence", role: null, period: "unspecified", absenceKind: "medical" }),
+      SCHEDULE,
+      [],
+    );
+    const dayOff = buildCalendarItem(
+      baseEvent({ category: "absence", role: null, period: "unspecified", absenceKind: "day_off" }),
+      SCHEDULE,
+      [],
+    );
+    expect(medical!.color).not.toBeNull();
+    expect(medical!.color).toBe(dayOff!.color);
+  });
+
+  it("an unmapped duty family (rasar/oxid) has no color, never a guessed one", () => {
+    const rasar = buildCalendarItem(
+      baseEvent({ category: "duty", role: null, period: "unspecified", dutyFamily: "rasar" }),
+      SCHEDULE,
+      [],
+    );
+    const oxid = buildCalendarItem(
+      baseEvent({ category: "duty", role: null, period: "unspecified", dutyFamily: "oxid" }),
+      SCHEDULE,
+      [],
+    );
+    expect(rasar!.color).toBeNull();
+    expect(oxid!.color).toBeNull();
+  });
+});
+
 describe("buildCalendarItem -- shift roster in DESCRIPTION", () => {
   it("includes the roster, grouped by role, when colleagues share the same date+period", () => {
     const target = baseEvent();

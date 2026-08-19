@@ -1,5 +1,6 @@
 import type { PersonalEventView } from "@/lib/readModels/types";
 import { assignmentEmoji } from "./emoji";
+import { eventColorBgClassName } from "./eventColor";
 import { absenceKindLabel, periodLabel } from "./labels";
 
 /**
@@ -22,6 +23,16 @@ export interface CalendarDayIndicator {
   emoji: string | null;
   label: string;
   tentative: boolean;
+  /**
+   * The semantic per-event-type soft-background class (`eventColorBgClassName`,
+   * `lib/presentation/eventColor.ts`), or `null` when the event's category/
+   * dutyFamily/absenceKind isn't one of the 8 mapped slots. This is a
+   * PERSONAL-calendar-only concept -- `EveryoneMonthGrid` never builds a
+   * `CalendarDayIndicator` at all (it computes its own coverage-status
+   * indicators), so the shared "כולם" calendar is structurally unaffected
+   * by this field's existence.
+   */
+  colorClassName: string | null;
 }
 
 const GENERIC_SHIFT_LABEL = "משמרת";
@@ -42,6 +53,7 @@ export function eventIndicator(event: PersonalEventView, key: string): CalendarD
     emoji: assignmentEmoji(event),
     label: eventIndicatorLabel(event),
     tentative: event.certainty === "tentative",
+    colorClassName: eventColorBgClassName(event),
   };
 }
 

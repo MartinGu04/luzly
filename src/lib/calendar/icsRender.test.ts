@@ -9,6 +9,7 @@ function timedItem(overrides: Partial<IcsCalendarItem> = {}): IcsCalendarItem {
     summary: 'אחמ"ש יום',
     description: null,
     timing: { kind: "timed", startUtc: new Date("2026-08-19T04:30:00.000Z"), endUtc: new Date("2026-08-19T16:30:00.000Z") },
+    color: null,
     ...overrides,
   };
 }
@@ -88,6 +89,29 @@ describe("renderIcsFeed", () => {
     const secondIndex = text.indexOf("UID:second@");
     expect(firstIndex).toBeGreaterThan(-1);
     expect(secondIndex).toBeGreaterThan(firstIndex);
+  });
+
+  it("COLOR is omitted entirely when null, and emitted verbatim when present", () => {
+    const withoutColor = renderIcsFeed({ personName: "דני", items: [timedItem({ color: null })], generatedAt: GENERATED_AT });
+    expect(withoutColor).not.toContain("COLOR");
+
+    const withColor = renderIcsFeed({ personName: "דני", items: [timedItem({ color: "goldenrod" })], generatedAt: GENERATED_AT });
+    expect(withColor).toContain("COLOR:goldenrod\r\n");
+  });
+
+  it("a COLOR property never affects any other VEVENT field -- UID/timing/SUMMARY/DESCRIPTION stay identical with or without it", () => {
+    const withoutColor = renderIcsFeed({
+      personName: "דני",
+      items: [timedItem({ uid: "x", color: null })],
+      generatedAt: GENERATED_AT,
+    });
+    const withColor = renderIcsFeed({
+      personName: "דני",
+      items: [timedItem({ uid: "x", color: "royalblue" })],
+      generatedAt: GENERATED_AT,
+    });
+    const stripColorLine = (text: string) => text.replace(/COLOR:[^\r\n]*\r\n/, "");
+    expect(stripColorLine(withColor)).toBe(withoutColor);
   });
 
   it("never produces a line exceeding 75 octets (folding is applied end-to-end) even for a long Hebrew summary", () => {

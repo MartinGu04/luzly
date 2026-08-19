@@ -80,17 +80,28 @@ export function IndicatorChip({
   toneClassName = "text-foreground",
   /** When set, a small colored dot (e.g. coverage full/partial/missing) always represents this item below `sm:`, taking priority over the emoji so the mobile dot-only view keeps its semantic color signal. */
   statusDotClassName,
+  /**
+   * When set (e.g. `eventColorBgClassName`, `lib/presentation/eventColor.ts`),
+   * replaces the chip's default neutral `bg-overlay-soft` with a semantic
+   * soft color tint, at every breakpoint -- used only by `CalendarGrid`'s
+   * single-person "הלוח שלי" indicators, never by `EveryoneMonthGrid` (which
+   * never passes this prop, so its chips are completely unaffected).
+   * Deliberately independent of `statusDotClassName`/emoji rendering below --
+   * this never hides/changes the emoji or label, only the chip's background.
+   */
+  categoryBgClassName,
   className = "",
 }: {
   emoji: string | null;
   label: string;
   toneClassName?: string;
   statusDotClassName?: string;
+  categoryBgClassName?: string;
   className?: string;
 }) {
   return (
     <span
-      className={`flex min-w-0 items-center gap-1 rounded bg-overlay-soft px-1 text-[9px] leading-[13px] sm:text-[10px] sm:leading-4 ${toneClassName} ${className}`}
+      className={`flex min-w-0 items-center gap-1 rounded ${categoryBgClassName ?? "bg-overlay-soft"} px-1 text-[9px] leading-[13px] sm:text-[10px] sm:leading-4 ${toneClassName} ${className}`}
     >
       {statusDotClassName ? (
         <span aria-hidden="true" className={`h-1.5 w-1.5 shrink-0 rounded-full sm:hidden ${statusDotClassName}`} />

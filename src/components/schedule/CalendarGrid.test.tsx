@@ -849,6 +849,252 @@ describe("CalendarGrid", () => {
     });
   });
 
+  describe("semantic event colors (single-person mode -- CalendarGrid is only ever rendered for 'self'/'person', never 'כולם')", () => {
+    it("a day shift's chip gets the shift-day soft-tint background", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          eventsByDate={{ "2026-08-12": [shiftEvent({ date: "2026-08-12", period: "day" })] }}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const chip = screen.getByText("יום").parentElement;
+      expect(chip?.className).toMatch(/bg-event-shift-day-soft/);
+    });
+
+    it("a night shift's chip gets a DIFFERENT soft-tint background than a day shift", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          eventsByDate={{ "2026-08-13": [shiftEvent({ date: "2026-08-13", period: "night" })] }}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const chip = screen.getByText("לילה").parentElement;
+      expect(chip?.className).toMatch(/bg-event-shift-night-soft/);
+      expect(chip?.className).not.toMatch(/bg-event-shift-day-soft/);
+    });
+
+    it("a vacation absence's chip gets the vacation soft-tint background", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          eventsByDate={{ "2026-08-12": [absenceEvent({ date: "2026-08-12", absenceKind: "vacation" })] }}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const chip = screen.getByText("חופש").parentElement;
+      expect(chip?.className).toMatch(/bg-event-vacation-soft/);
+    });
+
+    it("an 'after' absence's chip gets a color distinct from vacation", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          eventsByDate={{ "2026-08-12": [absenceEvent({ date: "2026-08-12", absenceKind: "after", title: "אפטר" })] }}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const chip = screen.getByText("אפטר").parentElement;
+      expect(chip?.className).toMatch(/bg-event-after-soft/);
+      expect(chip?.className).not.toMatch(/bg-event-vacation-soft/);
+    });
+
+    it("a referral absence's chip gets its own distinct color", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          eventsByDate={{
+            "2026-08-12": [absenceEvent({ date: "2026-08-12", absenceKind: "referral", title: "הפנייה" })],
+          }}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const chip = screen.getByText("הפנייה").parentElement;
+      expect(chip?.className).toMatch(/bg-event-referral-soft/);
+    });
+
+    it("a guard duty's chip gets the guard soft-tint background", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          eventsByDate={{ "2026-08-12": [dutyEvent({ date: "2026-08-12", dutyFamily: "guard" })] }}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const chip = screen.getByText("תורנות").parentElement;
+      expect(chip?.className).toMatch(/bg-event-guard-soft/);
+    });
+
+    it("an evacuation on-call duty's chip gets its own distinct color from guard", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          eventsByDate={{
+            "2026-08-12": [dutyEvent({ date: "2026-08-12", dutyFamily: "evacuation_on_call", slot: null })],
+          }}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const chip = screen.getByText("תורנות").parentElement;
+      expect(chip?.className).toMatch(/bg-event-evacuation-soft/);
+      expect(chip?.className).not.toMatch(/bg-event-guard-soft/);
+    });
+
+    it("a kitchen duty's chip gets the kitchen soft-tint background", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          eventsByDate={{
+            "2026-08-12": [dutyEvent({ date: "2026-08-12", dutyFamily: "daily_kitchen", slot: null })],
+          }}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const chip = screen.getByText("תורנות").parentElement;
+      expect(chip?.className).toMatch(/bg-event-kitchen-soft/);
+    });
+
+    it("an unmapped/unclassified event (rasar duty) degrades safely to the default neutral chip background, never a broken/missing class", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          eventsByDate={{
+            "2026-08-12": [dutyEvent({ date: "2026-08-12", dutyFamily: "rasar" })],
+          }}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const chip = screen.getByText("תורנות").parentElement;
+      expect(chip?.className).toMatch(/bg-overlay-soft/);
+      expect(chip?.className).not.toMatch(/bg-event-/);
+    });
+
+    it("a medical absence's chip gets the medical-rest soft-tint background (previously neutral -- follow-up mapping)", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          eventsByDate={{
+            "2026-08-12": [absenceEvent({ date: "2026-08-12", absenceKind: "medical", title: "גימלים" })],
+          }}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const chip = screen.getByText("גימלים").parentElement;
+      expect(chip?.className).toMatch(/bg-event-medical-rest-soft/);
+    });
+
+    it("a day_off absence's chip gets the SAME medical-rest color as a medical absence -- one shared color, not two", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          eventsByDate={{
+            "2026-08-12": [absenceEvent({ date: "2026-08-12", absenceKind: "day_off", title: "יום ד'" })],
+          }}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const chip = screen.getByText("יום ד").parentElement;
+      expect(chip?.className).toMatch(/bg-event-medical-rest-soft/);
+    });
+
+    it("a reserve duty's chip gets the reserve soft-tint background (previously neutral -- follow-up mapping)", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          eventsByDate={{ "2026-08-12": [dutyEvent({ date: "2026-08-12", dutyFamily: "reserve" })] }}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const chip = screen.getByText("תורנות").parentElement;
+      expect(chip?.className).toMatch(/bg-event-reserve-soft/);
+    });
+
+    it("a callup duty's chip gets the SAME reserve color as a reserve duty -- one shared color, not two", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          eventsByDate={{ "2026-08-12": [dutyEvent({ date: "2026-08-12", dutyFamily: "callup" })] }}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const chip = screen.getByText("תורנות").parentElement;
+      expect(chip?.className).toMatch(/bg-event-reserve-soft/);
+    });
+
+    it("a morning shift's chip gets its own shift-morning soft-tint background, distinct from day and night", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          eventsByDate={{ "2026-08-12": [shiftEvent({ date: "2026-08-12", period: "morning" })] }}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const chip = screen.getByText("בוקר").parentElement;
+      expect(chip?.className).toMatch(/bg-event-shift-morning-soft/);
+      expect(chip?.className).not.toMatch(/bg-event-shift-day-soft/);
+      expect(chip?.className).not.toMatch(/bg-event-shift-night-soft/);
+    });
+
+    it("emoji and label rendering are completely unaffected by the color addition", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          eventsByDate={{ "2026-08-12": [shiftEvent({ date: "2026-08-12", period: "day" })] }}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+      expect(cell.textContent).toContain("☀️");
+      expect(cell.textContent).toContain("יום");
+    });
+  });
+
   describe("week numbers (Design Pass PR #20, Sunday-first convention)", () => {
     it("shows the Sunday-first week-of-year number beside the row, matching the weekOfYear helper", () => {
       const { container } = render(
