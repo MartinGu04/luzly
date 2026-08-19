@@ -28,6 +28,7 @@ function okContext(
     people: Person[];
     h1Rows: string[][];
     h2Rows: string[][];
+    scheduleRows: string[][];
     avatarByPersonId: ReadonlyMap<string, string | null>;
   }> = {},
 ) {
@@ -42,7 +43,10 @@ function okContext(
         fetchedAt: "2026-08-15T10:00:00.000Z",
         sheets: [
           { name: 'כ"א', values: [] },
-          { name: "משמרות + תורנויות", values: [] },
+          {
+            name: "משמרות + תורנויות",
+            values: overrides.scheduleRows ? [["תאריך", "יום", ...people.map((p) => p.name)], ...overrides.scheduleRows] : [],
+          },
           fairnessSheet('פוטנציאל תקש"אס 1-6/2026', overrides.h1Rows ?? []),
           fairnessSheet('פוטנציאל תקש"אס 7-12/2026', overrides.h2Rows ?? []),
         ],
@@ -191,5 +195,157 @@ describe("loadDutyFairnessReadModel — avatar enrichment (never touches calcula
     const supervisorRow = result.model.groups.find((g) => g.key === "supervisor")?.rows[0];
     expect(technicianRow?.avatarUrl).toBe("https://lh3.googleusercontent.com/a/tal.jpg");
     expect(supervisorRow?.avatarUrl).toBe("https://lh3.googleusercontent.com/a/roni.jpg");
+  });
+});
+
+describe("loadDutyFairnessReadModel — completedAllocationTotal: derived from the real schedule sheet, end-to-end", () => {
+  it("weighs confirmed guard-duty ('שומר 1') schedule entries for the row's own person, within the selected H1 period -- each isolated day is its own single-day 0.25 allocation, never a raw count", async () => {
+    loadFairnessWorkbookContext.mockResolvedValue(
+      okContext({
+        h1Rows: [["טל טכנאי", "טכנאי", "5", "6", "1", "-"]],
+        scheduleRows: [
+          ["10/03/2026", "ג", "שומר 1"],
+          ["15/04/2026", "ד", "שומר 1"],
+        ],
+      }),
+    );
+    const result = await loadDutyFairnessReadModel("h1");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    const technicianRow = result.model.groups.find((g) => g.key === "technician")?.rows[0];
+    // Two isolated (non-consecutive) single-day guard blocks -> 0.25 + 0.25.
+    expect(technicianRow?.completedAllocationTotal).toBeCloseTo(0.5);
+    // A different, unrelated fact from the workbook's own weighted score.
+    expect(technicianRow?.currentScore).toBe(6);
+  });
+
+  it("respects the selected period -- a duty dated in H2 is excluded while H1 is selected", async () => {
+    loadFairnessWorkbookContext.mockResolvedValue(
+      okContext({
+        h1Rows: [["טל טכנאי", "טכנאי", "5", "6", "1", "-"]],
+        scheduleRows: [
+          ["10/03/2026", "ג", "שומר 1"], // inside H1
+          ["10/08/2026", "ב", "שומר 1"], // inside H2 -- must not count for H1
+        ],
+      }),
+    );
+    const result = await loadDutyFairnessReadModel("h1");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    const technicianRow = result.model.groups.find((g) => g.key === "technician")?.rows[0];
+    expect(technicianRow?.completedAllocationTotal).toBeCloseTo(0.25);
+  });
+
+  it("never counts a future duty -- NOW is mocked to 2026-08-15, so a schedule entry dated after that is excluded even inside the selected H2 period", async () => {
+    loadFairnessWorkbookContext.mockResolvedValue(
+      okContext({
+        h2Rows: [["טל טכנאי", "טכנאי", "3", "4", "0", "-"]],
+        scheduleRows: [
+          ["01/08/2026", "ש", "שומר 1"], // before NOW -- completed
+          ["20/12/2026", "א", "שומר 1"], // after NOW -- still planned, not completed
+        ],
+      }),
+    );
+    const result = await loadDutyFairnessReadModel("h2");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    const technicianRow = result.model.groups.find((g) => g.key === "technician")?.rows[0];
+    expect(technicianRow?.completedAllocationTotal).toBeCloseTo(0.25);
+  });
+
+  it('a non-comparable person (\'ר"צ\', null target/status) still shows a real completed-allocation total', async () => {
+    loadFairnessWorkbookContext.mockResolvedValue(
+      okContext({
+        people: [person({ id: "p_ratz", name: "רוני רצ" })],
+        h2Rows: [["רוני רצ", 'ר"צ', "5", "5", "1", "-"]],
+        scheduleRows: [["10/08/2026", "ב", "שומר 1"]],
+      }),
+    );
+    const result = await loadDutyFairnessReadModel("h2");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    const row = result.model.groups[0].rows[0];
+    expect(row.status).toBeNull();
+    expect(row.comparisonTarget).toBeNull();
+    expect(row.completedAllocationTotal).toBeCloseTo(0.25);
+  });
+
+  it("no schedule data at all -> a real 0, never null, for a resolved person", async () => {
+    loadFairnessWorkbookContext.mockResolvedValue(okContext({ h2Rows: [["טל טכנאי", "טכנאי", "5", "6", "1", "-"]] }));
+    const result = await loadDutyFairnessReadModel("h2");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    const technicianRow = result.model.groups.find((g) => g.key === "technician")?.rows[0];
+    expect(technicianRow?.completedAllocationTotal).toBe(0);
+  });
+});
+
+describe("loadDutyFairnessReadModel — historical duty personnel (former employee, no longer in current כ\"א)", () => {
+  // Synthetic scenario for a technician who performed real duties, then left
+  // the current roster mid-period (e.g. transferred departments). "עומר
+  // עזוב" is corroborated by BOTH a real schedule column AND a real
+  // unresolved Fairness-table row -- current roster is only "טל טכנאי".
+  function contextWithFormerEmployee() {
+    const currentPerson = person();
+    return {
+      status: "ok" as const,
+      context: {
+        person: currentPerson,
+        people: [currentPerson],
+        avatarByPersonId: new Map<string, string | null>(),
+        snapshot: {
+          fetchedAt: "2026-08-15T10:00:00.000Z",
+          sheets: [
+            { name: 'כ"א', values: [] },
+            {
+              name: "משמרות + תורנויות",
+              values: [
+                ["תאריך", "יום", "טל טכנאי", "עומר עזוב"],
+                ["10/03/2026", "ג", "", "שומר 1"],
+              ],
+            },
+            fairnessSheet('פוטנציאל תקש"אס 1-6/2026', [
+              ["טל טכנאי", "טכנאי", "5", "6", "1", "-"],
+              ["עומר עזוב", "טכנאי", "4", "5", "0", "-"],
+            ]),
+            fairnessSheet('פוטנציאל תקש"אס 7-12/2026', []),
+          ],
+        },
+      },
+    };
+  }
+
+  it("attributes the former employee's real completed duty to their own historical row, keeping the workbook's own score untouched", async () => {
+    loadFairnessWorkbookContext.mockResolvedValue(contextWithFormerEmployee());
+    const result = await loadDutyFairnessReadModel("h1");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+
+    const technicianGroup = result.model.groups.find((g) => g.key === "technician");
+    const formerRow = technicianGroup?.rows.find((row) => row.sourceName === "עומר עזוב");
+    expect(formerRow).toBeDefined();
+    expect(formerRow?.personId).not.toBeNull();
+    expect(formerRow?.currentScore).toBe(5);
+    expect(formerRow?.completedAllocationTotal).toBeCloseTo(0.25);
+
+    // The current-roster person's own row is untouched by the historical stand-in.
+    const currentRow = technicianGroup?.rows.find((row) => row.sourceName === "טל טכנאי");
+    expect(currentRow?.completedAllocationTotal).toBe(0);
+  });
+
+  it("does not mint a historical stand-in without BOTH corroborating signals (no schedule column here)", async () => {
+    const ctx = contextWithFormerEmployee();
+    // Drop the extra schedule column -- only the Fairness-table row remains.
+    ctx.context.snapshot.sheets[1] = {
+      name: "משמרות + תורנויות",
+      values: [["תאריך", "יום", "טל טכנאי"], ["10/03/2026", "ג", ""]],
+    };
+    loadFairnessWorkbookContext.mockResolvedValue(ctx);
+    const result = await loadDutyFairnessReadModel("h1");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    const technicianGroup = result.model.groups.find((g) => g.key === "technician");
+    const formerRow = technicianGroup?.rows.find((row) => row.sourceName === "עומר עזוב");
+    expect(formerRow?.personId).toBeNull();
   });
 });

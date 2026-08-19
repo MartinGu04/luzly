@@ -2,7 +2,10 @@ import "server-only";
 import { resolveFairnessPeriodIdentity } from "@/lib/domain/fairnessPeriod";
 import type { Person } from "@/lib/domain/types";
 import type { SheetSourceKey } from "@/lib/google";
+import { parseEvent } from "@/lib/parsers/event";
 import { parseFairnessTable } from "@/lib/parsers/fairness";
+import { resolveHistoricalDutyPersonnel } from "@/lib/parsers/historicalDutyPersonnel";
+import { parseScheduleSheet } from "@/lib/parsers/schedule";
 import { getJerusalemLocalNow } from "@/lib/time/jerusalemClock";
 import { buildDutyFairnessReadModel } from "./buildDutyFairnessReadModel";
 import type { DutyFairnessGroupView, DutyFairnessReadModel } from "./dutyFairnessTypes";
@@ -31,6 +34,13 @@ const PERIOD_SHEET_KEYS: Record<"h1" | "h2", SheetSourceKey> = {
  * via the existing, unchanged `parseFairnessTable`, and delegating every
  * actual analysis to `buildDutyFairnessReadModel` UNCHANGED. Duty Fairness
  * stays H1/H2 -- never converted to calendar months.
+ *
+ * Also parses the `schedule` sheet into real `Event`s (the SAME sheet/
+ * parse call `shiftFairness.ts` already makes) purely to feed each row's
+ * weighted `completedAllocationTotal` -- `FAIRNESS_WORKBOOK_SOURCES` already
+ * includes `schedule` for both Fairness modes, so this is no extra Google
+ * fetch. Never used for anything score/target/status-related, which stay entirely
+ * workbook-sourced.
  */
 export async function loadDutyFairnessReadModel(rawPeriod: string | null): Promise<DutyFairnessLoadResult> {
   const contextResult = await loadFairnessWorkbookContext();
@@ -42,9 +52,28 @@ export async function loadDutyFairnessReadModel(rawPeriod: string | null): Promi
   const periodIdentity = resolveFairnessPeriodIdentity(rawPeriod, now);
 
   const sheet = getFairnessWorkbookSheet(snapshot, PERIOD_SHEET_KEYS[periodIdentity.key]);
-  const parseResult = parseFairnessTable(sheet, people);
+  const scheduleSheet = getFairnessWorkbookSheet(snapshot, "schedule");
 
-  const model = buildDutyFairnessReadModel({ parseResult, periodIdentity, fetchedAt: snapshot.fetchedAt, now });
+  // First pass with the current roster only, to find Fairness-table rows
+  // that don't resolve against anyone currently in כ"א -- candidates for a
+  // former employee with real historical duty evidence (see
+  // lib/parsers/historicalDutyPersonnel.ts). `people` itself, and every
+  // other read model sharing loadFairnessWorkbookContext(), never see the
+  // extended list built below -- this stays local to Duty Fairness.
+  const firstPassResult = parseFairnessTable(sheet, people);
+  const unresolvedNames = firstPassResult.personRows
+    .filter((row) => row.resolvedPersonId === null)
+    .map((row) => row.sourceName);
+
+  const historicalPeople = resolveHistoricalDutyPersonnel(scheduleSheet, people, unresolvedNames);
+  const extendedPeople = historicalPeople.length > 0 ? [...people, ...historicalPeople] : people;
+
+  const parseResult = extendedPeople === people ? firstPassResult : parseFairnessTable(sheet, extendedPeople);
+
+  const rawAssignments = parseScheduleSheet(scheduleSheet, extendedPeople);
+  const events = rawAssignments.map(parseEvent);
+
+  const model = buildDutyFairnessReadModel({ parseResult, periodIdentity, fetchedAt: snapshot.fetchedAt, now, events });
 
   return { status: "ok", model: withAvatars(model, avatarByPersonId), person };
 }

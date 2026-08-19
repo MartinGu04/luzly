@@ -96,6 +96,8 @@ export interface DutyFairnessCardView {
   avatarUrl: string | null;
   href: string | null;
   allocationLabel: string;
+  /** "הקצאות שבוצעו" -- the weighted completed-allocation total, formatted with the same clean-decimal rules as `currentLabel` (never forced trailing zeros). See `DutyFairnessPersonRowView.completedAllocationTotal`'s own docs for why it's independent of `status`/`targetLabel`, and for the two distinct reasons it can be "—". */
+  completedAllocationLabel: string;
   currentLabel: string;
   targetLabel: string | null;
   deltaLabel: string;
@@ -116,6 +118,7 @@ export function buildDutyFairnessCardView(
     avatarUrl: row.avatarUrl ?? null,
     href,
     allocationLabel: row.allocationLabel,
+    completedAllocationLabel: formatFairnessScore(row.completedAllocationTotal),
     currentLabel: formatFairnessScore(row.currentScore),
     targetLabel: row.comparisonTarget !== null ? formatFairnessScore(row.comparisonTarget) : null,
     deltaLabel: formatFairnessDelta(row.delta),

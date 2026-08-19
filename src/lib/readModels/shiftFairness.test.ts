@@ -247,3 +247,31 @@ describe("loadShiftFairnessReadModel — avatar enrichment (never touches calcul
     );
   });
 });
+
+describe("loadShiftFairnessReadModel — historical duty personnel never leaks in (Duty Fairness-only mechanism)", () => {
+  // Same corroborating shape Duty Fairness would use to recognize a former
+  // employee (real schedule-attributed event + a real unresolved
+  // Fairness-table row for the same name) -- this loader never imports
+  // `resolveHistoricalDutyPersonnel` at all, so it must stay fully
+  // unaffected: only the current roster's own people ever appear.
+  it("a former employee's schedule event and unresolved Fairness-table row never produce a row or leak into any group", async () => {
+    parseScheduleSheet.mockReturnValue([
+      shiftEvent({ personId: "p_former", date: "2026-08-05", role: "technician" }),
+      shiftEvent({ personId: "p_tech", date: "2026-08-06", role: "technician" }),
+    ]);
+    loadFairnessWorkbookContext.mockResolvedValue(
+      okContext({
+        potentialH1: fairnessSheet('פוטנציאל תקש"אס 1-6/2026', [["עומר עזוב", "טכנאי", "4", "5", "0", "-"]]),
+      }),
+    );
+
+    const result = await loadShiftFairnessReadModel("2026-08");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+
+    const allRows = result.model.groups.flatMap((group) => group.rows);
+    expect(allRows).toHaveLength(1);
+    expect(allRows.every((row) => row.personId === "p_tech")).toBe(true);
+    expect(allRows.some((row) => row.personId === "p_former")).toBe(false);
+  });
+});

@@ -1,3 +1,5 @@
+import { computeCompletedDutyAllocation } from "@/lib/domain/dutyAllocationWeight";
+import type { Event } from "@/lib/domain/event";
 import {
   computeGapToTarget,
   computeNormalizedLoad,
@@ -17,6 +19,7 @@ import {
 import {
   fairnessPeriodEndDate,
   fairnessPeriodIdentityLabel,
+  fairnessPeriodStartDate,
   type FairnessPeriodIdentity,
 } from "@/lib/domain/fairnessPeriod";
 import type { FairnessPersonRow, FairnessTableParseResult, FairnessTargets } from "@/lib/domain/fairnessTable";
@@ -35,6 +38,16 @@ export interface BuildDutyFairnessReadModelInput {
   periodIdentity: FairnessPeriodIdentity;
   fetchedAt: string;
   now: LocalNow;
+  /**
+   * Real schedule Events, used ONLY to derive each row's
+   * `completedAllocationTotal` (`computeCompletedDutyAllocation`) -- never
+   * consulted for score/target/delta/status, which stay entirely
+   * workbook-sourced per this module's own docs. Defaults to an empty
+   * array -- a genuinely safe default (zero supplied Events really does
+   * mean zero completed allocation to sum, never a guess standing in for
+   * unknown data) for any existing caller/test that predates this field.
+   */
+  events?: readonly Event[];
 }
 
 /**
@@ -63,12 +76,19 @@ export interface BuildDutyFairnessReadModelInput {
  * label -- landing in a group never by itself grants a target.
  */
 export function buildDutyFairnessReadModel(input: BuildDutyFairnessReadModelInput): DutyFairnessReadModel {
-  const { parseResult, periodIdentity, fetchedAt, now } = input;
+  const { parseResult, periodIdentity, fetchedAt, now, events = [] } = input;
   const { personRows, totals, targets } = parseResult;
 
-  const periodStatus = resolveFairnessPeriodStatus(fairnessPeriodEndDate(periodIdentity), now);
+  const periodStartDate = fairnessPeriodStartDate(periodIdentity);
+  const periodEndDate = fairnessPeriodEndDate(periodIdentity);
+  const periodStatus = resolveFairnessPeriodStatus(periodEndDate, now);
 
-  const rows = personRows.map((row, index) => toRowView(row, targets, index));
+  // "period start -> min(today, period end)" -- the one effective range
+  // `computeCompletedDutyAllocation` ever sees; a future/not-yet-reached
+  // period end never lets a not-yet-happened duty contribute.
+  const effectiveEndDate = now.date < periodEndDate ? now.date : periodEndDate;
+
+  const rows = personRows.map((row, index) => toRowView(row, targets, index, events, periodStartDate, effectiveEndDate));
   const sortedRows = [...rows].sort(compareDutyFairnessRows);
 
   return {
@@ -86,7 +106,14 @@ export function buildDutyFairnessReadModel(input: BuildDutyFairnessReadModelInpu
   };
 }
 
-function toRowView(row: FairnessPersonRow, targets: FairnessTargets, index: number): DutyFairnessPersonRowView {
+function toRowView(
+  row: FairnessPersonRow,
+  targets: FairnessTargets,
+  index: number,
+  events: readonly Event[],
+  periodStartDate: string,
+  effectiveEndDate: string,
+): DutyFairnessPersonRowView {
   const role = resolveFairnessAllocationRole(row.allocationLabel);
   const comparisonTarget = resolveComparisonTarget(row.allocationLabel, targets);
   const currentScore = row.currentScore;
@@ -94,6 +121,18 @@ function toRowView(row: FairnessPersonRow, targets: FairnessTargets, index: numb
   const reasons: FairnessDataCompletenessReason[] = [];
   if (row.resolvedPersonId === null) reasons.push("duty_identity_unresolved");
   if (role !== null && comparisonTarget === null) reasons.push("duty_target_unavailable");
+
+  // Independent of `comparisonTarget`/`status` -- a person who cannot be
+  // compared (no target-bearing allocation label) still gets a real
+  // allocation total here whenever their identity is resolved, since this
+  // is a plain factual total, not an analysis result (see
+  // `DutyFairnessPersonRowView.completedAllocationTotal`'s own docs).
+  let completedAllocationTotal: number | null = null;
+  if (row.resolvedPersonId !== null) {
+    const allocation = computeCompletedDutyAllocation(events, row.resolvedPersonId, periodStartDate, effectiveEndDate);
+    completedAllocationTotal = allocation.total;
+    if (allocation.unsupportedBlocks.length > 0) reasons.push("duty_allocation_unsupported_block_shape");
+  }
 
   return {
     key: `${row.resolvedPersonId ?? "unresolved"}-${index}`,
@@ -108,6 +147,7 @@ function toRowView(row: FairnessPersonRow, targets: FairnessTargets, index: numb
     normalizedLoad: computeNormalizedLoad(currentScore, comparisonTarget),
     status: resolveDutyFairnessStatus(currentScore, comparisonTarget),
     weekendCount: row.weekendCount,
+    completedAllocationTotal,
     exemptions: resolveFairnessExemptions(row.exemptions),
     dataCompleteness: fairnessDataCompleteness(reasons),
   };

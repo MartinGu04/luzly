@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { RawSheet } from "@/lib/google";
 import type { Person } from "@/lib/domain/types";
-import { parseScheduleSheet } from "./schedule";
+import { findScheduleColumnHeaderTexts, parseScheduleSheet } from "./schedule";
 
 function syntheticPerson(name: string): Person {
   return {
@@ -169,5 +169,48 @@ describe("parseScheduleSheet — blank/whitespace first date header (real workbo
       sourceSheet: "משמרות + תורנויות",
       sourceCell: "F2",
     }]);
+  });
+});
+
+describe("findScheduleColumnHeaderTexts", () => {
+  it("returns every distinct non-blank person-zone header, including names absent from the personnel list", () => {
+    // "עומר עזוב" heads a real column but is intentionally NOT in `personnel`
+    // (e.g. a former employee no longer on the current roster).
+    const sheet: RawSheet = {
+      name: "משמרות + תורנויות",
+      values: [
+        [
+          "תאריך",
+          "יום",
+          "דני בדיקה",
+          "עומר עזוב",
+          "הערות",
+          "תאריך",
+          "יום",
+          "דני בדיקה",
+          "נועה דוגמה",
+        ],
+        ["05/01/2026", "ב", "בוקר", "לילה", "", "10.02.2026", "ג", "בוקר", "חופש"],
+      ],
+    };
+    expect(findScheduleColumnHeaderTexts(sheet)).toEqual(
+      expect.arrayContaining(["דני בדיקה", "עומר עזוב", "הערות", "נועה דוגמה"]),
+    );
+  });
+
+  it("deduplicates a header that appears in more than one block", () => {
+    const sheet: RawSheet = {
+      name: "משמרות + תורנויות",
+      values: [
+        ["תאריך", "יום", "דני בדיקה", "תאריך", "יום", "דני בדיקה"],
+        ["05/01/2026", "ב", "בוקר", "10.02.2026", "ג", "לילה"],
+      ],
+    };
+    expect(findScheduleColumnHeaderTexts(sheet)).toEqual(["דני בדיקה"]);
+  });
+
+  it("returns an empty list when there is no date header", () => {
+    const emptySheet: RawSheet = { name: "משמרות + תורנויות", values: [["a", "b"]] };
+    expect(findScheduleColumnHeaderTexts(emptySheet)).toEqual([]);
   });
 });

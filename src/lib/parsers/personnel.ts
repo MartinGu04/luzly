@@ -23,8 +23,15 @@ const RECOGNIZED_LABEL_GROUPS = [
  * Deterministic id derived from the (normalized) name so the same person
  * gets a stable id across parses without needing an external identity
  * source. FNV-1a 32-bit, more than enough entropy for a personnel roster.
+ *
+ * Exported for reuse by `lib/parsers/historicalDutyPersonnel.ts`, which
+ * mints the SAME id shape for a former employee who has left the current
+ * כ"א roster but still has real historical Duty Fairness evidence -- the
+ * whole point is that id continuity survives a person going in and out of
+ * the current roster, so this is deliberately the ONE place that hash is
+ * computed, never a second/parallel derivation.
  */
-function stableIdFromName(name: string): string {
+export function stableIdFromName(name: string): string {
   const normalized = name.replace(/\s+/g, " ").trim();
   let hash = 0x811c9dc5;
   for (let i = 0; i < normalized.length; i++) {

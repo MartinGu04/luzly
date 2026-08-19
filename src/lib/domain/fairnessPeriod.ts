@@ -71,3 +71,16 @@ export function fairnessPeriodIdentityLabel(identity: FairnessPeriodIdentity): s
 export function fairnessPeriodEndDate(identity: FairnessPeriodIdentity): string {
   return identity.key === "h1" ? `${identity.year}-06-30` : `${identity.year}-12-31`;
 }
+
+/**
+ * The period's own calendar start date -- h1 starts 1/1, h2 starts 1/7, of
+ * `identity.year`. Companion to `fairnessPeriodEndDate` above -- deliberately
+ * the ONLY place a duty period's start date is computed, feeding the
+ * weighted completed-allocation total
+ * (`dutyAllocationWeight.ts`'s `computeCompletedDutyAllocation`), which
+ * needs a real `[start, end]` date range to restrict real schedule Events to
+ * the SELECTED H1/H2 period.
+ */
+export function fairnessPeriodStartDate(identity: FairnessPeriodIdentity): string {
+  return identity.key === "h1" ? `${identity.year}-01-01` : `${identity.year}-07-01`;
+}
