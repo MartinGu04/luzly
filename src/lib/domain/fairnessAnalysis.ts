@@ -1,5 +1,7 @@
+import type { Event } from "./event";
 import type { FairnessStatus } from "./fairnessFoundation";
 import type { FairnessPersonRow, FairnessTargets } from "./fairnessTable";
+import type { LocalNow } from "./localNow";
 
 export type FairnessAllocationRole = "supervisor" | "technician";
 
@@ -116,4 +118,57 @@ export function sumDisplayedFairnessRows(rows: readonly FairnessPersonRow[]): Fa
     displayedCurrentSum: sumNonNull(rows.map((row) => row.currentScore)),
     displayedWeekendSum: sumNonNull(rows.map((row) => row.weekendCount)),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Raw completed-duty count ("תורנויות שבוצעו") -- a plain, UNWEIGHTED fact,
+// deliberately separate from `currentScore` (the workbook's weighted score,
+// where different duty families/weekend duties can contribute different
+// weights). The workbook's Fairness table has no per-duty-event data at all
+// behind `currentScore` -- this is derived instead from real schedule
+// Events, the SAME source `fairnessShiftEngine.ts` already uses for its own
+// `actualShifts` raw count, never a second/independent reinterpretation of
+// the workbook's own score cell.
+// ---------------------------------------------------------------------------
+
+/**
+ * A genuine, SETTLED duty occurrence -- `category === "duty"` (which, by
+ * construction in `lib/parsers/event.ts`'s `parseEvent`, always carries a
+ * non-null `dutyFamily`; checked explicitly anyway, the same genuine-duty
+ * test `lib/domain/dutyBlocks.ts`'s `isBlockableDutyEvent` already
+ * established, never re-derived differently here) AND CONFIRMED only -- the
+ * same "not yet a settled fact" convention `fairnessShiftEngine.ts`'s
+ * `isConfirmedNonShadowRoleShift` already established for shifts: a
+ * tentative ("?"-suffixed) duty is still a plan, not yet a completed fact.
+ */
+function isSettledDutyEvent(event: Event): boolean {
+  return event.category === "duty" && event.dutyFamily !== null && event.certainty === "confirmed";
+}
+
+/**
+ * Raw count of duties `personId` has ACTUALLY COMPLETED within
+ * `[periodStartDate, periodEndDate]`, up to and including `now.date` -- a
+ * duty dated after `now.date`, even a confirmed one already on the
+ * schedule, is a PLAN, not yet a completed fact, and is never counted. This
+ * is a plain unweighted count, never presented as if it were `currentScore`
+ * (which stays the sole authoritative, workbook-sourced score -- see this
+ * module's own docs), and it never feeds back into recomputing that score.
+ * Deliberately period-SHAPE-agnostic like the rest of this foundation: takes
+ * a plain start/end date range, never an h1/h2 key.
+ */
+export function countCompletedDutiesForPerson(
+  events: readonly Event[],
+  personId: string,
+  periodStartDate: string,
+  periodEndDate: string,
+  now: LocalNow,
+): number {
+  return events.filter(
+    (event) =>
+      event.personId === personId &&
+      isSettledDutyEvent(event) &&
+      event.date >= periodStartDate &&
+      event.date <= periodEndDate &&
+      event.date <= now.date,
+  ).length;
 }

@@ -1,7 +1,9 @@
+import type { Event } from "@/lib/domain/event";
 import {
   computeGapToTarget,
   computeNormalizedLoad,
   computeScoreDelta,
+  countCompletedDutiesForPerson,
   resolveComparisonTarget,
   resolveDutyFairnessStatus,
   resolveFairnessAllocationRole,
@@ -17,6 +19,7 @@ import {
 import {
   fairnessPeriodEndDate,
   fairnessPeriodIdentityLabel,
+  fairnessPeriodStartDate,
   type FairnessPeriodIdentity,
 } from "@/lib/domain/fairnessPeriod";
 import type { FairnessPersonRow, FairnessTableParseResult, FairnessTargets } from "@/lib/domain/fairnessTable";
@@ -35,6 +38,16 @@ export interface BuildDutyFairnessReadModelInput {
   periodIdentity: FairnessPeriodIdentity;
   fetchedAt: string;
   now: LocalNow;
+  /**
+   * Real schedule Events, used ONLY to derive each row's raw
+   * `completedDutyCount` (`countCompletedDutiesForPerson`) -- never
+   * consulted for score/target/delta/status, which stay entirely
+   * workbook-sourced per this module's own docs. Defaults to an empty
+   * array -- a genuinely safe default (zero supplied Events really does
+   * mean zero completed duties to count, never a guess standing in for
+   * unknown data) for any existing caller/test that predates this field.
+   */
+  events?: readonly Event[];
 }
 
 /**
@@ -63,12 +76,14 @@ export interface BuildDutyFairnessReadModelInput {
  * label -- landing in a group never by itself grants a target.
  */
 export function buildDutyFairnessReadModel(input: BuildDutyFairnessReadModelInput): DutyFairnessReadModel {
-  const { parseResult, periodIdentity, fetchedAt, now } = input;
+  const { parseResult, periodIdentity, fetchedAt, now, events = [] } = input;
   const { personRows, totals, targets } = parseResult;
 
-  const periodStatus = resolveFairnessPeriodStatus(fairnessPeriodEndDate(periodIdentity), now);
+  const periodStartDate = fairnessPeriodStartDate(periodIdentity);
+  const periodEndDate = fairnessPeriodEndDate(periodIdentity);
+  const periodStatus = resolveFairnessPeriodStatus(periodEndDate, now);
 
-  const rows = personRows.map((row, index) => toRowView(row, targets, index));
+  const rows = personRows.map((row, index) => toRowView(row, targets, index, events, periodStartDate, periodEndDate, now));
   const sortedRows = [...rows].sort(compareDutyFairnessRows);
 
   return {
@@ -86,7 +101,15 @@ export function buildDutyFairnessReadModel(input: BuildDutyFairnessReadModelInpu
   };
 }
 
-function toRowView(row: FairnessPersonRow, targets: FairnessTargets, index: number): DutyFairnessPersonRowView {
+function toRowView(
+  row: FairnessPersonRow,
+  targets: FairnessTargets,
+  index: number,
+  events: readonly Event[],
+  periodStartDate: string,
+  periodEndDate: string,
+  now: LocalNow,
+): DutyFairnessPersonRowView {
   const role = resolveFairnessAllocationRole(row.allocationLabel);
   const comparisonTarget = resolveComparisonTarget(row.allocationLabel, targets);
   const currentScore = row.currentScore;
@@ -94,6 +117,16 @@ function toRowView(row: FairnessPersonRow, targets: FairnessTargets, index: numb
   const reasons: FairnessDataCompletenessReason[] = [];
   if (row.resolvedPersonId === null) reasons.push("duty_identity_unresolved");
   if (role !== null && comparisonTarget === null) reasons.push("duty_target_unavailable");
+
+  // Independent of `comparisonTarget`/`status` -- a person who cannot be
+  // compared (no target-bearing allocation label) still gets a real raw
+  // count here whenever their identity is resolved, since this is a plain
+  // factual count, not an analysis result (see `DutyFairnessPersonRowView
+  // .completedDutyCount`'s own docs).
+  const completedDutyCount =
+    row.resolvedPersonId !== null
+      ? countCompletedDutiesForPerson(events, row.resolvedPersonId, periodStartDate, periodEndDate, now)
+      : null;
 
   return {
     key: `${row.resolvedPersonId ?? "unresolved"}-${index}`,
@@ -108,6 +141,7 @@ function toRowView(row: FairnessPersonRow, targets: FairnessTargets, index: numb
     normalizedLoad: computeNormalizedLoad(currentScore, comparisonTarget),
     status: resolveDutyFairnessStatus(currentScore, comparisonTarget),
     weekendCount: row.weekendCount,
+    completedDutyCount,
     exemptions: resolveFairnessExemptions(row.exemptions),
     dataCompleteness: fairnessDataCompleteness(reasons),
   };

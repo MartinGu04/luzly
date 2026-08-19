@@ -18,11 +18,11 @@ function Stat({ label, value }: { label: string; value: string }) {
 }
 
 /**
- * Duty Fairness person detail (PR #4 §16) -- previous/current/delta,
- * target, gap, and normalized load as CONTEXTUAL "load relative to the
- * comparison target" only, explicitly labeled as such -- never a 0–100
- * Fairness grade. Exemptions render as visible badges directly in the
- * panel, never behind hover.
+ * Duty Fairness person detail (PR #4 §16) -- the raw completed-duty count,
+ * previous/current/delta, target, gap, and normalized load as CONTEXTUAL
+ * "load relative to the comparison target" only, explicitly labeled as
+ * such -- never a 0–100 Fairness grade. Exemptions render as visible
+ * badges directly in the panel, never behind hover.
  */
 export function DutyFairnessDetail({ view, normalizedLoad, previousLabel }: DutyFairnessDetailProps) {
   const normalizedLoadLabel = normalizedLoad !== null ? formatNormalizedLoad(normalizedLoad) : null;
@@ -32,6 +32,7 @@ export function DutyFairnessDetail({ view, normalizedLoad, previousLabel }: Duty
       <p className="text-sm text-muted">{view.allocationLabel || "—"}</p>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <Stat label="תורנויות שבוצעו" value={view.completedDutyLabel} />
         <Stat label="ניקוד קודם" value={previousLabel} />
         <Stat label="ניקוד נוכחי" value={view.currentLabel} />
         <Stat label="שינוי" value={view.deltaLabel} />

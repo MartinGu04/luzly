@@ -2,7 +2,9 @@ import "server-only";
 import { resolveFairnessPeriodIdentity } from "@/lib/domain/fairnessPeriod";
 import type { Person } from "@/lib/domain/types";
 import type { SheetSourceKey } from "@/lib/google";
+import { parseEvent } from "@/lib/parsers/event";
 import { parseFairnessTable } from "@/lib/parsers/fairness";
+import { parseScheduleSheet } from "@/lib/parsers/schedule";
 import { getJerusalemLocalNow } from "@/lib/time/jerusalemClock";
 import { buildDutyFairnessReadModel } from "./buildDutyFairnessReadModel";
 import type { DutyFairnessGroupView, DutyFairnessReadModel } from "./dutyFairnessTypes";
@@ -31,6 +33,13 @@ const PERIOD_SHEET_KEYS: Record<"h1" | "h2", SheetSourceKey> = {
  * via the existing, unchanged `parseFairnessTable`, and delegating every
  * actual analysis to `buildDutyFairnessReadModel` UNCHANGED. Duty Fairness
  * stays H1/H2 -- never converted to calendar months.
+ *
+ * Also parses the `schedule` sheet into real `Event`s (the SAME sheet/
+ * parse call `shiftFairness.ts` already makes) purely to feed each row's
+ * raw `completedDutyCount` -- `FAIRNESS_WORKBOOK_SOURCES` already includes
+ * `schedule` for both Fairness modes, so this is no extra Google fetch.
+ * Never used for anything score/target/status-related, which stay entirely
+ * workbook-sourced.
  */
 export async function loadDutyFairnessReadModel(rawPeriod: string | null): Promise<DutyFairnessLoadResult> {
   const contextResult = await loadFairnessWorkbookContext();
@@ -44,7 +53,10 @@ export async function loadDutyFairnessReadModel(rawPeriod: string | null): Promi
   const sheet = getFairnessWorkbookSheet(snapshot, PERIOD_SHEET_KEYS[periodIdentity.key]);
   const parseResult = parseFairnessTable(sheet, people);
 
-  const model = buildDutyFairnessReadModel({ parseResult, periodIdentity, fetchedAt: snapshot.fetchedAt, now });
+  const rawAssignments = parseScheduleSheet(getFairnessWorkbookSheet(snapshot, "schedule"), people);
+  const events = rawAssignments.map(parseEvent);
+
+  const model = buildDutyFairnessReadModel({ parseResult, periodIdentity, fetchedAt: snapshot.fetchedAt, now, events });
 
   return { status: "ok", model: withAvatars(model, avatarByPersonId), person };
 }

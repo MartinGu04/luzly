@@ -72,6 +72,22 @@ export interface DutyFairnessPersonRowView {
   /** below/balanced/above, EXACT comparison with no tolerance band -- `null` whenever currentScore or comparisonTarget is unavailable. */
   status: DutyFairnessStatus | null;
   weekendCount: number | null;
+  /**
+   * Raw, UNWEIGHTED count of duties this person has ACTUALLY COMPLETED in
+   * this period, up to and including today -- a DIFFERENT fact from
+   * `currentScore` (the workbook's weighted score, where different duty
+   * families/weekend duties can contribute different weights). Derived from
+   * real schedule Events (`category === "duty"`, confirmed only -- see
+   * `lib/domain/fairnessAnalysis.ts`'s `countCompletedDutiesForPerson`),
+   * never from the workbook's own score cell. `null` ONLY when `personId`
+   * itself is `null` (an unresolved source name has no person to join
+   * schedule Events against) -- unlike `comparisonTarget`, this does NOT
+   * depend on having a comparison target: a person who "cannot be compared"
+   * (no target-bearing allocation label, `status: null`) still gets a real
+   * count here whenever their identity is resolved, since it's a plain
+   * factual count, not an analysis result.
+   */
+  completedDutyCount: number | null;
   exemptions: readonly DutyFairnessExemptionView[];
   /** Only ever non-empty for a genuinely verified gap (unresolved identity, or a target-bearing role missing its period target note) -- never noise on every row. */
   dataCompleteness: FairnessDataCompleteness;

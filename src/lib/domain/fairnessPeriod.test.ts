@@ -3,6 +3,7 @@ import {
   fairnessPeriodEndDate,
   fairnessPeriodIdentityLabel,
   fairnessPeriodLabel,
+  fairnessPeriodStartDate,
   parseFairnessPeriodParam,
   resolveFairnessPeriod,
   resolveFairnessPeriodIdentity,
@@ -92,5 +93,19 @@ describe("fairnessPeriodEndDate — K. H1/H2 period end dates for shared Fairnes
 
   it("uses identity.year, never a hard-coded year", () => {
     expect(fairnessPeriodEndDate({ key: "h1", year: 2031 })).toBe("2031-06-30");
+  });
+});
+
+describe("fairnessPeriodStartDate — companion to fairnessPeriodEndDate, for the completed-duty count's date range", () => {
+  it("h1 starts January 1 of its own year", () => {
+    expect(fairnessPeriodStartDate({ key: "h1", year: 2026 })).toBe("2026-01-01");
+  });
+
+  it("h2 starts July 1 of its own year", () => {
+    expect(fairnessPeriodStartDate({ key: "h2", year: 2026 })).toBe("2026-07-01");
+  });
+
+  it("uses identity.year, never a hard-coded year", () => {
+    expect(fairnessPeriodStartDate({ key: "h2", year: 2031 })).toBe("2031-07-01");
   });
 });

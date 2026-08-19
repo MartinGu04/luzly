@@ -1,7 +1,32 @@
 import { describe, expect, it } from "vitest";
+import type { Event } from "@/lib/domain/event";
 import type { LocalNow } from "@/lib/domain/localNow";
 import type { FairnessPersonRow, FairnessTableParseResult, FairnessTargets, FairnessTotalsRow } from "@/lib/domain/fairnessTable";
 import { buildDutyFairnessReadModel } from "./buildDutyFairnessReadModel";
+
+function dutyEvent(overrides: Partial<Event> = {}): Event {
+  return {
+    personId: "p1",
+    personName: "מרטין בדיקה",
+    date: "2026-03-10",
+    title: "שמירה",
+    rawValue: "שמירה",
+    category: "duty",
+    certainty: "confirmed",
+    role: null,
+    period: "unspecified",
+    sourceSheet: "sheet",
+    sourceCell: "A1",
+    slot: null,
+    shadow: false,
+    startTimeOverride: null,
+    endTimeOverride: null,
+    changeNote: null,
+    dutyFamily: "guard",
+    absenceKind: null,
+    ...overrides,
+  };
+}
 
 function personRow(overrides: Partial<FairnessPersonRow> = {}): FairnessPersonRow {
   return {
@@ -414,5 +439,115 @@ describe("buildDutyFairnessReadModel — sorting: established ordering preserved
     });
     const allRows = model.groups.flatMap((g) => g.rows);
     expect(allRows.map((r) => r.sourceName)).toEqual(["נמוך", "גבוה", "אין יעד"]);
+  });
+});
+
+describe("buildDutyFairnessReadModel — completedDutyCount: raw, unweighted, independent of the workbook score", () => {
+  it("derives the count from real schedule Events for the row's resolved person, distinct from the weighted currentScore", () => {
+    const events: Event[] = [
+      dutyEvent({ personId: "p1", date: "2026-01-10" }),
+      dutyEvent({ personId: "p1", date: "2026-02-15" }),
+      dutyEvent({ personId: "p1", date: "2026-03-20" }),
+      dutyEvent({ personId: "p1", date: "2026-04-25" }),
+      dutyEvent({ personId: "p1", date: "2026-05-30" }),
+    ];
+    const model = buildDutyFairnessReadModel({
+      parseResult: parseResult({
+        personRows: [personRow({ resolvedPersonId: "p1", allocationLabel: "טכנאי", currentScore: 6 })],
+        targets: { supervisorTarget: 4, technicianTarget: 8 },
+      }),
+      periodIdentity: { key: "h1", year: 2026 },
+      fetchedAt: "2026-08-15T10:00:00.000Z",
+      now: NOW,
+      events,
+    });
+    const row = model.groups.find((g) => g.key === "technician")?.rows[0];
+    expect(row?.completedDutyCount).toBe(5);
+    expect(row?.currentScore).toBe(6);
+    expect(row?.completedDutyCount).not.toBe(row?.currentScore);
+  });
+
+  it("never counts a future/planned duty, even inside the selected period", () => {
+    const events: Event[] = [
+      dutyEvent({ personId: "p1", date: "2026-08-14" }), // completed, before NOW (2026-08-15)
+      dutyEvent({ personId: "p1", date: "2026-12-20" }), // still inside h2, but in the future relative to NOW
+    ];
+    const model = buildDutyFairnessReadModel({
+      parseResult: parseResult({
+        personRows: [personRow({ resolvedPersonId: "p1", allocationLabel: "טכנאי" })],
+      }),
+      periodIdentity: { key: "h2", year: 2026 },
+      fetchedAt: "2026-08-15T10:00:00.000Z",
+      now: NOW,
+      events,
+    });
+    const row = model.groups.find((g) => g.key === "technician")?.rows[0];
+    expect(row?.completedDutyCount).toBe(1);
+  });
+
+  it("respects the SELECTED fairness period -- a duty from the other half-year is excluded", () => {
+    const events: Event[] = [
+      dutyEvent({ personId: "p1", date: "2026-03-01" }), // H1
+      dutyEvent({ personId: "p1", date: "2026-08-01" }), // H2 -- not H1
+    ];
+    const model = buildDutyFairnessReadModel({
+      parseResult: parseResult({
+        personRows: [personRow({ resolvedPersonId: "p1", allocationLabel: "טכנאי" })],
+      }),
+      periodIdentity: { key: "h1", year: 2026 },
+      fetchedAt: "2026-08-15T10:00:00.000Z",
+      now: NOW,
+      events,
+    });
+    const row = model.groups.find((g) => g.key === "technician")?.rows[0];
+    expect(row?.completedDutyCount).toBe(1);
+  });
+
+  it('a non-comparable person (e.g. \'ר"צ\', null target/status) still shows a real completed-duty count when the identity is resolved', () => {
+    const events: Event[] = [dutyEvent({ personId: "p_rats", date: "2026-02-01" }), dutyEvent({ personId: "p_rats", date: "2026-03-01" })];
+    const model = buildDutyFairnessReadModel({
+      parseResult: parseResult({
+        personRows: [personRow({ resolvedPersonId: "p_rats", sourceName: "רס", allocationLabel: 'ר"צ', currentScore: 5 })],
+        targets: { supervisorTarget: 4, technicianTarget: 8 },
+      }),
+      periodIdentity: { key: "h1", year: 2026 },
+      fetchedAt: "2026-08-15T10:00:00.000Z",
+      now: NOW,
+      events,
+    });
+    const row = model.groups.find((g) => g.key === "supervisor")?.rows[0];
+    expect(row?.status).toBeNull();
+    expect(row?.comparisonTarget).toBeNull();
+    expect(row?.completedDutyCount).toBe(2);
+  });
+
+  it("an unresolved source name (personId null) gets a null completedDutyCount, never a fabricated 0", () => {
+    const events: Event[] = [dutyEvent({ personId: "p1", date: "2026-02-01" })];
+    const model = buildDutyFairnessReadModel({
+      parseResult: parseResult({
+        personRows: [personRow({ resolvedPersonId: null, allocationLabel: "טכנאי", currentScore: 6 })],
+        targets: { supervisorTarget: 4, technicianTarget: 8 },
+      }),
+      periodIdentity: { key: "h1", year: 2026 },
+      fetchedAt: "2026-08-15T10:00:00.000Z",
+      now: NOW,
+      events,
+    });
+    const row = model.groups.find((g) => g.key === "technician")?.rows[0];
+    expect(row?.personId).toBeNull();
+    expect(row?.completedDutyCount).toBeNull();
+  });
+
+  it("no events supplied (default []) -> 0 for a resolved person, never a crash", () => {
+    const model = buildDutyFairnessReadModel({
+      parseResult: parseResult({
+        personRows: [personRow({ resolvedPersonId: "p1", allocationLabel: "טכנאי" })],
+      }),
+      periodIdentity: { key: "h1", year: 2026 },
+      fetchedAt: "2026-08-15T10:00:00.000Z",
+      now: NOW,
+    });
+    const row = model.groups.find((g) => g.key === "technician")?.rows[0];
+    expect(row?.completedDutyCount).toBe(0);
   });
 });

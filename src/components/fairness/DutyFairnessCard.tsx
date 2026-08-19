@@ -7,15 +7,18 @@ import { FairnessStatusBadge, fairnessStatusTintTextClass } from "./FairnessStat
 /**
  * One Duty Fairness person card (PR #4 §12, redesigned PR #51 follow-up)
  * -- name/allocation + status, then a compact self-explanatory PRIMARY
- * metric grid (ניקוד נוכחי / יעד השוואה / פער מהיעד, the gap tinted with
- * the same restrained status color as the badge), then a smaller
- * SECONDARY row for the previous-period change, weekend count, and any
- * exemption badges. Deliberately a compact subset -- normalized load lives
- * in the detail overlay, not every read-model field crammed onto the
- * card. An unavailable target never fakes a gap/normalizedLoad/status -- a
- * `'ר"צ'` card, for example, can sit in the אחמ״שים section showing a real
+ * metric grid (תורנויות שבוצעו / ניקוד נוכחי / יעד השוואה / פער מהיעד, the
+ * raw completed-duty count leading since it's the intuitive fact, followed
+ * by the fairness-scoring metrics, the gap tinted with the same restrained
+ * status color as the badge), then a smaller SECONDARY row for the
+ * previous-period change, weekend count, and any exemption badges.
+ * Deliberately a compact subset -- normalized load lives in the detail
+ * overlay, not every read-model field crammed onto the card. An unavailable
+ * target never fakes a gap/normalizedLoad/status -- a `'ר"צ'` card, for
+ * example, can sit in the אחמ״שים section showing a real
  * score/weekend/exemptions with no comparison target at all, which is
- * expected, not an error.
+ * expected, not an error; the completed-duty count stays visible either
+ * way, since it never depends on having a comparison target.
  *
  * A row with no resolved `href` (unresolved source name) still renders in
  * full, just as a plain (non-clickable) card -- same convention as the
@@ -35,7 +38,8 @@ export function DutyFairnessCard({ view }: { view: DutyFairnessCardView }) {
         <FairnessStatusBadge status={view.status} />
       </div>
 
-      <div className="mt-3 grid grid-cols-3 gap-x-2 gap-y-1 rounded-lg bg-overlay-faint px-3 py-2.5">
+      <div className="mt-3 grid grid-cols-2 gap-x-2 gap-y-2 rounded-lg bg-overlay-faint px-3 py-2.5">
+        <FairnessMetric testId="metric-duty-completed" label="תורנויות שבוצעו" value={view.completedDutyLabel} />
         <FairnessMetric testId="metric-duty-current" label="ניקוד נוכחי" value={view.currentLabel} />
         <FairnessMetric testId="metric-duty-target" label="יעד השוואה" value={view.targetLabel ?? "—"} />
         <FairnessMetric

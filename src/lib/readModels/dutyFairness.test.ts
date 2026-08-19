@@ -28,6 +28,7 @@ function okContext(
     people: Person[];
     h1Rows: string[][];
     h2Rows: string[][];
+    scheduleRows: string[][];
     avatarByPersonId: ReadonlyMap<string, string | null>;
   }> = {},
 ) {
@@ -42,7 +43,10 @@ function okContext(
         fetchedAt: "2026-08-15T10:00:00.000Z",
         sheets: [
           { name: 'כ"א', values: [] },
-          { name: "משמרות + תורנויות", values: [] },
+          {
+            name: "משמרות + תורנויות",
+            values: overrides.scheduleRows ? [["תאריך", "יום", ...people.map((p) => p.name)], ...overrides.scheduleRows] : [],
+          },
           fairnessSheet('פוטנציאל תקש"אס 1-6/2026', overrides.h1Rows ?? []),
           fairnessSheet('פוטנציאל תקש"אס 7-12/2026', overrides.h2Rows ?? []),
         ],
@@ -191,5 +195,86 @@ describe("loadDutyFairnessReadModel — avatar enrichment (never touches calcula
     const supervisorRow = result.model.groups.find((g) => g.key === "supervisor")?.rows[0];
     expect(technicianRow?.avatarUrl).toBe("https://lh3.googleusercontent.com/a/tal.jpg");
     expect(supervisorRow?.avatarUrl).toBe("https://lh3.googleusercontent.com/a/roni.jpg");
+  });
+});
+
+describe("loadDutyFairnessReadModel — completedDutyCount: derived from the real schedule sheet, end-to-end", () => {
+  it("counts confirmed guard-duty ('שומר 1') schedule entries for the row's own person, within the selected H1 period", async () => {
+    loadFairnessWorkbookContext.mockResolvedValue(
+      okContext({
+        h1Rows: [["טל טכנאי", "טכנאי", "5", "6", "1", "-"]],
+        scheduleRows: [
+          ["10/03/2026", "ג", "שומר 1"],
+          ["15/04/2026", "ד", "שומר 1"],
+        ],
+      }),
+    );
+    const result = await loadDutyFairnessReadModel("h1");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    const technicianRow = result.model.groups.find((g) => g.key === "technician")?.rows[0];
+    expect(technicianRow?.completedDutyCount).toBe(2);
+    // A different, unrelated fact from the workbook's own weighted score.
+    expect(technicianRow?.currentScore).toBe(6);
+  });
+
+  it("respects the selected period -- a duty dated in H2 is excluded while H1 is selected", async () => {
+    loadFairnessWorkbookContext.mockResolvedValue(
+      okContext({
+        h1Rows: [["טל טכנאי", "טכנאי", "5", "6", "1", "-"]],
+        scheduleRows: [
+          ["10/03/2026", "ג", "שומר 1"], // inside H1
+          ["10/08/2026", "ב", "שומר 1"], // inside H2 -- must not count for H1
+        ],
+      }),
+    );
+    const result = await loadDutyFairnessReadModel("h1");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    const technicianRow = result.model.groups.find((g) => g.key === "technician")?.rows[0];
+    expect(technicianRow?.completedDutyCount).toBe(1);
+  });
+
+  it("never counts a future duty -- NOW is mocked to 2026-08-15, so a schedule entry dated after that is excluded even inside the selected H2 period", async () => {
+    loadFairnessWorkbookContext.mockResolvedValue(
+      okContext({
+        h2Rows: [["טל טכנאי", "טכנאי", "3", "4", "0", "-"]],
+        scheduleRows: [
+          ["01/08/2026", "ש", "שומר 1"], // before NOW -- completed
+          ["20/12/2026", "א", "שומר 1"], // after NOW -- still planned, not completed
+        ],
+      }),
+    );
+    const result = await loadDutyFairnessReadModel("h2");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    const technicianRow = result.model.groups.find((g) => g.key === "technician")?.rows[0];
+    expect(technicianRow?.completedDutyCount).toBe(1);
+  });
+
+  it('a non-comparable person (\'ר"צ\', null target/status) still shows a real completed-duty count', async () => {
+    loadFairnessWorkbookContext.mockResolvedValue(
+      okContext({
+        people: [person({ id: "p_ratz", name: "רוני רצ" })],
+        h2Rows: [["רוני רצ", 'ר"צ', "5", "5", "1", "-"]],
+        scheduleRows: [["10/08/2026", "ב", "שומר 1"]],
+      }),
+    );
+    const result = await loadDutyFairnessReadModel("h2");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    const row = result.model.groups[0].rows[0];
+    expect(row.status).toBeNull();
+    expect(row.comparisonTarget).toBeNull();
+    expect(row.completedDutyCount).toBe(1);
+  });
+
+  it("no schedule data at all -> a real 0, never null, for a resolved person", async () => {
+    loadFairnessWorkbookContext.mockResolvedValue(okContext({ h2Rows: [["טל טכנאי", "טכנאי", "5", "6", "1", "-"]] }));
+    const result = await loadDutyFairnessReadModel("h2");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    const technicianRow = result.model.groups.find((g) => g.key === "technician")?.rows[0];
+    expect(technicianRow?.completedDutyCount).toBe(0);
   });
 });

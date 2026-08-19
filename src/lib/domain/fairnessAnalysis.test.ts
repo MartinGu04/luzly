@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
+import type { Event } from "./event";
 import type { FairnessPersonRow } from "./fairnessTable";
+import type { LocalNow } from "./localNow";
 import {
   computeGapToTarget,
   computeNormalizedLoad,
   computeScoreDelta,
+  countCompletedDutiesForPerson,
   resolveComparisonTarget,
   resolveDutyFairnessStatus,
   resolveFairnessAllocationRole,
@@ -200,5 +203,98 @@ describe("sumDisplayedFairnessRows — PR #15 hardening pass (never a validation
     // that could even represent a "mismatch"/"discrepancy" conclusion.
     expect(result).not.toHaveProperty("hasDiscrepancy");
     expect(result).not.toHaveProperty("previousMismatch");
+  });
+});
+
+function dutyEvent(overrides: Partial<Event> = {}): Event {
+  return {
+    personId: "p1",
+    personName: "מרטין בדיקה",
+    date: "2026-03-10",
+    title: "שמירה",
+    rawValue: "שמירה",
+    category: "duty",
+    certainty: "confirmed",
+    role: null,
+    period: "unspecified",
+    sourceSheet: "sheet",
+    sourceCell: "A1",
+    slot: null,
+    shadow: false,
+    startTimeOverride: null,
+    endTimeOverride: null,
+    changeNote: null,
+    dutyFamily: "guard",
+    absenceKind: null,
+    ...overrides,
+  };
+}
+
+const H1_2026: LocalNow = { date: "2026-08-15", minuteOfDay: 600 };
+
+describe("countCompletedDutiesForPerson — raw, unweighted completed-duty count", () => {
+  it("counts confirmed duty events for the person within the period, up to now", () => {
+    const events: Event[] = [
+      dutyEvent({ date: "2026-01-05" }),
+      dutyEvent({ date: "2026-03-10" }),
+      dutyEvent({ date: "2026-05-20" }),
+    ];
+    expect(countCompletedDutiesForPerson(events, "p1", "2026-01-01", "2026-06-30", H1_2026)).toBe(3);
+  });
+
+  it("is a raw count, DIFFERENT from the weighted currentScore -- multiple duties can sum to fewer or more score points than there are duties", () => {
+    const events: Event[] = [
+      dutyEvent({ date: "2026-01-05" }),
+      dutyEvent({ date: "2026-02-10" }),
+      dutyEvent({ date: "2026-03-15" }),
+      dutyEvent({ date: "2026-04-20" }),
+      dutyEvent({ date: "2026-05-25" }),
+    ];
+    const completedCount = countCompletedDutiesForPerson(events, "p1", "2026-01-01", "2026-06-30", H1_2026);
+    const weightedScore = 6; // e.g. from the workbook's own currentScore cell -- an unrelated, independently-sourced number.
+    expect(completedCount).toBe(5);
+    expect(completedCount).not.toBe(weightedScore);
+  });
+
+  it("never counts a future/planned duty, even a confirmed one already on the schedule", () => {
+    const events: Event[] = [
+      dutyEvent({ date: "2026-08-14" }), // yesterday relative to H1_2026 -- completed
+      dutyEvent({ date: "2026-08-15" }), // today -- completed
+      dutyEvent({ date: "2026-08-16" }), // tomorrow -- not yet completed
+      dutyEvent({ date: "2026-12-31" }), // far future within the period -- not yet completed
+    ];
+    expect(countCompletedDutiesForPerson(events, "p1", "2026-07-01", "2026-12-31", H1_2026)).toBe(2);
+  });
+
+  it("respects the selected period -- a duty outside [periodStartDate, periodEndDate] is excluded even if it already happened", () => {
+    const events: Event[] = [
+      dutyEvent({ date: "2026-05-01" }), // inside H1
+      dutyEvent({ date: "2025-12-20" }), // before H1 -- a prior period
+    ];
+    expect(countCompletedDutiesForPerson(events, "p1", "2026-01-01", "2026-06-30", H1_2026)).toBe(1);
+  });
+
+  it("only counts the requested person's own events, never another person's duties", () => {
+    const events: Event[] = [dutyEvent({ personId: "p1", date: "2026-03-01" }), dutyEvent({ personId: "p2", date: "2026-03-01" })];
+    expect(countCompletedDutiesForPerson(events, "p1", "2026-01-01", "2026-06-30", H1_2026)).toBe(1);
+  });
+
+  it("a tentative (\"?\"-suffixed) duty is a plan, not yet a settled fact -- never counted", () => {
+    const events: Event[] = [dutyEvent({ date: "2026-03-01", certainty: "tentative" })];
+    expect(countCompletedDutiesForPerson(events, "p1", "2026-01-01", "2026-06-30", H1_2026)).toBe(0);
+  });
+
+  it("a shift Event is never counted as a duty, even for the same person/date", () => {
+    const events: Event[] = [dutyEvent({ date: "2026-03-01", category: "shift", dutyFamily: null })];
+    expect(countCompletedDutiesForPerson(events, "p1", "2026-01-01", "2026-06-30", H1_2026)).toBe(0);
+  });
+
+  it("an absence/status/other-category Event on the same date never counts as a duty", () => {
+    const events: Event[] = [dutyEvent({ date: "2026-03-01", category: "absence", dutyFamily: null, absenceKind: "vacation" })];
+    expect(countCompletedDutiesForPerson(events, "p1", "2026-01-01", "2026-06-30", H1_2026)).toBe(0);
+  });
+
+  it("no matching events -> 0, never a crash", () => {
+    expect(countCompletedDutiesForPerson([], "p1", "2026-01-01", "2026-06-30", H1_2026)).toBe(0);
   });
 });

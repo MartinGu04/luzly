@@ -15,6 +15,7 @@ function view(overrides: Partial<DutyFairnessCardView> = {}): DutyFairnessCardVi
     avatarUrl: null,
     href: "/fairness?mode=duties&person=p_1",
     allocationLabel: "טכנאי",
+    completedDutyLabel: "5",
     currentLabel: "6",
     targetLabel: "8",
     deltaLabel: "+1.00",
@@ -72,5 +73,50 @@ describe("DutyFairnessCard — avatar", () => {
     expect(screen.getByText("נועה טכנאית")).toBeInTheDocument();
     expect(screen.getByText("טכנאי")).toBeInTheDocument();
     expect(screen.getByTestId("metric-duty-current")).toBeInTheDocument();
+  });
+});
+
+describe("DutyFairnessCard — primary metric grid order and content", () => {
+  it("renders the four primary metrics in the required order: תורנויות שבוצעו, ניקוד נוכחי, יעד השוואה, פער מהיעד", () => {
+    render(
+      <ul>
+        <DutyFairnessCard view={view({ completedDutyLabel: "5", currentLabel: "6", targetLabel: "8", gapLabel: "-2.00" })} />
+      </ul>,
+    );
+    const grid = screen.getByTestId("metric-duty-completed").parentElement;
+    const gridChildIds = Array.from(grid?.children ?? []).map((child) => child.getAttribute("data-testid"));
+    expect(gridChildIds).toEqual(["metric-duty-completed", "metric-duty-current", "metric-duty-target", "metric-duty-gap"]);
+  });
+
+  it("shows the raw completed-duty count as a plain value, distinct from the weighted current score", () => {
+    render(
+      <ul>
+        <DutyFairnessCard view={view({ completedDutyLabel: "5", currentLabel: "6" })} />
+      </ul>,
+    );
+    expect(screen.getByTestId("metric-duty-completed")).toHaveTextContent("תורנויות שבוצעו");
+    expect(screen.getByTestId("metric-duty-completed")).toHaveTextContent("5");
+    expect(screen.getByTestId("metric-duty-current")).toHaveTextContent("6");
+  });
+
+  it("still renders a completed-duty count for a non-comparable person (null target/status/gap)", () => {
+    render(
+      <ul>
+        <DutyFairnessCard
+          view={view({ completedDutyLabel: "3", targetLabel: null, gapLabel: null, status: null })}
+        />
+      </ul>,
+    );
+    expect(screen.getByTestId("metric-duty-completed")).toHaveTextContent("3");
+    expect(screen.getByTestId("metric-duty-target")).toHaveTextContent("—");
+  });
+
+  it("renders \"—\" for an unresolved identity's completed-duty count, never a fabricated 0", () => {
+    render(
+      <ul>
+        <DutyFairnessCard view={view({ completedDutyLabel: "—" })} />
+      </ul>,
+    );
+    expect(screen.getByTestId("metric-duty-completed")).toHaveTextContent("—");
   });
 });

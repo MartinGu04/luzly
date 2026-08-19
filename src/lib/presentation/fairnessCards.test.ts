@@ -124,6 +124,7 @@ function dutyRow(overrides: Partial<DutyFairnessPersonRowView> = {}): DutyFairne
     normalizedLoad: 0.75,
     status: "below",
     weekendCount: 2,
+    completedDutyCount: 5,
     exemptions: [],
     dataCompleteness: COMPLETE_FAIRNESS_DATA,
     ...overrides,
@@ -139,6 +140,7 @@ describe("buildDutyFairnessCardView", () => {
       personName: "נועה טכנאית",
       href: "/fairness?mode=duties&person=p_1",
       allocationLabel: "טכנאי",
+      completedDutyLabel: "5",
       currentLabel: "6",
       targetLabel: "8",
       deltaLabel: "+1.00",
@@ -170,6 +172,44 @@ describe("buildDutyFairnessCardView", () => {
       "/fairness?mode=duties&person=p_1",
     );
     expect(view.exemptionBadges).toEqual(["🚫 מטבח"]);
+  });
+});
+
+describe("buildDutyFairnessCardView -- completedDutyLabel is a raw count, independent of the comparison target", () => {
+  it("formats a real completed-duty count as a plain integer -- a DIFFERENT fact from the weighted currentLabel", () => {
+    const view = buildDutyFairnessCardView(
+      dutyRow({ completedDutyCount: 5, currentScore: 6 }),
+      "/fairness?mode=duties&person=p_1",
+    );
+    expect(view.completedDutyLabel).toBe("5");
+    expect(view.currentLabel).toBe("6");
+    expect(view.completedDutyLabel).not.toBe(view.currentLabel);
+  });
+
+  it('a ר"צ / non-comparable row (null target/status) still shows a real completed-duty count when the identity is resolved', () => {
+    const view = buildDutyFairnessCardView(
+      dutyRow({
+        allocationLabel: 'ר"צ',
+        comparisonTarget: null,
+        gapToTarget: null,
+        status: null,
+        completedDutyCount: 3,
+      }),
+      "/fairness?mode=duties&person=p_1",
+    );
+    expect(view.status).toBeNull();
+    expect(view.targetLabel).toBeNull();
+    expect(view.completedDutyLabel).toBe("3");
+  });
+
+  it("unresolved identity (null completedDutyCount from the read model) renders as \"—\", never a fabricated 0", () => {
+    const view = buildDutyFairnessCardView(dutyRow({ personId: null, completedDutyCount: null }), null);
+    expect(view.completedDutyLabel).toBe("—");
+  });
+
+  it("a real zero completed-duty count renders as \"0\", never as unavailable", () => {
+    const view = buildDutyFairnessCardView(dutyRow({ completedDutyCount: 0 }), "/fairness?mode=duties&person=p_1");
+    expect(view.completedDutyLabel).toBe("0");
   });
 });
 

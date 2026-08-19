@@ -1,6 +1,6 @@
 import type { FairnessDataCompletenessReason, FairnessStatus } from "@/lib/domain/fairnessFoundation";
 import type { PersonnelServiceCategory } from "@/lib/domain/personnelType";
-import { exemptionBadgeLabel, formatFairnessDelta, formatFairnessGap, formatFairnessScore, formatFairnessWeekendCount } from "@/lib/presentation/fairness";
+import { exemptionBadgeLabel, formatFairnessCount, formatFairnessDelta, formatFairnessGap, formatFairnessScore, formatFairnessWeekendCount } from "@/lib/presentation/fairness";
 import type { DutyFairnessPersonRowView } from "@/lib/readModels/dutyFairnessTypes";
 import type { ShiftFairnessPersonRowView } from "@/lib/readModels/shiftFairnessTypes";
 
@@ -96,6 +96,8 @@ export interface DutyFairnessCardView {
   avatarUrl: string | null;
   href: string | null;
   allocationLabel: string;
+  /** Raw, unweighted "תורנויות שבוצעו" count -- see `DutyFairnessPersonRowView.completedDutyCount`'s own docs for why it's independent of `status`/`targetLabel`. "—" only when `personId` itself is unresolved. */
+  completedDutyLabel: string;
   currentLabel: string;
   targetLabel: string | null;
   deltaLabel: string;
@@ -116,6 +118,7 @@ export function buildDutyFairnessCardView(
     avatarUrl: row.avatarUrl ?? null,
     href,
     allocationLabel: row.allocationLabel,
+    completedDutyLabel: formatFairnessCount(row.completedDutyCount),
     currentLabel: formatFairnessScore(row.currentScore),
     targetLabel: row.comparisonTarget !== null ? formatFairnessScore(row.comparisonTarget) : null,
     deltaLabel: formatFairnessDelta(row.delta),
