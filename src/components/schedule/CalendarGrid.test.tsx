@@ -396,7 +396,7 @@ describe("CalendarGrid", () => {
       expect(cell.textContent).not.toContain("טכנאי יום");
     });
 
-    it("labels a duty generically as 'תורנות', never the specific duty family/title", () => {
+    it("labels a duty with its own duty-family label ('שמירה'), never the raw title", () => {
       render(
         <CalendarGrid
           grid={WEEK_GRID}
@@ -408,8 +408,75 @@ describe("CalendarGrid", () => {
         />,
       );
       const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
-      expect(cell.textContent).toContain("תורנות");
+      expect(cell.textContent).toContain("שמירה");
       expect(cell.textContent).not.toContain("שומר 1");
+    });
+
+    it("labels a full_kitchen duty 'מטבח מלא', never the generic 'תורנות'", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          eventsByDate={{
+            "2026-08-12": [dutyEvent({ date: "2026-08-12", dutyFamily: "full_kitchen", slot: null })],
+          }}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+      expect(cell.textContent).toContain("מטבח מלא");
+      expect(cell.textContent).not.toContain("תורנות");
+    });
+
+    it("labels a daily_kitchen duty 'מטבח יומי'", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          eventsByDate={{
+            "2026-08-12": [dutyEvent({ date: "2026-08-12", dutyFamily: "daily_kitchen", slot: null })],
+          }}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+      expect(cell.textContent).toContain("מטבח יומי");
+    });
+
+    it("labels a rasar duty '🧹 רס\"ר'", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          eventsByDate={{ "2026-08-12": [dutyEvent({ date: "2026-08-12", dutyFamily: "rasar", slot: null })] }}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+      expect(cell.textContent).toContain('רס"ר');
+      expect(cell.textContent).toContain("🧹");
+    });
+
+    it("labels an oxid duty '📄 אוקסיד'", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          eventsByDate={{ "2026-08-12": [dutyEvent({ date: "2026-08-12", dutyFamily: "oxid", slot: null })] }}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+      expect(cell.textContent).toContain("אוקסיד");
+      expect(cell.textContent).toContain("📄");
     });
 
     it("labels an absence with its own kind ('חופש')", () => {
@@ -447,7 +514,7 @@ describe("CalendarGrid", () => {
       const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
       expect(cell.textContent).toContain("יום");
       expect(cell.textContent).toContain("לילה");
-      expect(cell.textContent).not.toContain("תורנות");
+      expect(cell.textContent).not.toContain("שמירה");
 
       // Wide overflow ("+1", counting past the 2 visible-on-wide indicators)
       // is present and marked wide-only.
@@ -706,7 +773,7 @@ describe("CalendarGrid", () => {
           activeShiftDates={[]}
         />,
       );
-      const label = screen.getByText("תורנות");
+      const label = screen.getByText("שמירה");
       expect(label.className).toMatch(/truncate/);
       // The truncate class lives on the label span itself, which is hidden
       // below sm: -- it never applies to the always-visible emoji/fallback.
@@ -940,7 +1007,7 @@ describe("CalendarGrid", () => {
           activeShiftDates={[]}
         />,
       );
-      const chip = screen.getByText("תורנות").parentElement;
+      const chip = screen.getByText("שמירה").parentElement;
       expect(chip?.className).toMatch(/bg-event-guard-soft/);
     });
 
@@ -957,7 +1024,7 @@ describe("CalendarGrid", () => {
           activeShiftDates={[]}
         />,
       );
-      const chip = screen.getByText("תורנות").parentElement;
+      const chip = screen.getByText("כונן פינויים").parentElement;
       expect(chip?.className).toMatch(/bg-event-evacuation-soft/);
       expect(chip?.className).not.toMatch(/bg-event-guard-soft/);
     });
@@ -975,7 +1042,7 @@ describe("CalendarGrid", () => {
           activeShiftDates={[]}
         />,
       );
-      const chip = screen.getByText("תורנות").parentElement;
+      const chip = screen.getByText("מטבח יומי").parentElement;
       expect(chip?.className).toMatch(/bg-event-kitchen-soft/);
     });
 
@@ -992,7 +1059,7 @@ describe("CalendarGrid", () => {
           activeShiftDates={[]}
         />,
       );
-      const chip = screen.getByText("תורנות").parentElement;
+      const chip = screen.getByText('רס"ר').parentElement;
       expect(chip?.className).toMatch(/bg-overlay-soft/);
       expect(chip?.className).not.toMatch(/bg-event-/);
     });
@@ -1042,7 +1109,7 @@ describe("CalendarGrid", () => {
           activeShiftDates={[]}
         />,
       );
-      const chip = screen.getByText("תורנות").parentElement;
+      const chip = screen.getByText("עתודה").parentElement;
       expect(chip?.className).toMatch(/bg-event-reserve-soft/);
     });
 
@@ -1057,7 +1124,7 @@ describe("CalendarGrid", () => {
           activeShiftDates={[]}
         />,
       );
-      const chip = screen.getByText("תורנות").parentElement;
+      const chip = screen.getByText("הקפצה").parentElement;
       expect(chip?.className).toMatch(/bg-event-reserve-soft/);
     });
 

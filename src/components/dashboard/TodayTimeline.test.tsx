@@ -119,7 +119,18 @@ describe("TodayTimeline", () => {
   it("shows no emoji for a non-timed event with no known semantic mapping", () => {
     const { container } = render(
       <TodayTimeline
-        todayEvents={[dutyEvent({ dutyFamily: "rasar", title: "רס״ר" })]}
+        todayEvents={[
+          shiftEvent({
+            category: "absence",
+            role: null,
+            period: "unspecified",
+            absenceKind: "medical",
+            dutyFamily: null,
+            title: "גימלים",
+            rawValue: "גימלים",
+            timing: { status: "not_evaluable" },
+          }),
+        ]}
         todayDutyActions={[]}
         localNow={localNow()}
       />,

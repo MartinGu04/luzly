@@ -15,7 +15,7 @@ import type { DayMeta } from "./types";
  * (see `EveryoneMonthGrid`'s day/night status chips, reusing `IndicatorChip`/
  * `OverflowChip` from this module), never by growing the cell itself.
  */
-export const CALENDAR_CELL_HEIGHT_CLASSES = "h-[58px] sm:h-20 lg:h-[84px]";
+export const CALENDAR_CELL_HEIGHT_CLASSES = "h-16 sm:h-24 lg:h-[104px]";
 
 /**
  * A shared base-height floor for the desktop selected-day panel
@@ -101,7 +101,7 @@ export function IndicatorChip({
 }) {
   return (
     <span
-      className={`flex min-w-0 items-center gap-1 rounded ${categoryBgClassName ?? "bg-overlay-soft"} px-1 text-[9px] leading-[13px] sm:text-[10px] sm:leading-4 ${toneClassName} ${className}`}
+      className={`flex min-w-0 items-center gap-1 rounded ${categoryBgClassName ?? "bg-overlay-soft"} px-1 text-[10px] leading-[14px] sm:text-xs sm:leading-4 lg:text-[13px] lg:leading-5 ${toneClassName} ${className}`}
     >
       {statusDotClassName ? (
         <span aria-hidden="true" className={`h-1.5 w-1.5 shrink-0 rounded-full sm:hidden ${statusDotClassName}`} />
@@ -123,7 +123,7 @@ export function OverflowChip({ count, className = "" }: { count: number; classNa
   return (
     <span
       dir="ltr"
-      className={`px-1 text-[9px] font-medium leading-[13px] text-muted-2 sm:text-[10px] sm:leading-4 ${className}`}
+      className={`px-1 text-[10px] font-medium leading-[14px] text-muted-2 sm:text-xs sm:leading-4 lg:text-[13px] lg:leading-5 ${className}`}
     >
       +{count}
     </span>
@@ -135,7 +135,7 @@ export function CalendarWeekdayHeader() {
   return (
     <div className="flex items-stretch gap-1 border-b border-border pb-2 sm:gap-1.5">
       <span aria-hidden="true" className="w-5 shrink-0 sm:w-6" />
-      <div className="grid flex-1 grid-cols-7 gap-1 text-center text-[11px] font-medium sm:gap-1.5 sm:text-xs">
+      <div className="grid flex-1 grid-cols-7 gap-1 text-center text-xs font-medium sm:gap-1.5 sm:text-sm">
         {SHORT_WEEKDAY_LABELS.map((label, index) => (
           <span key={index} className={isWeekendColumn(index) ? "text-muted" : "text-muted-2"}>
             {label}
@@ -198,7 +198,7 @@ export function OutOfMonthCell({ cell, columnIndex, isFirstRow }: OutOfMonthCell
         isWeekend ? "bg-weekend-tint" : ""
       }`}
     >
-      <span className="text-[11px] font-medium text-muted-2 opacity-40 sm:text-xs">
+      <span className="text-xs font-medium text-muted-2 opacity-40 sm:text-sm lg:text-base">
         {dayNumberFromDate(cell.date)}
       </span>
     </div>
@@ -259,7 +259,7 @@ export function CalendarDayCell({
       <div className={`flex h-full flex-col gap-0.5 ${isPast ? "opacity-60" : ""}`}>
         <div className="flex shrink-0 items-center justify-between">
           <span
-            className={`flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-medium sm:h-6 sm:w-6 sm:text-xs ${
+            className={`flex h-5 w-5 items-center justify-center rounded-full text-xs font-medium sm:h-7 sm:w-7 sm:text-sm lg:h-8 lg:w-8 lg:text-base ${
               dayNumberActive
                 ? "bg-primary text-primary-foreground"
                 : meta.isToday

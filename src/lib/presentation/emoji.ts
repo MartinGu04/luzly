@@ -25,7 +25,8 @@ const DUTY_FAMILY_EMOJI: Partial<Record<DutyFamily, string>> = {
   daily_kitchen: "🍽️",
   weekend_kitchen: "🍽️",
   callup: "📞",
-  // rasar/oxid: no clearly-fitting restrained symbol -- left unmapped.
+  rasar: "🧹",
+  oxid: "📄",
 };
 
 const ABSENCE_EMOJI: Partial<Record<AbsenceKind, string>> = {
