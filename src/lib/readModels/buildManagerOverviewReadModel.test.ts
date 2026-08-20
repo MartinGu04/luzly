@@ -715,17 +715,32 @@ describe("buildManagerOverviewReadModel — selected person", () => {
   });
 });
 
-describe("buildManagerOverviewReadModel — selected person's תקשא\"ס-only duty completeness", () => {
-  it("a person with a תקשא\"ס-only duty (no matching internal Event) shows it in their upcoming assignments instead of looking duty-free", () => {
+describe("buildManagerOverviewReadModel — selected person's תקשא\"ס-only allocation is NEVER shown as an actual personal assignment", () => {
+  it("a person with a תקשא\"ס-only allocation (no matching internal Event) shows NOTHING in their upcoming assignments -- Potential is source/planning data, never presented as an actual assignment", () => {
     const model = buildModel({
       events: [],
       potentialAllocations: [allocation({ date: "2026-08-20", dutyFamily: "guard", slot: 1 })],
       selectedPersonId: MARTIN.id,
       now: { date: "2026-08-13", minuteOfDay: 600 },
     });
-    expect(model.selectedPerson?.nextAssignmentGroup?.events).toEqual([
-      expect.objectContaining({ date: "2026-08-20", dutyFamily: "guard", category: "duty" }),
-    ]);
+    expect(model.selectedPerson?.nextAssignmentGroup).toBeNull();
+    expect(model.selectedPerson?.dutyBlocks).toEqual([]);
+  });
+
+  it("a duty family mismatch on the same date (real daily_kitchen vs. Potential full_kitchen) never adds a second pseudo-duty for the selected person", () => {
+    const events: Event[] = [
+      event({ personId: MARTIN.id, personName: MARTIN.name, date: "2026-08-20", category: "duty", role: null, dutyFamily: "daily_kitchen", slot: null, title: "מטבח יומי" }),
+    ];
+    const model = buildModel({
+      events,
+      potentialAllocations: [
+        allocation({ date: "2026-08-20", dutyFamily: "full_kitchen", slot: 3, sourceSlot: 3, columnLabel: "מטבח מלא 3", sourceAllocationLabel: MARTIN.name }),
+      ],
+      selectedPersonId: MARTIN.id,
+      now: { date: "2026-08-13", minuteOfDay: 600 },
+    });
+    const duties = model.selectedPerson?.calendarEvents.filter((e) => e.category === "duty") ?? [];
+    expect(duties).toEqual([expect.objectContaining({ dutyFamily: "daily_kitchen", title: "מטבח יומי" })]);
   });
 
   it("a normal department person's existing assignments are unaffected -- no duplicate from an overlapping allocation", () => {
