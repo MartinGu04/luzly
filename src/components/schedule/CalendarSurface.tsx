@@ -49,16 +49,22 @@ export function dayNumberFromDate(date: string): number {
 }
 
 /**
- * The shared per-cell grid-line treatment: only a bottom + inline-end
- * border per cell, with the FIRST column additionally drawing its own
- * inline-start edge and the FIRST row its own top edge, so the whole 7x6
- * matrix reads as one bordered rectangle without doubled/thicker shared
- * edges. Identical across every calendar surface.
+ * The shared per-cell grid-line treatment -- from `sm:` up, a bottom +
+ * inline-end border per cell, with the FIRST column additionally drawing
+ * its own inline-start edge and the FIRST row its own top edge, so the
+ * whole 7x6 matrix reads as one bordered rectangle without doubled/thicker
+ * shared edges (unchanged desktop appearance from PR #75). Below `sm:`,
+ * deliberately NO borders at all -- the approved-desktop bordered "table"
+ * look is exactly the "Excel/spreadsheet" feel a native-style mobile month
+ * view avoids; on mobile the grid reads through equal-width columns, fixed
+ * row height, and the day number's own placement alone, the same way a
+ * native phone calendar has no cell gridlines. Identical across every
+ * calendar surface.
  */
 export function cellBorderClasses(columnIndex: number, isFirstRow: boolean): string {
-  const start = columnIndex === 0 ? "border-s" : "";
-  const top = isFirstRow ? "border-t" : "";
-  return `border-b border-e border-border ${start} ${top}`.trim();
+  const start = columnIndex === 0 ? "sm:border-s" : "";
+  const top = isFirstRow ? "sm:border-t" : "";
+  return `sm:border-b sm:border-e sm:border-border ${start} ${top}`.trim();
 }
 
 /**
@@ -73,6 +79,12 @@ export function cellBorderClasses(columnIndex: number, isFirstRow: boolean): str
  * item's own emoji -- so a narrow cell never shows a clipped "…" fragment.
  * The short word label only appears from `sm:` up, where the cell has room
  * for it.
+ *
+ * The chip's own box chrome (rounded corners, background tint, horizontal
+ * padding) is likewise `sm:`-only -- below `sm:` the emoji/dot renders as a
+ * bare mark with no surrounding pill, so a narrow cell shows one small
+ * native-feeling marker rather than a tiny colored "fragment" box. Desktop
+ * (`sm:` and up) keeps the exact chip appearance approved in PR #75.
  */
 export function IndicatorChip({
   emoji,
@@ -83,11 +95,13 @@ export function IndicatorChip({
   /**
    * When set (e.g. `eventColorBgClassName`, `lib/presentation/eventColor.ts`),
    * replaces the chip's default neutral `bg-overlay-soft` with a semantic
-   * soft color tint, at every breakpoint -- used only by `CalendarGrid`'s
+   * soft color tint, from `sm:` up -- used only by `CalendarGrid`'s
    * single-person "הלוח שלי" indicators, never by `EveryoneMonthGrid` (which
-   * never passes this prop, so its chips are completely unaffected).
-   * Deliberately independent of `statusDotClassName`/emoji rendering below --
-   * this never hides/changes the emoji or label, only the chip's background.
+   * never passes this prop, so its chips are completely unaffected). Always
+   * a single Tailwind class (see `EVENT_COLOR_SOFT_BG_CLASS`), safe to
+   * prefix with the `sm:` variant below. Deliberately independent of
+   * `statusDotClassName`/emoji rendering -- this never hides/changes the
+   * emoji or label, only the chip's background.
    */
   categoryBgClassName,
   className = "",
@@ -99,9 +113,10 @@ export function IndicatorChip({
   categoryBgClassName?: string;
   className?: string;
 }) {
+  const bgClassName = categoryBgClassName ? `sm:${categoryBgClassName}` : "sm:bg-overlay-soft";
   return (
     <span
-      className={`flex min-w-0 items-center gap-1 rounded ${categoryBgClassName ?? "bg-overlay-soft"} px-1 text-[10px] leading-[14px] sm:text-xs sm:leading-4 lg:text-[13px] lg:leading-5 ${toneClassName} ${className}`}
+      className={`flex min-w-0 items-center gap-1 sm:rounded ${bgClassName} px-0 sm:px-1 text-[10px] leading-[14px] sm:text-xs sm:leading-4 lg:text-[13px] lg:leading-5 ${toneClassName} ${className}`}
     >
       {statusDotClassName ? (
         <span aria-hidden="true" className={`h-1.5 w-1.5 shrink-0 rounded-full sm:hidden ${statusDotClassName}`} />
