@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assignmentEmoji, dutyFamilyEmoji, type AssignmentEmojiInput } from "./emoji";
+import { assignmentEmoji, dutyFamilyEmoji, personalActivityEmoji, type AssignmentEmojiInput } from "./emoji";
 
 function input(overrides: Partial<AssignmentEmojiInput> = {}): AssignmentEmojiInput {
   return {
@@ -111,5 +111,20 @@ describe("dutyFamilyEmoji", () => {
   it("maps rasar and oxid to their own symbols", () => {
     expect(dutyFamilyEmoji("rasar")).toBe("🧹");
     expect(dutyFamilyEmoji("oxid")).toBe("📄");
+  });
+});
+
+describe("personalActivityEmoji", () => {
+  it("maps the known activity phrases to their own symbols", () => {
+    expect(personalActivityEmoji("סוגר")).toBe("🔒");
+    expect(personalActivityEmoji("שלב 9")).toBe("🎓");
+    expect(personalActivityEmoji("שלב 11")).toBe("🎓");
+    expect(personalActivityEmoji("כנס בטיחות")).toBe("🦺");
+    expect(personalActivityEmoji('כנס יוהל"ם')).toBe("📌");
+  });
+
+  it("falls back to the generic pin for any unrecognized, never-seen activity text -- never leaves it unlabeled", () => {
+    expect(personalActivityEmoji("כנס חדש שלא ראינו")).toBe("📌");
+    expect(personalActivityEmoji("שלב 7")).toBe("📌");
   });
 });

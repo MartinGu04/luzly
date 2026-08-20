@@ -111,7 +111,7 @@ export function buildPersonalScheduleReadModel(
     .map((event) => toEventView(event, shiftSchedule, now));
 
   const calendarEvents = sortedPersonEvents
-    .filter((event) => isCalendarDisplayEvent(event))
+    .filter((event) => isPersonalCalendarActivityEvent(event))
     .map((event) => toEventView(event, shiftSchedule, now));
 
   const assignmentEvents = sortedPersonEvents.filter(isAssignmentEvent);
@@ -186,14 +186,55 @@ function isAssignmentEvent(event: Event): boolean {
 }
 
 /**
- * "הלוח שלי"'s calendar-worthy categories -- shift, duty, and absence.
- * Every other `EventCategory` is internal bookkeeping, never a calendar
- * entry on its own. Exported so `lib/calendar/icsItems.ts` (the personal
- * ICS feed) reuses the exact same definition rather than risking a second
- * one drifting out of sync.
+ * The external ICS feed's calendar-worthy categories -- shift, duty, and
+ * absence. Every other `EventCategory` is internal bookkeeping, never an
+ * ICS entry on its own. Exported so `lib/calendar/icsItems.ts` (the
+ * personal ICS feed) reuses the exact same definition rather than risking
+ * a second one drifting out of sync. Deliberately NOT reused for the
+ * in-app "הלוח שלי" calendar's own (wider) inclusion policy any more -- see
+ * `isPersonalCalendarActivityEvent` below -- so widening the in-app
+ * calendar can never silently widen what this app exports to ICS too.
  */
 export function isCalendarDisplayEvent(event: Event): boolean {
   return event.category === "shift" || event.category === "duty" || event.category === "absence";
+}
+
+/**
+ * The in-app "הלוח שלי" personal calendar's OWN, wider inclusion policy --
+ * every `isCalendarDisplayEvent` category, PLUS a display-only personal
+ * "activity" (category `"status"` -- e.g. סוגר -- or `"other"` -- e.g.
+ * שלב 9/שלב 11/כנס בטיחות, or any future unrecognized non-empty personal
+ * schedule text). These are calendar/display information only: `title` is
+ * always non-empty for these two categories already (the parser's own
+ * `classify()` only ever produces `"status"`/`"other"` for non-empty text
+ * -- see `lib/parsers/event.ts`), but the check stays explicit here as a
+ * documented invariant, not an assumption.
+ *
+ * `constraint`/`context`/`change_note`/`unknown` remain excluded -- this is
+ * a narrow widening for genuinely informational activities, never a
+ * blanket "show every category" policy.
+ *
+ * Deliberately a SEPARATE predicate from `isCalendarDisplayEvent`, never a
+ * broadened version of it -- the external ICS feed
+ * (`lib/calendar/icsItems.ts`/`loadCalendarFeedForToken.ts`) keeps
+ * importing the narrower `isCalendarDisplayEvent` unchanged, so this
+ * in-app-only widening can never leak into the ICS feed as a side effect.
+ *
+ * These activities stay operationally inert by construction, not by any
+ * new check added here: `isAssignmentEvent` below (shift/duty only),
+ * `buildDutyBlocks` (`category === "duty" && dutyFamily !== null`),
+ * shift-coverage/roster (`category === "shift"` throughout
+ * `shiftCoverage.ts`), and `detectOperationalIssues`/
+ * `classifyAssignmentTemporalState` (shift/duty/absence only) all already
+ * gate strictly on their own specific categories -- a `"status"`/`"other"`
+ * event was never eligible to become an assignment, duty, coverage
+ * contributor, or issue target before this predicate existed, and adding
+ * it to the calendar grid here doesn't change any of that.
+ */
+export function isPersonalCalendarActivityEvent(event: Event): boolean {
+  if (isCalendarDisplayEvent(event)) return true;
+  if (event.category !== "status" && event.category !== "other") return false;
+  return event.title.trim() !== "";
 }
 
 // ---------------------------------------------------------------------------

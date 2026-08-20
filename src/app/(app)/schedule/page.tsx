@@ -75,7 +75,9 @@ function scheduleHref(
 /**
  * "הלוח שלי" -- the personal monthly calendar (formerly "לוח משמרות", a
  * shift-only calendar; see `CalendarGrid`/`SelectedDayPanel`/
- * `calendarEvents` for the shift+duty+absence+holiday widening). For a
+ * `calendarEvents` for the shift+duty+absence+holiday widening, and
+ * `isPersonalCalendarActivityEvent` for the further display-only-activity
+ * widening -- e.g. סוגר/שלב 9/כנס בטיחות). For a
  * normal user this is still exactly the personal calendar it always was:
  * `model.manager` is always null, `model.perspective` is always "self",
  * and no manager UI ever renders, no matter what `?person=` the URL

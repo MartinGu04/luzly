@@ -1,4 +1,4 @@
-import { assignmentEmoji } from "@/lib/presentation/emoji";
+import { assignmentEmoji, personalActivityEmoji } from "@/lib/presentation/emoji";
 import { absenceKindLabel, dutyFamilyLabel, periodLabel, roleLabel } from "@/lib/presentation/labels";
 import type { PersonalEventView } from "@/lib/readModels/types";
 import { Badge } from "@/components/ui/Badge";
@@ -10,6 +10,21 @@ import type { DayMeta } from "./types";
 interface SelectedDayPanelProps {
   dayMeta: DayMeta | null;
   events: PersonalEventView[];
+}
+
+/**
+ * The event's own emoji -- `assignmentEmoji`'s typed shift/duty/absence
+ * mapping, or (for a display-only "status"/"other" personal activity, e.g.
+ * סוגר/שלב 9/כנס בטיחות) `personalActivityEmoji`'s title-keyed lookup, the
+ * exact same routing `lib/presentation/calendarDayIndicator.ts` uses for
+ * the month-grid indicator, so the same event never shows two different
+ * emoji between the grid cell and this detail panel.
+ */
+function eventEmoji(event: PersonalEventView): string | null {
+  if (event.category === "status" || event.category === "other") {
+    return personalActivityEmoji(event.title);
+  }
+  return assignmentEmoji(event);
 }
 
 /**
@@ -70,7 +85,7 @@ export function SelectedDayPanel({ dayMeta, events }: SelectedDayPanelProps) {
         ) : (
           <ul className="mt-3 space-y-2.5">
             {events.map((event, index) => {
-              const emoji = assignmentEmoji(event);
+              const emoji = eventEmoji(event);
               // A subtitle identical to the title (e.g. an "אפטר"/"חופש"
               // absence, where both the title and the kind label read the
               // same) says nothing the title above it doesn't already --

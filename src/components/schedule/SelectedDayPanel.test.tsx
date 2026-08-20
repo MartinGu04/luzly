@@ -55,6 +55,17 @@ function absenceEvent(overrides: Partial<PersonalEventView> = {}): PersonalEvent
   });
 }
 
+function activityEvent(overrides: Partial<PersonalEventView> = {}): PersonalEventView {
+  return shiftEvent({
+    title: "סוגר",
+    rawValue: "סוגר",
+    category: "status",
+    role: null,
+    period: "unspecified",
+    ...overrides,
+  });
+}
+
 function holiday(overrides: Partial<HolidayContext> = {}): HolidayContext {
   return { emoji: "🍎", label: "ראש השנה", kind: "holiday", shortLabel: "חג", ...overrides };
 }
@@ -242,6 +253,39 @@ describe("SelectedDayPanel", () => {
       expect(screen.getByText("משוער")).toBeInTheDocument();
       expect(screen.getByText("חפיפה / צל")).toBeInTheDocument();
       expect(screen.getByText("עודכן אתמול")).toBeInTheDocument();
+    });
+  });
+
+  describe("personal activities (status/other -- display-only informational entries)", () => {
+    it("shows a 'סוגר' status activity's full title with its lock emoji", () => {
+      render(<SelectedDayPanel dayMeta={meta()} events={[activityEvent({ category: "status", title: "סוגר" })]} />);
+      expect(screen.getByText("סוגר")).toBeInTheDocument();
+      expect(screen.getByText("🔒", { selector: "span" })).toBeInTheDocument();
+    });
+
+    it("shows a 'שלב 9' other activity's full title with its graduation-cap emoji", () => {
+      render(<SelectedDayPanel dayMeta={meta()} events={[activityEvent({ category: "other", title: "שלב 9" })]} />);
+      expect(screen.getByText("שלב 9")).toBeInTheDocument();
+      expect(screen.getByText("🎓", { selector: "span" })).toBeInTheDocument();
+    });
+
+    it("shows an unrecognized activity's full ORIGINAL title with the generic pin fallback -- never disappears", () => {
+      render(
+        <SelectedDayPanel dayMeta={meta()} events={[activityEvent({ category: "other", title: "פעילות חדשה" })]} />,
+      );
+      expect(screen.getByText("פעילות חדשה")).toBeInTheDocument();
+      expect(screen.getByText("📌", { selector: "span" })).toBeInTheDocument();
+    });
+
+    it("an activity coexists alongside a real shift on the same day -- both appear, neither hides the other", () => {
+      render(
+        <SelectedDayPanel
+          dayMeta={meta()}
+          events={[shiftEvent({ title: "טכנאי יום" }), activityEvent({ category: "status", title: "סוגר" })]}
+        />,
+      );
+      expect(screen.getByText("טכנאי יום")).toBeInTheDocument();
+      expect(screen.getByText("סוגר")).toBeInTheDocument();
     });
   });
 
