@@ -349,3 +349,126 @@ describe("loadDutyFairnessReadModel — historical duty personnel (former employ
     expect(formerRow?.personId).toBeNull();
   });
 });
+
+describe("loadDutyFairnessReadModel — Duty-Fairness-local Potential-derived completed-duty evidence (duty-only current person, e.g. Nadav-shaped)", () => {
+  // Combines the Potential sheet's real operational date/day block (row 0:
+  // תאריך/יום/'רס"ר 1' -- real duty evidence) with its separate "טבלת צדק"
+  // Fairness table further down the SAME sheet -- the two real, distinct
+  // tables the actual workbook keeps on one tab (`lib/parsers/potential.ts`
+  // / `lib/parsers/fairness.ts`).
+  function potentialSheetWithOperationalDuties(
+    name: string,
+    operationalRows: string[][],
+    fairnessRow: string[] | null,
+  ): RawSheet {
+    return {
+      name,
+      values: [
+        ["תאריך", "יום", 'רס"ר 1'],
+        ...operationalRows,
+        [],
+        FAIRNESS_HEADER,
+        ...(fairnessRow ? [fairnessRow] : []),
+      ],
+    };
+  }
+
+  const NADAV = person({ id: "p_nadav", name: 'נדב ליאל וקנין', isTechnician: false, isSupervisor: false });
+
+  function contextFor(
+    h2OperationalRows: string[][],
+    overrides: Partial<{ people: Person[]; scheduleRows: string[][] }> = {},
+  ) {
+    const people = overrides.people ?? [NADAV];
+    return {
+      status: "ok" as const,
+      context: {
+        person: people[0],
+        people,
+        avatarByPersonId: new Map<string, string | null>(),
+        snapshot: {
+          fetchedAt: "2026-08-15T10:00:00.000Z",
+          sheets: [
+            { name: 'כ"א', values: [] },
+            {
+              name: "משמרות + תורנויות",
+              values: overrides.scheduleRows
+                ? [["תאריך", "יום", ...people.map((p) => p.name)], ...overrides.scheduleRows]
+                : [],
+            },
+            potentialSheetWithOperationalDuties('פוטנציאל תקש"אס 1-6/2026', [], null),
+            potentialSheetWithOperationalDuties('פוטנציאל תקש"אס 7-12/2026', h2OperationalRows, [
+              NADAV.name,
+              "אחר",
+              "4",
+              "5",
+              "0",
+              "-",
+            ]),
+          ],
+        },
+      },
+    };
+  }
+
+  it("a real past rasar duty recorded under the operational short name 'נדב' counts toward completedAllocationTotal, via the unique-short-name resolution already used by classifyPotentialSourceOwnership", async () => {
+    loadFairnessWorkbookContext.mockResolvedValue(contextFor([["10/07/2026", "ה", "נדב"]]));
+    const result = await loadDutyFairnessReadModel("h2");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    const otherGroup = result.model.groups.find((g) => g.key === "other");
+    const row = otherGroup?.rows.find((r) => r.sourceName === NADAV.name);
+    expect(row?.personId).toBe(NADAV.id);
+    expect(row?.completedAllocationTotal).toBeCloseTo(0.2);
+  });
+
+  it("a future-dated Potential entry never counts, even though it resolves fine -- the SAME existing [periodStart, effectiveEndDate] cutoff computeCompletedDutyAllocation always applies", async () => {
+    // NOW is mocked to 2026-08-15 in beforeEach -- 20/08/2026 is still inside
+    // H2 but after "now", so it must not count as completed yet.
+    loadFairnessWorkbookContext.mockResolvedValue(contextFor([["20/08/2026", "ה", "נדב"]]));
+    const result = await loadDutyFairnessReadModel("h2");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    const otherGroup = result.model.groups.find((g) => g.key === "other");
+    const row = otherGroup?.rows.find((r) => r.sourceName === NADAV.name);
+    expect(row?.completedAllocationTotal).toBe(0);
+  });
+
+  it("an ambiguous short name (two current people sharing the same leading token) never counts -- classifyPotentialSourceOwnership fails closed, no arbitrary pick", async () => {
+    const secondNadav = person({ id: "p_nadav2", name: "נדב אחר לגמרי", isTechnician: false, isSupervisor: false });
+    loadFairnessWorkbookContext.mockResolvedValue(
+      contextFor([["10/07/2026", "ה", "נדב"]], { people: [NADAV, secondNadav] }),
+    );
+    const result = await loadDutyFairnessReadModel("h2");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    const otherGroup = result.model.groups.find((g) => g.key === "other");
+    const row = otherGroup?.rows.find((r) => r.sourceName === NADAV.name);
+    expect(row?.personId).toBe(NADAV.id); // his own Fairness-table row still resolves by exact full name
+    expect(row?.completedAllocationTotal).toBe(0); // but the ambiguous short-name operational entry never attributes to him
+  });
+
+  it("a real internal schedule Event for the same date/family/slot prevents double-counting the Potential-derived duplicate", async () => {
+    loadFairnessWorkbookContext.mockResolvedValue(
+      contextFor([["10/07/2026", "ה", "נדב"]], { scheduleRows: [["10/07/2026", "ה", 'רס"ר']] }),
+    );
+    const result = await loadDutyFairnessReadModel("h2");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    const otherGroup = result.model.groups.find((g) => g.key === "other");
+    const row = otherGroup?.rows.find((r) => r.sourceName === NADAV.name);
+    // Exactly one 0.2 rasar-day contribution -- never 0.4 from both the real
+    // Event and a redundant Potential-derived duplicate.
+    expect(row?.completedAllocationTotal).toBeCloseTo(0.2);
+  });
+
+  it("stays isTechnician/isSupervisor false and lands in the 'other' group, never 'technician'/'supervisor', purely from real duty participation", async () => {
+    loadFairnessWorkbookContext.mockResolvedValue(contextFor([["10/07/2026", "ה", "נדב"]]));
+    const result = await loadDutyFairnessReadModel("h2");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.model.groups.map((g) => g.key)).toEqual(["other"]);
+    expect(NADAV.isTechnician).toBe(false);
+    expect(NADAV.isSupervisor).toBe(false);
+  });
+});
