@@ -1,5 +1,5 @@
 import type { PersonalEventView } from "@/lib/readModels/types";
-import { assignmentEmoji } from "./emoji";
+import { assignmentEmoji, personalActivityEmoji } from "./emoji";
 import { eventColorBgClassName } from "./eventColor";
 import { absenceKindLabel, dutyFamilyLabel, periodLabel } from "./labels";
 
@@ -9,8 +9,12 @@ import { absenceKindLabel, dutyFamilyLabel, periodLabel } from "./labels";
  * detail). A short word per category: the shift's period ("יום"/"לילה"/
  * "בוקר"), the duty's own family label ("שמירה"/"מטבח מלא"/... -- the same
  * `dutyFamilyLabel` the selected-day detail already uses, never a second
- * Hebrew mapping invented here), or the absence's own kind label ("חופש"/
- * "אפטר"/...).
+ * Hebrew mapping invented here), the absence's own kind label ("חופש"/
+ * "אפטר"/...), or -- for a display-only personal "activity" (category
+ * `"status"`/`"other"`, e.g. סוגר/שלב 9/כנס בטיחות -- see
+ * `isPersonalCalendarActivityEvent`) -- the event's own original title
+ * text unchanged, since these have no further typed classification to
+ * derive a short word from.
  *
  * A day's holiday is deliberately NOT one of these -- it's calendar
  * context about the date itself, not something the person is doing, so it
@@ -39,7 +43,7 @@ export interface CalendarDayIndicator {
 const GENERIC_SHIFT_LABEL = "משמרת";
 const GENERIC_DUTY_LABEL = "תורנות";
 
-/** The compact label for one calendar event -- purely a lookup through the app's own existing label maps, never a new one-off classification. */
+/** The compact label for one calendar event -- purely a lookup through the app's own existing label maps, never a new one-off classification. Falls back to the event's own title for a display-only activity (status/other) and any other unmapped case. */
 function eventIndicatorLabel(event: PersonalEventView): string {
   if (event.category === "shift") return periodLabel(event.period) ?? GENERIC_SHIFT_LABEL;
   if (event.category === "duty") return event.dutyFamily ? dutyFamilyLabel(event.dutyFamily) : GENERIC_DUTY_LABEL;
@@ -47,11 +51,25 @@ function eventIndicatorLabel(event: PersonalEventView): string {
   return event.title;
 }
 
-/** One personal calendar event (shift/duty/absence) as a compact grid indicator. */
+/**
+ * The indicator emoji for one calendar event -- `assignmentEmoji`'s typed
+ * shift/duty/absence mapping for those categories, or (for a display-only
+ * "status"/"other" activity) `personalActivityEmoji`'s title-keyed lookup,
+ * the one place this module keys off an event's own text rather than a
+ * typed field -- see that function's own doc comment for why.
+ */
+function eventIndicatorEmoji(event: PersonalEventView): string | null {
+  if (event.category === "status" || event.category === "other") {
+    return personalActivityEmoji(event.title);
+  }
+  return assignmentEmoji(event);
+}
+
+/** One personal calendar event (shift/duty/absence, or a display-only status/other activity) as a compact grid indicator. */
 export function eventIndicator(event: PersonalEventView, key: string): CalendarDayIndicator {
   return {
     key,
-    emoji: assignmentEmoji(event),
+    emoji: eventIndicatorEmoji(event),
     label: eventIndicatorLabel(event),
     tentative: event.certainty === "tentative",
     colorClassName: eventColorBgClassName(event),

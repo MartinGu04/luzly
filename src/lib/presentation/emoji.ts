@@ -62,3 +62,32 @@ export function assignmentEmoji(input: AssignmentEmojiInput): string | null {
 export function dutyFamilyEmoji(dutyFamily: DutyFamily): string | null {
   return DUTY_FAMILY_EMOJI[dutyFamily] ?? null;
 }
+
+/**
+ * Known personal "activity" title text -> emoji, for category `"status"`/
+ * `"other"` events (informational calendar entries -- see
+ * `lib/readModels/buildPersonalScheduleReadModel.ts`'s
+ * `isPersonalCalendarActivityEvent`). These events have no further typed
+ * classification beyond their own display text (`STATUS_PHRASES`/the
+ * "other" fallback in `lib/parsers/event.ts` never structure them any
+ * further), so this is the ONE deliberate exception to this module's
+ * "never key off rawValue/title" rule -- there is no other typed field to
+ * key off for them. Only a small, fixed set of EXACT known phrases is
+ * matched (never fuzzy/substring), and `personalActivityEmoji` always
+ * returns a usable emoji (the restrained `📌` pin) for anything else, so a
+ * brand-new, never-seen activity text is never left unlabeled.
+ */
+const PERSONAL_ACTIVITY_EMOJI: Record<string, string> = {
+  סוגר: "🔒",
+  "שלב 9": "🎓",
+  "שלב 11": "🎓",
+  "כנס בטיחות": "🦺",
+  'כנס יוהל"ם': "📌",
+};
+
+const GENERIC_PERSONAL_ACTIVITY_EMOJI = "📌";
+
+/** The emoji for one personal-activity title -- a known phrase's own symbol, or the generic pin fallback for anything unrecognized. */
+export function personalActivityEmoji(title: string): string {
+  return PERSONAL_ACTIVITY_EMOJI[title] ?? GENERIC_PERSONAL_ACTIVITY_EMOJI;
+}

@@ -4,7 +4,11 @@ import type { Event } from "@/lib/domain/event";
 import type { LocalNow } from "@/lib/domain/localNow";
 import type { PotentialAllocation } from "@/lib/domain/potentialAllocation";
 import type { Person } from "@/lib/domain/types";
-import { buildPersonalScheduleReadModel } from "./buildPersonalScheduleReadModel";
+import {
+  buildPersonalScheduleReadModel,
+  isCalendarDisplayEvent,
+  isPersonalCalendarActivityEvent,
+} from "./buildPersonalScheduleReadModel";
 import type { PersonalScheduleReadModel } from "./types";
 
 // day 07:30-19:30, night 19:30-07:30(+1)
@@ -316,6 +320,30 @@ describe("todayEvents / upcomingEvents", () => {
 // calendarEvents ("הלוח שלי" personal monthly calendar)
 // ---------------------------------------------------------------------------
 
+describe("isCalendarDisplayEvent (ICS scope) vs isPersonalCalendarActivityEvent (in-app calendar scope)", () => {
+  it("isCalendarDisplayEvent -- the external ICS feed's own predicate -- stays narrow to shift/duty/absence, unaffected by the in-app widening", () => {
+    expect(isCalendarDisplayEvent(baseEvent({ category: "shift" }))).toBe(true);
+    expect(isCalendarDisplayEvent(baseEvent({ category: "duty" }))).toBe(true);
+    expect(isCalendarDisplayEvent(baseEvent({ category: "absence" }))).toBe(true);
+    expect(isCalendarDisplayEvent(baseEvent({ category: "status", title: "סוגר" }))).toBe(false);
+    expect(isCalendarDisplayEvent(baseEvent({ category: "other", title: "שלב 9" }))).toBe(false);
+    expect(isCalendarDisplayEvent(baseEvent({ category: "constraint" }))).toBe(false);
+    expect(isCalendarDisplayEvent(baseEvent({ category: "context" }))).toBe(false);
+  });
+
+  it("isPersonalCalendarActivityEvent -- the in-app calendar's own wider predicate -- additionally includes non-empty status/other, but nothing wider than that", () => {
+    expect(isPersonalCalendarActivityEvent(baseEvent({ category: "shift" }))).toBe(true);
+    expect(isPersonalCalendarActivityEvent(baseEvent({ category: "duty" }))).toBe(true);
+    expect(isPersonalCalendarActivityEvent(baseEvent({ category: "absence" }))).toBe(true);
+    expect(isPersonalCalendarActivityEvent(baseEvent({ category: "status", title: "סוגר" }))).toBe(true);
+    expect(isPersonalCalendarActivityEvent(baseEvent({ category: "other", title: "שלב 9" }))).toBe(true);
+    expect(isPersonalCalendarActivityEvent(baseEvent({ category: "constraint" }))).toBe(false);
+    expect(isPersonalCalendarActivityEvent(baseEvent({ category: "context" }))).toBe(false);
+    expect(isPersonalCalendarActivityEvent(baseEvent({ category: "change_note", changeNote: "הוחלף" }))).toBe(false);
+    expect(isPersonalCalendarActivityEvent(baseEvent({ category: "unknown" }))).toBe(false);
+  });
+});
+
 describe("calendarEvents", () => {
   it("includes a historical (finished, past-dated) personal shift", () => {
     const events = [myShift({ date: "2026-08-01", period: "day" })];
@@ -349,16 +377,67 @@ describe("calendarEvents", () => {
     expect(model.calendarEvents.some((e) => e.category === "absence")).toBe(true);
   });
 
-  it("excludes non-calendar-worthy categories (e.g. an internal constraint/status/context row)", () => {
+  it("excludes non-calendar-worthy categories with no display-only carve-out (internal constraint/context rows)", () => {
     const events = [
       myShift({ date: "2026-08-12" }),
       baseEvent({ date: "2026-08-12", category: "constraint", title: "אילוץ" }),
-      baseEvent({ date: "2026-08-12", category: "status", title: "סטטוס" }),
-      baseEvent({ date: "2026-08-12", category: "other", title: "אחר" }),
+      baseEvent({ date: "2026-08-12", category: "context", title: "מלחמה" }),
+      baseEvent({ date: "2026-08-12", category: "change_note", title: "הוחלף", changeNote: "הוחלף" }),
     ];
     const model = build({ events });
     expect(model.calendarEvents).toHaveLength(1);
     expect(model.calendarEvents[0].category).toBe("shift");
+  });
+
+  describe("personal activities (status/other -- display-only informational entries)", () => {
+    it("includes a 'status' activity (e.g. סוגר), unlike the old shift/duty/absence-only calendar", () => {
+      const events = [baseEvent({ date: "2026-08-12", category: "status", title: "סוגר", rawValue: "סוגר" })];
+      const model = build({ events });
+      expect(model.calendarEvents).toHaveLength(1);
+      expect(model.calendarEvents[0].category).toBe("status");
+      expect(model.calendarEvents[0].title).toBe("סוגר");
+    });
+
+    it("includes an 'other' activity (e.g. שלב 9), unlike the old shift/duty/absence-only calendar", () => {
+      const events = [baseEvent({ date: "2026-08-12", category: "other", title: "שלב 9", rawValue: "שלב 9" })];
+      const model = build({ events });
+      expect(model.calendarEvents).toHaveLength(1);
+      expect(model.calendarEvents[0].category).toBe("other");
+      expect(model.calendarEvents[0].title).toBe("שלב 9");
+    });
+
+    it("an activity coexists with a real shift on the same date -- neither hides the other", () => {
+      const events = [
+        myShift({ date: "2026-08-12", period: "day" }),
+        baseEvent({ date: "2026-08-12", category: "status", title: "סוגר", rawValue: "סוגר" }),
+      ];
+      const model = build({ events });
+      expect(model.calendarEvents).toHaveLength(2);
+      expect(model.calendarEvents.map((e) => e.category).sort()).toEqual(["shift", "status"]);
+    });
+
+    it("an activity never becomes an assignment, current or otherwise -- currentAssignments stays shift/duty only", () => {
+      const events = [
+        myShift({ date: "2026-08-12", period: "day" }),
+        baseEvent({ date: "2026-08-12", category: "status", title: "סוגר", rawValue: "סוגר" }),
+      ];
+      const model = build({ events });
+      expect(model.currentAssignments).toHaveLength(1);
+      expect(model.currentAssignments[0].category).toBe("shift");
+    });
+
+    it("an activity never enters dutyBlocks/dutyActions", () => {
+      const events = [baseEvent({ date: "2026-08-12", category: "status", title: "סוגר", rawValue: "סוגר" })];
+      const model = build({ events });
+      expect(model.dutyBlocks).toHaveLength(0);
+      expect(model.dutyActions).toHaveLength(0);
+    });
+
+    it("an activity never becomes an operational issue target", () => {
+      const events = [baseEvent({ date: "2026-08-12", category: "status", title: "סוגר", rawValue: "סוגר" })];
+      const model = build({ events });
+      expect(model.issues).toHaveLength(0);
+    });
   });
 
   it("excludes an unrelated person's events", () => {

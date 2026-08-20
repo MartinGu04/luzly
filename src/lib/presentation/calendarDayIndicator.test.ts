@@ -180,6 +180,62 @@ describe("eventIndicator", () => {
     const indicator = eventIndicator(baseEvent({ category: "shift", period: "morning" }), "k");
     expect(indicator.colorClassName).toBe("bg-event-shift-morning-soft");
   });
+
+  describe("personal activities (status/other -- display-only informational entries)", () => {
+    it("labels a 'סוגר' status activity with its own original title and lock emoji", () => {
+      const indicator = eventIndicator(
+        baseEvent({ category: "status", period: "unspecified", title: "סוגר", rawValue: "סוגר" }),
+        "k",
+      );
+      expect(indicator.label).toBe("סוגר");
+      expect(indicator.emoji).toBe("🔒");
+    });
+
+    it("labels a 'שלב 9' other activity with its own title and graduation-cap emoji", () => {
+      const indicator = eventIndicator(
+        baseEvent({ category: "other", period: "unspecified", title: "שלב 9", rawValue: "שלב 9" }),
+        "k",
+      );
+      expect(indicator.label).toBe("שלב 9");
+      expect(indicator.emoji).toBe("🎓");
+    });
+
+    it("labels a 'שלב 11' other activity with the same graduation-cap emoji as שלב 9", () => {
+      const indicator = eventIndicator(
+        baseEvent({ category: "other", period: "unspecified", title: "שלב 11", rawValue: "שלב 11" }),
+        "k",
+      );
+      expect(indicator.label).toBe("שלב 11");
+      expect(indicator.emoji).toBe("🎓");
+    });
+
+    it("labels a 'כנס בטיחות' other activity with its own title and safety-vest emoji", () => {
+      const indicator = eventIndicator(
+        baseEvent({ category: "other", period: "unspecified", title: "כנס בטיחות", rawValue: "כנס בטיחות" }),
+        "k",
+      );
+      expect(indicator.label).toBe("כנס בטיחות");
+      expect(indicator.emoji).toBe("🦺");
+    });
+
+    it("labels a 'כנס יוהל\"ם' other activity with its own title and the generic pin emoji", () => {
+      const indicator = eventIndicator(
+        baseEvent({ category: "other", period: "unspecified", title: 'כנס יוהל"ם', rawValue: 'כנס יוהל"ם' }),
+        "k",
+      );
+      expect(indicator.label).toBe('כנס יוהל"ם');
+      expect(indicator.emoji).toBe("📌");
+    });
+
+    it("an unrecognized non-empty activity keeps its ORIGINAL title, with the generic pin fallback emoji -- never disappears", () => {
+      const indicator = eventIndicator(
+        baseEvent({ category: "other", period: "unspecified", title: "פעילות חדשה שלא ראינו", rawValue: "פעילות חדשה שלא ראינו" }),
+        "k",
+      );
+      expect(indicator.label).toBe("פעילות חדשה שלא ראינו");
+      expect(indicator.emoji).toBe("📌");
+    });
+  });
 });
 
 describe("buildDayIndicators", () => {

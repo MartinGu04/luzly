@@ -58,6 +58,17 @@ function absenceEvent(overrides: Partial<PersonalEventView> = {}): PersonalEvent
   });
 }
 
+function activityEvent(overrides: Partial<PersonalEventView> = {}): PersonalEventView {
+  return shiftEvent({
+    title: "סוגר",
+    rawValue: "סוגר",
+    category: "status",
+    role: null,
+    period: "unspecified",
+    ...overrides,
+  });
+}
+
 const HOLIDAY: HolidayContext = { emoji: "🍎", label: "ראש השנה", kind: "holiday", shortLabel: "חג" };
 
 function dayMeta(date: string, overrides: Partial<DayMeta> = {}): DayMeta {
@@ -605,6 +616,97 @@ describe("CalendarGrid", () => {
       expect(cell.textContent?.trim()).toBe("11");
     });
 
+  });
+
+  describe("personal activities (status/other -- display-only informational entries)", () => {
+    it("shows a 'סוגר' status activity's original title and lock emoji, never the generic pin", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          eventsByDate={{ "2026-08-12": [activityEvent({ date: "2026-08-12", category: "status", title: "סוגר" })] }}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+      expect(cell.textContent).toContain("סוגר");
+      expect(cell.textContent).toContain("🔒");
+    });
+
+    it("shows a 'שלב 9' other activity with its graduation-cap emoji", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          eventsByDate={{ "2026-08-12": [activityEvent({ date: "2026-08-12", category: "other", title: "שלב 9" })] }}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+      expect(cell.textContent).toContain("שלב 9");
+      expect(cell.textContent).toContain("🎓");
+    });
+
+    it("shows an unrecognized non-empty activity's ORIGINAL title with the generic pin fallback -- never disappears from the grid", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          eventsByDate={{
+            "2026-08-12": [activityEvent({ date: "2026-08-12", category: "other", title: "פעילות חדשה שלא ראינו" })],
+          }}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+      expect(cell.textContent).toContain("פעילות חדשה שלא ראינו");
+      expect(cell.textContent).toContain("📌");
+    });
+
+    it("an activity coexists with a real shift on the same day -- both indicators show, neither hides the other", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          eventsByDate={{
+            "2026-08-12": [
+              shiftEvent({ date: "2026-08-12", period: "day" }),
+              activityEvent({ date: "2026-08-12", category: "status", title: "סוגר" }),
+            ],
+          }}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+      expect(cell.textContent).toContain("יום");
+      expect(cell.textContent).toContain("סוגר");
+    });
+
+    it("an activity's emoji is always shown, with its title hidden below sm: -- same mobile treatment as any other indicator", () => {
+      render(
+        <CalendarGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          eventsByDate={{ "2026-08-12": [activityEvent({ date: "2026-08-12", category: "status", title: "סוגר" })] }}
+          selectedDate={null}
+          onSelectDate={noop}
+          activeShiftDates={[]}
+        />,
+      );
+      const label = screen.getByText("סוגר");
+      expect(label.className).toMatch(/hidden/);
+      expect(label.className).toMatch(/sm:inline/);
+      const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+      expect(cell.textContent).toContain("🔒");
+    });
   });
 
   describe("holiday is calendar context, never a personal-event indicator (polish pass)", () => {
