@@ -422,9 +422,9 @@ describe("SchedulePage — הלוח שלי represents more than shifts alone", (
     const element = await SchedulePage({ searchParams: searchParams() });
     render(element);
     expect(selectedDayPanel().getByText("שומר 1")).toBeInTheDocument();
-    // The compact grid cell shows the generic short label, not the full duty title.
+    // The compact grid cell shows the duty family's own short label, not the full duty title.
     const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
-    expect(cell.textContent).toContain("תורנות");
+    expect(cell.textContent).toContain("שמירה");
     expect(cell.textContent).not.toContain("שומר 1");
   });
 

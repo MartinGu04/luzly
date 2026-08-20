@@ -43,11 +43,8 @@ describe("assignmentEmoji — duty families", () => {
       assignmentEmoji(input({ category: "duty", period: "unspecified", dutyFamily: "weekend_kitchen" })),
     ).toBe("🍽️");
     expect(assignmentEmoji(input({ category: "duty", period: "unspecified", dutyFamily: "callup" }))).toBe("📞");
-  });
-
-  it("returns null for a duty family with no fitting mapping", () => {
-    expect(assignmentEmoji(input({ category: "duty", period: "unspecified", dutyFamily: "rasar" }))).toBeNull();
-    expect(assignmentEmoji(input({ category: "duty", period: "unspecified", dutyFamily: "oxid" }))).toBeNull();
+    expect(assignmentEmoji(input({ category: "duty", period: "unspecified", dutyFamily: "rasar" }))).toBe("🧹");
+    expect(assignmentEmoji(input({ category: "duty", period: "unspecified", dutyFamily: "oxid" }))).toBe("📄");
   });
 
   it("returns null for a duty Event with no dutyFamily at all", () => {
@@ -111,7 +108,8 @@ describe("dutyFamilyEmoji", () => {
     expect(dutyFamilyEmoji("guard")).toBe("💂");
   });
 
-  it("returns null for a duty family with no fitting mapping", () => {
-    expect(dutyFamilyEmoji("rasar")).toBeNull();
+  it("maps rasar and oxid to their own symbols", () => {
+    expect(dutyFamilyEmoji("rasar")).toBe("🧹");
+    expect(dutyFamilyEmoji("oxid")).toBe("📄");
   });
 });

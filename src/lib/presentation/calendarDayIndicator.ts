@@ -1,15 +1,16 @@
 import type { PersonalEventView } from "@/lib/readModels/types";
 import { assignmentEmoji } from "./emoji";
 import { eventColorBgClassName } from "./eventColor";
-import { absenceKindLabel, periodLabel } from "./labels";
+import { absenceKindLabel, dutyFamilyLabel, periodLabel } from "./labels";
 
 /**
  * One compact, scannable indicator for a "הלוח שלי" month-grid day cell --
  * never the full event title (that belongs only in the selected-day
- * detail). A short, generic word per category: the shift's period ("יום"/
- * "לילה"/"בוקר"), the generic "תורנות" for any duty (never the specific
- * family -- that level of detail belongs in the day panel), or the
- * absence's own kind label ("חופש"/"אפטר"/...).
+ * detail). A short word per category: the shift's period ("יום"/"לילה"/
+ * "בוקר"), the duty's own family label ("שמירה"/"מטבח מלא"/... -- the same
+ * `dutyFamilyLabel` the selected-day detail already uses, never a second
+ * Hebrew mapping invented here), or the absence's own kind label ("חופש"/
+ * "אפטר"/...).
  *
  * A day's holiday is deliberately NOT one of these -- it's calendar
  * context about the date itself, not something the person is doing, so it
@@ -41,7 +42,7 @@ const GENERIC_DUTY_LABEL = "תורנות";
 /** The compact label for one calendar event -- purely a lookup through the app's own existing label maps, never a new one-off classification. */
 function eventIndicatorLabel(event: PersonalEventView): string {
   if (event.category === "shift") return periodLabel(event.period) ?? GENERIC_SHIFT_LABEL;
-  if (event.category === "duty") return GENERIC_DUTY_LABEL;
+  if (event.category === "duty") return event.dutyFamily ? dutyFamilyLabel(event.dutyFamily) : GENERIC_DUTY_LABEL;
   if (event.category === "absence" && event.absenceKind) return absenceKindLabel(event.absenceKind);
   return event.title;
 }

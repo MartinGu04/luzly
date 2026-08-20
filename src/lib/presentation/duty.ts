@@ -11,7 +11,7 @@ export function dutyBlockTitle(block: Pick<PersonalDutyBlock, "dutyFamily" | "sl
   return block.slot !== null ? `${label} ${block.slot}` : label;
 }
 
-/** The block's semantic emoji, or null when the family intentionally has none (e.g. rasar/oxid) -- never a guessed fallback. */
+/** The block's semantic emoji, or null when the family intentionally has none -- never a guessed fallback. */
 export function dutyBlockEmoji(block: Pick<PersonalDutyBlock, "dutyFamily">): string | null {
   return dutyFamilyEmoji(block.dutyFamily);
 }

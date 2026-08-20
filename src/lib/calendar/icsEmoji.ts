@@ -15,9 +15,9 @@ import type { AbsenceKind, DutyFamily, EventCategory, EventPeriod } from "@/lib/
  * 🏠 after) intentionally differ from the UI's existing choices (💂, 🚑,
  * 🌅), so reusing that function verbatim would have silently produced the
  * wrong symbols here. Every value NOT explicitly requested for the feed
- * (reserve, callup, shift-morning, absence-abroad) reuses the UI's own
- * already-established choice rather than inventing a new one; every value
- * with genuinely no fitting symbol in either place (rasar, oxid, absence-
+ * (reserve, callup, rasar, oxid, shift-morning, absence-abroad) reuses the
+ * UI's own already-established choice rather than inventing a new one;
+ * every value with genuinely no fitting symbol in either place (absence-
  * medical, absence-day_off, shift-unspecified) stays unmapped -- see
  * `icsEventEmoji`'s own docstring for the graceful-degradation contract.
  * This file has zero effect on the in-app "הלוח שלי" UI, which still goes
@@ -38,7 +38,8 @@ const DUTY_FAMILY_EMOJI: Partial<Record<DutyFamily, string>> = {
   daily_kitchen: "🍽️",
   weekend_kitchen: "🍽️",
   callup: "📞",
-  // rasar/oxid: no clearly-fitting restrained symbol, same as the UI's own mapping -- left unmapped rather than guessed.
+  rasar: "🧹",
+  oxid: "📄",
 };
 
 const ABSENCE_EMOJI: Partial<Record<AbsenceKind, string>> = {

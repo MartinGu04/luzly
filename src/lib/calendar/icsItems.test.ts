@@ -275,9 +275,9 @@ describe("buildCalendarItem -- duty events", () => {
     expect(buildCalendarItem(event, SCHEDULE, [])!.summary).toBe("🛡️ שמירה 2");
   });
 
-  it("summary omits the slot when the duty family has none, and has no emoji prefix for an unmapped family (oxid)", () => {
+  it("summary omits the slot when the duty family has none, and gets oxid's own emoji prefix", () => {
     const event = baseEvent({ category: "duty", dutyFamily: "oxid", slot: null });
-    expect(buildCalendarItem(event, SCHEDULE, [])!.summary).toBe("אוקסיד");
+    expect(buildCalendarItem(event, SCHEDULE, [])!.summary).toBe("📄 אוקסיד");
   });
 
   it("never gets a roster/'who's with me' description, even when another duty Event shares the exact same date+family+slot", () => {

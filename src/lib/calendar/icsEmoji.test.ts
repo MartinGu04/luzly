@@ -44,9 +44,9 @@ describe("icsEventEmoji -- duty families (per PR's requested mapping)", () => {
     expect(icsEventEmoji(input({ category: "duty", dutyFamily: "callup" }))).toBe("📞");
   });
 
-  it("returns null for duty families with no fitting symbol (rasar, oxid) -- degrades gracefully, never invents one", () => {
-    expect(icsEventEmoji(input({ category: "duty", dutyFamily: "rasar" }))).toBeNull();
-    expect(icsEventEmoji(input({ category: "duty", dutyFamily: "oxid" }))).toBeNull();
+  it("maps rasar and oxid to their own symbols, same as the in-app UI's choices", () => {
+    expect(icsEventEmoji(input({ category: "duty", dutyFamily: "rasar" }))).toBe("🧹");
+    expect(icsEventEmoji(input({ category: "duty", dutyFamily: "oxid" }))).toBe("📄");
   });
 
   it("returns null for a duty Event with no dutyFamily at all", () => {

@@ -15,7 +15,7 @@ import type { DayMeta } from "./types";
  * (see `EveryoneMonthGrid`'s day/night status chips, reusing `IndicatorChip`/
  * `OverflowChip` from this module), never by growing the cell itself.
  */
-export const CALENDAR_CELL_HEIGHT_CLASSES = "h-[58px] sm:h-20 lg:h-[84px]";
+export const CALENDAR_CELL_HEIGHT_CLASSES = "h-16 sm:h-24 lg:h-[104px]";
 
 /**
  * A shared base-height floor for the desktop selected-day panel
@@ -49,16 +49,22 @@ export function dayNumberFromDate(date: string): number {
 }
 
 /**
- * The shared per-cell grid-line treatment: only a bottom + inline-end
- * border per cell, with the FIRST column additionally drawing its own
- * inline-start edge and the FIRST row its own top edge, so the whole 7x6
- * matrix reads as one bordered rectangle without doubled/thicker shared
- * edges. Identical across every calendar surface.
+ * The shared per-cell grid-line treatment -- from `sm:` up, a bottom +
+ * inline-end border per cell, with the FIRST column additionally drawing
+ * its own inline-start edge and the FIRST row its own top edge, so the
+ * whole 7x6 matrix reads as one bordered rectangle without doubled/thicker
+ * shared edges (unchanged desktop appearance from PR #75). Below `sm:`,
+ * deliberately NO borders at all -- the approved-desktop bordered "table"
+ * look is exactly the "Excel/spreadsheet" feel a native-style mobile month
+ * view avoids; on mobile the grid reads through equal-width columns, fixed
+ * row height, and the day number's own placement alone, the same way a
+ * native phone calendar has no cell gridlines. Identical across every
+ * calendar surface.
  */
 export function cellBorderClasses(columnIndex: number, isFirstRow: boolean): string {
-  const start = columnIndex === 0 ? "border-s" : "";
-  const top = isFirstRow ? "border-t" : "";
-  return `border-b border-e border-border ${start} ${top}`.trim();
+  const start = columnIndex === 0 ? "sm:border-s" : "";
+  const top = isFirstRow ? "sm:border-t" : "";
+  return `sm:border-b sm:border-e sm:border-border ${start} ${top}`.trim();
 }
 
 /**
@@ -73,6 +79,12 @@ export function cellBorderClasses(columnIndex: number, isFirstRow: boolean): str
  * item's own emoji -- so a narrow cell never shows a clipped "…" fragment.
  * The short word label only appears from `sm:` up, where the cell has room
  * for it.
+ *
+ * The chip's own box chrome (rounded corners, background tint, horizontal
+ * padding) is likewise `sm:`-only -- below `sm:` the emoji/dot renders as a
+ * bare mark with no surrounding pill, so a narrow cell shows one small
+ * native-feeling marker rather than a tiny colored "fragment" box. Desktop
+ * (`sm:` and up) keeps the exact chip appearance approved in PR #75.
  */
 export function IndicatorChip({
   emoji,
@@ -83,11 +95,13 @@ export function IndicatorChip({
   /**
    * When set (e.g. `eventColorBgClassName`, `lib/presentation/eventColor.ts`),
    * replaces the chip's default neutral `bg-overlay-soft` with a semantic
-   * soft color tint, at every breakpoint -- used only by `CalendarGrid`'s
+   * soft color tint, from `sm:` up -- used only by `CalendarGrid`'s
    * single-person "הלוח שלי" indicators, never by `EveryoneMonthGrid` (which
-   * never passes this prop, so its chips are completely unaffected).
-   * Deliberately independent of `statusDotClassName`/emoji rendering below --
-   * this never hides/changes the emoji or label, only the chip's background.
+   * never passes this prop, so its chips are completely unaffected). Always
+   * a single Tailwind class (see `EVENT_COLOR_SOFT_BG_CLASS`), safe to
+   * prefix with the `sm:` variant below. Deliberately independent of
+   * `statusDotClassName`/emoji rendering -- this never hides/changes the
+   * emoji or label, only the chip's background.
    */
   categoryBgClassName,
   className = "",
@@ -99,9 +113,10 @@ export function IndicatorChip({
   categoryBgClassName?: string;
   className?: string;
 }) {
+  const bgClassName = categoryBgClassName ? `sm:${categoryBgClassName}` : "sm:bg-overlay-soft";
   return (
     <span
-      className={`flex min-w-0 items-center gap-1 rounded ${categoryBgClassName ?? "bg-overlay-soft"} px-1 text-[9px] leading-[13px] sm:text-[10px] sm:leading-4 ${toneClassName} ${className}`}
+      className={`flex min-w-0 items-center gap-1 sm:rounded ${bgClassName} px-0 sm:px-1 text-[10px] leading-[14px] sm:text-xs sm:leading-4 lg:text-[13px] lg:leading-5 ${toneClassName} ${className}`}
     >
       {statusDotClassName ? (
         <span aria-hidden="true" className={`h-1.5 w-1.5 shrink-0 rounded-full sm:hidden ${statusDotClassName}`} />
@@ -123,7 +138,7 @@ export function OverflowChip({ count, className = "" }: { count: number; classNa
   return (
     <span
       dir="ltr"
-      className={`px-1 text-[9px] font-medium leading-[13px] text-muted-2 sm:text-[10px] sm:leading-4 ${className}`}
+      className={`px-1 text-[10px] font-medium leading-[14px] text-muted-2 sm:text-xs sm:leading-4 lg:text-[13px] lg:leading-5 ${className}`}
     >
       +{count}
     </span>
@@ -135,7 +150,7 @@ export function CalendarWeekdayHeader() {
   return (
     <div className="flex items-stretch gap-1 border-b border-border pb-2 sm:gap-1.5">
       <span aria-hidden="true" className="w-5 shrink-0 sm:w-6" />
-      <div className="grid flex-1 grid-cols-7 gap-1 text-center text-[11px] font-medium sm:gap-1.5 sm:text-xs">
+      <div className="grid flex-1 grid-cols-7 gap-1 text-center text-xs font-medium sm:gap-1.5 sm:text-sm">
         {SHORT_WEEKDAY_LABELS.map((label, index) => (
           <span key={index} className={isWeekendColumn(index) ? "text-muted" : "text-muted-2"}>
             {label}
@@ -198,7 +213,7 @@ export function OutOfMonthCell({ cell, columnIndex, isFirstRow }: OutOfMonthCell
         isWeekend ? "bg-weekend-tint" : ""
       }`}
     >
-      <span className="text-[11px] font-medium text-muted-2 opacity-40 sm:text-xs">
+      <span className="text-xs font-medium text-muted-2 opacity-40 sm:text-sm lg:text-base">
         {dayNumberFromDate(cell.date)}
       </span>
     </div>
@@ -259,7 +274,7 @@ export function CalendarDayCell({
       <div className={`flex h-full flex-col gap-0.5 ${isPast ? "opacity-60" : ""}`}>
         <div className="flex shrink-0 items-center justify-between">
           <span
-            className={`flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-medium sm:h-6 sm:w-6 sm:text-xs ${
+            className={`flex h-5 w-5 items-center justify-center rounded-full text-xs font-medium sm:h-7 sm:w-7 sm:text-sm lg:h-8 lg:w-8 lg:text-base ${
               dayNumberActive
                 ? "bg-primary text-primary-foreground"
                 : meta.isToday

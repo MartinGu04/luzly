@@ -41,9 +41,51 @@ describe("eventIndicator", () => {
     expect(indicator.label).toBe("משמרת");
   });
 
-  it("labels any duty generically as 'תורנות', never the specific duty family", () => {
+  it("labels a duty with its own duty-family label, never the generic 'תורנות'", () => {
     const indicator = eventIndicator(
       baseEvent({ category: "duty", role: null, period: "unspecified", dutyFamily: "guard", slot: 1, title: "שומר 1" }),
+      "k",
+    );
+    expect(indicator.label).toBe("שמירה");
+  });
+
+  it("labels a full_kitchen duty 'מטבח מלא'", () => {
+    const indicator = eventIndicator(
+      baseEvent({ category: "duty", role: null, period: "unspecified", dutyFamily: "full_kitchen" }),
+      "k",
+    );
+    expect(indicator.label).toBe("מטבח מלא");
+  });
+
+  it("labels a daily_kitchen duty 'מטבח יומי'", () => {
+    const indicator = eventIndicator(
+      baseEvent({ category: "duty", role: null, period: "unspecified", dutyFamily: "daily_kitchen" }),
+      "k",
+    );
+    expect(indicator.label).toBe("מטבח יומי");
+  });
+
+  it("labels a rasar duty 'רס\"ר', with its own emoji", () => {
+    const indicator = eventIndicator(
+      baseEvent({ category: "duty", role: null, period: "unspecified", dutyFamily: "rasar" }),
+      "k",
+    );
+    expect(indicator.label).toBe('רס"ר');
+    expect(indicator.emoji).toBe("🧹");
+  });
+
+  it("labels an oxid duty 'אוקסיד', with its own emoji", () => {
+    const indicator = eventIndicator(
+      baseEvent({ category: "duty", role: null, period: "unspecified", dutyFamily: "oxid" }),
+      "k",
+    );
+    expect(indicator.label).toBe("אוקסיד");
+    expect(indicator.emoji).toBe("📄");
+  });
+
+  it("falls back to the generic 'תורנות' label for a duty Event with no dutyFamily at all", () => {
+    const indicator = eventIndicator(
+      baseEvent({ category: "duty", role: null, period: "unspecified", dutyFamily: null }),
       "k",
     );
     expect(indicator.label).toBe("תורנות");

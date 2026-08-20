@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import type { CalendarGridCell } from "@/lib/domain/calendarMonth";
-import { CALENDAR_CELL_HEIGHT_CLASSES } from "./CalendarSurface";
+import { CALENDAR_CELL_HEIGHT_CLASSES, IndicatorChip, cellBorderClasses } from "./CalendarSurface";
 import { CalendarGrid } from "./CalendarGrid";
 import { EveryoneMonthGrid } from "./EveryoneMonthGrid";
 import type { DayMeta } from "./types";
@@ -129,5 +129,74 @@ describe("shared calendar-shell geometry contract (CalendarGrid vs EveryoneMonth
 
     expect(everyoneTokens).toEqual(personalTokens);
     expect(everyoneTokens.length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * Mobile-declutter follow-up pass: below `sm:`, cell borders and the
+ * indicator chip's own box chrome (background/rounded/padding) disappear
+ * entirely -- the desktop (`sm:`+) look stays pixel-identical to the
+ * PR #75 appearance approved for that breakpoint. These tests pin that
+ * responsive contract at the shared-primitive level, shared by construction
+ * with `CalendarGrid` and `EveryoneMonthGrid`.
+ */
+describe("mobile grid declutter (borders + chip chrome are sm:+ only)", () => {
+  it("cellBorderClasses never emits a bare (non-sm:-prefixed) border utility", () => {
+    for (const columnIndex of [0, 1]) {
+      for (const isFirstRow of [true, false]) {
+        const tokens = cellBorderClasses(columnIndex, isFirstRow).split(" ").filter(Boolean);
+        for (const token of tokens) {
+          expect(token.startsWith("sm:")).toBe(true);
+        }
+      }
+    }
+  });
+
+  it("cellBorderClasses still produces the same sm:+ border set as before (desktop unchanged)", () => {
+    expect(cellBorderClasses(0, true).split(" ").sort()).toEqual(
+      ["sm:border-b", "sm:border-e", "sm:border-border", "sm:border-s", "sm:border-t"].sort(),
+    );
+    expect(cellBorderClasses(1, false).split(" ").sort()).toEqual(["sm:border-b", "sm:border-e", "sm:border-border"].sort());
+  });
+
+  it("a real day cell's outer button carries only sm:-prefixed border classes, no bare border below sm:", () => {
+    render(
+      <CalendarGrid
+        grid={WEEK_GRID}
+        days={weekDays()}
+        eventsByDate={{}}
+        selectedDate={null}
+        onSelectDate={noop}
+        activeShiftDates={[]}
+      />,
+    );
+    const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+    const borderTokens = cell.className.split(" ").filter((token) => token.includes("border"));
+    for (const token of borderTokens) {
+      expect(token.startsWith("sm:")).toBe(true);
+    }
+  });
+
+  it("IndicatorChip's background/rounded/padding are sm:-only, so mobile shows a bare marker with no chip box", () => {
+    render(<IndicatorChip emoji="🍽️" label="מטבח מלא" categoryBgClassName="bg-event-kitchen-soft" />);
+    const chip = screen.getByText("מטבח מלא").parentElement as HTMLElement;
+    const tokens = chip.className.split(" ").filter(Boolean);
+    // No bare (non-sm:) rounded/background/px-1 -- only sm:-prefixed variants.
+    expect(tokens).not.toContain("rounded");
+    expect(tokens).not.toContain("bg-event-kitchen-soft");
+    expect(tokens).not.toContain("px-1");
+    expect(tokens).toContain("sm:rounded");
+    expect(tokens).toContain("sm:bg-event-kitchen-soft");
+    expect(tokens).toContain("sm:px-1");
+    // The emoji itself is still always shown, at every width.
+    expect(chip.textContent).toContain("🍽️");
+  });
+
+  it("IndicatorChip's default (no categoryBgClassName) neutral background is also sm:-only", () => {
+    render(<IndicatorChip emoji="☀️" label="יום" />);
+    const chip = screen.getByText("יום").parentElement as HTMLElement;
+    const tokens = chip.className.split(" ").filter(Boolean);
+    expect(tokens).not.toContain("bg-overlay-soft");
+    expect(tokens).toContain("sm:bg-overlay-soft");
   });
 });

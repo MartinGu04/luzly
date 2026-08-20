@@ -68,9 +68,9 @@ describe("dutyBlockEmoji", () => {
     expect(dutyBlockEmoji({ dutyFamily: "reserve" })).toBe("🪖");
   });
 
-  it("renders cleanly (null) for a family with no assigned emoji, never inventing one", () => {
-    expect(dutyBlockEmoji({ dutyFamily: "rasar" })).toBeNull();
-    expect(dutyBlockEmoji({ dutyFamily: "oxid" })).toBeNull();
+  it("maps rasar and oxid to their own symbols", () => {
+    expect(dutyBlockEmoji({ dutyFamily: "rasar" })).toBe("🧹");
+    expect(dutyBlockEmoji({ dutyFamily: "oxid" })).toBe("📄");
   });
 });
 
