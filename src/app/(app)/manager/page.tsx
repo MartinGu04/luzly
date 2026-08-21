@@ -4,7 +4,7 @@ import type { IssueRowView } from "@/components/issues/types";
 import { ManagerAdoptionSection } from "@/components/manager/ManagerAdoptionSection";
 import { ManagerAdoptionSummary } from "@/components/manager/ManagerAdoptionSummary";
 import { ManagerAttentionSection } from "@/components/manager/ManagerAttentionSection";
-import { ManagerBroadcastComposer } from "@/components/manager/ManagerBroadcastComposer";
+import { ManagerBroadcastArea } from "@/components/manager/ManagerBroadcastArea";
 import { ManagerCategoryNav } from "@/components/manager/ManagerCategoryNav";
 import { ManagerCommandBar } from "@/components/manager/ManagerCommandBar";
 import { ManagerCoverageSection } from "@/components/manager/ManagerCoverageSection";
@@ -467,7 +467,7 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
 
       {category === "logins" ? (
         <div className="flex flex-col gap-4">
-          <ManagerBroadcastComposer
+          <ManagerBroadcastArea
             roster={model.roster}
             adoptionPeople={model.adoption.status === "available" ? model.adoption.view.people : []}
           />

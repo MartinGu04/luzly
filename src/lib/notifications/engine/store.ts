@@ -878,6 +878,18 @@ export async function getManagerNotificationBatchByIdempotencyKey(
   return data ? toBatchRow(data as Record<string, unknown>) : null;
 }
 
+/** Looked up by `id` (rather than `idempotency_key`) for a scheduled broadcast RESUMING dispatch after its own `batch_id` checkpoint was already written -- see `engine/scheduledBroadcast.ts`. */
+export async function getManagerNotificationBatchById(id: string): Promise<ManagerNotificationBatchRow | null> {
+  const supabase = getNotificationServiceClient();
+  const { data, error } = await supabase
+    .from("manager_notification_batches")
+    .select(MANAGER_NOTIFICATION_BATCH_COLUMNS)
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? toBatchRow(data as Record<string, unknown>) : null;
+}
+
 export interface ManagerNotificationBatchUpsertResult {
   row: ManagerNotificationBatchRow;
   /** `true` only when THIS call genuinely inserted the row. `false` means `idempotency_key` already existed -- `row` is the ORIGINAL stored batch, never overwritten by this call's (possibly different) payload. The caller MUST compare `row` against its own current request before creating any jobs -- see `manualBroadcast.ts`'s `isSameLogicalBroadcastRequest`; this function itself does not decide whether a reused key represents a legitimate replay or a mutated request. */
@@ -939,4 +951,309 @@ export async function listRecentManagerNotificationBatches(
     .limit(limit);
   if (error) throw error;
   return ((data ?? []) as Record<string, unknown>[]).map(toBatchRow);
+}
+
+// ---------------------------------------------------------------------------
+// Manager scheduled broadcasts -- a manager-scheduled "שליחת התראה" that has
+// not yet dispatched. Deliberately separate from `manager_notification_batches`
+// (which is immutable once created): this table's whole reason to exist is
+// that a scheduled broadcast stays editable/cancellable up until dispatch
+// claims it. See the migration's own doc comment for the full lifecycle.
+// ---------------------------------------------------------------------------
+
+export type ManagerScheduledBroadcastStatus = "scheduled" | "claimed" | "dispatched" | "cancelled";
+
+export interface NewManagerScheduledBroadcast {
+  /** The compose-session key behind exactly-once CREATION -- see the migration's own doc comment. Never reused for dispatch (that's `batch_id`/`scheduled:<id>`). */
+  createIdempotencyKey: string;
+  audienceKind: BroadcastAudienceKind;
+  /** The frozen audience snapshot -- for `"everyone"` this is already the roster expanded to ids at save time, never re-expanded later. */
+  targetPersonIds: readonly string[];
+  title: string;
+  body: string;
+  scheduledFor: string;
+  createdByPersonId: string;
+  createdByPersonName: string;
+}
+
+export interface ManagerScheduledBroadcastRow {
+  id: string;
+  createIdempotencyKey: string;
+  status: ManagerScheduledBroadcastStatus;
+  audienceKind: BroadcastAudienceKind;
+  targetPersonIds: string[];
+  title: string;
+  body: string;
+  scheduledFor: string;
+  createdByPersonId: string;
+  createdByPersonName: string;
+  lastChangedByPersonId: string | null;
+  lastChangedByPersonName: string | null;
+  cancelledByPersonId: string | null;
+  cancelledByPersonName: string | null;
+  /** The manager who actually pressed "שלח עכשיו" -- distinct from `createdByPersonId`/`lastChangedByPersonId`; null for a normal due-time worker dispatch. See `claim_manager_scheduled_broadcast_now` and `scheduledBroadcast.ts`'s `batchCreatorForRow`. */
+  sentNowByPersonId: string | null;
+  sentNowByPersonName: string | null;
+  sentNowAt: string | null;
+  claimedAt: string | null;
+  batchId: string | null;
+  dispatchedAt: string | null;
+  cancelledAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+const MANAGER_SCHEDULED_BROADCAST_COLUMNS =
+  "id, create_idempotency_key, status, audience_kind, target_person_ids, title, body, scheduled_for, created_by_person_id, created_by_person_name, last_changed_by_person_id, last_changed_by_person_name, cancelled_by_person_id, cancelled_by_person_name, sent_now_by_person_id, sent_now_by_person_name, sent_now_at, claimed_at, batch_id, dispatched_at, cancelled_at, created_at, updated_at";
+
+function toScheduledBroadcastRow(row: Record<string, unknown>): ManagerScheduledBroadcastRow {
+  return {
+    id: row.id as string,
+    createIdempotencyKey: row.create_idempotency_key as string,
+    status: row.status as ManagerScheduledBroadcastStatus,
+    audienceKind: row.audience_kind as BroadcastAudienceKind,
+    targetPersonIds: (row.target_person_ids as string[] | null) ?? [],
+    title: row.title as string,
+    body: row.body as string,
+    // Canonicalized here, ONCE, at this row's one mapping boundary --
+    // Postgres/PostgREST can represent the identical `timestamptz`
+    // instant as either `+00:00` or `.000Z`; every downstream consumer
+    // of `ManagerScheduledBroadcastRow.scheduledFor` (dispatch,
+    // create-idempotency replay comparison, the UI's local-time view)
+    // must be able to trust a single canonical string form and never
+    // re-normalize it itself. See `scheduledBroadcast.ts`'s
+    // `isSameLogicalScheduledCreateRequest` for exactly why this matters.
+    scheduledFor: new Date(row.scheduled_for as string).toISOString(),
+    createdByPersonId: row.created_by_person_id as string,
+    createdByPersonName: row.created_by_person_name as string,
+    lastChangedByPersonId: (row.last_changed_by_person_id as string | null) ?? null,
+    lastChangedByPersonName: (row.last_changed_by_person_name as string | null) ?? null,
+    cancelledByPersonId: (row.cancelled_by_person_id as string | null) ?? null,
+    cancelledByPersonName: (row.cancelled_by_person_name as string | null) ?? null,
+    sentNowByPersonId: (row.sent_now_by_person_id as string | null) ?? null,
+    sentNowByPersonName: (row.sent_now_by_person_name as string | null) ?? null,
+    sentNowAt: (row.sent_now_at as string | null) ?? null,
+    claimedAt: (row.claimed_at as string | null) ?? null,
+    batchId: (row.batch_id as string | null) ?? null,
+    dispatchedAt: (row.dispatched_at as string | null) ?? null,
+    cancelledAt: (row.cancelled_at as string | null) ?? null,
+    createdAt: row.created_at as string,
+    updatedAt: row.updated_at as string,
+  };
+}
+
+export interface ManagerScheduledBroadcastUpsertResult {
+  row: ManagerScheduledBroadcastRow;
+  /** `true` only when THIS call genuinely inserted the row. `false` means `create_idempotency_key` already existed -- `row` is the ORIGINAL stored row, never overwritten by this call's (possibly different) payload. The caller MUST compare `row` against its own current request before treating this as a safe replay -- see `scheduledBroadcast.ts`'s `createScheduledBroadcast`; this function itself does not decide whether a reused key represents a legitimate replay or a mutated request. */
+  created: boolean;
+}
+
+/**
+ * Idempotent by `create_idempotency_key` -- a genuinely new schedule
+ * inserts and returns its own fresh row with `created: true`. A retried/
+ * double-submitted "שמירת תזמון" click carrying the SAME key hits the
+ * unique constraint and this returns the ALREADY-EXISTING row instead
+ * (`created: false`, the row's ORIGINAL stored values). Never performs an
+ * `update` on conflict -- so this can never overwrite an edit that
+ * happened to the row after its original creation, no matter how late a
+ * replay of the original create request arrives.
+ */
+export async function insertManagerScheduledBroadcastIfAbsent(
+  input: NewManagerScheduledBroadcast,
+): Promise<ManagerScheduledBroadcastUpsertResult> {
+  const supabase = getNotificationServiceClient();
+  const { data, error } = await supabase
+    .from("manager_scheduled_broadcasts")
+    .insert({
+      create_idempotency_key: input.createIdempotencyKey,
+      audience_kind: input.audienceKind,
+      target_person_ids: input.targetPersonIds,
+      title: input.title,
+      body: input.body,
+      scheduled_for: input.scheduledFor,
+      created_by_person_id: input.createdByPersonId,
+      created_by_person_name: input.createdByPersonName,
+    })
+    .select(MANAGER_SCHEDULED_BROADCAST_COLUMNS)
+    .single();
+
+  if (error) {
+    if ((error as { code?: string }).code === "23505") {
+      const existing = await getManagerScheduledBroadcastByCreateIdempotencyKey(input.createIdempotencyKey);
+      if (existing) return { row: existing, created: false };
+    }
+    throw error;
+  }
+  return { row: toScheduledBroadcastRow(data as Record<string, unknown>), created: true };
+}
+
+export async function getManagerScheduledBroadcastByCreateIdempotencyKey(
+  createIdempotencyKey: string,
+): Promise<ManagerScheduledBroadcastRow | null> {
+  const supabase = getNotificationServiceClient();
+  const { data, error } = await supabase
+    .from("manager_scheduled_broadcasts")
+    .select(MANAGER_SCHEDULED_BROADCAST_COLUMNS)
+    .eq("create_idempotency_key", createIdempotencyKey)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? toScheduledBroadcastRow(data as Record<string, unknown>) : null;
+}
+
+export async function getManagerScheduledBroadcastById(id: string): Promise<ManagerScheduledBroadcastRow | null> {
+  const supabase = getNotificationServiceClient();
+  const { data, error } = await supabase
+    .from("manager_scheduled_broadcasts")
+    .select(MANAGER_SCHEDULED_BROADCAST_COLUMNS)
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? toScheduledBroadcastRow(data as Record<string, unknown>) : null;
+}
+
+export interface ManagerScheduledBroadcastEdit {
+  audienceKind: BroadcastAudienceKind;
+  targetPersonIds: readonly string[];
+  title: string;
+  body: string;
+  scheduledFor: string;
+  changedByPersonId: string;
+  changedByPersonName: string;
+}
+
+/** Guarded by `status = 'scheduled'` at the database level -- returns `null` (never throws) when the row is missing or no longer editable, so the caller can fail truthfully ("השליחה כבר התחילה") instead of silently no-op'ing. */
+export async function updateManagerScheduledBroadcastIfEditable(
+  id: string,
+  edit: ManagerScheduledBroadcastEdit,
+): Promise<ManagerScheduledBroadcastRow | null> {
+  const supabase = getNotificationServiceClient();
+  const { data, error } = await supabase
+    .from("manager_scheduled_broadcasts")
+    .update({
+      audience_kind: edit.audienceKind,
+      target_person_ids: edit.targetPersonIds,
+      title: edit.title,
+      body: edit.body,
+      scheduled_for: edit.scheduledFor,
+      last_changed_by_person_id: edit.changedByPersonId,
+      last_changed_by_person_name: edit.changedByPersonName,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .eq("status", "scheduled")
+    .select(MANAGER_SCHEDULED_BROADCAST_COLUMNS)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? toScheduledBroadcastRow(data as Record<string, unknown>) : null;
+}
+
+/** Same fail-closed shape as `updateManagerScheduledBroadcastIfEditable` -- `null` means it was no longer `'scheduled'` (already claimed/dispatched/cancelled). */
+export async function cancelManagerScheduledBroadcastIfEditable(
+  id: string,
+  cancelledByPersonId: string,
+  cancelledByPersonName: string,
+): Promise<ManagerScheduledBroadcastRow | null> {
+  const supabase = getNotificationServiceClient();
+  const { data, error } = await supabase
+    .from("manager_scheduled_broadcasts")
+    .update({
+      status: "cancelled",
+      cancelled_at: new Date().toISOString(),
+      cancelled_by_person_id: cancelledByPersonId,
+      cancelled_by_person_name: cancelledByPersonName,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .eq("status", "scheduled")
+    .select(MANAGER_SCHEDULED_BROADCAST_COLUMNS)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? toScheduledBroadcastRow(data as Record<string, unknown>) : null;
+}
+
+/** The manager UI's "🕒 התראות מתוזמנות" list -- every not-yet-dispatched, not-cancelled broadcast (including one currently `'claimed'` mid-dispatch, a normally brief transient state), soonest due first. */
+export async function listActiveManagerScheduledBroadcasts(): Promise<ManagerScheduledBroadcastRow[]> {
+  const supabase = getNotificationServiceClient();
+  const { data, error } = await supabase
+    .from("manager_scheduled_broadcasts")
+    .select(MANAGER_SCHEDULED_BROADCAST_COLUMNS)
+    .in("status", ["scheduled", "claimed"])
+    .order("scheduled_for", { ascending: true });
+  if (error) throw error;
+  return ((data ?? []) as Record<string, unknown>[]).map(toScheduledBroadcastRow);
+}
+
+/** The worker tick's bulk atomic claim -- see `claim_due_manager_scheduled_broadcasts`'s own migration doc comment for the exact `for update skip locked` + crash-recovery semantics. */
+export async function claimDueManagerScheduledBroadcasts(limit = 50): Promise<ManagerScheduledBroadcastRow[]> {
+  const supabase = getNotificationServiceClient();
+  const { data, error } = await supabase.rpc("claim_due_manager_scheduled_broadcasts", { p_limit: limit });
+  if (error) throw error;
+  return ((data ?? []) as Record<string, unknown>[]).map(toScheduledBroadcastRow);
+}
+
+/**
+ * "שלח עכשיו"'s single-row atomic claim. `null` means it was no longer
+ * `'scheduled'` (already claimed by a racing worker tick, already
+ * dispatched, or cancelled). `sentNowByPersonId`/`sentNowByPersonName` --
+ * the AUTHENTICATED caller, never client-supplied -- are recorded by the
+ * RPC itself, atomically with the winning claim, so only the manager
+ * whose claim actually succeeds is ever attributed.
+ */
+export async function claimManagerScheduledBroadcastNow(
+  id: string,
+  sentNowByPersonId: string,
+  sentNowByPersonName: string,
+): Promise<ManagerScheduledBroadcastRow | null> {
+  const supabase = getNotificationServiceClient();
+  const { data, error } = await supabase.rpc("claim_manager_scheduled_broadcast_now", {
+    p_id: id,
+    p_sent_now_by_person_id: sentNowByPersonId,
+    p_sent_now_by_person_name: sentNowByPersonName,
+  });
+  if (error) throw error;
+  const rows = (data ?? []) as Record<string, unknown>[];
+  return rows.length > 0 ? toScheduledBroadcastRow(rows[0]) : null;
+}
+
+/**
+ * The dispatch checkpoint: once this succeeds, `id`'s eventual batch is
+ * fixed forever -- a worker crash after this point only ever needs to
+ * retry idempotent job creation for `batchId`, never re-decide whether a
+ * batch should exist. Guarded so it only ever applies once (`batch_id is
+ * null`) to a still-`'claimed'` row; a second call for the same id is a
+ * harmless no-op (0 rows affected), which is exactly what a retried
+ * dispatch attempt after a crash right at this step produces.
+ */
+export async function setManagerScheduledBroadcastBatchId(id: string, batchId: string): Promise<void> {
+  const supabase = getNotificationServiceClient();
+  const { error } = await supabase
+    .from("manager_scheduled_broadcasts")
+    .update({ batch_id: batchId, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .eq("status", "claimed")
+    .is("batch_id", null);
+  if (error) throw error;
+}
+
+/** The final state transition, once every resolved recipient's `notification_jobs` row exists. Guarded to `status = 'claimed'` so it can never "dispatch" a row that was somehow no longer in flight. */
+export async function markManagerScheduledBroadcastDispatched(id: string): Promise<void> {
+  const supabase = getNotificationServiceClient();
+  const { error } = await supabase
+    .from("manager_scheduled_broadcasts")
+    .update({ status: "dispatched", dispatched_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .eq("status", "claimed");
+  if (error) throw error;
+}
+
+/** Read-only count of scheduled broadcasts already due -- dry-run mode's estimate; never claims/mutates, mirroring `peekDueJobsCount`. */
+export async function peekDueManagerScheduledBroadcastsCount(): Promise<number> {
+  const supabase = getNotificationServiceClient();
+  const { count, error } = await supabase
+    .from("manager_scheduled_broadcasts")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "scheduled")
+    .lte("scheduled_for", new Date().toISOString());
+  if (error) throw error;
+  return count ?? 0;
 }

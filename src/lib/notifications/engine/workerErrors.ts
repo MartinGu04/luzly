@@ -25,6 +25,8 @@ export type WorkerStage =
   | "recipient_resolution"
   | "change_detection"
   | "reminders"
+  | "scheduled_broadcasts"
+  | "scheduled_broadcasts_due_lookup"
   | "jobs_due_lookup"
   | "delivery";
 

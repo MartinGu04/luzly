@@ -8,22 +8,41 @@ import {
   type SendManagerBroadcastActionResult,
 } from "@/lib/notifications/manualBroadcastActions";
 import { BROADCAST_BODY_MAX_LENGTH, BROADCAST_TITLE_MAX_LENGTH } from "@/lib/notifications/manualBroadcastLimits";
+import {
+  createScheduledBroadcastAction,
+  editScheduledBroadcastAction,
+  type ScheduledBroadcastActionResult,
+  type ScheduledBroadcastView,
+} from "@/lib/notifications/scheduledBroadcastActions";
+import { formatScheduledBroadcastMoment } from "@/lib/presentation/scheduledBroadcast";
 import { computeAudienceSummary, unresolvedReasonLabel } from "@/lib/presentation/managerBroadcast";
 import { groupRosterHierarchy } from "@/lib/presentation/roster";
 import type { ManagerAdoptionPersonView, ManagerPersonSummary } from "@/lib/readModels/managerTypes";
 
 type AudienceKind = "person" | "people" | "everyone";
+type SendMode = "now" | "schedule";
 
 interface ManagerBroadcastComposerProps {
   roster: ManagerPersonSummary[];
   /** Empty when the "התחברויות והתראות" readiness lookup itself is unavailable -- the picker still works, it just can't annotate anyone's readiness. */
   adoptionPeople: ManagerAdoptionPersonView[];
+  /** Set while the manager is editing an existing scheduled broadcast (from "🕒 התראות מתוזמנות"'s own "עריכה" action) -- pre-fills the form and switches submission to `editScheduledBroadcastAction`. `null`/omitted is the ordinary "new broadcast" composer. */
+  editingItem?: ScheduledBroadcastView | null;
+  /** Fired after ANY successful send/save (immediate, scheduled create, or scheduled edit) -- the parent uses this to refresh the scheduled/recent lists. */
+  onSaved?: () => void;
+  /** Fired when the manager leaves edit mode (save succeeded, or they cancel editing explicitly). */
+  onCancelEdit?: () => void;
 }
 
 const AUDIENCE_OPTIONS: { value: AudienceKind; label: string }[] = [
   { value: "person", label: "אדם מסוים" },
   { value: "people", label: "כמה אנשים" },
   { value: "everyone", label: "כולם" },
+];
+
+const SEND_MODE_OPTIONS: { value: SendMode; label: string }[] = [
+  { value: "now", label: "עכשיו" },
+  { value: "schedule", label: "תזמון" },
 ];
 
 function newIdempotencyKey(): string {
@@ -46,6 +65,10 @@ const ERROR_LABELS: Record<string, string> = {
   invalid_targets: "הבחירה אינה תקפה יותר. נסה/י לבחור מחדש.",
   no_targets: "לא נבחרו אנשי צוות תקפים לשליחה.",
   idempotency_conflict: "השליחה הקודמת עדיין בעיבוד או שונה מהבקשה הזו. נסה/י שוב.",
+  invalid_schedule: "יש לבחור תאריך ושעה תקינים בעתיד.",
+  not_found: "התזמון לא נמצא -- ייתכן שכבר בוטל.",
+  already_started: "השליחה כבר התחילה, ולא ניתן עוד לערוך/לבטל.",
+  already_cancelled: "התזמון הזה כבר בוטל.",
 };
 
 function errorLabel(error: string): string {
@@ -91,25 +114,69 @@ function PersonCheckbox({
   );
 }
 
+function minuteOfDayToTimeValue(minuteOfDay: number): string {
+  const hour = Math.floor(minuteOfDay / 60);
+  const minute = minuteOfDay % 60;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+/** `null` when `timeValue` isn't a well-formed `HH:MM` (an empty/partially-filled `<input type="time">`). */
+function parseTimeValue(timeValue: string): { hour: number; minute: number } | null {
+  const match = /^(\d{2}):(\d{2})$/.exec(timeValue);
+  if (!match) return null;
+  return { hour: Number(match[1]), minute: Number(match[2]) };
+}
+
 /**
  * "📣 שליחת התראה" -- the manager-only manual-broadcast composer. Lives
  * above the adoption/readiness sections in the "התחברויות והתראות"
  * category (see `app/(app)/manager/page.tsx`). Purely a thin client shell
- * around `sendManagerBroadcastAction` -- every real decision (who counts as
- * a valid recipient, push-capable vs. inbox-only vs. unresolved, dedupe)
- * happens server-side; this component's own `computeAudienceSummary` call
- * is an ESTIMATE for the manager to read before sending, never the source
- * of truth (see that function's own docstring).
+ * around `sendManagerBroadcastAction`/`createScheduledBroadcastAction`/
+ * `editScheduledBroadcastAction` -- every real decision (who counts as a
+ * valid recipient, push-capable vs. inbox-only vs. unresolved, dedupe,
+ * audience-snapshot freezing) happens server-side; this component's own
+ * `computeAudienceSummary` call is an ESTIMATE for the manager to read
+ * before sending/scheduling, never the source of truth (see that
+ * function's own docstring).
+ *
+ * "מתי לשלוח?" (עכשיו / תזמון) branches the SAME form to one of three
+ * server actions: an immediate send is byte-for-byte the PR #78 behavior
+ * (`sendManagerBroadcastAction`, unchanged); "תזמון" saves a still-mutable
+ * scheduled broadcast instead of sending anything (`createScheduledBroadcastAction`)
+ * -- never claims Push was sent. `editingItem` repurposes the exact same
+ * form to edit an existing scheduled broadcast in place
+ * (`editScheduledBroadcastAction`) rather than a second editor UI.
  */
-export function ManagerBroadcastComposer({ roster, adoptionPeople }: ManagerBroadcastComposerProps) {
-  const [audienceKind, setAudienceKind] = useState<AudienceKind>("person");
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+export function ManagerBroadcastComposer({
+  roster,
+  adoptionPeople,
+  editingItem = null,
+  onSaved,
+  onCancelEdit,
+}: ManagerBroadcastComposerProps) {
+  // Initial state is derived from `editingItem` once, on mount -- the
+  // parent (`ManagerBroadcastArea`) remounts this component with a fresh
+  // `key` whenever `editingItem` changes identity (a different scheduled
+  // broadcast, or leaving/entering edit mode), so there is no need to
+  // re-sync these via an effect.
+  const [audienceKind, setAudienceKind] = useState<AudienceKind>(() =>
+    editingItem && editingItem.audienceKind !== "everyone" ? editingItem.audienceKind : editingItem ? "everyone" : "person",
+  );
+  const [selectedIds, setSelectedIds] = useState<string[]>(() =>
+    editingItem && editingItem.audienceKind !== "everyone" ? editingItem.targetPersonIds : [],
+  );
   const [query, setQuery] = useState("");
-  const [title, setTitle] = useState("");
-  const [body, setBody] = useState("");
+  const [title, setTitle] = useState(() => editingItem?.title ?? "");
+  const [body, setBody] = useState(() => editingItem?.body ?? "");
+  const [sendMode, setSendMode] = useState<SendMode>(() => (editingItem ? "schedule" : "now"));
+  const [scheduledDate, setScheduledDate] = useState(() => editingItem?.scheduledLocalDate ?? "");
+  const [scheduledTime, setScheduledTime] = useState(() =>
+    editingItem ? minuteOfDayToTimeValue(editingItem.scheduledLocalMinuteOfDay) : "",
+  );
   const [idempotencyKey, setIdempotencyKey] = useState(newIdempotencyKey);
   const [isPending, startTransition] = useTransition();
   const [result, setResult] = useState<SendManagerBroadcastActionResult | null>(null);
+  const [scheduleResult, setScheduleResult] = useState<ScheduledBroadcastActionResult | null>(null);
 
   const adoptionByPersonId = useMemo(
     () => new Map(adoptionPeople.map((person) => [person.personId, person])),
@@ -127,13 +194,31 @@ export function ManagerBroadcastComposer({ roster, adoptionPeople }: ManagerBroa
 
   const trimmedTitle = title.trim();
   const trimmedBody = body.trim();
+  const parsedTime = parseTimeValue(scheduledTime);
+  const scheduleSummary =
+    sendMode === "schedule" && scheduledDate && parsedTime
+      ? formatScheduledBroadcastMoment(scheduledDate, parsedTime.hour * 60 + parsedTime.minute)
+      : null;
+
   const canSubmit =
     !isPending &&
     trimmedTitle.length > 0 &&
     trimmedTitle.length <= BROADCAST_TITLE_MAX_LENGTH &&
     trimmedBody.length > 0 &&
     trimmedBody.length <= BROADCAST_BODY_MAX_LENGTH &&
-    effectiveSelectedIds.length > 0;
+    effectiveSelectedIds.length > 0 &&
+    (sendMode === "now" || (scheduledDate.length > 0 && parsedTime !== null));
+
+  function resetForm() {
+    setTitle("");
+    setBody("");
+    setSelectedIds([]);
+    setQuery("");
+    setScheduledDate("");
+    setScheduledTime("");
+    setSendMode("now");
+    setIdempotencyKey(newIdempotencyKey());
+  }
 
   function toggleAudience(next: AudienceKind) {
     setAudienceKind(next);
@@ -151,21 +236,46 @@ export function ManagerBroadcastComposer({ roster, adoptionPeople }: ManagerBroa
   function handleSubmit() {
     if (!canSubmit) return;
     setResult(null);
+    setScheduleResult(null);
+
     startTransition(async () => {
-      const outcome = await sendManagerBroadcastAction({
+      if (sendMode === "now" && !editingItem) {
+        const outcome = await sendManagerBroadcastAction({
+          audienceKind,
+          targetPersonIds: audienceKind === "everyone" ? [] : selectedIds,
+          title: trimmedTitle,
+          body: trimmedBody,
+          idempotencyKey,
+        });
+        setResult(outcome);
+        if (outcome.ok) {
+          resetForm();
+          onSaved?.();
+        }
+        return;
+      }
+
+      if (!parsedTime) return; // canSubmit already guards this; narrows for TypeScript.
+
+      const scheduleInput = {
         audienceKind,
         targetPersonIds: audienceKind === "everyone" ? [] : selectedIds,
         title: trimmedTitle,
         body: trimmedBody,
-        idempotencyKey,
-      });
-      setResult(outcome);
+        scheduledDate,
+        scheduledHour: parsedTime.hour,
+        scheduledMinute: parsedTime.minute,
+      };
+
+      const outcome = editingItem
+        ? await editScheduledBroadcastAction(editingItem.id, scheduleInput)
+        : await createScheduledBroadcastAction({ ...scheduleInput, idempotencyKey });
+
+      setScheduleResult(outcome);
       if (outcome.ok) {
-        setTitle("");
-        setBody("");
-        setSelectedIds([]);
-        setQuery("");
-        setIdempotencyKey(newIdempotencyKey());
+        resetForm();
+        onSaved?.();
+        onCancelEdit?.();
       }
     });
   }
@@ -174,11 +284,38 @@ export function ManagerBroadcastComposer({ roster, adoptionPeople }: ManagerBroa
     <Panel variant="panel" data-testid="manager-broadcast-composer">
       <div className="flex flex-col gap-4">
         <div>
-          <h3 className="text-sm font-semibold text-foreground">📣 שליחת התראה</h3>
+          <h3 className="text-sm font-semibold text-foreground">
+            {editingItem ? "✏️ עריכת התראה מתוזמנת" : "📣 שליחת התראה"}
+          </h3>
           <p className="mt-0.5 text-xs text-muted">
             שולח/ת התראה לתיבת ההתראות של אנשי הצוות שנבחרו, וגם כ-Push למי שהפעיל/ה זאת.
           </p>
         </div>
+
+        {!editingItem ? (
+          <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="מתי לשלוח">
+            {SEND_MODE_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                role="radio"
+                aria-checked={sendMode === option.value}
+                onClick={() => setSendMode(option.value)}
+                className={`rounded-full px-3 py-1.5 text-sm font-medium ring-1 transition-colors duration-150 ${
+                  sendMode === option.value
+                    ? "bg-primary text-primary-foreground ring-primary"
+                    : "bg-overlay-soft text-foreground ring-border hover:bg-overlay-strong"
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <button type="button" onClick={onCancelEdit} className="self-start text-xs font-medium text-muted underline">
+            ביטול עריכה
+          </button>
+        )}
 
         <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="למי לשלוח">
           {AUDIENCE_OPTIONS.map((option) => (
@@ -272,6 +409,34 @@ export function ManagerBroadcastComposer({ roster, adoptionPeople }: ManagerBroa
           </label>
         </div>
 
+        {sendMode === "schedule" ? (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-muted">תאריך</span>
+              <input
+                type="date"
+                value={scheduledDate}
+                onChange={(event) => setScheduledDate(event.target.value)}
+                aria-label="תאריך השליחה"
+                className="rounded-lg bg-overlay-soft px-3 py-1.5 text-sm text-foreground ring-1 ring-border focus:outline-none"
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-muted">שעה</span>
+              <input
+                type="time"
+                value={scheduledTime}
+                onChange={(event) => setScheduledTime(event.target.value)}
+                aria-label="שעת השליחה"
+                className="rounded-lg bg-overlay-soft px-3 py-1.5 text-sm text-foreground ring-1 ring-border focus:outline-none"
+              />
+            </label>
+            {scheduleSummary ? (
+              <p className="text-xs font-medium text-primary sm:col-span-2">תוזמן ל{scheduleSummary}</p>
+            ) : null}
+          </div>
+        ) : null}
+
         {trimmedTitle || trimmedBody ? (
           <div className="rounded-xl bg-overlay-faint p-3 ring-1 ring-border">
             <p className="text-[11px] font-medium text-muted-2">תצוגה מקדימה</p>
@@ -291,6 +456,11 @@ export function ManagerBroadcastComposer({ roster, adoptionPeople }: ManagerBroa
               <li className="text-warning">{summary.unresolvedCount} לא ניתנים לשליחה כרגע</li>
             ) : null}
           </ul>
+          {sendMode === "schedule" ? (
+            <p className="mt-1 text-[11px] text-muted-2">
+              ההערכה משקפת את המצב הנוכחי בלבד -- היא עשויה להשתנות עד למועד השליחה בפועל.
+            </p>
+          ) : null}
         </div>
 
         <div>
@@ -301,7 +471,13 @@ export function ManagerBroadcastComposer({ roster, adoptionPeople }: ManagerBroa
             aria-busy={isPending}
             className="rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors duration-150 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {isPending ? "שולח/ת…" : "שלח התראה"}
+            {isPending
+              ? "שולח/ת…"
+              : editingItem
+                ? "שמירת שינויים"
+                : sendMode === "now"
+                  ? "שלח התראה"
+                  : "שמירת תזמון"}
           </button>
         </div>
 
@@ -320,6 +496,29 @@ export function ManagerBroadcastComposer({ roster, adoptionPeople }: ManagerBroa
           ) : (
             <div className="rounded-xl bg-critical/10 p-3 text-sm text-critical ring-1 ring-critical/25">
               {errorLabel(result.error)}
+            </div>
+          )
+        ) : null}
+
+        {scheduleResult ? (
+          scheduleResult.ok ? (
+            <div className="rounded-xl bg-success/10 p-3 text-sm text-success ring-1 ring-success/25">
+              <p className="font-semibold">
+                ✅ ההתראה תוזמנה
+                {formatScheduledBroadcastMoment(
+                  scheduleResult.item.scheduledLocalDate,
+                  scheduleResult.item.scheduledLocalMinuteOfDay,
+                )
+                  ? ` ל${formatScheduledBroadcastMoment(
+                      scheduleResult.item.scheduledLocalDate,
+                      scheduleResult.item.scheduledLocalMinuteOfDay,
+                    )}`
+                  : ""}
+              </p>
+            </div>
+          ) : (
+            <div className="rounded-xl bg-critical/10 p-3 text-sm text-critical ring-1 ring-critical/25">
+              {errorLabel(scheduleResult.error)}
             </div>
           )
         ) : null}
