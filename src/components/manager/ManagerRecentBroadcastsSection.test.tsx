@@ -236,7 +236,7 @@ describe("ManagerRecentBroadcastsSection -- polling survives a transient failure
     expect(getRecentManagerBroadcastsAction).toHaveBeenCalledTimes(3);
   });
 
-  it("a typed, permanent ok:false result still stops retrying, unlike a thrown failure", async () => {
+  it("a typed, permanent ok:false result FAILS CLOSED -- clears previously-loaded items and stops retrying, unlike a thrown failure", async () => {
     vi.useFakeTimers();
     getRecentManagerBroadcastsAction
       .mockResolvedValueOnce({ ok: true, items: [RECENT_ITEM] })
@@ -244,10 +244,19 @@ describe("ManagerRecentBroadcastsSection -- polling survives a transient failure
 
     render(<ManagerRecentBroadcastsSection reloadToken={0} pollWhileActive={true} />);
 
-    await vi.waitFor(() => expect(getRecentManagerBroadcastsAction).toHaveBeenCalledTimes(1));
+    // 1. loads recent items successfully.
+    await vi.waitFor(() => expect(screen.getByText("נשלחו לאחרונה")).toBeInTheDocument());
+
+    // 2. the next poll returns a typed permanent failure.
     await vi.advanceTimersByTimeAsync(17_000);
     await vi.waitFor(() => expect(getRecentManagerBroadcastsAction).toHaveBeenCalledTimes(2));
 
+    // 3. the existing content disappears -- unlike a transient throw, a permanent
+    // manager-auth failure must not leave stale, possibly-unauthorized data visible.
+    await vi.waitFor(() => expect(screen.queryByText("נשלחו לאחרונה")).toBeNull());
+    expect(screen.queryByText("עדכון")).toBeNull();
+
+    // 4. no further polling occurs.
     await vi.advanceTimersByTimeAsync(60_000);
     expect(getRecentManagerBroadcastsAction).toHaveBeenCalledTimes(2);
   });

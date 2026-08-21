@@ -71,10 +71,18 @@ export function ManagerRecentBroadcastsSection({ reloadToken, pollWhileActive }:
           if (pollWhileActive) {
             timeoutId = setTimeout(load, POLL_INTERVAL_MS);
           }
+        } else {
+          // A typed `result.ok === false` is a genuinely PERMANENT
+          // manager-auth state (`forbidden`, `unauthenticated`,
+          // `unmapped`, `ambiguous_identity`, `missing_email` -- the
+          // only statuses `loadManagerPersonnelContext` can ever
+          // return), unlike a thrown failure. Fails closed: any
+          // previously-loaded items are cleared rather than left
+          // showing stale data the caller may no longer be authorized to
+          // see, and no retry is scheduled -- retrying wouldn't change a
+          // permanent state anyway.
+          setItems(null);
         }
-        // A typed `result.ok === false` (a genuinely permanent manager-
-        // auth state) simply stops here -- no retry scheduled, and
-        // `items` is left exactly as it was (see the docstring above).
       } catch {
         if (!cancelled) {
           // Deliberately no early return / state wipe here -- `items`
@@ -96,12 +104,14 @@ export function ManagerRecentBroadcastsSection({ reloadToken, pollWhileActive }:
     };
   }, [reloadToken, pollWhileActive]);
 
-  // A transient background-poll failure must never hide already-loaded
-  // items (see the effect's own docstring above) -- there is no error
-  // state to gate on here at all, deliberately. `items === null`
-  // (nothing has ever loaded successfully yet, including right after an
-  // initial failure) and a genuine successful empty result both still
-  // render nothing, exactly as before.
+  // No error state to gate on here at all, deliberately -- `items` itself
+  // is the single source of truth for what to render. A transient throw
+  // never touches it (see the effect above), so already-loaded items
+  // stay visible through a background hiccup; a typed permanent failure
+  // explicitly `setItems(null)`s (fail closed), which is why this same
+  // `items === null` check also correctly hides content in that case. A
+  // genuine successful empty result renders nothing too, exactly as
+  // before.
   if (items === null || items.length === 0) return null;
 
   return (
