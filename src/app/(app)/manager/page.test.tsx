@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import type {
   ManagerAbsenceEntry,
   ManagerDutyEntry,
@@ -960,10 +960,11 @@ describe("ManagerPage — Logins & Notifications (התחברויות והתרא�
       ),
     );
     await renderPage({ category: "logins" });
-    expect(screen.getByText("טרם נכנסו למערכת")).toBeInTheDocument();
-    expect(screen.getByText("מרטין בדיקה")).toBeInTheDocument();
-    expect(screen.getByText("נכנסו למערכת אך לא הפעילו התראות")).toBeInTheDocument();
-    expect(screen.getByText("איתן דוגמה")).toBeInTheDocument();
+    const adoptionSection = within(screen.getByTestId("manager-adoption-section"));
+    expect(adoptionSection.getByText("טרם נכנסו למערכת")).toBeInTheDocument();
+    expect(adoptionSection.getByText("מרטין בדיקה")).toBeInTheDocument();
+    expect(adoptionSection.getByText("נכנסו למערכת אך לא הפעילו התראות")).toBeInTheDocument();
+    expect(adoptionSection.getByText("איתן דוגמה")).toBeInTheDocument();
   });
 
   it("frames a missing/ambiguous email as a roster data issue, distinct from 'hasn't logged in'", async () => {
