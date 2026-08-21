@@ -480,12 +480,22 @@ body {
   50% { transform: translateX(6px); }
 }
 
+/* The login hero's decorative clock face sweep hand -- a continuous,
+   direction-agnostic full rotation with NO relation to the real time (see
+   `LoginScheduleRing`, which never derives this from `Date`/the Jerusalem
+   clock). A slow 20s revolution reads as calm, not a spinning radar. */
+@keyframes login-clock-sweep {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 .animate-pulse-dot { animation: pulse-dot 2.4s ease-in-out infinite; }
 .animate-pulse-ring { animation: pulse-ring 2.4s cubic-bezier(0.25, 0.6, 0.35, 1) infinite; }
 .animate-fade-up { animation: fade-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }
 .animate-breathe { animation: breathe 3.4s ease-in-out infinite; }
 .animate-issue-pulse { animation: issue-pulse 2.8s ease-in-out infinite; }
 .animate-login-now-drift { animation: login-now-drift 9s ease-in-out infinite; }
+.animate-login-clock-sweep { animation: login-clock-sweep 20s linear infinite; }
 
 .skeleton {
   background-image: linear-gradient(
@@ -505,6 +515,7 @@ body {
   .animate-breathe,
   .animate-issue-pulse,
   .animate-login-now-drift,
+  .animate-login-clock-sweep,
   .skeleton {
     animation: none !important;
   }

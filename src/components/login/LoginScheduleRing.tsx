@@ -116,6 +116,26 @@ const TICKS = Array.from({ length: TICK_COUNT }, (_, index) => {
   };
 });
 
+/**
+ * The login clock's decorative rotating sweep hand -- radar/sweep-style,
+ * spinning forever via the `animate-login-clock-sweep` CSS keyframe (see
+ * globals.css, which also disables it under `prefers-reduced-motion`).
+ * Deliberately NOT a real clock hand: no relation to the actual time, a
+ * shift, a duty, or any schedule data -- purely decorative motion, same
+ * spirit as `TICKS`/`FLOATING_CARDS` above. Geometry (a thin bright edge
+ * plus a soft fading trail wedge, both reaching almost to the tick ring)
+ * is computed once at module scope, same convention as `TICKS`.
+ */
+const SWEEP_HAND_RADIUS = 92;
+const SWEEP_HAND_TRAIL_DEGREES = 20;
+function sweepHandPoint(angleDegrees: number) {
+  const angle = (angleDegrees * Math.PI) / 180;
+  return { x: 100 + SWEEP_HAND_RADIUS * Math.sin(angle), y: 100 - SWEEP_HAND_RADIUS * Math.cos(angle) };
+}
+const SWEEP_HAND_LEAD = sweepHandPoint(0);
+const SWEEP_HAND_TRAIL = sweepHandPoint(-SWEEP_HAND_TRAIL_DEGREES);
+const SWEEP_HAND_TRAIL_PATH = `M 100 100 L ${SWEEP_HAND_TRAIL.x} ${SWEEP_HAND_TRAIL.y} A ${SWEEP_HAND_RADIUS} ${SWEEP_HAND_RADIUS} 0 0 1 ${SWEEP_HAND_LEAD.x} ${SWEEP_HAND_LEAD.y} Z`;
+
 interface LoginScheduleRingProps {
   /** The mobile-only centered content (the stacked `LoginClockReadout`) -- desktop shows the glowing brand mark instead, since the desktop clock readout already lives in the text column. */
   children: ReactNode;
@@ -156,6 +176,35 @@ export function LoginScheduleRing({ children }: LoginScheduleRingProps) {
               strokeLinecap="round"
             />
           ))}
+          <defs>
+            <linearGradient
+              id="loginClockSweepTrail"
+              gradientUnits="userSpaceOnUse"
+              x1={SWEEP_HAND_TRAIL.x}
+              y1={SWEEP_HAND_TRAIL.y}
+              x2={SWEEP_HAND_LEAD.x}
+              y2={SWEEP_HAND_LEAD.y}
+            >
+              <stop offset="0%" stopColor="#8ab4d6" stopOpacity="0" />
+              <stop offset="100%" stopColor="#8ab4d6" stopOpacity="0.32" />
+            </linearGradient>
+            <linearGradient id="loginClockSweepHand" gradientUnits="userSpaceOnUse" x1="100" y1="100" x2={SWEEP_HAND_LEAD.x} y2={SWEEP_HAND_LEAD.y}>
+              <stop offset="0%" stopColor="#bcd7ec" stopOpacity="0" />
+              <stop offset="100%" stopColor="#bcd7ec" stopOpacity="0.6" />
+            </linearGradient>
+          </defs>
+          <g style={{ transformOrigin: "100px 100px" }} className="animate-login-clock-sweep">
+            <path d={SWEEP_HAND_TRAIL_PATH} fill="url(#loginClockSweepTrail)" />
+            <line
+              x1="100"
+              y1="100"
+              x2={SWEEP_HAND_LEAD.x}
+              y2={SWEEP_HAND_LEAD.y}
+              stroke="url(#loginClockSweepHand)"
+              strokeWidth="1.25"
+              strokeLinecap="round"
+            />
+          </g>
         </svg>
 
         <div className="absolute inset-0 flex items-center justify-center">
