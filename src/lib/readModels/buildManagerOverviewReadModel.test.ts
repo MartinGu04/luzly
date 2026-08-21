@@ -735,7 +735,7 @@ describe("buildManagerOverviewReadModel — selected person's תקשא\"ס-only 
     const model = buildModel({
       events,
       potentialAllocations: [
-        allocation({ date: "2026-08-20", dutyFamily: "full_kitchen", slot: 3, sourceSlot: 3, columnLabel: "מטבח מלא 3", sourceAllocationLabel: MARTIN.name }),
+        allocation({ date: "2026-08-20", dutyFamily: "full_kitchen", slot: null, sourceSlot: 3, columnLabel: "מטבח מלא 3", sourceAllocationLabel: MARTIN.name }),
       ],
       selectedPersonId: MARTIN.id,
       now: { date: "2026-08-13", minuteOfDay: 600 },

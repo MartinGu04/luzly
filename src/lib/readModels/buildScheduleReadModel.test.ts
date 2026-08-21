@@ -511,7 +511,7 @@ describe("buildManagerScheduleReadModel — 'self'/'person' perspectives: תקש
       monthDates: AUGUST_DATES,
       requestedPersonId: DANIEL.id,
       potentialAllocations: [
-        allocation({ date: "2026-08-20", dutyFamily: "full_kitchen", slot: 3, sourceSlot: 3, columnLabel: "מטבח מלא 3" }),
+        allocation({ date: "2026-08-20", dutyFamily: "full_kitchen", slot: null, sourceSlot: 3, columnLabel: "מטבח מלא 3" }),
       ],
     });
     const dutyEvents = model.personal?.calendarEvents.filter((e) => e.category === "duty") ?? [];

@@ -1160,7 +1160,7 @@ describe("dutyBlocks — תקשא\"ס period (Potential) sources are a GAP-FILLE
   it("3. a real daily_kitchen duty + a Potential full_kitchen allocation on the SAME date -- personal duty blocks show ONLY the real daily_kitchen, the real observed 'מטבח יומי' + 'מטבח מלא 3' case", () => {
     const events = [myDuty({ date: "2026-08-20", dutyFamily: "daily_kitchen", slot: null, title: "מטבח יומי" })];
     const potentialAllocations = [
-      allocation({ date: "2026-08-20", dutyFamily: "full_kitchen", slot: 3, sourceSlot: 3, columnLabel: "מטבח מלא 3" }),
+      allocation({ date: "2026-08-20", dutyFamily: "full_kitchen", slot: null, sourceSlot: 3, columnLabel: "מטבח מלא 3" }),
     ];
     const model = build({ events, potentialAllocations });
     expect(model.dutyBlocks).toEqual([expect.objectContaining({ dutyFamily: "daily_kitchen", certainty: "confirmed" })]);
@@ -1181,8 +1181,8 @@ describe("dutyBlocks — תקשא\"ס period (Potential) sources are a GAP-FILLE
   it("6. a real internal duty on only ONE date suppresses Potential only for THAT date -- an adjacent Potential-only date still fills in as its own (unmerged) block", () => {
     const events = [myDuty({ date: "2026-08-20", dutyFamily: "guard", slot: 1 })];
     const potentialAllocations = [
-      allocation({ date: "2026-08-20", dutyFamily: "full_kitchen", slot: 1, sourceSlot: 1, columnLabel: "מטבח מלא 1" }),
-      allocation({ date: "2026-08-21", dutyFamily: "full_kitchen", slot: 1, sourceSlot: 1, columnLabel: "מטבח מלא 1" }),
+      allocation({ date: "2026-08-20", dutyFamily: "full_kitchen", slot: null, sourceSlot: 1, columnLabel: "מטבח מלא 1" }),
+      allocation({ date: "2026-08-21", dutyFamily: "full_kitchen", slot: null, sourceSlot: 1, columnLabel: "מטבח מלא 1" }),
     ];
     const model = build({ events, potentialAllocations });
     expect(model.dutyBlocks).toEqual(
@@ -1291,7 +1291,7 @@ describe("calendarEvents / currentAssignments / nextAssignmentGroup — תקשא
   it("3 & 4. a real daily_kitchen duty + a mismatched Potential full_kitchen allocation on the SAME date -- personal calendar shows ONLY מטבח יומי, the real observed case", () => {
     const events = [myDuty({ date: "2026-08-20", dutyFamily: "daily_kitchen", slot: null, title: "מטבח יומי" })];
     const potentialAllocations = [
-      allocation({ date: "2026-08-20", dutyFamily: "full_kitchen", slot: 3, sourceSlot: 3, columnLabel: "מטבח מלא 3" }),
+      allocation({ date: "2026-08-20", dutyFamily: "full_kitchen", slot: null, sourceSlot: 3, columnLabel: "מטבח מלא 3" }),
     ];
     const model = build({ events, potentialAllocations });
     const duties = model.calendarEvents.filter((e) => e.category === "duty");
@@ -1312,8 +1312,8 @@ describe("calendarEvents / currentAssignments / nextAssignmentGroup — תקשא
   it("6. a real internal duty on only ONE date never suppresses an adjacent Potential-only date's own calendar entry", () => {
     const events = [myDuty({ date: "2026-08-20", dutyFamily: "guard", slot: 1 })];
     const potentialAllocations = [
-      allocation({ date: "2026-08-20", dutyFamily: "full_kitchen", slot: 1, sourceSlot: 1, columnLabel: "מטבח מלא 1" }),
-      allocation({ date: "2026-08-21", dutyFamily: "full_kitchen", slot: 1, sourceSlot: 1, columnLabel: "מטבח מלא 1" }),
+      allocation({ date: "2026-08-20", dutyFamily: "full_kitchen", slot: null, sourceSlot: 1, columnLabel: "מטבח מלא 1" }),
+      allocation({ date: "2026-08-21", dutyFamily: "full_kitchen", slot: null, sourceSlot: 1, columnLabel: "מטבח מלא 1" }),
     ];
     const model = build({ events, potentialAllocations });
     const duties = model.calendarEvents.filter((e) => e.category === "duty");

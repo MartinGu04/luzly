@@ -10,8 +10,10 @@ import { buildPersonalScheduleReadModel } from "./buildPersonalScheduleReadModel
 /**
  * Real-world regression: a person's actual internal schedule had a
  * "מטבח יומי" (daily_kitchen) duty, while the Potential/תקשא"ס source
- * separately required a "מטבח מלא 3" (full_kitchen, slot 3) for the same
- * date -- a genuinely DIFFERENT duty family. The personal calendar used to
+ * separately required a "מטבח מלא 3" (full_kitchen, Potential column/
+ * `sourceSlot` 3 -- kitchen families never carry a numbered internal
+ * `slot`, only guard/reserve do) for the same date -- a genuinely
+ * DIFFERENT duty family. The personal calendar used to
  * show BOTH (the real duty, plus a synthetic tentative "מטבח מלא 3" duty
  * built from the mismatched Potential allocation), even though Potential
  * is only organizational/source planning data, never a second confirmed
@@ -64,10 +66,13 @@ describe("Potential/תקשא\"ס allocations stay out of the personal calendar w
     absenceKind: null,
   };
 
+  // full_kitchen (like all kitchen/rasar/oxid families) never carries a
+  // numbered internal `slot` -- only guard/reserve do. The Potential
+  // column order lives in `sourceSlot` alone, per `lib/parsers/potential.ts`.
   const mismatchedFullKitchenAllocation: PotentialAllocation = {
     date: "2026-08-20",
     dutyFamily: "full_kitchen",
-    slot: 3,
+    slot: null,
     sourceSlot: 3,
     columnLabel: "מטבח מלא 3",
     sourceAllocationLabel: PERSON.name,
