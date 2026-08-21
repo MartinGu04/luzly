@@ -14,6 +14,7 @@ import {
   type OperationalIssue,
 } from "@/lib/domain/operationalIssues";
 import type { PotentialAllocation } from "@/lib/domain/potentialAllocation";
+import { buildPotentialDutyEvents } from "@/lib/domain/potentialDutyEvents";
 import { analyzeShiftCounterparts, buildShiftRoster, findShiftGroupEvents } from "@/lib/domain/shiftCoverage";
 import {
   nextShiftPeriod,
@@ -51,28 +52,37 @@ export interface BuildPersonalScheduleReadModelInput {
   /**
    * Combined H1 + H2 Potential/תקשא"ס allocations, structurally parsed
    * (`lib/parsers/potential.ts`), across every person — never pre-filtered
-   * by the caller. Optional/defaults to empty.
-   *
-   * Accepted here ONLY because every current caller
-   * (`personalSchedule.ts`, `buildScheduleReadModel.ts`'s "self"/"person"
-   * perspectives, `buildManagerOverviewReadModel.ts`'s `selectedPerson`)
-   * already threads the SAME allocations through to build OTHER,
-   * genuinely manager-facing projections in the same call
-   * (`buildPotentialDutyEventsForRoster`, `reconcilePotentialAllocations`)
-   * — keeping this field on the input type means none of those callers
-   * need restructuring. This function's OWN output deliberately never
-   * reads it: a synthetic duty built purely from Potential/organizational
-   * planning data is never folded into any personal-facing field below
+   * by the caller. Optional/defaults to empty so every existing caller and
+   * test keeps working unchanged. Feeds every duty-display section below
    * (`todayEvents`/`upcomingEvents`/`calendarEvents`/`currentAssignments`/
-   * `nextAssignmentGroup`/`dutyBlocks`/`dutyActions`) — see
-   * `buildPotentialDutyEvents`'s own docs for the (roster-facing-only)
-   * conversion this used to also feed into personal display, and this
-   * function's own body below for why that stopped: a real observed case
-   * (an actual internal "מטבח יומי" duty coexisting with a mismatched
-   * "מטבח מלא 3" Potential requirement) used to show as two separate
-   * duties on the person's own calendar, even though Potential is only
-   * organizational/source planning data, never a second confirmed
-   * schedule entry.
+   * `nextAssignmentGroup`/`dutyBlocks`/`dutyActions`) — but never `issues`,
+   * `currentShiftContexts`/`nextShiftContexts` (coverage/roster), which
+   * deliberately keep reading the raw, unmodified `events`.
+   *
+   * A synthetic Potential duty is a GAP-FILLER only, never a second source
+   * of truth once a real one exists for that person/date: on top of
+   * `buildPotentialDutyEvents`'s own exact `(date, dutyFamily, slot)`
+   * dedup, this function additionally drops any synthetic duty for a date
+   * where the person already has ANY real internal `category === "duty"`
+   * Event at all -- real internal duty data is authoritative for a
+   * person/date, full stop, even when its `dutyFamily` doesn't match the
+   * Potential requirement (see `excludePotentialDutiesShadowedByRealDuty`'s
+   * own docs for the real observed case this precedence rule fixes: an
+   * actual internal "מטבח יומי"/daily_kitchen duty coexisting with a
+   * mismatched "מטבח מלא 3"/full_kitchen Potential requirement used to show
+   * as two separate duties on the person's own calendar). A person with NO
+   * real internal duty at all on a date still gets their תקשא"ס-only duty
+   * filled in here, exactly as before -- this is a precedence rule, never
+   * a blanket exclusion of Potential from personal display.
+   *
+   * This precedence rule is deliberately local to THIS function, never
+   * folded into `buildPotentialDutyEvents`/`buildPotentialDutyEventsForRoster`
+   * themselves -- roster-wide, manager-facing callers (Manager Overview's
+   * and the "כולם" calendar's own duty completeness lists) keep the
+   * original per-slot-only dedup unchanged, and
+   * `reconcilePotentialAllocations` (missing/covered requirement
+   * detection, source-conflict logic) is entirely untouched -- neither is
+   * built from this function's output.
    */
   potentialAllocations?: readonly PotentialAllocation[];
 }
@@ -89,25 +99,36 @@ export interface BuildPersonalScheduleReadModelInput {
 export function buildPersonalScheduleReadModel(
   input: BuildPersonalScheduleReadModelInput,
 ): PersonalScheduleReadModel {
-  const { person, people, events, shiftSchedule, fetchedAt, now } = input;
+  const { person, people, events, shiftSchedule, fetchedAt, now, potentialAllocations = [] } = input;
+
+  const personEvents = events.filter((event) => event.personId === person.id);
 
   /**
-   * Every personal-facing field below is built from `personEvents` alone —
-   * the person's own REAL, confirmed internal Events, never a synthetic
-   * duty invented from Potential/תקשא"ס allocations (see
-   * `BuildPersonalScheduleReadModelInput.potentialAllocations`'s own doc
-   * comment for why: Potential is organizational/source planning data, not
-   * a second confirmed schedule, so it must never look like an actual
-   * assignment on the person's own calendar/duties). Potential-derived
-   * duty completeness remains fully available where it's genuinely
-   * manager-facing — `buildPotentialDutyEventsForRoster` (Manager
-   * Overview's and the "כולם" calendar's own roster-wide duties list) and
-   * `reconcilePotentialAllocations` (missing/covered requirement
-   * detection, source-conflict logic) — neither of which is built from
-   * this function's output.
+   * A normal department person's duties already have a real Event for
+   * every occurrence, so `buildPotentialDutyEvents` drops every matching
+   * (exact date+dutyFamily+slot) Potential allocation as already-covered.
+   * `excludePotentialDutiesShadowedByRealDuty` goes one step further,
+   * dropping ANY remaining synthetic duty for a date where the person
+   * already has SOME real internal duty (even a different family/slot) --
+   * see its own doc comment for why. What's left is only a genuine gap:
+   * a date with a Potential requirement and NO real internal duty at all,
+   * which still flows into every place this read model already displays
+   * that person's own duties -- the calendar, today/upcoming, and
+   * current/next assignments (PR #60 originally wired this into
+   * `dutyBlocks`/`dutyActions` only; this is the same conversion, just
+   * consumed more broadly) -- never JUST the personal Duties page.
+   * `issues`/shift counterpart context/coverage below deliberately keep
+   * reading the RAW `events` (every person, unmodified) instead of this
+   * per-person merged list — a synthetic duty Event only ever represents
+   * duty data for ITS OWN person's display, never a second source of
+   * shift/coverage truth for anyone.
    */
-  const personEvents = events.filter((event) => event.personId === person.id);
-  const sortedPersonEvents = [...personEvents].sort((a, b) => compareEventsForDisplay(a, b, shiftSchedule));
+  const potentialDutyEvents = excludePotentialDutiesShadowedByRealDuty(
+    buildPotentialDutyEvents(potentialAllocations, person, people, personEvents),
+    personEvents,
+  );
+  const personDisplayEvents = [...personEvents, ...potentialDutyEvents];
+  const sortedPersonEvents = [...personDisplayEvents].sort((a, b) => compareEventsForDisplay(a, b, shiftSchedule));
 
   const todayEvents = sortedPersonEvents
     .filter((event) => event.date === now.date)
@@ -164,7 +185,10 @@ export function buildPersonalScheduleReadModel(
     .sort(compareIssues)
     .map(toPersonalIssue);
 
-  const dutyBlocks = buildDutyBlocks(personEvents);
+  // Merged into the SAME `buildDutyBlocks` call (never a second grouping
+  // implementation) so a duty that spans both sources on consecutive dates
+  // still groups into one real block instead of two artificial ones.
+  const dutyBlocks = buildDutyBlocks(personDisplayEvents);
   const dutyActions = deriveDutyActions(dutyBlocks).filter((action) => action.date >= now.date);
 
   return {
@@ -183,6 +207,48 @@ export function buildPersonalScheduleReadModel(
     dutyBlocks: dutyBlocks.map(toDutyBlockView),
     dutyActions: dutyActions.map(toDutyActionView),
   };
+}
+
+/**
+ * PERSONAL-read-model-only precedence rule, applied ON TOP OF
+ * `buildPotentialDutyEvents`'s own exact `(date, dutyFamily, slot)` dedup:
+ * a synthetic Potential duty is excluded whenever the person already has
+ * ANY real internal `category === "duty"` Event on that exact date --
+ * regardless of whether its `dutyFamily`/`slot` actually matches the
+ * Potential requirement.
+ *
+ * Real internal duty data is authoritative for a person/date, full stop.
+ * The real observed case this fixes: an actual internal "מטבח יומי"
+ * (`daily_kitchen`) duty coexisting with a mismatched "מטבח מלא 3"
+ * (`full_kitchen`) Potential requirement for the same person/date used to
+ * show as two separate duties on the person's own calendar, even though
+ * Potential is only organizational/source planning data, never a second
+ * confirmed schedule entry -- `buildPotentialDutyEvents`'s own dedup never
+ * caught this because it only matches an EXACT `dutyFamily`+`slot` triple,
+ * by design (see its own docs), not "any duty this date".
+ *
+ * A person with NO real internal duty at all on a date is completely
+ * unaffected -- their תקשא"ס-only duty still fills the gap exactly as
+ * before; this only ever narrows an EXISTING synthetic duty list, never
+ * widens it. Source-based, not certainty-based: a genuinely tentative
+ * REAL internal duty (parsed with a trailing "?") still counts as "a real
+ * duty this date" here -- `event.category === "duty"` alone decides this,
+ * never `event.certainty`.
+ *
+ * Deliberately local to `buildPersonalScheduleReadModel` -- never folded
+ * into `buildPotentialDutyEvents`/`buildPotentialDutyEventsForRoster`
+ * themselves, so roster-wide manager-facing callers (Manager Overview's
+ * and the "כולם" calendar's own duty completeness lists) keep their
+ * original per-slot-only dedup unchanged.
+ */
+function excludePotentialDutiesShadowedByRealDuty(
+  potentialDutyEvents: readonly Event[],
+  personEvents: readonly Event[],
+): Event[] {
+  const datesWithRealDuty = new Set(
+    personEvents.filter((event) => event.category === "duty").map((event) => event.date),
+  );
+  return potentialDutyEvents.filter((event) => !datesWithRealDuty.has(event.date));
 }
 
 function isAssignmentEvent(event: Event): boolean {

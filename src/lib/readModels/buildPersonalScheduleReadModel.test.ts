@@ -1134,8 +1134,22 @@ describe("dutyBlocks / dutyActions", () => {
   });
 });
 
-describe("dutyBlocks — תקשא\"ס period (Potential) sources are NEVER folded into the personal read model", () => {
-  it("a normal department person's duty (a real Event) is completely unaffected by an overlapping Potential allocation", () => {
+describe("dutyBlocks — תקשא\"ס period (Potential) sources are a GAP-FILLER, never a second source once a real duty exists", () => {
+  it("1. a person with NO internal duty at all still gets their תקשא\"ס-only duty on their own Duties page, tentative", () => {
+    const potentialAllocations = [allocation({ date: "2026-08-20", dutyFamily: "guard", slot: 1 })];
+    const model = build({ events: [], potentialAllocations });
+    expect(model.dutyBlocks).toEqual([
+      expect.objectContaining({
+        dutyFamily: "guard",
+        slot: 1,
+        startDate: "2026-08-20",
+        endDate: "2026-08-20",
+        certainty: "tentative",
+      }),
+    ]);
+  });
+
+  it("2. a real internal duty + an identical (exact date+family+slot) Potential duty -- one real block, no duplicate", () => {
     const events = [myDuty({ date: "2026-08-20", dutyFamily: "guard", slot: 1 })];
     const potentialAllocations = [allocation({ date: "2026-08-20", dutyFamily: "guard", slot: 1 })];
     const model = build({ events, potentialAllocations });
@@ -1143,19 +1157,7 @@ describe("dutyBlocks — תקשא\"ס period (Potential) sources are NEVER folde
     expect(model.dutyBlocks[0].certainty).toBe("confirmed");
   });
 
-  it("a person with NO internal Event at all gets NO duty block from a תקשא\"ס-only allocation -- Potential is never presented as an actual personal assignment", () => {
-    const potentialAllocations = [allocation({ date: "2026-08-20", dutyFamily: "guard", slot: 1 })];
-    const model = build({ events: [], potentialAllocations });
-    expect(model.dutyBlocks).toEqual([]);
-  });
-
-  it("the same holds for a past-dated allocation -- no synthetic history block either", () => {
-    const potentialAllocations = [allocation({ date: "2026-08-01", dutyFamily: "guard", slot: 1 })];
-    const model = build({ events: [], potentialAllocations }); // localNow defaults to 2026-08-12
-    expect(model.dutyBlocks).toEqual([]);
-  });
-
-  it("a duty family MISMATCH between the real internal Event and a Potential allocation on the same date never produces a second pseudo-duty block -- the real observed 'מטבח יומי' + 'מטבח מלא 3' case", () => {
+  it("3. a real daily_kitchen duty + a Potential full_kitchen allocation on the SAME date -- personal duty blocks show ONLY the real daily_kitchen, the real observed 'מטבח יומי' + 'מטבח מלא 3' case", () => {
     const events = [myDuty({ date: "2026-08-20", dutyFamily: "daily_kitchen", slot: null, title: "מטבח יומי" })];
     const potentialAllocations = [
       allocation({ date: "2026-08-20", dutyFamily: "full_kitchen", slot: 3, sourceSlot: 3, columnLabel: "מטבח מלא 3" }),
@@ -1164,13 +1166,83 @@ describe("dutyBlocks — תקשא\"ס period (Potential) sources are NEVER folde
     expect(model.dutyBlocks).toEqual([expect.objectContaining({ dutyFamily: "daily_kitchen", certainty: "confirmed" })]);
   });
 
-  it("a duty spanning both sources on consecutive dates never merges into a mixed-certainty block -- only the real date remains", () => {
+  it("5. a multi-day תקשא\"ס-only duty (no internal duty on ANY of its dates) still appears on every one of its correct dates", () => {
+    const potentialAllocations = [
+      allocation({ date: "2026-08-20", dutyFamily: "guard", slot: 1 }),
+      allocation({ date: "2026-08-21", dutyFamily: "guard", slot: 1 }),
+      allocation({ date: "2026-08-22", dutyFamily: "guard", slot: 1 }),
+    ];
+    const model = build({ events: [], potentialAllocations });
+    expect(model.dutyBlocks).toEqual([
+      expect.objectContaining({ startDate: "2026-08-20", endDate: "2026-08-22", dayCount: 3, certainty: "tentative" }),
+    ]);
+  });
+
+  it("6. a real internal duty on only ONE date suppresses Potential only for THAT date -- an adjacent Potential-only date still fills in as its own (unmerged) block", () => {
+    const events = [myDuty({ date: "2026-08-20", dutyFamily: "guard", slot: 1 })];
+    const potentialAllocations = [
+      allocation({ date: "2026-08-20", dutyFamily: "full_kitchen", slot: 1, sourceSlot: 1, columnLabel: "מטבח מלא 1" }),
+      allocation({ date: "2026-08-21", dutyFamily: "full_kitchen", slot: 1, sourceSlot: 1, columnLabel: "מטבח מלא 1" }),
+    ];
+    const model = build({ events, potentialAllocations });
+    expect(model.dutyBlocks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ dutyFamily: "guard", startDate: "2026-08-20", endDate: "2026-08-20", certainty: "confirmed" }),
+        expect.objectContaining({ dutyFamily: "full_kitchen", startDate: "2026-08-21", endDate: "2026-08-21", certainty: "tentative" }),
+      ]),
+    );
+    expect(model.dutyBlocks).toHaveLength(2);
+    // The 20th never gets a full_kitchen block -- suppressed by the real guard duty that date.
+    expect(model.dutyBlocks.some((block) => block.dutyFamily === "full_kitchen" && block.startDate === "2026-08-20")).toBe(false);
+  });
+
+  it("the same gap-filling works for history -- a past-dated allocation still produces a real block with a past endDate", () => {
+    const potentialAllocations = [allocation({ date: "2026-08-01", dutyFamily: "guard", slot: 1 })];
+    const model = build({ events: [], potentialAllocations }); // localNow defaults to 2026-08-12
+    expect(model.dutyBlocks).toEqual([
+      expect.objectContaining({ startDate: "2026-08-01", endDate: "2026-08-01" }),
+    ]);
+  });
+
+  it("short-name attribution works only through the existing safe resolver -- resolves a bare first name uniquely", () => {
+    const potentialAllocations = [allocation({ sourceAllocationLabel: "דני" })];
+    const model = build({ events: [], potentialAllocations, people: [me(), colleague()] });
+    expect(model.dutyBlocks).toHaveLength(1);
+  });
+
+  it("ambiguous short-name ownership is never guessed -- two personnel sharing a leading token produce no duty for either", () => {
+    const sharedFirstNamePerson = colleague({ id: "p_other", name: "דני אחר" });
+    const potentialAllocations = [allocation({ sourceAllocationLabel: "דני" })];
+    const model = build({
+      events: [],
+      potentialAllocations,
+      people: [me(), sharedFirstNamePerson],
+    });
+    expect(model.dutyBlocks).toHaveLength(0);
+  });
+
+  it("adding a תקשא\"ס-only duty never classifies the person as a shift worker -- Person capability flags are untouched", () => {
+    const nonShiftPerson = me({ isTechnician: false, isSupervisor: false });
+    const potentialAllocations = [
+      allocation({ sourceAllocationLabel: nonShiftPerson.name, date: "2026-08-20" }),
+    ];
+    const model = build({ person: nonShiftPerson, events: [], potentialAllocations });
+    expect(model.dutyBlocks).toHaveLength(1);
+    expect(model.person.isTechnician).toBe(false);
+    expect(model.person.isSupervisor).toBe(false);
+  });
+
+  it("a duty spanning both sources on consecutive dates (no real duty on the Potential date) merges into ONE block via the existing buildDutyBlocks grouping, not two", () => {
     const events = [myDuty({ date: "2026-08-20", dutyFamily: "guard", slot: 1 })];
     const potentialAllocations = [allocation({ date: "2026-08-21", dutyFamily: "guard", slot: 1 })];
     const model = build({ events, potentialAllocations });
-    expect(model.dutyBlocks).toEqual([
-      expect.objectContaining({ startDate: "2026-08-20", endDate: "2026-08-20", dayCount: 1, certainty: "confirmed" }),
-    ]);
+    expect(model.dutyBlocks).toHaveLength(1);
+    expect(model.dutyBlocks[0]).toMatchObject({
+      startDate: "2026-08-20",
+      endDate: "2026-08-21",
+      dayCount: 2,
+      certainty: "mixed",
+    });
   });
 
   it("omitting potentialAllocations entirely keeps existing callers/tests working unchanged", () => {
@@ -1187,32 +1259,36 @@ describe("dutyBlocks — תקשא\"ס period (Potential) sources are NEVER folde
   });
 });
 
-describe("calendarEvents / currentAssignments / nextAssignmentGroup — תקשא\"ס period (Potential) sources are NEVER folded into the personal read model", () => {
-  it("a person with only a תקשא\"ס allocation and no real internal Event sees NOTHING on their calendar for it", () => {
+describe("calendarEvents / currentAssignments / nextAssignmentGroup — תקשא\"ס period (Potential) sources are a GAP-FILLER, never a second source once a real duty exists", () => {
+  it("a non-shift person with only a תקשא\"ס duty and NO internal duty sees it on their calendar", () => {
     const nonShiftPerson = me({ isTechnician: false, isSupervisor: false });
     const potentialAllocations = [allocation({ date: "2026-08-20", dutyFamily: "guard", slot: 1 })];
     const model = build({ person: nonShiftPerson, events: [], potentialAllocations });
-    expect(model.calendarEvents).toEqual([]);
+    expect(model.calendarEvents).toEqual([
+      expect.objectContaining({ date: "2026-08-20", category: "duty", dutyFamily: "guard", slot: 1 }),
+    ]);
   });
 
-  it("a multi-day תקשא\"ס-only allocation appears on NONE of its dates on the calendar", () => {
+  it("a multi-day תקשא\"ס duty (no internal duty on any date) appears on every one of its correct dates on the calendar", () => {
     const potentialAllocations = [
       allocation({ date: "2026-08-20", dutyFamily: "guard", slot: 1 }),
       allocation({ date: "2026-08-21", dutyFamily: "guard", slot: 1 }),
       allocation({ date: "2026-08-22", dutyFamily: "guard", slot: 1 }),
     ];
     const model = build({ events: [], potentialAllocations });
-    expect(model.calendarEvents.filter((e) => e.category === "duty")).toEqual([]);
+    const dutyDates = model.calendarEvents.filter((e) => e.category === "duty").map((e) => e.date);
+    expect(dutyDates).toEqual(["2026-08-20", "2026-08-21", "2026-08-22"]);
   });
 
-  it("never becomes a currentAssignment/nextAssignmentGroup entry -- upcoming/current personal assignment semantics stay based on real assignments only", () => {
+  it("shows up in currentAssignments/nextAssignmentGroup exactly like a real duty would, when there is no real duty that date", () => {
     const potentialAllocations = [allocation({ date: "2026-08-20", dutyFamily: "guard", slot: 1 })];
     const model = build({ events: [], potentialAllocations }); // localNow defaults to 2026-08-12
-    expect(model.nextAssignmentGroup).toBeNull();
-    expect(model.currentAssignments).toEqual([]);
+    expect(model.nextAssignmentGroup?.events).toEqual([
+      expect.objectContaining({ date: "2026-08-20", category: "duty", dutyFamily: "guard" }),
+    ]);
   });
 
-  it("a real internal daily_kitchen duty remains visible while a mismatched Potential full_kitchen allocation for the same person/date does NOT appear -- the real observed case", () => {
+  it("3 & 4. a real daily_kitchen duty + a mismatched Potential full_kitchen allocation on the SAME date -- personal calendar shows ONLY מטבח יומי, the real observed case", () => {
     const events = [myDuty({ date: "2026-08-20", dutyFamily: "daily_kitchen", slot: null, title: "מטבח יומי" })];
     const potentialAllocations = [
       allocation({ date: "2026-08-20", dutyFamily: "full_kitchen", slot: 3, sourceSlot: 3, columnLabel: "מטבח מלא 3" }),
@@ -1225,7 +1301,7 @@ describe("calendarEvents / currentAssignments / nextAssignmentGroup — תקשא
     expect(model.calendarEvents.some((e) => e.dutyFamily === "full_kitchen")).toBe(false);
   });
 
-  it("a normal department person's calendar/assignments are unaffected by an overlapping allocation -- no duplicate, no change either way", () => {
+  it("a normal department person's calendar/assignments are unaffected -- no duplicate from an overlapping allocation", () => {
     const events = [myDuty({ date: "2026-08-20", dutyFamily: "guard", slot: 1 })];
     const potentialAllocations = [allocation({ date: "2026-08-20", dutyFamily: "guard", slot: 1 })];
     const model = build({ events, potentialAllocations });
@@ -1233,11 +1309,47 @@ describe("calendarEvents / currentAssignments / nextAssignmentGroup — תקשא
     expect(model.nextAssignmentGroup?.events).toHaveLength(1);
   });
 
-  it("never affects shift-only sections -- currentShiftContexts/nextShiftContexts stay empty when only an allocation was added", () => {
+  it("6. a real internal duty on only ONE date never suppresses an adjacent Potential-only date's own calendar entry", () => {
+    const events = [myDuty({ date: "2026-08-20", dutyFamily: "guard", slot: 1 })];
+    const potentialAllocations = [
+      allocation({ date: "2026-08-20", dutyFamily: "full_kitchen", slot: 1, sourceSlot: 1, columnLabel: "מטבח מלא 1" }),
+      allocation({ date: "2026-08-21", dutyFamily: "full_kitchen", slot: 1, sourceSlot: 1, columnLabel: "מטבח מלא 1" }),
+    ];
+    const model = build({ events, potentialAllocations });
+    const duties = model.calendarEvents.filter((e) => e.category === "duty");
+    expect(duties).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ date: "2026-08-20", dutyFamily: "guard" }),
+        expect.objectContaining({ date: "2026-08-21", dutyFamily: "full_kitchen" }),
+      ]),
+    );
+    expect(duties).toHaveLength(2);
+  });
+
+  it("ambiguous short-name ownership is excluded from the calendar too, not just dutyBlocks", () => {
+    const sharedFirstNamePerson = colleague({ id: "p_other", name: "דני אחר" });
+    const potentialAllocations = [allocation({ date: "2026-08-20", sourceAllocationLabel: "דני" })];
+    const model = build({ events: [], potentialAllocations, people: [me(), sharedFirstNamePerson] });
+    expect(model.calendarEvents.some((e) => e.category === "duty")).toBe(false);
+    expect(model.currentAssignments).toHaveLength(0);
+    expect(model.nextAssignmentGroup).toBeNull();
+  });
+
+  it("never affects shift-only sections -- currentShiftContexts/nextShiftContexts stay empty when only a duty was added", () => {
     const potentialAllocations = [allocation({ date: "2026-08-20", dutyFamily: "guard", slot: 1 })];
     const model = build({ events: [], potentialAllocations });
     expect(model.currentShiftContexts).toEqual([]);
     expect(model.nextShiftContexts).toEqual([]);
+  });
+
+  it("7. a PR #76 personal activity (status/other) is unaffected by this precedence rule -- still reaches the personal calendar alongside a gap-filled Potential duty", () => {
+    const potentialAllocations = [allocation({ date: "2026-08-20", dutyFamily: "guard", slot: 1 })];
+    const model = build({
+      events: [baseEvent({ date: "2026-08-20", category: "status", title: "סוגר", rawValue: "סוגר" })],
+      potentialAllocations,
+    });
+    expect(model.calendarEvents.some((e) => e.category === "status" && e.title === "סוגר")).toBe(true);
+    expect(model.calendarEvents.some((e) => e.category === "duty" && e.dutyFamily === "guard")).toBe(true);
   });
 });
 

@@ -197,7 +197,7 @@ describe("loadPersonalScheduleReadModel", () => {
     expect(result.status).toBe("configuration_error");
   });
 
-  it("a duty attributed via a תקשא\"ס period source ONLY (no matching internal Event at all) does NOT reach dutyBlocks end-to-end -- Potential is never presented as an actual personal assignment", async () => {
+  it("a duty attributed via a תקשא\"ס period source (no matching internal Event at all) reaches dutyBlocks end-to-end", async () => {
     getAuthenticatedIdentity.mockResolvedValue({
       status: "authenticated",
       userId: "u1",
@@ -222,7 +222,15 @@ describe("loadPersonalScheduleReadModel", () => {
 
     expect(result.status).toBe("ok");
     if (result.status === "ok") {
-      expect(result.model.dutyBlocks).toEqual([]);
+      expect(result.model.dutyBlocks).toEqual([
+        expect.objectContaining({
+          dutyFamily: "guard",
+          slot: 1,
+          startDate: "2026-08-20",
+          endDate: "2026-08-20",
+          certainty: "tentative",
+        }),
+      ]);
     }
   });
 

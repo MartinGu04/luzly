@@ -263,7 +263,7 @@ describe("loadScheduleReadModel — success / privacy", () => {
 });
 
 describe("loadScheduleReadModel — תקשא\"ס period (Potential) duty completeness reaches the calendar", () => {
-  it("a colleague with a תקשא\"ס-only duty (no matching internal Event) shows NOTHING on the manager's 'person' perspective calendar -- Potential is never presented as an actual personal assignment", async () => {
+  it("a colleague with a תקשא\"ס-only duty (no matching internal Event) shows it on the manager's 'person' perspective calendar", async () => {
     getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(true));
     const snapshot = managerSnapshot({
       potentialH2: [
@@ -285,7 +285,7 @@ describe("loadScheduleReadModel — תקשא\"ס period (Potential) duty complet
     expect(result.status).toBe("ok");
     if (result.status === "ok" && result.model.perspective === "person") {
       const dutyEntries = result.model.personal?.calendarEvents.filter((event) => event.category === "duty");
-      expect(dutyEntries).toEqual([]);
+      expect(dutyEntries).toEqual([expect.objectContaining({ date: "2026-08-20", dutyFamily: "guard", slot: 1 })]);
     } else {
       throw new Error("expected 'person' perspective");
     }

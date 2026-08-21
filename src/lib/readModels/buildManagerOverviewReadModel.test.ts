@@ -715,16 +715,17 @@ describe("buildManagerOverviewReadModel — selected person", () => {
   });
 });
 
-describe("buildManagerOverviewReadModel — selected person's תקשא\"ס-only allocation is NEVER shown as an actual personal assignment", () => {
-  it("a person with a תקשא\"ס-only allocation (no matching internal Event) shows NOTHING in their upcoming assignments -- Potential is source/planning data, never presented as an actual assignment", () => {
+describe("buildManagerOverviewReadModel — selected person's תקשא\"ס-only duty completeness is a gap-filler, never a second source once a real duty exists", () => {
+  it("a person with a תקשא\"ס-only duty (no matching internal Event) shows it in their upcoming assignments instead of looking duty-free", () => {
     const model = buildModel({
       events: [],
       potentialAllocations: [allocation({ date: "2026-08-20", dutyFamily: "guard", slot: 1 })],
       selectedPersonId: MARTIN.id,
       now: { date: "2026-08-13", minuteOfDay: 600 },
     });
-    expect(model.selectedPerson?.nextAssignmentGroup).toBeNull();
-    expect(model.selectedPerson?.dutyBlocks).toEqual([]);
+    expect(model.selectedPerson?.nextAssignmentGroup?.events).toEqual([
+      expect.objectContaining({ date: "2026-08-20", dutyFamily: "guard", category: "duty" }),
+    ]);
   });
 
   it("a duty family mismatch on the same date (real daily_kitchen vs. Potential full_kitchen) never adds a second pseudo-duty for the selected person", () => {

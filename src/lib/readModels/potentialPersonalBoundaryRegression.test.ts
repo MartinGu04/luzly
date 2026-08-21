@@ -137,6 +137,31 @@ describe("Potential/תקשא\"ס allocations stay out of the personal calendar w
     ]);
   });
 
+  it("Potential remains a gap-filler: a DIFFERENT date with no real internal duty at all still gets the Potential allocation as a tentative personal duty", () => {
+    const gapFillerAllocation: PotentialAllocation = {
+      ...mismatchedFullKitchenAllocation,
+      date: "2026-08-25",
+      sourceCell: "D2",
+    };
+    const model = buildPersonalScheduleReadModel({
+      person: PERSON,
+      people,
+      events: [realDailyKitchenDuty], // only on 2026-08-20 -- 2026-08-25 has no real duty at all.
+      shiftSchedule: schedule,
+      fetchedAt: "2026-08-13T08:00:00.000Z",
+      now: { date: "2026-08-13", minuteOfDay: 600 } satisfies LocalNow,
+      potentialAllocations: [gapFillerAllocation],
+    });
+    const dutyEvents = model.calendarEvents.filter((event) => event.category === "duty");
+    expect(dutyEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ date: "2026-08-20", dutyFamily: "daily_kitchen", certainty: "confirmed" }),
+        expect.objectContaining({ date: "2026-08-25", dutyFamily: "full_kitchen", certainty: "tentative" }),
+      ]),
+    );
+    expect(dutyEvents).toHaveLength(2);
+  });
+
   it("a PR #76 personal activity (status/other) on the same date is unaffected by this fix -- still reaches the personal calendar", () => {
     const statusActivity: Event = {
       ...realDailyKitchenDuty,

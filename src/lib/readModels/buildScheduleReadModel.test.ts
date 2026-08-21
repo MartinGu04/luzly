@@ -447,8 +447,8 @@ describe("buildSelfOnlyScheduleReadModel (normal user / fail-closed fallback)", 
   });
 });
 
-describe("buildManagerScheduleReadModel — 'self'/'person' perspectives NEVER show תקשא\"ס (Potential) duty completeness on the personal-style calendar", () => {
-  it("'person' perspective: a colleague's תקשא\"ס-only allocation (no matching internal Event) shows NOTHING on their calendar", () => {
+describe("buildManagerScheduleReadModel — 'self'/'person' perspectives: תקשא\"ס (Potential) duty completeness is a gap-filler, never a second source once a real duty exists", () => {
+  it("'person' perspective: a colleague's תקשא\"ס-only allocation (no matching internal Event) shows on their calendar", () => {
     const model = buildManagerScheduleReadModel({
       manager: MANAGER,
       people: PEOPLE,
@@ -462,10 +462,10 @@ describe("buildManagerScheduleReadModel — 'self'/'person' perspectives NEVER s
     });
     expect(model.perspective).toBe("person");
     const dutyEvents = model.personal?.calendarEvents.filter((e) => e.category === "duty") ?? [];
-    expect(dutyEvents).toEqual([]);
+    expect(dutyEvents).toEqual([expect.objectContaining({ date: "2026-08-20", dutyFamily: "guard", slot: 1 })]);
   });
 
-  it("'self' perspective: the manager's OWN תקשא\"ס-only allocation shows NOTHING on their calendar either", () => {
+  it("'self' perspective: the manager's OWN תקשא\"ס-only allocation shows on their calendar too", () => {
     const model = buildManagerScheduleReadModel({
       manager: MANAGER,
       people: PEOPLE,
@@ -479,7 +479,7 @@ describe("buildManagerScheduleReadModel — 'self'/'person' perspectives NEVER s
     });
     expect(model.perspective).toBe("self");
     const dutyEvents = model.personal?.calendarEvents.filter((e) => e.category === "duty") ?? [];
-    expect(dutyEvents).toHaveLength(0);
+    expect(dutyEvents).toHaveLength(1);
   });
 
   it("a normal department person's real duty is unaffected by an overlapping allocation -- no duplicate, no change", () => {
@@ -518,7 +518,7 @@ describe("buildManagerScheduleReadModel — 'self'/'person' perspectives NEVER s
     expect(dutyEvents).toEqual([expect.objectContaining({ dutyFamily: "daily_kitchen", title: "מטבח יומי" })]);
   });
 
-  it("a תקשא\"ס-only allocation never makes a non-shift-capable person a shift worker, and never appears on their calendar either", () => {
+  it("adding a תקשא\"ס duty never makes a non-shift-capable person a shift worker", () => {
     const nonShiftPerson = person({ id: "p_nonshift", name: "אלון דוגמה", isTechnician: false, isSupervisor: false });
     const model = buildManagerScheduleReadModel({
       manager: MANAGER,
@@ -533,7 +533,7 @@ describe("buildManagerScheduleReadModel — 'self'/'person' perspectives NEVER s
     });
     expect(model.personal?.person.isTechnician).toBe(false);
     expect(model.personal?.person.isSupervisor).toBe(false);
-    expect(model.personal?.calendarEvents.some((e) => e.category === "duty")).toBe(false);
+    expect(model.personal?.calendarEvents.some((e) => e.category === "duty")).toBe(true);
   });
 
   it("the 'all' (everyone) calendar shows an attributed תקשא\"ס-only duty as a normal duty entry", () => {
