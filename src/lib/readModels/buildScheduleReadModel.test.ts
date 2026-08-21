@@ -447,8 +447,8 @@ describe("buildSelfOnlyScheduleReadModel (normal user / fail-closed fallback)", 
   });
 });
 
-describe("buildManagerScheduleReadModel — תקשא\"ס period (Potential) duty completeness reaches the calendar", () => {
-  it("'person' perspective: a colleague's תקשא\"ס-only duty (no matching internal Event) shows on their calendar", () => {
+describe("buildManagerScheduleReadModel — 'self'/'person' perspectives: תקשא\"ס (Potential) duty completeness is a gap-filler, never a second source once a real duty exists", () => {
+  it("'person' perspective: a colleague's תקשא\"ס-only allocation (no matching internal Event) shows on their calendar", () => {
     const model = buildManagerScheduleReadModel({
       manager: MANAGER,
       people: PEOPLE,
@@ -465,7 +465,7 @@ describe("buildManagerScheduleReadModel — תקשא\"ס period (Potential) duty
     expect(dutyEvents).toEqual([expect.objectContaining({ date: "2026-08-20", dutyFamily: "guard", slot: 1 })]);
   });
 
-  it("'self' perspective: the manager's OWN תקשא\"ס-only duty shows on their calendar too", () => {
+  it("'self' perspective: the manager's OWN תקשא\"ס-only allocation shows on their calendar too", () => {
     const model = buildManagerScheduleReadModel({
       manager: MANAGER,
       people: PEOPLE,
@@ -482,7 +482,7 @@ describe("buildManagerScheduleReadModel — תקשא\"ס period (Potential) duty
     expect(dutyEvents).toHaveLength(1);
   });
 
-  it("a normal department person's real duty is unaffected -- no duplicate from an overlapping allocation", () => {
+  it("a normal department person's real duty is unaffected by an overlapping allocation -- no duplicate, no change", () => {
     const model = buildManagerScheduleReadModel({
       manager: MANAGER,
       people: PEOPLE,
@@ -496,6 +496,26 @@ describe("buildManagerScheduleReadModel — תקשא\"ס period (Potential) duty
     });
     const dutyEvents = model.personal?.calendarEvents.filter((e) => e.category === "duty") ?? [];
     expect(dutyEvents).toHaveLength(1);
+  });
+
+  it("a duty family mismatch on the same date (real daily_kitchen vs. Potential full_kitchen) never adds a second pseudo-duty to the personal calendar", () => {
+    const model = buildManagerScheduleReadModel({
+      manager: MANAGER,
+      people: PEOPLE,
+      events: [
+        event({ category: "duty", role: null, period: "unspecified", dutyFamily: "daily_kitchen", slot: null, title: "מטבח יומי", date: "2026-08-20" }),
+      ],
+      shiftSchedule: schedule,
+      fetchedAt: "2026-08-13T08:00:00.000Z",
+      now,
+      monthDates: AUGUST_DATES,
+      requestedPersonId: DANIEL.id,
+      potentialAllocations: [
+        allocation({ date: "2026-08-20", dutyFamily: "full_kitchen", slot: null, sourceSlot: 3, columnLabel: "מטבח מלא 3" }),
+      ],
+    });
+    const dutyEvents = model.personal?.calendarEvents.filter((e) => e.category === "duty") ?? [];
+    expect(dutyEvents).toEqual([expect.objectContaining({ dutyFamily: "daily_kitchen", title: "מטבח יומי" })]);
   });
 
   it("adding a תקשא\"ס duty never makes a non-shift-capable person a shift worker", () => {

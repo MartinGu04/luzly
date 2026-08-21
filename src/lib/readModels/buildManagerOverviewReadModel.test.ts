@@ -715,7 +715,7 @@ describe("buildManagerOverviewReadModel — selected person", () => {
   });
 });
 
-describe("buildManagerOverviewReadModel — selected person's תקשא\"ס-only duty completeness", () => {
+describe("buildManagerOverviewReadModel — selected person's תקשא\"ס-only duty completeness is a gap-filler, never a second source once a real duty exists", () => {
   it("a person with a תקשא\"ס-only duty (no matching internal Event) shows it in their upcoming assignments instead of looking duty-free", () => {
     const model = buildModel({
       events: [],
@@ -726,6 +726,22 @@ describe("buildManagerOverviewReadModel — selected person's תקשא\"ס-only 
     expect(model.selectedPerson?.nextAssignmentGroup?.events).toEqual([
       expect.objectContaining({ date: "2026-08-20", dutyFamily: "guard", category: "duty" }),
     ]);
+  });
+
+  it("a duty family mismatch on the same date (real daily_kitchen vs. Potential full_kitchen) never adds a second pseudo-duty for the selected person", () => {
+    const events: Event[] = [
+      event({ personId: MARTIN.id, personName: MARTIN.name, date: "2026-08-20", category: "duty", role: null, dutyFamily: "daily_kitchen", slot: null, title: "מטבח יומי" }),
+    ];
+    const model = buildModel({
+      events,
+      potentialAllocations: [
+        allocation({ date: "2026-08-20", dutyFamily: "full_kitchen", slot: null, sourceSlot: 3, columnLabel: "מטבח מלא 3", sourceAllocationLabel: MARTIN.name }),
+      ],
+      selectedPersonId: MARTIN.id,
+      now: { date: "2026-08-13", minuteOfDay: 600 },
+    });
+    const duties = model.selectedPerson?.calendarEvents.filter((e) => e.category === "duty") ?? [];
+    expect(duties).toEqual([expect.objectContaining({ dutyFamily: "daily_kitchen", title: "מטבח יומי" })]);
   });
 
   it("a normal department person's existing assignments are unaffected -- no duplicate from an overlapping allocation", () => {
