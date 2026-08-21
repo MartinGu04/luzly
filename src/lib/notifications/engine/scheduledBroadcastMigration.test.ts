@@ -59,6 +59,13 @@ describe("manager_scheduled_broadcasts migration -- security shape (text-level o
     expect(sql).toMatch(/for update skip locked/i);
   });
 
+  it("a stale 'claimed' row with no batch_id is NEVER reset back to 'scheduled' -- 'claimed' is an irreversible boundary (a batch may already exist externally by then)", () => {
+    expect(sql).not.toMatch(/set status = 'scheduled', claimed_at = null/i);
+    // The stale-claim case is folded into the SAME eligibility clause as
+    // the other two claimable cases, all resolving to `status = 'claimed'`.
+    expect(sql).toMatch(/status = 'claimed' and batch_id is null and claimed_at < now\(\) - interval '4 minutes'/i);
+  });
+
   it("declares claim_due_manager_scheduled_broadcasts and claim_manager_scheduled_broadcast_now, both service_role-only", () => {
     expect(sql).toMatch(/create or replace function public\.claim_due_manager_scheduled_broadcasts/i);
     expect(sql).toMatch(/create or replace function public\.claim_manager_scheduled_broadcast_now/i);

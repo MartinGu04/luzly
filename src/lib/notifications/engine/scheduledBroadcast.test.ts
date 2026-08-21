@@ -408,6 +408,53 @@ describe("dispatchScheduledBroadcast -- fresh dispatch", () => {
     expect(insertNotificationJobIfAbsent).not.toHaveBeenCalled();
     expect(markManagerScheduledBroadcastDispatched).not.toHaveBeenCalled();
   });
+
+  it("resuming a crash BEFORE the batch_id checkpoint (row still batchId: null, but its batch was already created by the interrupted attempt): finds the SAME batch via the deterministic key, checkpoints it, creates only the missing jobs, marks dispatched -- never a second batch", async () => {
+    fetchAllUserIdsByEmail.mockResolvedValue(
+      new Map([["alon@example.invalid", { userId: "u_a", avatarUrl: null }]]),
+    );
+    fetchAllSubscribedUserIds.mockResolvedValue(["u_a"]);
+    resolvePersonIdentity.mockImplementation((p: Person) =>
+      p.id === "p_a" ? { status: "mapped", normalizedEmail: "alon@example.invalid", userId: "u_a", avatarUrl: null } : { status: "no_email" },
+    );
+    // insertManagerNotificationBatchIfAbsent models the REAL unique-key
+    // conflict: the batch from the interrupted first attempt already
+    // exists with IDENTICAL content (same row, never edited -- editing is
+    // blocked once claimed), so this is a genuine replay, not a conflict.
+    insertManagerNotificationBatchIfAbsent.mockResolvedValue({
+      row: {
+        id: "batch_1",
+        idempotencyKey: "scheduled:sb_1",
+        createdByPersonId: "p_manager",
+        createdByPersonName: "דני מנהל",
+        audienceKind: "people",
+        targetPersonIds: ["p_a", "p_b"],
+        resolvedRecipientUserIds: ["u_a"],
+        title: "כותרת",
+        body: "תוכן",
+        resolvedRecipientCount: 1,
+        pushCapableCount: 1,
+        inboxOnlyCount: 0,
+        unresolvedCount: 1,
+        createdAt: "2026-08-23T17:00:01.000Z",
+      },
+      created: false, // it already existed -- this retry attempt did NOT create it
+    });
+
+    const { dispatchScheduledBroadcast } = await loadModule();
+    // row.batchId is still null -- exactly the crash-before-checkpoint state.
+    const row = scheduledRow({ batchId: null });
+    const outcome = await dispatchScheduledBroadcast(row as never, [MANAGER, PERSON_A]);
+
+    expect(outcome).toEqual({ ok: true, batchId: "batch_1", resolvedRecipientCount: 1 });
+    // Exactly one insertManagerNotificationBatchIfAbsent call, which itself
+    // reported created: false -- proving no SECOND batch was created.
+    expect(insertManagerNotificationBatchIfAbsent).toHaveBeenCalledTimes(1);
+    // The checkpoint is (finally) written now, closing the crash window.
+    expect(setManagerScheduledBroadcastBatchId).toHaveBeenCalledWith("sb_1", "batch_1");
+    expect(insertNotificationJobIfAbsent).toHaveBeenCalledTimes(1);
+    expect(markManagerScheduledBroadcastDispatched).toHaveBeenCalledWith("sb_1");
+  });
 });
 
 describe("dispatchScheduledBroadcast -- resuming after a crash checkpoint", () => {

@@ -28,10 +28,21 @@
 -- checkpoint: once set, the batch already exists and is never recreated
 -- or compared-for-replay again -- a worker crash after this point only
 -- ever needs to retry (idempotent) job creation for that same batch, not
--- re-decide whether a batch should exist at all. Before this checkpoint,
--- a crashed claim is safe to fully reclaim back to 'scheduled' (see the
--- claim function below), because nothing has been persisted outside this
--- row yet.
+-- re-decide whether a batch should exist at all.
+--
+-- IMPORTANT: a `'claimed'` row with NO `batch_id` yet is NOT proof that
+-- nothing has been persisted outside this row -- `manager_notification_batches`
+-- insertion and this row's own `batch_id` checkpoint are two SEPARATE
+-- statements (see `lib/notifications/engine/scheduledBroadcast.ts`'s
+-- `dispatchScheduledBroadcast`), so a crash between them leaves a
+-- genuinely immutable batch already in existence while this row still
+-- shows `batch_id is null`. `'claimed'` is therefore an IRREVERSIBLE
+-- boundary once reached: this row must NEVER transition back to
+-- `'scheduled'` (which would make it editable/cancellable again) no
+-- matter how stale its claim looks. Crash recovery always RESUMES
+-- dispatch on a still-`'claimed'` row -- it never reopens the draft. See
+-- `claim_due_manager_scheduled_broadcasts` below for exactly how a stale
+-- pre-checkpoint claim is safely re-entered.
 -- ---------------------------------------------------------------------
 create table if not exists public.manager_scheduled_broadcasts (
   id uuid primary key default gen_random_uuid(),
@@ -95,33 +106,42 @@ alter table public.manager_scheduled_broadcasts enable row level security;
 -- `for update skip locked` pattern so two overlapping ticks can never
 -- claim the same row.
 --
--- Two kinds of row are eligible in one pass:
---  1. 'scheduled' rows whose `scheduled_for` is due -- an ordinary fresh
---     claim, transitioning 'scheduled' -> 'claimed'.
---  2. 'claimed' rows that already have a `batch_id` -- a dispatch that
---     was interrupted (worker crash) AFTER its batch checkpoint was
---     written but before the row could be marked 'dispatched'. These are
---     always safe to "reclaim" (re-select) regardless of `claimed_at`
---     age: resuming them only ever retries idempotent job creation for
---     an already-fixed batch/recipient set, never re-decides anything.
---
--- A 'claimed' row with NO `batch_id` (dispatch crashed before its
--- checkpoint -- nothing persisted outside this row yet) is instead fully
--- reset back to 'scheduled' once its claim is older than the worker's own
--- crash-recovery window, so the NEXT claim re-runs the whole dispatch
--- (including a fresh recipient resolution) from scratch -- exactly the
--- same "claimed but stale -> back to pending" policy
--- `claim_due_notification_jobs` already uses.
+-- Three kinds of row are eligible in one pass, ALL of which resolve to
+-- the SAME update (`status = 'claimed'`, `claimed_at = now()`) -- a row
+-- already `'claimed'` simply has its claim refreshed, never reset:
+--  1. `'scheduled'` rows whose `scheduled_for` is due -- an ordinary
+--     fresh claim, transitioning `'scheduled' -> 'claimed'`.
+--  2. `'claimed'` rows that already have a `batch_id` -- a dispatch
+--     interrupted (worker crash) AFTER its batch checkpoint was written
+--     but before the row could be marked `'dispatched'`. Always safe to
+--     resume regardless of `claimed_at` age: retrying only ever redoes
+--     idempotent job creation for an already-fixed batch/recipient set.
+--  3. `'claimed'` rows with NO `batch_id` yet whose claim is older than
+--     the worker's own crash-recovery window -- a dispatch interrupted
+--     BEFORE its batch checkpoint. Critically, this does NOT mean
+--     nothing was persisted: `manager_notification_batches` insertion
+--     and this row's own `batch_id` checkpoint are two separate
+--     statements (see the table's own doc comment above), so the
+--     immutable batch may already exist. This row is therefore
+--     RE-CLAIMED (stays `'claimed'`, `claimed_at` refreshed) rather than
+--     ever reset to `'scheduled'` -- resuming dispatch re-runs
+--     `insertManagerNotificationBatchIfAbsent`'s own deterministic
+--     `scheduled:<id>` idempotency key, which transparently finds the
+--     already-created batch (or creates it fresh if the crash happened
+--     even earlier) and checkpoints it -- never a second logical batch,
+--     and never a window where this row is briefly editable/cancellable
+--     again. This ALSO preserves an explicit "שלח עכשיו" intent across a
+--     crash: `sent_now_by_*` is untouched by this reclaim, and eligibility
+--     here has no `scheduled_for` condition at all, so a stale send-now
+--     claim for a broadcast whose `scheduled_for` is still far in the
+--     future is reclaimed immediately once stale, never silently
+--     degrading into "wait until the original due time".
 -- -----------------------------------------------------------------------
 create or replace function public.claim_due_manager_scheduled_broadcasts(p_limit integer default 50)
 returns setof public.manager_scheduled_broadcasts
 language plpgsql
 as $$
 begin
-  update public.manager_scheduled_broadcasts
-    set status = 'scheduled', claimed_at = null, updated_at = now()
-    where status = 'claimed' and batch_id is null and claimed_at < now() - interval '4 minutes';
-
   return query
     update public.manager_scheduled_broadcasts b
       set status = 'claimed', claimed_at = now(), updated_at = now()
@@ -129,6 +149,7 @@ begin
         select id from public.manager_scheduled_broadcasts
         where (status = 'scheduled' and scheduled_for <= now())
            or (status = 'claimed' and batch_id is not null)
+           or (status = 'claimed' and batch_id is null and claimed_at < now() - interval '4 minutes')
         order by scheduled_for
         limit p_limit
         for update skip locked

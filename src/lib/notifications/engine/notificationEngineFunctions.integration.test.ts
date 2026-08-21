@@ -425,30 +425,41 @@ describe.skipIf(!databaseAvailable)("notification engine SQL functions -- real P
   describe("claim_due_manager_scheduled_broadcasts", () => {
     async function insertScheduled(
       id: string,
-      overrides: Partial<{ status: string; scheduledForOffsetMs: number; claimedAtOffsetMs: number | null; batchId: string | null }> = {},
+      overrides: Partial<{
+        status: string;
+        scheduledForOffsetMs: number;
+        claimedAtOffsetMs: number | null;
+        batchId: string | null;
+        sentNowByPersonId: string | null;
+        sentNowByPersonName: string | null;
+      }> = {},
     ) {
       const status = overrides.status ?? "scheduled";
       const scheduledForOffsetMs = overrides.scheduledForOffsetMs ?? -1000;
       const claimedAtOffsetMs = overrides.claimedAtOffsetMs ?? null;
       const batchId = overrides.batchId ?? null;
+      const sentNowByPersonId = overrides.sentNowByPersonId ?? null;
+      const sentNowByPersonName = overrides.sentNowByPersonName ?? null;
       await db.query(
         `insert into public.manager_scheduled_broadcasts
            (id, status, audience_kind, target_person_ids, title, body, scheduled_for,
-            created_by_person_id, created_by_person_name, claimed_at, batch_id)
+            created_by_person_id, created_by_person_name, claimed_at, batch_id,
+            sent_now_by_person_id, sent_now_by_person_name, sent_now_at)
          values ($1, $2, 'person', '{p_1}', 't', 'b', now() + ($3 || ' milliseconds')::interval,
            'p_manager', 'מנהל',
            case when $4::bigint is null then null else now() + ($4 || ' milliseconds')::interval end,
-           $5)`,
-        [id, status, scheduledForOffsetMs, claimedAtOffsetMs, batchId],
+           $5, $6, $7,
+           case when $6::text is null then null else now() end)`,
+        [id, status, scheduledForOffsetMs, claimedAtOffsetMs, batchId, sentNowByPersonId, sentNowByPersonName],
       );
     }
 
-    async function insertBatch(id: string) {
+    async function insertBatch(id: string, idempotencyKey: string = `scheduled:${id}`) {
       await db.query(
         `insert into public.manager_notification_batches
            (id, idempotency_key, created_by_person_id, created_by_person_name, audience_kind, title, body)
          values ($1, $2, 'p_manager', 'מנהל', 'person', 't', 'b')`,
-        [id, `scheduled:${id}`],
+        [id, idempotencyKey],
       );
     }
 
@@ -474,7 +485,7 @@ describe.skipIf(!databaseAvailable)("notification engine SQL functions -- real P
       expect(second.rows.map((r) => r.id)).not.toContain("aaaaaaaa-0000-0000-0000-000000000003");
     });
 
-    it("22. a 'claimed' row with NO batch_id, stuck past the crash-recovery window, is reset to 'scheduled' and immediately re-claimable", async () => {
+    it("22. a 'claimed' row with NO batch_id, stuck past the crash-recovery window, is RE-CLAIMED while REMAINING 'claimed' -- never reset to 'scheduled' (a batch may already exist externally, see the table's own doc comment)", async () => {
       await insertScheduled("aaaaaaaa-0000-0000-0000-000000000004", {
         status: "claimed",
         scheduledForOffsetMs: -1000,
@@ -486,6 +497,17 @@ describe.skipIf(!databaseAvailable)("notification engine SQL functions -- real P
       const row = result.rows.find((r) => r.id === "aaaaaaaa-0000-0000-0000-000000000004");
       expect(row).toBeDefined();
       expect(row.status).toBe("claimed");
+      // claimed_at was refreshed by the reclaim, not nulled out.
+      expect(new Date(row.claimed_at).getTime()).toBeGreaterThan(Date.now() - 5000);
+
+      // Confirms it was genuinely RE-claimed (not left over from the old
+      // status='scheduled' reset+reclaim two-step): the row was never
+      // 'scheduled' at any point an edit/cancel guard could have observed.
+      const stillGuarded = await db.query(
+        "update public.manager_scheduled_broadcasts set title = 'hacked' where id = $1 and status = 'scheduled' returning *",
+        ["aaaaaaaa-0000-0000-0000-000000000004"],
+      );
+      expect(stillGuarded.rows).toHaveLength(0);
     });
 
     it("23. a 'claimed' row that already HAS a batch_id is always resumable, even if its claim is fresh (not stale) -- a checkpointed dispatch is never left stranded", async () => {
@@ -511,6 +533,67 @@ describe.skipIf(!databaseAvailable)("notification engine SQL functions -- real P
 
       const result = await db.query("select * from public.claim_due_manager_scheduled_broadcasts(100)");
       expect(result.rows.map((r) => r.id)).not.toContain("aaaaaaaa-0000-0000-0000-000000000006");
+    });
+
+    it("32. a stale 'שלח עכשיו' claim (no batch_id yet) for a broadcast whose scheduled_for is still far in the future is reclaimed immediately once stale -- it never waits for scheduled_for", async () => {
+      await insertScheduled("aaaaaaaa-0000-0000-0000-00000000000a", {
+        status: "claimed",
+        scheduledForOffsetMs: 24 * 60 * 60_000, // due only tomorrow
+        claimedAtOffsetMs: -10 * 60_000, // stale send-now claim
+        batchId: null,
+        sentNowByPersonId: "p_manager_b",
+        sentNowByPersonName: "רותם מנהלת",
+      });
+
+      const result = await db.query("select * from public.claim_due_manager_scheduled_broadcasts(100)");
+      const row = result.rows.find((r) => r.id === "aaaaaaaa-0000-0000-0000-00000000000a");
+
+      expect(row).toBeDefined();
+      expect(row.status).toBe("claimed");
+    });
+
+    it("33. sent_now_by_person_id/name/at survive stale-claim recovery completely unchanged", async () => {
+      await insertScheduled("aaaaaaaa-0000-0000-0000-00000000000b", {
+        status: "claimed",
+        scheduledForOffsetMs: 24 * 60 * 60_000,
+        claimedAtOffsetMs: -10 * 60_000,
+        batchId: null,
+        sentNowByPersonId: "p_manager_b",
+        sentNowByPersonName: "רותם מנהלת",
+      });
+      const before = await db.query("select sent_now_at from public.manager_scheduled_broadcasts where id = $1", [
+        "aaaaaaaa-0000-0000-0000-00000000000b",
+      ]);
+
+      const result = await db.query("select * from public.claim_due_manager_scheduled_broadcasts(100)");
+      const row = result.rows.find((r) => r.id === "aaaaaaaa-0000-0000-0000-00000000000b");
+
+      expect(row.sent_now_by_person_id).toBe("p_manager_b");
+      expect(row.sent_now_by_person_name).toBe("רותם מנהלת");
+      expect(row.sent_now_at.toISOString()).toBe(before.rows[0].sent_now_at.toISOString());
+    });
+
+    it("34. simulates the crash window itself: the immutable batch already exists (deterministic scheduled:<id> key) while the row is still 'claimed' with batch_id null -- recovery re-claims it, setting up the application-level dispatch retry to find that exact batch (never a second one; see the engine-level dispatch test for the rest of that flow)", async () => {
+      const scheduledId = "aaaaaaaa-0000-0000-0000-00000000000c";
+      await insertScheduled(scheduledId, {
+        status: "claimed",
+        scheduledForOffsetMs: -1000,
+        claimedAtOffsetMs: -10 * 60_000,
+        batchId: null,
+      });
+      await insertBatch("bbbbbbbb-0000-0000-0000-000000000002", `scheduled:${scheduledId}`);
+
+      const result = await db.query("select * from public.claim_due_manager_scheduled_broadcasts(100)");
+      const row = result.rows.find((r) => r.id === scheduledId);
+
+      expect(row).toBeDefined();
+      expect(row.status).toBe("claimed");
+      expect(row.batch_id).toBeNull(); // the checkpoint itself is still the application layer's job, not this SQL claim's
+
+      const existingBatch = await db.query("select * from public.manager_notification_batches where idempotency_key = $1", [
+        `scheduled:${scheduledId}`,
+      ]);
+      expect(existingBatch.rows).toHaveLength(1); // exactly one -- proving the precondition for "never a second batch" on the retry
     });
 
     it("25. anon/authenticated cannot execute the function at all", async () => {
