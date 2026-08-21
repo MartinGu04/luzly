@@ -186,9 +186,9 @@ describe("sendScheduledBroadcastNowAction", () => {
     expect(sendScheduledBroadcastNow).not.toHaveBeenCalled();
   });
 
-  it("dispatches through the engine using the freshly-fetched roster", async () => {
+  it("dispatches through the engine using the freshly-fetched roster AND the authenticated manager as the send-now actor", async () => {
     const result = await sendScheduledBroadcastNowAction("sb_1");
-    expect(sendScheduledBroadcastNow).toHaveBeenCalledWith("sb_1", PEOPLE);
+    expect(sendScheduledBroadcastNow).toHaveBeenCalledWith("sb_1", PEOPLE, MANAGER);
     expect(result).toEqual({ ok: true, batchId: "batch_1", resolvedRecipientCount: 1 });
   });
 });

@@ -180,7 +180,9 @@ export async function sendScheduledBroadcastNowAction(id: string): Promise<SendS
   const contextResult = await loadManagerWorkbookContext(["personnel"]);
   if (contextResult.status !== "ok") return { ok: false, error: contextResult.status };
 
-  const outcome = await sendScheduledBroadcastNow(id, contextResult.context.people);
+  const { manager, people } = contextResult.context;
+
+  const outcome = await sendScheduledBroadcastNow(id, people, manager);
   if (!outcome.ok) return { ok: false, error: outcome.error };
   return { ok: true, batchId: outcome.batchId, resolvedRecipientCount: outcome.resolvedRecipientCount };
 }

@@ -130,23 +130,38 @@ export function ManagerScheduledBroadcastsSection({
       <h4 className="text-sm font-semibold text-foreground">🕒 התראות מתוזמנות</h4>
       <ul className="mt-2 flex flex-col gap-2">
         {items.map((item) => {
-          const editable = item.status === "scheduled";
           const isBusy = busyId === item.id;
           const isEditing = editingId === item.id;
+          // While this exact item is open in the composer's editor, its
+          // on-screen title/body/audience/time may differ from what's
+          // still stored -- "שלח עכשיו"/"ביטול" here would silently act on
+          // the STORED version while the manager may reasonably believe
+          // the visible edited draft is what's being acted on. So this
+          // card's actions are unavailable until the manager saves or
+          // leaves edit mode; starting a second edit of the SAME item is
+          // blocked the same way (the "עריכה" button simply isn't shown).
+          const editable = item.status === "scheduled" && !isEditing;
           const moment = formatScheduledBroadcastMoment(item.scheduledLocalDate, item.scheduledLocalMinuteOfDay);
 
           return (
             <li key={item.id} className={`rounded-lg p-2.5 ring-1 ring-border ${isEditing ? "bg-primary/5" : "bg-overlay-faint"}`}>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">{item.title}</p>
-                <Badge tone={item.status === "claimed" ? "warning" : "neutral"}>{STATUS_LABELS[item.status]}</Badge>
+                <div className="flex items-center gap-1.5">
+                  {isEditing ? <Badge tone="primary">✏️ בעריכה כעת</Badge> : null}
+                  <Badge tone={item.status === "claimed" ? "warning" : "neutral"}>{STATUS_LABELS[item.status]}</Badge>
+                </div>
               </div>
               <p className="mt-0.5 text-xs text-muted">
                 {moment ?? item.scheduledFor} · {audienceLabel(item)}
                 {item.createdByPersonName ? ` · נוצר ע״י ${item.createdByPersonName}` : ""}
               </p>
 
-              {editable ? (
+              {isEditing ? (
+                <p className="mt-2 text-xs font-medium text-primary">
+                  שמור/י או בטל/י את העריכה למעלה כדי לשלוח עכשיו או לבטל את התזמון הזה.
+                </p>
+              ) : editable ? (
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <button
                     type="button"

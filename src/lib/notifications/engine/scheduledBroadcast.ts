@@ -1,7 +1,7 @@
 import "server-only";
 import type { Person } from "@/lib/domain/types";
 import { parseCalendarDate } from "@/lib/domain/dutyBlocks";
-import { jerusalemLocalTimeToInstant } from "@/lib/time/jerusalemClock";
+import { getJerusalemLocalNow, jerusalemLocalTimeToInstant } from "@/lib/time/jerusalemClock";
 import { BROADCAST_BODY_MAX_LENGTH, BROADCAST_TITLE_MAX_LENGTH } from "../manualBroadcastLimits";
 import { fetchAllSubscribedUserIds, fetchAllUserIdsByEmail, resolvePersonIdentity, type AuthAccountLookup } from "./recipients";
 import {
@@ -33,11 +33,39 @@ export type { ManagerScheduledBroadcastRow, ManagerScheduledBroadcastStatus } fr
 
 /**
  * Israel-local civil date + clock time -> a validated future UTC instant,
- * or `null` for anything invalid (bad date, out-of-range hour/minute, or a
- * moment that is not genuinely in the future). Reuses the domain's own
- * calendar-date validation (`parseCalendarDate`) and the codebase's one
- * canonical local-time-to-instant conversion (`jerusalemLocalTimeToInstant`)
- * -- never hand-rolls either.
+ * or `null` for anything invalid (bad date, out-of-range hour/minute, a
+ * moment that is not genuinely in the future, or a local wall-clock time
+ * that does not exist). Reuses the domain's own calendar-date validation
+ * (`parseCalendarDate`) and the codebase's one canonical local-time-to-
+ * instant conversion (`jerusalemLocalTimeToInstant`) -- never hand-rolls
+ * either.
+ *
+ * `jerusalemLocalTimeToInstant` was written for a handful of FIXED
+ * reminder hours (20:00/18:00/09:00, never near midnight) and its own
+ * docstring says it does not perfectly resolve a wall-clock time that
+ * falls exactly inside a DST transition's skipped/repeated hour -- an
+ * edge case that assumption tolerated because no reminder ever lands
+ * there. A manager-controlled time picker can request ANY hour, so that
+ * assumption is no longer safe: on the Asia/Jerusalem spring-forward
+ * transition (01:59 -> 03:00), a nonexistent local time like 02:30 would
+ * otherwise silently normalize to some other instant (e.g. 03:30) --
+ * the manager would believe they scheduled 02:30 while the stored
+ * instant represents something else entirely.
+ *
+ * Fixed by round-tripping: convert the requested local date/hour/minute
+ * to an instant, then convert that instant BACK to Asia/Jerusalem local
+ * civil terms via `getJerusalemLocalNow` (the exact reverse of
+ * `jerusalemLocalTimeToInstant`) and require the round-tripped date and
+ * minute-of-day to match the manager's request exactly. A nonexistent
+ * local time can never round-trip to itself (the forward conversion is
+ * forced to land on SOME real instant, whose reverse reading is
+ * necessarily a different wall-clock time), so it fails closed as
+ * `invalid_schedule` here rather than silently shifting. A genuinely
+ * repeated local time (autumn fall-back) round-trips correctly to
+ * whichever of the two real instants `jerusalemLocalTimeToInstant`
+ * deterministically picked -- acceptable for V1 (see this feature's own
+ * spec), since the manager's requested wall-clock time is still exactly
+ * honored either way.
  */
 function resolveValidatedScheduleInstant(dateStr: string, hour: number, minute: number): Date | null {
   if (!parseCalendarDate(dateStr)) return null;
@@ -45,6 +73,10 @@ function resolveValidatedScheduleInstant(dateStr: string, hour: number, minute: 
   if (!Number.isInteger(minute) || minute < 0 || minute > 59) return null;
 
   const instant = jerusalemLocalTimeToInstant(dateStr, hour, minute);
+
+  const roundTrip = getJerusalemLocalNow(instant);
+  if (roundTrip.date !== dateStr || roundTrip.minuteOfDay !== hour * 60 + minute) return null;
+
   if (instant.getTime() <= Date.now()) return null;
   return instant;
 }
@@ -260,6 +292,24 @@ function resolveScheduledDispatchTargets(
   return { pushCapable, inboxOnly, unresolved };
 }
 
+/**
+ * Who the eventual `manager_notification_batches` row should identify as
+ * the sending manager. Automatic due-dispatch (`sent_now_by_person_id` is
+ * null) keeps the ORIGINAL scheduling manager -- "normal scheduled worker
+ * dispatch may remain the manager who originally scheduled it". A "שלח
+ * עכשיו" claim (`sent_now_by_person_id` set atomically by
+ * `claim_manager_scheduled_broadcast_now`, from the authenticated caller,
+ * never client-supplied) instead identifies whoever actually pressed
+ * send-now -- so "נשלחו לאחרונה" never attributes an explicit immediate
+ * send to a DIFFERENT manager than the one who triggered it.
+ */
+function batchCreatorForRow(row: ManagerScheduledBroadcastRow): { id: string; name: string } {
+  if (row.sentNowByPersonId && row.sentNowByPersonName) {
+    return { id: row.sentNowByPersonId, name: row.sentNowByPersonName };
+  }
+  return { id: row.createdByPersonId, name: row.createdByPersonName };
+}
+
 export type DispatchScheduledBroadcastOutcome =
   | { ok: true; batchId: string; resolvedRecipientCount: number }
   | { ok: false; error: "idempotency_conflict" };
@@ -317,10 +367,12 @@ export async function dispatchScheduledBroadcast(
       ...new Set([...resolution.pushCapable, ...resolution.inboxOnly].map((recipient) => recipient.userId)),
     ].sort();
 
+    const creator = batchCreatorForRow(row);
+
     const { row: batch, created } = await insertManagerNotificationBatchIfAbsent({
       idempotencyKey: scheduledBroadcastIdempotencyKey(row.id),
-      createdByPersonId: row.createdByPersonId,
-      createdByPersonName: row.createdByPersonName,
+      createdByPersonId: creator.id,
+      createdByPersonName: creator.name,
       audienceKind: row.audienceKind,
       targetPersonIds: row.targetPersonIds,
       resolvedRecipientUserIds: freshRecipientUserIds,
@@ -334,7 +386,7 @@ export async function dispatchScheduledBroadcast(
 
     if (!created) {
       const isReplay = isSameLogicalBroadcastRequest(batch, {
-        createdByPersonId: row.createdByPersonId,
+        createdByPersonId: creator.id,
         audienceKind: row.audienceKind,
         targetPersonIds: row.targetPersonIds,
         title: row.title,
@@ -409,12 +461,20 @@ export type SendScheduledBroadcastNowOutcome =
  * race-safe against a concurrently-firing worker tick) and then dispatches
  * it through the EXACT SAME `dispatchScheduledBroadcast` the worker tick
  * uses (spec §4: never a separate direct-send implementation).
+ *
+ * `sentNowBy` is the AUTHENTICATED caller (never client-supplied identity
+ * -- the server action resolves it via `loadManagerWorkbookContext`
+ * before this is ever called) and is recorded atomically with the
+ * winning claim itself, so only the manager whose claim actually
+ * succeeds is ever attributed -- see `claim_manager_scheduled_broadcast_now`
+ * and `batchCreatorForRow`.
  */
 export async function sendScheduledBroadcastNow(
   id: string,
   people: readonly Person[],
+  sentNowBy: Person,
 ): Promise<SendScheduledBroadcastNowOutcome> {
-  const claimed = await claimManagerScheduledBroadcastNow(id);
+  const claimed = await claimManagerScheduledBroadcastNow(id, sentNowBy.id, sentNowBy.name);
   if (!claimed) return await notEditableError(id);
 
   return dispatchScheduledBroadcast(claimed, people);

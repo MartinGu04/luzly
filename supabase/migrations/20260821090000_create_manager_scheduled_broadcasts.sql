@@ -47,6 +47,19 @@ create table if not exists public.manager_scheduled_broadcasts (
   last_changed_by_person_name text,
   cancelled_by_person_id text,
   cancelled_by_person_name text,
+  -- The manager who actually pressed "שלח עכשיו", if that's how this row
+  -- was claimed -- distinct from `created_by_person_id`/last-editor,
+  -- since a DIFFERENT manager may trigger an immediate send on someone
+  -- else's schedule. Recorded atomically by
+  -- `claim_manager_scheduled_broadcast_now` itself, from the AUTHENTICATED
+  -- caller only (never client-supplied) -- so only the manager whose
+  -- claim actually wins is ever attributed. NULL for a normal due-time
+  -- worker dispatch, which keeps `created_by_person_id`/name as the
+  -- eventual batch's sender (see `lib/notifications/engine/scheduledBroadcast.ts`'s
+  -- `batchCreatorForRow`).
+  sent_now_by_person_id text,
+  sent_now_by_person_name text,
+  sent_now_at timestamptz,
   claimed_at timestamptz,
   batch_id uuid references public.manager_notification_batches (id),
   dispatched_at timestamptz,
@@ -139,19 +152,35 @@ grant execute on function public.claim_due_manager_scheduled_broadcasts(integer)
 -- the broadcast is no longer 'scheduled' (already claimed/dispatched/
 -- cancelled) -- the caller reports this truthfully rather than silently
 -- no-op'ing.
+--
+-- `p_sent_now_by_person_id`/`p_sent_now_by_person_name` are written in the
+-- SAME atomic update as the winning `scheduled -> claimed` transition --
+-- so this identity is only ever recorded for whichever caller's claim
+-- actually succeeds, never for a caller that lost the race. The caller
+-- (`lib/notifications/engine/scheduledBroadcast.ts`) is trusted to pass
+-- only the already-authenticated manager's own identity here -- this
+-- function itself performs no authorization, exactly like the rest of
+-- this table's service-role-only surface.
 -- -----------------------------------------------------------------------
-create or replace function public.claim_manager_scheduled_broadcast_now(p_id uuid)
+create or replace function public.claim_manager_scheduled_broadcast_now(
+  p_id uuid,
+  p_sent_now_by_person_id text,
+  p_sent_now_by_person_name text
+)
 returns setof public.manager_scheduled_broadcasts
 language plpgsql
 as $$
 begin
   return query
     update public.manager_scheduled_broadcasts
-      set status = 'claimed', claimed_at = now(), updated_at = now()
+      set status = 'claimed', claimed_at = now(), updated_at = now(),
+          sent_now_by_person_id = p_sent_now_by_person_id,
+          sent_now_by_person_name = p_sent_now_by_person_name,
+          sent_now_at = now()
       where id = p_id and status = 'scheduled'
       returning *;
 end;
 $$;
 
-revoke all on function public.claim_manager_scheduled_broadcast_now(uuid) from public, anon, authenticated;
-grant execute on function public.claim_manager_scheduled_broadcast_now(uuid) to service_role;
+revoke all on function public.claim_manager_scheduled_broadcast_now(uuid, text, text) from public, anon, authenticated;
+grant execute on function public.claim_manager_scheduled_broadcast_now(uuid, text, text) to service_role;

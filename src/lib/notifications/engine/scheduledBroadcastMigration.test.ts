@@ -67,9 +67,19 @@ describe("manager_scheduled_broadcasts migration -- security shape (text-level o
     );
     expect(sql).toMatch(/grant execute on function public\.claim_due_manager_scheduled_broadcasts\(integer\) to service_role/i);
     expect(sql).toMatch(
-      /revoke all on function public\.claim_manager_scheduled_broadcast_now\(uuid\) from public, anon, authenticated/i,
+      /revoke all on function public\.claim_manager_scheduled_broadcast_now\(uuid, text, text\) from public, anon, authenticated/i,
     );
-    expect(sql).toMatch(/grant execute on function public\.claim_manager_scheduled_broadcast_now\(uuid\) to service_role/i);
+    expect(sql).toMatch(
+      /grant execute on function public\.claim_manager_scheduled_broadcast_now\(uuid, text, text\) to service_role/i,
+    );
+  });
+
+  it("claim_manager_scheduled_broadcast_now records the send-now actor's identity atomically with the winning claim, never the client-supplied recipient/roster data", () => {
+    expect(sql).toMatch(/sent_now_by_person_id text/i);
+    expect(sql).toMatch(/sent_now_by_person_name text/i);
+    expect(sql).toMatch(/sent_now_at timestamptz/i);
+    expect(sql).toMatch(/sent_now_by_person_id\s*=\s*p_sent_now_by_person_id/i);
+    expect(sql).toMatch(/sent_now_by_person_name\s*=\s*p_sent_now_by_person_name/i);
   });
 
   it("carries no recipient PII columns -- only manager audit ids/names, exactly like manager_notification_batches", () => {

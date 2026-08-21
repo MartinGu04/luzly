@@ -45,6 +45,7 @@ afterEach(() => {
 });
 
 const MANAGER = person({ id: "p_manager", name: "דני מנהל", isManager: true });
+const MANAGER_B = person({ id: "p_manager_b", name: "רותם מנהלת", isManager: true });
 const PERSON_A = person({ id: "p_a", name: "אלון", email: "alon@example.invalid" });
 const PERSON_B = person({ id: "p_b", name: "בר", email: "bar@example.invalid" });
 
@@ -68,6 +69,9 @@ function scheduledRow(overrides: Partial<Record<string, unknown>> = {}) {
     lastChangedByPersonName: null,
     cancelledByPersonId: null,
     cancelledByPersonName: null,
+    sentNowByPersonId: null,
+    sentNowByPersonName: null,
+    sentNowAt: null,
     claimedAt: "2026-08-23T17:00:01.000Z",
     batchId: null,
     dispatchedAt: null,
@@ -149,6 +153,43 @@ describe("createScheduledBroadcast -- validation (mirrors the immediate-send eng
     expect(
       await createScheduledBroadcast({ ...base, scheduledDate: `${FUTURE_YEAR}-02-30`, scheduledHour: 20, scheduledMinute: 0 }),
     ).toEqual({ ok: false, error: "invalid_schedule" });
+  });
+
+  it("fails closed on a local Asia/Jerusalem wall-clock time that does not exist -- the spring-forward DST gap -- rather than silently shifting it to a different instant", async () => {
+    const { createScheduledBroadcast } = await loadModule();
+    // Asia/Jerusalem's 2027 spring DST transition jumps 01:59 -> 03:00 on
+    // 2027-03-26, so 02:00-02:59 that day (e.g. 02:30) is not a real local
+    // wall-clock time at all.
+    const result = await createScheduledBroadcast({
+      manager: MANAGER,
+      people: [MANAGER, PERSON_A],
+      audienceKind: "person",
+      targetPersonIds: ["p_a"],
+      title: "כותרת",
+      body: "תוכן",
+      scheduledDate: "2027-03-26",
+      scheduledHour: 2,
+      scheduledMinute: 30,
+    });
+    expect(result).toEqual({ ok: false, error: "invalid_schedule" });
+    expect(insertManagerScheduledBroadcast).not.toHaveBeenCalled();
+  });
+
+  it("still accepts an ordinary, genuinely-existing local time on the SAME DST-transition day", async () => {
+    insertManagerScheduledBroadcast.mockResolvedValue(scheduledRow());
+    const { createScheduledBroadcast } = await loadModule();
+    const result = await createScheduledBroadcast({
+      manager: MANAGER,
+      people: [MANAGER, PERSON_A],
+      audienceKind: "person",
+      targetPersonIds: ["p_a"],
+      title: "כותרת",
+      body: "תוכן",
+      scheduledDate: "2027-03-26",
+      scheduledHour: 20,
+      scheduledMinute: 0,
+    });
+    expect(result.ok).toBe(true);
   });
 
   it("on success, freezes 'everyone' into the full current roster's ids and creates NO notification_jobs", async () => {
@@ -469,8 +510,16 @@ describe("sendScheduledBroadcastNow -- 'שלח עכשיו' uses the SAME dispatc
     claimManagerScheduledBroadcastNow.mockResolvedValue(null);
     getManagerScheduledBroadcastById.mockResolvedValue(scheduledRow({ status: "dispatched" }));
     const { sendScheduledBroadcastNow } = await loadModule();
-    const outcome = await sendScheduledBroadcastNow("sb_1", [MANAGER, PERSON_A]);
+    const outcome = await sendScheduledBroadcastNow("sb_1", [MANAGER, PERSON_A], MANAGER);
     expect(outcome).toEqual({ ok: false, error: "already_started" });
+  });
+
+  it("passes the acting manager's identity straight through to the atomic claim -- never a client-supplied identity", async () => {
+    claimManagerScheduledBroadcastNow.mockResolvedValue(null);
+    getManagerScheduledBroadcastById.mockResolvedValue(scheduledRow({ status: "dispatched" }));
+    const { sendScheduledBroadcastNow } = await loadModule();
+    await sendScheduledBroadcastNow("sb_1", [MANAGER_B, PERSON_A], MANAGER_B);
+    expect(claimManagerScheduledBroadcastNow).toHaveBeenCalledWith("sb_1", "p_manager_b", "רותם מנהלת");
   });
 
   it("on a successful claim, dispatches through the identical dispatch function", async () => {
@@ -493,9 +542,94 @@ describe("sendScheduledBroadcastNow -- 'שלח עכשיו' uses the SAME dispatc
     });
 
     const { sendScheduledBroadcastNow } = await loadModule();
-    const outcome = await sendScheduledBroadcastNow("sb_1", [MANAGER, PERSON_A, PERSON_B]);
+    const outcome = await sendScheduledBroadcastNow("sb_1", [MANAGER, PERSON_A, PERSON_B], MANAGER);
 
     expect(outcome).toEqual({ ok: true, batchId: "batch_1", resolvedRecipientCount: 1 });
     expect(markManagerScheduledBroadcastDispatched).toHaveBeenCalledWith("sb_1");
+  });
+
+  it("truthful attribution: Manager A schedules, Manager B sends now -> the eventual batch identifies B, never A, while the schedule's own audit still shows A as creator", async () => {
+    // The claim RPC atomically stamps sent_now_by_* on the winning claim --
+    // this test starts from that already-claimed shape (see the store-level
+    // RPC test for the atomic write itself).
+    claimManagerScheduledBroadcastNow.mockResolvedValue(
+      scheduledRow({
+        createdByPersonId: "p_manager",
+        createdByPersonName: "דני מנהל",
+        sentNowByPersonId: "p_manager_b",
+        sentNowByPersonName: "רותם מנהלת",
+      }),
+    );
+    fetchAllUserIdsByEmail.mockResolvedValue(
+      new Map([["alon@example.invalid", { userId: "u_a", avatarUrl: null }]]),
+    );
+    fetchAllSubscribedUserIds.mockResolvedValue(["u_a"]);
+    resolvePersonIdentity.mockReturnValue({ status: "mapped", normalizedEmail: "alon@example.invalid", userId: "u_a", avatarUrl: null });
+    insertManagerNotificationBatchIfAbsent.mockResolvedValue({
+      row: {
+        id: "batch_1",
+        idempotencyKey: "scheduled:sb_1",
+        createdByPersonId: "p_manager_b",
+        createdByPersonName: "רותם מנהלת",
+        audienceKind: "people",
+        targetPersonIds: ["p_a", "p_b"],
+        resolvedRecipientUserIds: ["u_a"],
+        title: "כותרת",
+        body: "תוכן",
+        resolvedRecipientCount: 1,
+        pushCapableCount: 1,
+        inboxOnlyCount: 0,
+        unresolvedCount: 0,
+        createdAt: "2026-08-23T17:00:01.000Z",
+      },
+      created: true,
+    });
+
+    const { sendScheduledBroadcastNow } = await loadModule();
+    const outcome = await sendScheduledBroadcastNow("sb_1", [MANAGER, PERSON_A, PERSON_B], MANAGER_B);
+
+    expect(outcome).toEqual({ ok: true, batchId: "batch_1", resolvedRecipientCount: 1 });
+    // The eventual batch is created for the SEND-NOW actor, never the original scheduler.
+    expect(insertManagerNotificationBatchIfAbsent).toHaveBeenCalledWith(
+      expect.objectContaining({ createdByPersonId: "p_manager_b", createdByPersonName: "רותם מנהלת" }),
+    );
+    // Exactly one logical batch/job, same as every other dispatch path.
+    expect(insertManagerNotificationBatchIfAbsent).toHaveBeenCalledTimes(1);
+    expect(insertNotificationJobIfAbsent).toHaveBeenCalledTimes(1);
+  });
+
+  it("automatic due dispatch (no send-now actor) keeps the ORIGINAL scheduling manager as the batch's sender", async () => {
+    claimDueManagerScheduledBroadcasts.mockResolvedValue([
+      scheduledRow({ createdByPersonId: "p_manager", createdByPersonName: "דני מנהל", sentNowByPersonId: null, sentNowByPersonName: null }),
+    ]);
+    fetchAllUserIdsByEmail.mockResolvedValue(new Map());
+    fetchAllSubscribedUserIds.mockResolvedValue([]);
+    resolvePersonIdentity.mockReturnValue({ status: "no_email" });
+    insertManagerNotificationBatchIfAbsent.mockResolvedValue({
+      row: {
+        id: "batch_1",
+        idempotencyKey: "scheduled:sb_1",
+        createdByPersonId: "p_manager",
+        createdByPersonName: "דני מנהל",
+        audienceKind: "people",
+        targetPersonIds: ["p_a", "p_b"],
+        resolvedRecipientUserIds: [],
+        title: "כותרת",
+        body: "תוכן",
+        resolvedRecipientCount: 0,
+        pushCapableCount: 0,
+        inboxOnlyCount: 0,
+        unresolvedCount: 2,
+        createdAt: "2026-08-23T17:00:01.000Z",
+      },
+      created: true,
+    });
+
+    const { runDueScheduledBroadcastDispatch } = await loadModule();
+    await runDueScheduledBroadcastDispatch([MANAGER, PERSON_A, PERSON_B]);
+
+    expect(insertManagerNotificationBatchIfAbsent).toHaveBeenCalledWith(
+      expect.objectContaining({ createdByPersonId: "p_manager", createdByPersonName: "דני מנהל" }),
+    );
   });
 });

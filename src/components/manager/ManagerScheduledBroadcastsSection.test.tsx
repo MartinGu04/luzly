@@ -65,6 +65,30 @@ describe("ManagerScheduledBroadcastsSection", () => {
     expect(screen.queryByRole("button", { name: "שלח עכשיו" })).toBeNull();
   });
 
+  it("hides עריכה/שלח עכשיו/ביטול for the item CURRENTLY being edited, and shows a visible editing indicator instead", async () => {
+    listActiveScheduledBroadcastsAction.mockResolvedValue({ ok: true, items: [item({ id: "sb_1" })] });
+    render(<ManagerScheduledBroadcastsSection reloadToken={0} editingId="sb_1" onEdit={vi.fn()} onChanged={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText("עדכון חשוב")).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "עריכה" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "שלח עכשיו" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "ביטול" })).toBeNull();
+    expect(screen.getByText("✏️ בעריכה כעת")).toBeInTheDocument();
+    expect(screen.getByText(/שמור\/י או בטל\/י את העריכה/)).toBeInTheDocument();
+  });
+
+  it("editing ONE item never disables actions on a DIFFERENT item in the same list", async () => {
+    listActiveScheduledBroadcastsAction.mockResolvedValue({
+      ok: true,
+      items: [item({ id: "sb_1", title: "הראשונה" }), item({ id: "sb_2", title: "השנייה" })],
+    });
+    render(<ManagerScheduledBroadcastsSection reloadToken={0} editingId="sb_1" onEdit={vi.fn()} onChanged={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText("השנייה")).toBeInTheDocument());
+    expect(screen.getAllByRole("button", { name: "עריכה" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "שלח עכשיו" })).toHaveLength(1);
+  });
+
   it("'עריכה' hands the item up to the parent", async () => {
     listActiveScheduledBroadcastsAction.mockResolvedValue({ ok: true, items: [item()] });
     const onEdit = vi.fn();

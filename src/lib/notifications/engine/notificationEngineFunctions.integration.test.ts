@@ -535,12 +535,14 @@ describe.skipIf(!databaseAvailable)("notification engine SQL functions -- real P
       );
     }
 
+    async function claimNow(id: string, personId = "p_manager_b", personName = "רותם מנהלת") {
+      return db.query("select * from public.claim_manager_scheduled_broadcast_now($1, $2, $3)", [id, personId, personName]);
+    }
+
     it("26. claims a still-'scheduled' broadcast regardless of how far in the future scheduled_for is", async () => {
       await insertScheduled("cccccccc-0000-0000-0000-000000000001", "scheduled", 3_600_000);
 
-      const result = await db.query("select * from public.claim_manager_scheduled_broadcast_now($1)", [
-        "cccccccc-0000-0000-0000-000000000001",
-      ]);
+      const result = await claimNow("cccccccc-0000-0000-0000-000000000001");
 
       expect(result.rows).toHaveLength(1);
       expect(result.rows[0].status).toBe("claimed");
@@ -556,7 +558,7 @@ describe.skipIf(!databaseAvailable)("notification engine SQL functions -- real P
         "cccccccc-0000-0000-0000-000000000003",
         "cccccccc-0000-0000-0000-000000000004",
       ]) {
-        const result = await db.query("select * from public.claim_manager_scheduled_broadcast_now($1)", [id]);
+        const result = await claimNow(id);
         expect(result.rows).toHaveLength(0);
       }
     });
@@ -564,12 +566,8 @@ describe.skipIf(!databaseAvailable)("notification engine SQL functions -- real P
     it("28. a second 'שלח עכשיו' claim on the same broadcast never succeeds twice -- exactly one logical dispatch", async () => {
       await insertScheduled("cccccccc-0000-0000-0000-000000000005", "scheduled", -1000);
 
-      const first = await db.query("select * from public.claim_manager_scheduled_broadcast_now($1)", [
-        "cccccccc-0000-0000-0000-000000000005",
-      ]);
-      const second = await db.query("select * from public.claim_manager_scheduled_broadcast_now($1)", [
-        "cccccccc-0000-0000-0000-000000000005",
-      ]);
+      const first = await claimNow("cccccccc-0000-0000-0000-000000000005");
+      const second = await claimNow("cccccccc-0000-0000-0000-000000000005");
 
       expect(first.rows).toHaveLength(1);
       expect(second.rows).toHaveLength(0);
@@ -579,12 +577,38 @@ describe.skipIf(!databaseAvailable)("notification engine SQL functions -- real P
       await insertScheduled("cccccccc-0000-0000-0000-000000000006", "scheduled", -1000);
       await db.query("set role authenticated");
       try {
-        await expect(
-          db.query("select * from public.claim_manager_scheduled_broadcast_now($1)", ["cccccccc-0000-0000-0000-000000000006"]),
-        ).rejects.toThrow(/permission denied/i);
+        await expect(claimNow("cccccccc-0000-0000-0000-000000000006")).rejects.toThrow(/permission denied/i);
       } finally {
         await db.query("reset role");
       }
+    });
+
+    it("30. records the ACTING manager's identity atomically with the winning claim -- never the original scheduler, never a losing racer", async () => {
+      await insertScheduled("cccccccc-0000-0000-0000-000000000007", "scheduled", -1000);
+
+      const winner = await claimNow("cccccccc-0000-0000-0000-000000000007", "p_manager_b", "רותם מנהלת");
+      expect(winner.rows).toHaveLength(1);
+      expect(winner.rows[0].created_by_person_id).toBe("p_manager"); // original scheduler, untouched
+      expect(winner.rows[0].sent_now_by_person_id).toBe("p_manager_b");
+      expect(winner.rows[0].sent_now_by_person_name).toBe("רותם מנהלת");
+      expect(winner.rows[0].sent_now_at).not.toBeNull();
+
+      // A second (losing) claim attempt by a DIFFERENT manager must never overwrite the winner's identity.
+      const loser = await claimNow("cccccccc-0000-0000-0000-000000000007", "p_manager_c", "מנהל אחר");
+      expect(loser.rows).toHaveLength(0);
+      const row = await db.query("select * from public.manager_scheduled_broadcasts where id = $1", [
+        "cccccccc-0000-0000-0000-000000000007",
+      ]);
+      expect(row.rows[0].sent_now_by_person_id).toBe("p_manager_b");
+    });
+
+    it("31. a normal due-time worker claim (claim_due_manager_scheduled_broadcasts) never sets sent_now_by_* -- only an explicit 'שלח עכשיו' claim does", async () => {
+      await insertScheduled("cccccccc-0000-0000-0000-000000000008", "scheduled", -1000);
+
+      const result = await db.query("select * from public.claim_due_manager_scheduled_broadcasts(100)");
+      const row = result.rows.find((r) => r.id === "cccccccc-0000-0000-0000-000000000008");
+      expect(row).toBeDefined();
+      expect(row.sent_now_by_person_id).toBeNull();
     });
   });
 });

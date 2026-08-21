@@ -303,7 +303,11 @@ describe("claimDueManagerScheduledBroadcasts / claimManagerScheduledBroadcastNow
     (client.rpc as ReturnType<typeof vi.fn>).mockResolvedValue({ data: [], error: null });
     const { claimManagerScheduledBroadcastNow } = await loadModule(client);
 
-    expect(await claimManagerScheduledBroadcastNow("sb_1")).toBeNull();
-    expect(client.rpc).toHaveBeenCalledWith("claim_manager_scheduled_broadcast_now", { p_id: "sb_1" });
+    expect(await claimManagerScheduledBroadcastNow("sb_1", "p_manager_b", "רותם מנהלת")).toBeNull();
+    expect(client.rpc).toHaveBeenCalledWith("claim_manager_scheduled_broadcast_now", {
+      p_id: "sb_1",
+      p_sent_now_by_person_id: "p_manager_b",
+      p_sent_now_by_person_name: "רותם מנהלת",
+    });
   });
 });

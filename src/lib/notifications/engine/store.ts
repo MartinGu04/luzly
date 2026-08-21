@@ -988,6 +988,10 @@ export interface ManagerScheduledBroadcastRow {
   lastChangedByPersonName: string | null;
   cancelledByPersonId: string | null;
   cancelledByPersonName: string | null;
+  /** The manager who actually pressed "שלח עכשיו" -- distinct from `createdByPersonId`/`lastChangedByPersonId`; null for a normal due-time worker dispatch. See `claim_manager_scheduled_broadcast_now` and `scheduledBroadcast.ts`'s `batchCreatorForRow`. */
+  sentNowByPersonId: string | null;
+  sentNowByPersonName: string | null;
+  sentNowAt: string | null;
   claimedAt: string | null;
   batchId: string | null;
   dispatchedAt: string | null;
@@ -997,7 +1001,7 @@ export interface ManagerScheduledBroadcastRow {
 }
 
 const MANAGER_SCHEDULED_BROADCAST_COLUMNS =
-  "id, status, audience_kind, target_person_ids, title, body, scheduled_for, created_by_person_id, created_by_person_name, last_changed_by_person_id, last_changed_by_person_name, cancelled_by_person_id, cancelled_by_person_name, claimed_at, batch_id, dispatched_at, cancelled_at, created_at, updated_at";
+  "id, status, audience_kind, target_person_ids, title, body, scheduled_for, created_by_person_id, created_by_person_name, last_changed_by_person_id, last_changed_by_person_name, cancelled_by_person_id, cancelled_by_person_name, sent_now_by_person_id, sent_now_by_person_name, sent_now_at, claimed_at, batch_id, dispatched_at, cancelled_at, created_at, updated_at";
 
 function toScheduledBroadcastRow(row: Record<string, unknown>): ManagerScheduledBroadcastRow {
   return {
@@ -1014,6 +1018,9 @@ function toScheduledBroadcastRow(row: Record<string, unknown>): ManagerScheduled
     lastChangedByPersonName: (row.last_changed_by_person_name as string | null) ?? null,
     cancelledByPersonId: (row.cancelled_by_person_id as string | null) ?? null,
     cancelledByPersonName: (row.cancelled_by_person_name as string | null) ?? null,
+    sentNowByPersonId: (row.sent_now_by_person_id as string | null) ?? null,
+    sentNowByPersonName: (row.sent_now_by_person_name as string | null) ?? null,
+    sentNowAt: (row.sent_now_at as string | null) ?? null,
     claimedAt: (row.claimed_at as string | null) ?? null,
     batchId: (row.batch_id as string | null) ?? null,
     dispatchedAt: (row.dispatched_at as string | null) ?? null,
@@ -1135,10 +1142,25 @@ export async function claimDueManagerScheduledBroadcasts(limit = 50): Promise<Ma
   return ((data ?? []) as Record<string, unknown>[]).map(toScheduledBroadcastRow);
 }
 
-/** "שלח עכשיו"'s single-row atomic claim. `null` means it was no longer `'scheduled'` (already claimed by a racing worker tick, already dispatched, or cancelled). */
-export async function claimManagerScheduledBroadcastNow(id: string): Promise<ManagerScheduledBroadcastRow | null> {
+/**
+ * "שלח עכשיו"'s single-row atomic claim. `null` means it was no longer
+ * `'scheduled'` (already claimed by a racing worker tick, already
+ * dispatched, or cancelled). `sentNowByPersonId`/`sentNowByPersonName` --
+ * the AUTHENTICATED caller, never client-supplied -- are recorded by the
+ * RPC itself, atomically with the winning claim, so only the manager
+ * whose claim actually succeeds is ever attributed.
+ */
+export async function claimManagerScheduledBroadcastNow(
+  id: string,
+  sentNowByPersonId: string,
+  sentNowByPersonName: string,
+): Promise<ManagerScheduledBroadcastRow | null> {
   const supabase = getNotificationServiceClient();
-  const { data, error } = await supabase.rpc("claim_manager_scheduled_broadcast_now", { p_id: id });
+  const { data, error } = await supabase.rpc("claim_manager_scheduled_broadcast_now", {
+    p_id: id,
+    p_sent_now_by_person_id: sentNowByPersonId,
+    p_sent_now_by_person_name: sentNowByPersonName,
+  });
   if (error) throw error;
   const rows = (data ?? []) as Record<string, unknown>[];
   return rows.length > 0 ? toScheduledBroadcastRow(rows[0]) : null;
