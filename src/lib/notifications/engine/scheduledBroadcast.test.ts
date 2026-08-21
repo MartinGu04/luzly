@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Person } from "@/lib/domain/types";
+import { jerusalemLocalTimeToInstant } from "@/lib/time/jerusalemClock";
 
 function person(overrides: Partial<Person> & Pick<Person, "id" | "name">): Person {
   return { email: null, isManager: false, isTechnician: false, isSupervisor: false, personnelType: null, ...overrides };
 }
 
-const insertManagerScheduledBroadcast = vi.fn();
+const insertManagerScheduledBroadcastIfAbsent = vi.fn();
 const getManagerScheduledBroadcastById = vi.fn();
 const updateManagerScheduledBroadcastIfEditable = vi.fn();
 const cancelManagerScheduledBroadcastIfEditable = vi.fn();
@@ -23,7 +24,7 @@ const resolvePersonIdentity = vi.fn();
 
 async function loadModule() {
   vi.doMock("./store", () => ({
-    insertManagerScheduledBroadcast,
+    insertManagerScheduledBroadcastIfAbsent,
     getManagerScheduledBroadcastById,
     updateManagerScheduledBroadcastIfEditable,
     cancelManagerScheduledBroadcastIfEditable,
@@ -95,9 +96,10 @@ describe("createScheduledBroadcast -- validation (mirrors the immediate-send eng
       scheduledDate: FUTURE_DATE,
       scheduledHour: 20,
       scheduledMinute: 0,
+      createIdempotencyKey: "idem-create-1",
     });
     expect(result).toEqual({ ok: false, error: "invalid_title" });
-    expect(insertManagerScheduledBroadcast).not.toHaveBeenCalled();
+    expect(insertManagerScheduledBroadcastIfAbsent).not.toHaveBeenCalled();
   });
 
   it("rejects an unknown target id (fails closed, never shrinks the audience)", async () => {
@@ -112,6 +114,7 @@ describe("createScheduledBroadcast -- validation (mirrors the immediate-send eng
       scheduledDate: FUTURE_DATE,
       scheduledHour: 20,
       scheduledMinute: 0,
+      createIdempotencyKey: "idem-create-1",
     });
     expect(result).toEqual({ ok: false, error: "invalid_targets" });
   });
@@ -128,6 +131,7 @@ describe("createScheduledBroadcast -- validation (mirrors the immediate-send eng
       scheduledDate: "2020-01-01",
       scheduledHour: 8,
       scheduledMinute: 0,
+      createIdempotencyKey: "idem-create-1",
     });
     expect(result).toEqual({ ok: false, error: "invalid_schedule" });
   });
@@ -141,6 +145,7 @@ describe("createScheduledBroadcast -- validation (mirrors the immediate-send eng
       targetPersonIds: ["p_a"],
       title: "כותרת",
       body: "תוכן",
+      createIdempotencyKey: "idem-create-1",
     };
     expect(await createScheduledBroadcast({ ...base, scheduledDate: FUTURE_DATE, scheduledHour: 24, scheduledMinute: 0 })).toEqual({
       ok: false,
@@ -170,13 +175,14 @@ describe("createScheduledBroadcast -- validation (mirrors the immediate-send eng
       scheduledDate: "2027-03-26",
       scheduledHour: 2,
       scheduledMinute: 30,
+      createIdempotencyKey: "idem-create-1",
     });
     expect(result).toEqual({ ok: false, error: "invalid_schedule" });
-    expect(insertManagerScheduledBroadcast).not.toHaveBeenCalled();
+    expect(insertManagerScheduledBroadcastIfAbsent).not.toHaveBeenCalled();
   });
 
   it("still accepts an ordinary, genuinely-existing local time on the SAME DST-transition day", async () => {
-    insertManagerScheduledBroadcast.mockResolvedValue(scheduledRow());
+    insertManagerScheduledBroadcastIfAbsent.mockResolvedValue({ row: scheduledRow(), created: true });
     const { createScheduledBroadcast } = await loadModule();
     const result = await createScheduledBroadcast({
       manager: MANAGER,
@@ -188,12 +194,16 @@ describe("createScheduledBroadcast -- validation (mirrors the immediate-send eng
       scheduledDate: "2027-03-26",
       scheduledHour: 20,
       scheduledMinute: 0,
+      createIdempotencyKey: "idem-create-1",
     });
     expect(result.ok).toBe(true);
   });
 
   it("on success, freezes 'everyone' into the full current roster's ids and creates NO notification_jobs", async () => {
-    insertManagerScheduledBroadcast.mockResolvedValue(scheduledRow({ audienceKind: "everyone", targetPersonIds: ["p_manager", "p_a", "p_b"] }));
+    insertManagerScheduledBroadcastIfAbsent.mockResolvedValue({
+      row: scheduledRow({ audienceKind: "everyone", targetPersonIds: ["p_manager", "p_a", "p_b"] }),
+      created: true,
+    });
     const { createScheduledBroadcast } = await loadModule();
 
     const result = await createScheduledBroadcast({
@@ -206,14 +216,109 @@ describe("createScheduledBroadcast -- validation (mirrors the immediate-send eng
       scheduledDate: FUTURE_DATE,
       scheduledHour: 20,
       scheduledMinute: 0,
+      createIdempotencyKey: "idem-create-1",
     });
 
     expect(result.ok).toBe(true);
-    expect(insertManagerScheduledBroadcast).toHaveBeenCalledWith(
-      expect.objectContaining({ audienceKind: "everyone", targetPersonIds: ["p_manager", "p_a", "p_b"] }),
+    expect(insertManagerScheduledBroadcastIfAbsent).toHaveBeenCalledWith(
+      expect.objectContaining({ audienceKind: "everyone", targetPersonIds: ["p_manager", "p_a", "p_b"], createIdempotencyKey: "idem-create-1" }),
     );
     expect(insertNotificationJobIfAbsent).not.toHaveBeenCalled();
     expect(insertManagerNotificationBatchIfAbsent).not.toHaveBeenCalled();
+  });
+});
+
+describe("createScheduledBroadcast -- create-exactly-once idempotency (separate from dispatch's own scheduled:<id> key)", () => {
+  const CREATE_INPUT = {
+    manager: MANAGER,
+    people: [MANAGER, PERSON_A],
+    audienceKind: "person" as const,
+    targetPersonIds: ["p_a"],
+    title: "כותרת",
+    body: "תוכן",
+    scheduledDate: FUTURE_DATE,
+    scheduledHour: 20,
+    scheduledMinute: 0,
+    createIdempotencyKey: "idem-create-1",
+  };
+  // The exact instant `createScheduledBroadcast` will resolve CREATE_INPUT's
+  // own date/hour/minute to -- a stored row must match this exactly for the
+  // replay comparison (`isSameLogicalScheduledCreateRequest`) to treat it as
+  // the SAME logical request.
+  const CREATE_INPUT_SCHEDULED_FOR = jerusalemLocalTimeToInstant(FUTURE_DATE, 20, 0).toISOString();
+
+  it("a genuinely new key inserts and returns the fresh row", async () => {
+    insertManagerScheduledBroadcastIfAbsent.mockResolvedValue({ row: scheduledRow(), created: true });
+    const { createScheduledBroadcast } = await loadModule();
+
+    const result = await createScheduledBroadcast(CREATE_INPUT);
+
+    expect(result).toEqual({ ok: true, row: scheduledRow() });
+    expect(insertManagerScheduledBroadcastIfAbsent).toHaveBeenCalledWith(
+      expect.objectContaining({ createIdempotencyKey: "idem-create-1" }),
+    );
+  });
+
+  it("a retry with the SAME key and the SAME logical request returns the ORIGINAL row, never a second one", async () => {
+    // The store found an existing row (created: false) whose stored
+    // content is IDENTICAL to this retry's own request.
+    const originalRow = scheduledRow({
+      id: "sb_original",
+      audienceKind: "person",
+      targetPersonIds: ["p_a"],
+      scheduledFor: CREATE_INPUT_SCHEDULED_FOR,
+    });
+    insertManagerScheduledBroadcastIfAbsent.mockResolvedValue({ row: originalRow, created: false });
+    const { createScheduledBroadcast } = await loadModule();
+
+    const result = await createScheduledBroadcast(CREATE_INPUT);
+
+    expect(result).toEqual({ ok: true, row: originalRow });
+  });
+
+  it("fails closed with idempotency_conflict when a reused key's stored row has genuinely different content -- never silently returns the mismatched row", async () => {
+    insertManagerScheduledBroadcastIfAbsent.mockResolvedValue({
+      row: scheduledRow({ title: "כותרת אחרת לגמרי" }), // mismatched vs. CREATE_INPUT.title
+      created: false,
+    });
+    const { createScheduledBroadcast } = await loadModule();
+
+    const result = await createScheduledBroadcast(CREATE_INPUT);
+
+    expect(result).toEqual({ ok: false, error: "idempotency_conflict" });
+  });
+
+  it("'everyone' replay comparison skips target-id comparison, same as the immediate-send engine's own rule (a roster that grew between two near-simultaneous requests must never itself manufacture a false conflict)", async () => {
+    insertManagerScheduledBroadcastIfAbsent.mockResolvedValue({
+      row: scheduledRow({
+        audienceKind: "everyone",
+        targetPersonIds: ["p_manager", "p_a"], // stored BEFORE the roster grew
+        scheduledFor: CREATE_INPUT_SCHEDULED_FOR,
+      }),
+      created: false,
+    });
+    const { createScheduledBroadcast } = await loadModule();
+
+    const result = await createScheduledBroadcast({
+      ...CREATE_INPUT,
+      audienceKind: "everyone",
+      people: [MANAGER, PERSON_A, PERSON_B], // roster now includes PERSON_B too
+      targetPersonIds: [],
+    });
+
+    expect(result.ok).toBe(true);
+  });
+
+  it("a DIFFERENT compose-session key creates an independent new schedule normally, not a replay of anything", async () => {
+    insertManagerScheduledBroadcastIfAbsent.mockResolvedValue({ row: scheduledRow({ id: "sb_new" }), created: true });
+    const { createScheduledBroadcast } = await loadModule();
+
+    const result = await createScheduledBroadcast({ ...CREATE_INPUT, createIdempotencyKey: "idem-create-2" });
+
+    expect(result).toEqual({ ok: true, row: scheduledRow({ id: "sb_new" }) });
+    expect(insertManagerScheduledBroadcastIfAbsent).toHaveBeenCalledWith(
+      expect.objectContaining({ createIdempotencyKey: "idem-create-2" }),
+    );
   });
 });
 

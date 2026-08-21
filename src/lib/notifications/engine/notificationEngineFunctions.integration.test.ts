@@ -440,17 +440,20 @@ describe.skipIf(!databaseAvailable)("notification engine SQL functions -- real P
       const batchId = overrides.batchId ?? null;
       const sentNowByPersonId = overrides.sentNowByPersonId ?? null;
       const sentNowByPersonName = overrides.sentNowByPersonName ?? null;
+      // A direct test insert never goes through the manager's own compose
+      // session, so it has no real client-generated creation key -- the
+      // row's own (already-unique) `id` is a convenient stand-in here.
       await db.query(
         `insert into public.manager_scheduled_broadcasts
-           (id, status, audience_kind, target_person_ids, title, body, scheduled_for,
+           (id, create_idempotency_key, status, audience_kind, target_person_ids, title, body, scheduled_for,
             created_by_person_id, created_by_person_name, claimed_at, batch_id,
             sent_now_by_person_id, sent_now_by_person_name, sent_now_at)
-         values ($1, $2, 'person', '{p_1}', 't', 'b', now() + ($3 || ' milliseconds')::interval,
+         values ($1, $8, $2, 'person', '{p_1}', 't', 'b', now() + ($3 || ' milliseconds')::interval,
            'p_manager', 'מנהל',
            case when $4::bigint is null then null else now() + ($4 || ' milliseconds')::interval end,
            $5, $6, $7,
            case when $6::text is null then null else now() end)`,
-        [id, status, scheduledForOffsetMs, claimedAtOffsetMs, batchId, sentNowByPersonId, sentNowByPersonName],
+        [id, status, scheduledForOffsetMs, claimedAtOffsetMs, batchId, sentNowByPersonId, sentNowByPersonName, `create:${id}`],
       );
     }
 
@@ -462,6 +465,40 @@ describe.skipIf(!databaseAvailable)("notification engine SQL functions -- real P
         [id, idempotencyKey],
       );
     }
+
+    it("35. create_idempotency_key's unique constraint rejects a duplicate insert -- a GENUINE proof that create-exactly-once is DB-enforced, not merely a client-side convention", async () => {
+      await db.query(
+        `insert into public.manager_scheduled_broadcasts
+           (id, create_idempotency_key, status, audience_kind, target_person_ids, title, body, scheduled_for, created_by_person_id, created_by_person_name)
+         values (gen_random_uuid(), 'idem-create-dup', 'scheduled', 'person', '{p_1}', 't', 'b', now() + interval '1 hour', 'p_manager', 'מנהל')`,
+      );
+
+      await expect(
+        db.query(
+          `insert into public.manager_scheduled_broadcasts
+             (id, create_idempotency_key, status, audience_kind, target_person_ids, title, body, scheduled_for, created_by_person_id, created_by_person_name)
+           values (gen_random_uuid(), 'idem-create-dup', 'scheduled', 'person', '{p_1}', 't', 'b', now() + interval '1 hour', 'p_manager', 'מנהל')`,
+        ),
+      ).rejects.toThrow(/duplicate key/i);
+    });
+
+    it("36. two DIFFERENT create_idempotency_keys genuinely insert two independent rows", async () => {
+      await db.query(
+        `insert into public.manager_scheduled_broadcasts
+           (id, create_idempotency_key, status, audience_kind, target_person_ids, title, body, scheduled_for, created_by_person_id, created_by_person_name)
+         values (gen_random_uuid(), 'idem-create-a', 'scheduled', 'person', '{p_1}', 't', 'b', now() + interval '1 hour', 'p_manager', 'מנהל')`,
+      );
+      await db.query(
+        `insert into public.manager_scheduled_broadcasts
+           (id, create_idempotency_key, status, audience_kind, target_person_ids, title, body, scheduled_for, created_by_person_id, created_by_person_name)
+         values (gen_random_uuid(), 'idem-create-b', 'scheduled', 'person', '{p_1}', 't', 'b', now() + interval '1 hour', 'p_manager', 'מנהל')`,
+      );
+
+      const rows = await db.query(
+        "select id from public.manager_scheduled_broadcasts where create_idempotency_key in ('idem-create-a', 'idem-create-b')",
+      );
+      expect(rows.rows).toHaveLength(2);
+    });
 
     it("20. only a due, still-'scheduled' broadcast is claimed -- a future one is left alone", async () => {
       await insertScheduled("aaaaaaaa-0000-0000-0000-000000000001", { scheduledForOffsetMs: -1000 });
@@ -612,9 +649,9 @@ describe.skipIf(!databaseAvailable)("notification engine SQL functions -- real P
     async function insertScheduled(id: string, status: string, scheduledForOffsetMs: number) {
       await db.query(
         `insert into public.manager_scheduled_broadcasts
-           (id, status, audience_kind, target_person_ids, title, body, scheduled_for, created_by_person_id, created_by_person_name)
-         values ($1, $2, 'person', '{p_1}', 't', 'b', now() + ($3 || ' milliseconds')::interval, 'p_manager', 'מנהל')`,
-        [id, status, scheduledForOffsetMs],
+           (id, create_idempotency_key, status, audience_kind, target_person_ids, title, body, scheduled_for, created_by_person_id, created_by_person_name)
+         values ($1, $4, $2, 'person', '{p_1}', 't', 'b', now() + ($3 || ' milliseconds')::interval, 'p_manager', 'מנהל')`,
+        [id, status, scheduledForOffsetMs, `create:${id}`],
       );
     }
 

@@ -93,6 +93,11 @@ describe("manager_scheduled_broadcasts migration -- security shape (text-level o
     expect(sql).not.toMatch(/^\s*recipient_\w+\s/im);
     expect(sql).not.toMatch(/^\s*\w*email\w*\s+text/im);
   });
+
+  it("create_idempotency_key is unique -- CREATION's own exactly-once guard, separate from batch_id/the eventual scheduled:<id> dispatch key", () => {
+    expect(sql).toMatch(/create_idempotency_key text not null/i);
+    expect(sql).toMatch(/unique \(create_idempotency_key\)/i);
+  });
 });
 
 describe("this migration file never edits PR #78's already-deployed manager_notification_batches migration", () => {

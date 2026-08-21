@@ -964,6 +964,8 @@ export async function listRecentManagerNotificationBatches(
 export type ManagerScheduledBroadcastStatus = "scheduled" | "claimed" | "dispatched" | "cancelled";
 
 export interface NewManagerScheduledBroadcast {
+  /** The compose-session key behind exactly-once CREATION -- see the migration's own doc comment. Never reused for dispatch (that's `batch_id`/`scheduled:<id>`). */
+  createIdempotencyKey: string;
   audienceKind: BroadcastAudienceKind;
   /** The frozen audience snapshot -- for `"everyone"` this is already the roster expanded to ids at save time, never re-expanded later. */
   targetPersonIds: readonly string[];
@@ -976,6 +978,7 @@ export interface NewManagerScheduledBroadcast {
 
 export interface ManagerScheduledBroadcastRow {
   id: string;
+  createIdempotencyKey: string;
   status: ManagerScheduledBroadcastStatus;
   audienceKind: BroadcastAudienceKind;
   targetPersonIds: string[];
@@ -1001,11 +1004,12 @@ export interface ManagerScheduledBroadcastRow {
 }
 
 const MANAGER_SCHEDULED_BROADCAST_COLUMNS =
-  "id, status, audience_kind, target_person_ids, title, body, scheduled_for, created_by_person_id, created_by_person_name, last_changed_by_person_id, last_changed_by_person_name, cancelled_by_person_id, cancelled_by_person_name, sent_now_by_person_id, sent_now_by_person_name, sent_now_at, claimed_at, batch_id, dispatched_at, cancelled_at, created_at, updated_at";
+  "id, create_idempotency_key, status, audience_kind, target_person_ids, title, body, scheduled_for, created_by_person_id, created_by_person_name, last_changed_by_person_id, last_changed_by_person_name, cancelled_by_person_id, cancelled_by_person_name, sent_now_by_person_id, sent_now_by_person_name, sent_now_at, claimed_at, batch_id, dispatched_at, cancelled_at, created_at, updated_at";
 
 function toScheduledBroadcastRow(row: Record<string, unknown>): ManagerScheduledBroadcastRow {
   return {
     id: row.id as string,
+    createIdempotencyKey: row.create_idempotency_key as string,
     status: row.status as ManagerScheduledBroadcastStatus,
     audienceKind: row.audience_kind as BroadcastAudienceKind,
     targetPersonIds: (row.target_person_ids as string[] | null) ?? [],
@@ -1030,13 +1034,30 @@ function toScheduledBroadcastRow(row: Record<string, unknown>): ManagerScheduled
   };
 }
 
-export async function insertManagerScheduledBroadcast(
+export interface ManagerScheduledBroadcastUpsertResult {
+  row: ManagerScheduledBroadcastRow;
+  /** `true` only when THIS call genuinely inserted the row. `false` means `create_idempotency_key` already existed -- `row` is the ORIGINAL stored row, never overwritten by this call's (possibly different) payload. The caller MUST compare `row` against its own current request before treating this as a safe replay -- see `scheduledBroadcast.ts`'s `createScheduledBroadcast`; this function itself does not decide whether a reused key represents a legitimate replay or a mutated request. */
+  created: boolean;
+}
+
+/**
+ * Idempotent by `create_idempotency_key` -- a genuinely new schedule
+ * inserts and returns its own fresh row with `created: true`. A retried/
+ * double-submitted "שמירת תזמון" click carrying the SAME key hits the
+ * unique constraint and this returns the ALREADY-EXISTING row instead
+ * (`created: false`, the row's ORIGINAL stored values). Never performs an
+ * `update` on conflict -- so this can never overwrite an edit that
+ * happened to the row after its original creation, no matter how late a
+ * replay of the original create request arrives.
+ */
+export async function insertManagerScheduledBroadcastIfAbsent(
   input: NewManagerScheduledBroadcast,
-): Promise<ManagerScheduledBroadcastRow> {
+): Promise<ManagerScheduledBroadcastUpsertResult> {
   const supabase = getNotificationServiceClient();
   const { data, error } = await supabase
     .from("manager_scheduled_broadcasts")
     .insert({
+      create_idempotency_key: input.createIdempotencyKey,
       audience_kind: input.audienceKind,
       target_person_ids: input.targetPersonIds,
       title: input.title,
@@ -1047,8 +1068,28 @@ export async function insertManagerScheduledBroadcast(
     })
     .select(MANAGER_SCHEDULED_BROADCAST_COLUMNS)
     .single();
+
+  if (error) {
+    if ((error as { code?: string }).code === "23505") {
+      const existing = await getManagerScheduledBroadcastByCreateIdempotencyKey(input.createIdempotencyKey);
+      if (existing) return { row: existing, created: false };
+    }
+    throw error;
+  }
+  return { row: toScheduledBroadcastRow(data as Record<string, unknown>), created: true };
+}
+
+export async function getManagerScheduledBroadcastByCreateIdempotencyKey(
+  createIdempotencyKey: string,
+): Promise<ManagerScheduledBroadcastRow | null> {
+  const supabase = getNotificationServiceClient();
+  const { data, error } = await supabase
+    .from("manager_scheduled_broadcasts")
+    .select(MANAGER_SCHEDULED_BROADCAST_COLUMNS)
+    .eq("create_idempotency_key", createIdempotencyKey)
+    .maybeSingle();
   if (error) throw error;
-  return toScheduledBroadcastRow(data as Record<string, unknown>);
+  return data ? toScheduledBroadcastRow(data as Record<string, unknown>) : null;
 }
 
 export async function getManagerScheduledBroadcastById(id: string): Promise<ManagerScheduledBroadcastRow | null> {

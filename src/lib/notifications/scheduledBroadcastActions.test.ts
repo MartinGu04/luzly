@@ -44,6 +44,7 @@ function validInput(overrides: Partial<Record<string, unknown>> = {}) {
     scheduledDate: "2026-08-23",
     scheduledHour: 20,
     scheduledMinute: 0,
+    idempotencyKey: "idem-key-12345678", // CREATE-only; harmlessly ignored by edit/cancel callers below.
     ...overrides,
   };
 }
@@ -122,6 +123,22 @@ describe("createScheduledBroadcastAction -- authorization + shape validation", (
     expect(createScheduledBroadcast).toHaveBeenCalledWith(expect.objectContaining({ manager: MANAGER, people: PEOPLE }));
   });
 
+  it("rejects a missing/short idempotencyKey -- this is the create-exactly-once guard's own input", async () => {
+    const result = await createScheduledBroadcastAction(validInput({ idempotencyKey: "short" }));
+    expect(result).toEqual({ ok: false, error: "invalid_request" });
+    expect(createScheduledBroadcast).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-string idempotencyKey", async () => {
+    const result = await createScheduledBroadcastAction(validInput({ idempotencyKey: 12345678 }));
+    expect(result).toEqual({ ok: false, error: "invalid_request" });
+  });
+
+  it("forwards the client's idempotencyKey as createIdempotencyKey -- the engine's own create-exactly-once field name", async () => {
+    await createScheduledBroadcastAction(validInput({ idempotencyKey: "idem-abcdefgh" }));
+    expect(createScheduledBroadcast).toHaveBeenCalledWith(expect.objectContaining({ createIdempotencyKey: "idem-abcdefgh" }));
+  });
+
   it("returns a view built from the engine's own row on success", async () => {
     const result = await createScheduledBroadcastAction(validInput());
     expect(result.ok).toBe(true);
@@ -156,6 +173,12 @@ describe("editScheduledBroadcastAction", () => {
     editScheduledBroadcast.mockResolvedValue({ ok: false, error: "already_started" });
     const result = await editScheduledBroadcastAction("sb_1", validInput());
     expect(result).toEqual({ ok: false, error: "already_started" });
+  });
+
+  it("never forwards a createIdempotencyKey -- editing never creates or replaces the row's own creation-idempotency key", async () => {
+    await editScheduledBroadcastAction("sb_1", validInput());
+    const forwarded = editScheduledBroadcast.mock.calls[0][1];
+    expect(forwarded).not.toHaveProperty("createIdempotencyKey");
   });
 });
 

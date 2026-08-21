@@ -27,6 +27,10 @@ function makeFakeSupabase(scheduledRows: Row[] = [], batchRows: Row[] = []) {
       insert: (payload: Row) => ({
         select: () => ({
           single: async () => {
+            // Real Postgres unique-constraint conflict on create_idempotency_key.
+            const conflict = scheduled.find((row) => row.create_idempotency_key === payload.create_idempotency_key);
+            if (conflict) return { data: null, error: { code: "23505" } };
+
             idCounter += 1;
             const row: Row = {
               id: `sb_${idCounter}`,
@@ -139,6 +143,7 @@ afterEach(() => {
 
 function newInput(overrides: Record<string, unknown> = {}) {
   return {
+    createIdempotencyKey: "idem-create-1",
     audienceKind: "person" as const,
     targetPersonIds: ["p_1"],
     title: "כותרת",
@@ -150,16 +155,61 @@ function newInput(overrides: Record<string, unknown> = {}) {
   };
 }
 
-describe("insertManagerScheduledBroadcast", () => {
-  it("inserts and returns the full mapped row, defaulted to status 'scheduled'", async () => {
+describe("insertManagerScheduledBroadcastIfAbsent", () => {
+  it("inserts a genuinely new row, defaulted to status 'scheduled', and reports created: true", async () => {
     const { client } = makeFakeSupabase();
-    const { insertManagerScheduledBroadcast } = await loadModule(client);
+    const { insertManagerScheduledBroadcastIfAbsent } = await loadModule(client);
 
-    const row = await insertManagerScheduledBroadcast(newInput());
+    const { row, created } = await insertManagerScheduledBroadcastIfAbsent(newInput());
 
+    expect(created).toBe(true);
     expect(row.status).toBe("scheduled");
     expect(row).toMatchObject({ title: "כותרת", body: "תוכן", createdByPersonId: "p_manager", targetPersonIds: ["p_1"] });
     expect(row.id).toBeTruthy();
+  });
+
+  it("a retried insert with the SAME create_idempotency_key returns created: false and the ALREADY-EXISTING row, never a second one", async () => {
+    const { client, scheduled } = makeFakeSupabase();
+    const { insertManagerScheduledBroadcastIfAbsent } = await loadModule(client);
+
+    const first = await insertManagerScheduledBroadcastIfAbsent(newInput());
+    const second = await insertManagerScheduledBroadcastIfAbsent(newInput({ title: "כותרת אחרת בכלל" }));
+
+    expect(first.created).toBe(true);
+    expect(second.created).toBe(false);
+    expect(second.row.id).toBe(first.row.id);
+    expect(second.row.title).toBe("כותרת"); // the ORIGINAL stored title, never overwritten by the retry's payload
+    expect(scheduled).toHaveLength(1);
+  });
+
+  it("a DIFFERENT create_idempotency_key genuinely inserts a second, independent row", async () => {
+    const { client, scheduled } = makeFakeSupabase();
+    const { insertManagerScheduledBroadcastIfAbsent } = await loadModule(client);
+
+    const first = await insertManagerScheduledBroadcastIfAbsent(newInput());
+    const second = await insertManagerScheduledBroadcastIfAbsent(newInput({ createIdempotencyKey: "idem-create-2" }));
+
+    expect(first.created).toBe(true);
+    expect(second.created).toBe(true);
+    expect(second.row.id).not.toBe(first.row.id);
+    expect(scheduled).toHaveLength(2);
+  });
+});
+
+describe("getManagerScheduledBroadcastByCreateIdempotencyKey", () => {
+  it("returns null for an unknown key", async () => {
+    const { client } = makeFakeSupabase();
+    const { getManagerScheduledBroadcastByCreateIdempotencyKey } = await loadModule(client);
+    expect(await getManagerScheduledBroadcastByCreateIdempotencyKey("nope")).toBeNull();
+  });
+
+  it("finds the row by its creation key", async () => {
+    const { client } = makeFakeSupabase();
+    const { insertManagerScheduledBroadcastIfAbsent, getManagerScheduledBroadcastByCreateIdempotencyKey } = await loadModule(client);
+    const { row } = await insertManagerScheduledBroadcastIfAbsent(newInput({ createIdempotencyKey: "idem-lookup" }));
+
+    const found = await getManagerScheduledBroadcastByCreateIdempotencyKey("idem-lookup");
+    expect(found?.id).toBe(row.id);
   });
 });
 

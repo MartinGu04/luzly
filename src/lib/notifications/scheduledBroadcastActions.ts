@@ -14,6 +14,7 @@ import {
 import { listActiveManagerScheduledBroadcasts } from "./engine/store";
 
 const MAX_TARGET_IDS = 5000; // same generous defensive bound as the immediate-send action, not a real limit.
+const MAX_IDEMPOTENCY_KEY_LENGTH = 200; // same bound as the immediate-send action's own idempotencyKey.
 
 export interface ScheduledBroadcastActionInput {
   audienceKind: BroadcastAudienceKind;
@@ -29,6 +30,12 @@ export interface ScheduledBroadcastActionInput {
   scheduledMinute: number;
 }
 
+/** CREATE-only -- edit/cancel/send-now never create or replace a schedule's own creation-idempotency key (see `createScheduledBroadcast`). */
+export interface CreateScheduledBroadcastActionInput extends ScheduledBroadcastActionInput {
+  /** Generated once per compose session on the client (e.g. `crypto.randomUUID()`), unchanged across a retry -- the SAME pattern PR #78's immediate send already uses for its own `idempotencyKey`. */
+  idempotencyKey: string;
+}
+
 function isValidRequestShape(input: ScheduledBroadcastActionInput): boolean {
   if (input.audienceKind !== "person" && input.audienceKind !== "people" && input.audienceKind !== "everyone") {
     return false;
@@ -39,6 +46,10 @@ function isValidRequestShape(input: ScheduledBroadcastActionInput): boolean {
   if (typeof input.scheduledDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(input.scheduledDate)) return false;
   if (!Number.isInteger(input.scheduledHour) || !Number.isInteger(input.scheduledMinute)) return false;
   return true;
+}
+
+function isValidIdempotencyKey(key: unknown): key is string {
+  return typeof key === "string" && key.length >= 8 && key.length <= MAX_IDEMPOTENCY_KEY_LENGTH;
 }
 
 export interface ScheduledBroadcastView {
@@ -87,11 +98,20 @@ export type ScheduledBroadcastActionResult =
  * `loadManagerWorkbookContext`, and every target id re-validated against
  * the freshly-fetched roster (`createScheduledBroadcast`) -- never a
  * client-supplied roster.
+ *
+ * `input.idempotencyKey` makes CREATION itself exactly-once (a double-
+ * clicked "שמירת תזמון", or a retried request, must never produce two
+ * scheduled rows) -- the same client-compose-session-key pattern PR #78's
+ * immediate send already uses, enforced server-side by
+ * `createScheduledBroadcast`. This is a SEPARATE idempotency boundary
+ * from dispatch's own `scheduled:<id>` key.
  */
 export async function createScheduledBroadcastAction(
-  input: ScheduledBroadcastActionInput,
+  input: CreateScheduledBroadcastActionInput,
 ): Promise<ScheduledBroadcastActionResult> {
-  if (!isValidRequestShape(input)) return { ok: false, error: "invalid_request" };
+  if (!isValidRequestShape(input) || !isValidIdempotencyKey(input.idempotencyKey)) {
+    return { ok: false, error: "invalid_request" };
+  }
 
   const contextResult = await loadManagerWorkbookContext(["personnel"]);
   if (contextResult.status !== "ok") return { ok: false, error: contextResult.status };
@@ -108,6 +128,7 @@ export async function createScheduledBroadcastAction(
     scheduledDate: input.scheduledDate,
     scheduledHour: input.scheduledHour,
     scheduledMinute: input.scheduledMinute,
+    createIdempotencyKey: input.idempotencyKey,
   });
 
   if (!outcome.ok) return { ok: false, error: outcome.error };

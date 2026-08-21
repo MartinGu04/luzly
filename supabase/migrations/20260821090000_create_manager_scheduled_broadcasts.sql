@@ -20,6 +20,21 @@
 -- `notification_jobs` row exist). 'cancelled' is a separate terminal
 -- state reachable only from 'scheduled'.
 --
+-- `create_idempotency_key` is a SEPARATE idempotency boundary from
+-- `batch_id`/the eventual batch's own `scheduled:<id>` key -- this one
+-- guards CREATION itself (a manager double-clicking "שמירת תזמון", or a
+-- retried request, must produce at most one scheduled row), the exact
+-- same client-compose-session-key pattern PR #78's immediate send already
+-- uses for `manager_notification_batches.idempotency_key`. It is NEVER
+-- reused for dispatch -- the eventual batch still keys off this row's own
+-- `id` (`scheduled:<id>`), computed only after a row already exists. A
+-- repeated create request with the same key finds and returns the
+-- EXISTING row (via the unique constraint's `23505` conflict) rather than
+-- inserting a second one, and this lookup NEVER performs an `update` --
+-- so a very late replay of the original create request can never
+-- overwrite an edit that happened to the row in between (see
+-- `lib/notifications/engine/scheduledBroadcast.ts`'s `createScheduledBroadcast`).
+--
 -- `target_person_ids` is the FROZEN audience snapshot as of save/last
 -- edit time -- for `audience_kind = 'everyone'` this already holds the
 -- roster expanded to person ids at that moment (never re-expanded at
@@ -46,6 +61,10 @@
 -- ---------------------------------------------------------------------
 create table if not exists public.manager_scheduled_broadcasts (
   id uuid primary key default gen_random_uuid(),
+  -- The compose-session key behind exactly-once CREATION -- see this
+  -- table's own doc comment above. Distinct from `batch_id`/the eventual
+  -- batch's `scheduled:<id>` dispatch-idempotency key.
+  create_idempotency_key text not null,
   status text not null default 'scheduled',
   audience_kind text not null,
   target_person_ids text[] not null default '{}',
@@ -77,6 +96,8 @@ create table if not exists public.manager_scheduled_broadcasts (
   cancelled_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
+  constraint manager_scheduled_broadcasts_create_idempotency_key_unique
+    unique (create_idempotency_key),
   constraint manager_scheduled_broadcasts_status_check
     check (status in ('scheduled', 'claimed', 'dispatched', 'cancelled')),
   constraint manager_scheduled_broadcasts_audience_kind_check

@@ -8,6 +8,7 @@ import {
   isSameLogicalBroadcastRequest,
   MANAGER_BROADCAST_CATEGORY,
   resolveAudience,
+  sameIdSet,
   validateAudienceCardinality,
   validateText,
   type BroadcastUnresolvedPerson,
@@ -19,7 +20,7 @@ import {
   getManagerNotificationBatchById,
   getManagerScheduledBroadcastById,
   insertManagerNotificationBatchIfAbsent,
-  insertManagerScheduledBroadcast,
+  insertManagerScheduledBroadcastIfAbsent,
   insertNotificationJobIfAbsent,
   markManagerScheduledBroadcastDispatched,
   setManagerScheduledBroadcastBatchId,
@@ -149,9 +150,53 @@ export interface ScheduledBroadcastInput {
   scheduledMinute: number;
 }
 
+export interface CreateScheduledBroadcastInput extends ScheduledBroadcastInput {
+  /**
+   * Client-generated once per compose session (e.g. `crypto.randomUUID()`),
+   * unchanged across a retry -- the exactly-once CREATE guard, the SAME
+   * pattern PR #78's immediate send already uses for its own
+   * `idempotencyKey`. This is a SEPARATE idempotency boundary from the
+   * eventual batch's `scheduled:<id>` key (see `dispatchScheduledBroadcast`)
+   * -- it only ever guards this row's own creation, never dispatch.
+   */
+  createIdempotencyKey: string;
+}
+
 export type CreateScheduledBroadcastOutcome =
   | { ok: true; row: ManagerScheduledBroadcastRow }
-  | { ok: false; error: ScheduledBroadcastValidationError };
+  | { ok: false; error: ScheduledBroadcastValidationError | "idempotency_conflict" };
+
+/**
+ * Whether `candidate` is a REPLAY of the exact same logical create
+ * request the stored row (found via a reused `create_idempotency_key`)
+ * already represents. Mirrors `manualBroadcast.ts`'s own
+ * `isSameLogicalBroadcastRequest` exactly, plus `scheduledFor` (a
+ * dimension the immediate-send comparison has no equivalent of) --
+ * `"everyone"` deliberately never compares target ids, for the same
+ * reason as the immediate-send comparison: that audience is derived from
+ * the roster at request time, not client-supplied, so a roster that
+ * changed between two near-simultaneous requests must never itself
+ * manufacture a false conflict.
+ */
+function isSameLogicalScheduledCreateRequest(
+  stored: Pick<ManagerScheduledBroadcastRow, "createdByPersonId" | "audienceKind" | "targetPersonIds" | "title" | "body" | "scheduledFor">,
+  candidate: {
+    createdByPersonId: string;
+    audienceKind: BroadcastAudienceKind;
+    targetPersonIds: readonly string[];
+    title: string;
+    body: string;
+    scheduledFor: string;
+  },
+): boolean {
+  if (stored.createdByPersonId !== candidate.createdByPersonId) return false;
+  if (stored.audienceKind !== candidate.audienceKind) return false;
+  if (stored.title !== candidate.title) return false;
+  if (stored.body !== candidate.body) return false;
+  if (stored.scheduledFor !== candidate.scheduledFor) return false;
+  if (stored.audienceKind === "everyone") return true;
+  return sameIdSet(stored.targetPersonIds, candidate.targetPersonIds);
+}
 
 /**
  * Saves a new scheduled broadcast -- deliberately creates NO
@@ -159,12 +204,23 @@ export type CreateScheduledBroadcastOutcome =
  * migration's doc comment). `"everyone"` is expanded against the fresh
  * roster right now and frozen into `target_person_ids` -- a person added
  * to כ"א afterward can never silently join this schedule.
+ *
+ * Idempotent by `createIdempotencyKey`: a genuinely new key inserts and
+ * returns the fresh row. A reused key finds the EXISTING row instead --
+ * if it represents the exact same logical request
+ * (`isSameLogicalScheduledCreateRequest`), that existing row is returned
+ * unchanged (a safe replay); any mismatch fails closed as
+ * `idempotency_conflict`, never creating a second row and never
+ * mutating the existing one. Because this NEVER performs an `update` on
+ * conflict, even a very late replay of the original create request can
+ * never overwrite an edit the manager made to the row afterward.
  */
-export async function createScheduledBroadcast(input: ScheduledBroadcastInput): Promise<CreateScheduledBroadcastOutcome> {
+export async function createScheduledBroadcast(input: CreateScheduledBroadcastInput): Promise<CreateScheduledBroadcastOutcome> {
   const validated = validateScheduledBroadcastFields(input);
   if (!validated.ok) return validated;
 
-  const row = await insertManagerScheduledBroadcast({
+  const { row, created } = await insertManagerScheduledBroadcastIfAbsent({
+    createIdempotencyKey: input.createIdempotencyKey,
     audienceKind: input.audienceKind,
     targetPersonIds: validated.fields.canonicalTargetPersonIds,
     title: validated.fields.title,
@@ -173,6 +229,18 @@ export async function createScheduledBroadcast(input: ScheduledBroadcastInput): 
     createdByPersonId: input.manager.id,
     createdByPersonName: input.manager.name,
   });
+
+  if (!created) {
+    const isReplay = isSameLogicalScheduledCreateRequest(row, {
+      createdByPersonId: input.manager.id,
+      audienceKind: input.audienceKind,
+      targetPersonIds: validated.fields.canonicalTargetPersonIds,
+      title: validated.fields.title,
+      body: validated.fields.body,
+      scheduledFor: validated.fields.scheduledForInstant.toISOString(),
+    });
+    if (!isReplay) return { ok: false, error: "idempotency_conflict" };
+  }
 
   return { ok: true, row };
 }

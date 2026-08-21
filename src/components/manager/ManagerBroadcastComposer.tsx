@@ -269,7 +269,7 @@ export function ManagerBroadcastComposer({
 
       const outcome = editingItem
         ? await editScheduledBroadcastAction(editingItem.id, scheduleInput)
-        : await createScheduledBroadcastAction(scheduleInput);
+        : await createScheduledBroadcastAction({ ...scheduleInput, idempotencyKey });
 
       setScheduleResult(outcome);
       if (outcome.ok) {

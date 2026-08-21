@@ -132,8 +132,8 @@ export function validateAudienceCardinality(audienceKind: BroadcastAudienceKind,
   return true; // "everyone"
 }
 
-/** Canonical (order-independent) target-id comparison -- a client resubmitting the same people in a different array order must never register as a different logical request. */
-function sameIdSet(a: readonly string[], b: readonly string[]): boolean {
+/** Canonical (order-independent) target-id comparison -- a client resubmitting the same people in a different array order must never register as a different logical request. Exported for `scheduledBroadcast.ts`'s own create-idempotency replay comparison (`isSameLogicalScheduledCreateRequest`). */
+export function sameIdSet(a: readonly string[], b: readonly string[]): boolean {
   const setA = new Set(a);
   const setB = new Set(b);
   if (setA.size !== setB.size) return false;
