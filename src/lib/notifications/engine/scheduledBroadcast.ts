@@ -604,25 +604,48 @@ export interface RunDueScheduledBroadcastDispatchSummary {
 }
 
 /**
- * The worker tick's own phase (see `pipeline.ts`): claims every due
- * scheduled broadcast (`claim_due_manager_scheduled_broadcasts`'s atomic
- * `for update skip locked` claim -- safe under overlapping ticks) and
- * dispatches each with the roster THIS SAME TICK already fetched, never a
- * second Google read.
+ * The worker tick's own phase (both `pipeline.ts`'s main 5-minute tick and
+ * `scheduledWorker.ts`'s dedicated 1-minute tick): claims and dispatches
+ * up to `limit` due scheduled broadcasts, with the roster THIS SAME TICK
+ * already fetched, never a second Google read.
+ *
+ * Claims exactly ONE row at a time (`claimDueManagerScheduledBroadcasts(1)`),
+ * dispatches it fully, THEN claims the next -- deliberately NOT a single
+ * up-front `claimDueManagerScheduledBroadcasts(limit)` bulk claim. A bulk
+ * claim would stamp `claimed_at = now()` on every row in the batch at
+ * once, even though row #30 of 50 might not begin its own application-
+ * level dispatch for many seconds (everything before it in this same
+ * sequential loop has to finish first) -- under the 90-second lease that
+ * would falsely make row #30 look stale to a DIFFERENT worker long
+ * before this one has even started processing it, letting the two
+ * actively process the same schedule concurrently. Claiming one row
+ * immediately before dispatching it means every row's lease genuinely
+ * starts when its own processing does. This also lets two overlapping
+ * workers naturally interleave a shared backlog via
+ * `claim_due_manager_scheduled_broadcasts`'s own `for update skip
+ * locked` -- each one-row claim independently picks whichever due row no
+ * other worker currently holds -- without ever needing a module-level
+ * mutex; the database claim/lease stays the only concurrency boundary.
  */
 export async function runDueScheduledBroadcastDispatch(
   people: readonly Person[],
   limit = 50,
 ): Promise<RunDueScheduledBroadcastDispatchSummary> {
-  const due = await claimDueManagerScheduledBroadcasts(limit);
+  let claimed = 0;
   let dispatched = 0;
   let failed = 0;
-  for (const row of due) {
-    const outcome = await dispatchScheduledBroadcast(row, people);
+
+  while (claimed < limit) {
+    const due = await claimDueManagerScheduledBroadcasts(1);
+    if (due.length === 0) break;
+
+    claimed += 1;
+    const outcome = await dispatchScheduledBroadcast(due[0], people);
     if (outcome.ok) dispatched++;
     else failed++;
   }
-  return { claimed: due.length, dispatched, failed };
+
+  return { claimed, dispatched, failed };
 }
 
 export type SendScheduledBroadcastNowOutcome =

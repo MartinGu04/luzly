@@ -547,29 +547,101 @@ describe.skipIf(!databaseAvailable)("notification engine SQL functions -- real P
       expect(stillGuarded.rows).toHaveLength(0);
     });
 
-    it("23. a 'claimed' row that already HAS a batch_id is always resumable, even if its claim is fresh (not stale) -- a checkpointed dispatch is never left stranded", async () => {
+    it("23. CRITICAL: a 'claimed' row that already HAS a batch_id but whose claim is FRESH (within the lease) is NOT reclaimable -- batch_id must never bypass the lease (this was the concurrency bug: two overlapping minute-worker invocations could otherwise both actively process the same still-live claim)", async () => {
       await insertBatch("bbbbbbbb-0000-0000-0000-000000000001");
       await insertScheduled("aaaaaaaa-0000-0000-0000-000000000005", {
         status: "claimed",
         scheduledForOffsetMs: -1000,
-        claimedAtOffsetMs: 0, // just claimed -- NOT past the stale-reclaim window
+        claimedAtOffsetMs: 0, // just claimed -- worker A is still actively dispatching
         batchId: "bbbbbbbb-0000-0000-0000-000000000001",
       });
 
       const result = await db.query("select * from public.claim_due_manager_scheduled_broadcasts(100)");
-      expect(result.rows.map((r) => r.id)).toContain("aaaaaaaa-0000-0000-0000-000000000005");
+      expect(result.rows.map((r) => r.id)).not.toContain("aaaaaaaa-0000-0000-0000-000000000005");
+    });
+
+    it("45. once the lease expires, the SAME 'claimed' + batch_id row IS reclaimable, and batch_id survives the reclaim unchanged -- resumption uses the existing immutable batch, never a second one", async () => {
+      await insertBatch("bbbbbbbb-0000-0000-0000-000000000003");
+      await insertScheduled("aaaaaaaa-0000-0000-0000-00000000000e", {
+        status: "claimed",
+        scheduledForOffsetMs: -1000,
+        claimedAtOffsetMs: -100_000, // past the 90-second lease
+        batchId: "bbbbbbbb-0000-0000-0000-000000000003",
+      });
+
+      const result = await db.query("select * from public.claim_due_manager_scheduled_broadcasts(100)");
+      const row = result.rows.find((r) => r.id === "aaaaaaaa-0000-0000-0000-00000000000e");
+
+      expect(row).toBeDefined();
+      expect(row.status).toBe("claimed");
+      expect(row.batch_id).toBe("bbbbbbbb-0000-0000-0000-000000000003");
+      // claimed_at was refreshed by the reclaim (a fresh lease for whichever worker resumes it).
+      expect(new Date(row.claimed_at).getTime()).toBeGreaterThan(Date.now() - 5000);
+    });
+
+    it("46. simulates overlapping minute-worker ticks: worker A's fresh claim (batch already checkpointed) is invisible to worker B's claim call -- zero rows for that schedule, no second active processing begins", async () => {
+      await insertBatch("bbbbbbbb-0000-0000-0000-000000000004");
+      const scheduledId = "aaaaaaaa-0000-0000-0000-00000000000f";
+      // Worker A: claimed this schedule and already checkpointed its batch, moments ago -- still actively creating notification_jobs rows in application code.
+      await insertScheduled(scheduledId, {
+        status: "claimed",
+        scheduledForOffsetMs: -1000,
+        claimedAtOffsetMs: -2000, // 2s ago -- worker A is still well within its own dispatch
+        batchId: "bbbbbbbb-0000-0000-0000-000000000004",
+      });
+
+      // Worker B's tick, a minute later, must not pick up the same schedule while A's lease is still live.
+      const workerB = await db.query("select * from public.claim_due_manager_scheduled_broadcasts(100)");
+      expect(workerB.rows.map((r) => r.id)).not.toContain(scheduledId);
+
+      // The row is exactly as worker A left it -- untouched by B's claim attempt.
+      const stillOwnedByA = await db.query("select status, batch_id, claimed_at from public.manager_scheduled_broadcasts where id = $1", [
+        scheduledId,
+      ]);
+      expect(stillOwnedByA.rows[0].status).toBe("claimed");
+      expect(stillOwnedByA.rows[0].batch_id).toBe("bbbbbbbb-0000-0000-0000-000000000004");
+    });
+
+    it("47. 'שלח עכשיו' followed by a minute-worker tick within the lease cannot re-claim the row while send-now is still active", async () => {
+      await insertScheduled("aaaaaaaa-0000-0000-0000-000000000010", { scheduledForOffsetMs: 3_600_000 });
+
+      const sendNow = await db.query("select * from public.claim_manager_scheduled_broadcast_now($1, $2, $3)", [
+        "aaaaaaaa-0000-0000-0000-000000000010",
+        "p_manager_b",
+        "רותם מנהלת",
+      ]);
+      expect(sendNow.rows).toHaveLength(1);
+      expect(sendNow.rows[0].status).toBe("claimed");
+
+      // A minute-worker tick firing right after must not treat this as a fresh due-and-unclaimed schedule.
+      const minuteWorkerTick = await db.query("select * from public.claim_due_manager_scheduled_broadcasts(100)");
+      expect(minuteWorkerTick.rows.map((r) => r.id)).not.toContain("aaaaaaaa-0000-0000-0000-000000000010");
     });
 
     it("24. a 'claimed' row with NO batch_id that is still within the crash-recovery window is NOT reclaimed -- a normal in-flight dispatch is left alone", async () => {
       await insertScheduled("aaaaaaaa-0000-0000-0000-000000000006", {
         status: "claimed",
         scheduledForOffsetMs: -1000,
-        claimedAtOffsetMs: -30_000, // 30s ago -- well within the 4-minute window
+        claimedAtOffsetMs: -30_000, // 30s ago -- well within the 90-second window (20260821100000 shrunk it from 4 minutes)
         batchId: null,
       });
 
       const result = await db.query("select * from public.claim_due_manager_scheduled_broadcasts(100)");
       expect(result.rows.map((r) => r.id)).not.toContain("aaaaaaaa-0000-0000-0000-000000000006");
+    });
+
+    it("37. a 'claimed' row with NO batch_id past the NEW 90-second window (but well within the OLD 4-minute one) IS reclaimed -- proves the follow-up migration's shrunk window is actually in effect, not just present in the SQL text", async () => {
+      await insertScheduled("aaaaaaaa-0000-0000-0000-00000000000d", {
+        status: "claimed",
+        scheduledForOffsetMs: -1000,
+        claimedAtOffsetMs: -100_000, // 100s ago -- past 90s, still well under the old 4-minute window
+        batchId: null,
+      });
+
+      const result = await db.query("select * from public.claim_due_manager_scheduled_broadcasts(100)");
+      const row = result.rows.find((r) => r.id === "aaaaaaaa-0000-0000-0000-00000000000d");
+      expect(row).toBeDefined();
+      expect(row.status).toBe("claimed");
     });
 
     it("32. a stale 'שלח עכשיו' claim (no batch_id yet) for a broadcast whose scheduled_for is still far in the future is reclaimed immediately once stale -- it never waits for scheduled_for", async () => {
@@ -631,6 +703,121 @@ describe.skipIf(!databaseAvailable)("notification engine SQL functions -- real P
         `scheduled:${scheduledId}`,
       ]);
       expect(existingBatch.rows).toHaveLength(1); // exactly one -- proving the precondition for "never a second batch" on the retry
+    });
+
+    // ---------------------------------------------------------------------
+    // `runDueScheduledBroadcastDispatch` now claims exactly ONE row per
+    // call (never a bulk `claim_due_manager_scheduled_broadcasts(limit)`)
+    // so a large backlog never gets a single shared `claimed_at` stamped
+    // across many rows before their own dispatch has even begun (see that
+    // function's own doc comment). These tests prove the SQL side of that
+    // design at `p_limit = 1` explicitly, since that is the exact call the
+    // application now always makes.
+    // ---------------------------------------------------------------------
+
+    it("48. a backlog of several due rows is correctly distributed between two overlapping workers, each claiming one row at a time -- neither ever reclaims a row the other already holds", async () => {
+      const ids = [
+        "aaaaaaaa-0000-0000-0000-000000000011",
+        "aaaaaaaa-0000-0000-0000-000000000012",
+        "aaaaaaaa-0000-0000-0000-000000000013",
+        "aaaaaaaa-0000-0000-0000-000000000014",
+      ];
+      for (const id of ids) {
+        await insertScheduled(id, { scheduledForOffsetMs: -1000 });
+      }
+
+      const claimedByWorkerA: string[] = [];
+      const claimedByWorkerB: string[] = [];
+
+      // Simulates two minute-workers interleaving one-row claims over the same backlog.
+      for (let i = 0; i < ids.length; i++) {
+        const worker = i % 2 === 0 ? "A" : "B";
+        const result = await db.query("select * from public.claim_due_manager_scheduled_broadcasts(1)");
+        expect(result.rows).toHaveLength(1);
+        (worker === "A" ? claimedByWorkerA : claimedByWorkerB).push(result.rows[0].id);
+      }
+
+      const allClaimed = [...claimedByWorkerA, ...claimedByWorkerB];
+      // Every row claimed exactly once, across both workers, no duplicates and nothing missed.
+      expect(new Set(allClaimed).size).toBe(ids.length);
+      for (const id of ids) expect(allClaimed).toContain(id);
+      // No overlap between what each worker holds.
+      expect(claimedByWorkerA.some((id) => claimedByWorkerB.includes(id))).toBe(false);
+    });
+
+    it("49. a row later in a backlog is not assigned a lease until a one-row claim actually reaches it -- unclaimed rows keep status='scheduled' with no claimed_at while earlier rows are still being processed", async () => {
+      const first = "aaaaaaaa-0000-0000-0000-000000000015";
+      const second = "aaaaaaaa-0000-0000-0000-000000000016";
+      await insertScheduled(first, { scheduledForOffsetMs: -2000 });
+      await insertScheduled(second, { scheduledForOffsetMs: -1000 });
+
+      const firstClaim = await db.query("select * from public.claim_due_manager_scheduled_broadcasts(1)");
+      expect(firstClaim.rows.map((r) => r.id)).toEqual([first]);
+
+      // While "processing" the first row, the second must still be untouched -- scheduled, no lease.
+      const stillUnclaimed = await db.query(
+        "select status, claimed_at from public.manager_scheduled_broadcasts where id = $1",
+        [second],
+      );
+      expect(stillUnclaimed.rows[0].status).toBe("scheduled");
+      expect(stillUnclaimed.rows[0].claimed_at).toBeNull();
+
+      const secondClaim = await db.query("select * from public.claim_due_manager_scheduled_broadcasts(1)");
+      expect(secondClaim.rows.map((r) => r.id)).toEqual([second]);
+    });
+
+    it("50. a genuinely crashed single-row claim (p_limit=1) is still recoverable after the 90-second lease expires", async () => {
+      await insertScheduled("aaaaaaaa-0000-0000-0000-000000000017", {
+        status: "claimed",
+        scheduledForOffsetMs: -1000,
+        claimedAtOffsetMs: -100_000, // past the lease
+        batchId: null,
+      });
+
+      const result = await db.query("select * from public.claim_due_manager_scheduled_broadcasts(1)");
+      expect(result.rows.map((r) => r.id)).toContain("aaaaaaaa-0000-0000-0000-000000000017");
+    });
+
+    it("51. a single dispatch still under the 90-second lease (p_limit=1) cannot be reclaimed by another one-row claim", async () => {
+      await insertScheduled("aaaaaaaa-0000-0000-0000-000000000018", {
+        status: "claimed",
+        scheduledForOffsetMs: -1000,
+        claimedAtOffsetMs: -2000, // fresh -- actively being processed
+        batchId: null,
+      });
+
+      const result = await db.query("select * from public.claim_due_manager_scheduled_broadcasts(1)");
+      expect(result.rows.map((r) => r.id)).not.toContain("aaaaaaaa-0000-0000-0000-000000000018");
+    });
+
+    it("52. the dedicated once-a-minute worker and the main 5-minute fallback tick share the SAME claim function -- a fresh claim by one is invisible to the other, and each can independently pick up a DIFFERENT due row", async () => {
+      const ownedByDedicatedWorker = "aaaaaaaa-0000-0000-0000-000000000019";
+      const dueForMainTickFallback = "aaaaaaaa-0000-0000-0000-00000000001a";
+      await insertBatch("bbbbbbbb-0000-0000-0000-000000000005");
+      // Simulates the dedicated worker having just claimed+checkpointed one schedule, still actively dispatching it.
+      await insertScheduled(ownedByDedicatedWorker, {
+        status: "claimed",
+        scheduledForOffsetMs: -1000,
+        claimedAtOffsetMs: -2000,
+        batchId: "bbbbbbbb-0000-0000-0000-000000000005",
+      });
+      // A second, independent schedule the dedicated worker hasn't reached yet.
+      await insertScheduled(dueForMainTickFallback, { scheduledForOffsetMs: -1000 });
+
+      // The main tick's own fallback dispatch (a separate call site, same RPC) claims one row.
+      const mainTickClaim = await db.query("select * from public.claim_due_manager_scheduled_broadcasts(1)");
+
+      // It must never pick up the dedicated worker's still-live claim...
+      expect(mainTickClaim.rows.map((r) => r.id)).not.toContain(ownedByDedicatedWorker);
+      // ...it independently claims the OTHER due row instead.
+      expect(mainTickClaim.rows.map((r) => r.id)).toEqual([dueForMainTickFallback]);
+
+      // The dedicated worker's row remains exactly as it left it -- untouched by the main tick's claim attempt.
+      const stillOwned = await db.query("select status, batch_id from public.manager_scheduled_broadcasts where id = $1", [
+        ownedByDedicatedWorker,
+      ]);
+      expect(stillOwned.rows[0].status).toBe("claimed");
+      expect(stillOwned.rows[0].batch_id).toBe("bbbbbbbb-0000-0000-0000-000000000005");
     });
 
     it("25. anon/authenticated cannot execute the function at all", async () => {
@@ -729,6 +916,149 @@ describe.skipIf(!databaseAvailable)("notification engine SQL functions -- real P
       const row = result.rows.find((r) => r.id === "cccccccc-0000-0000-0000-000000000008");
       expect(row).toBeDefined();
       expect(row.sent_now_by_person_id).toBeNull();
+    });
+  });
+
+  // -------------------------------------------------------------------
+  // peek_due_manager_scheduled_broadcasts -- the minute-level-precision
+  // follow-up's dedicated worker relies on this read-only function
+  // mirroring claim_due_manager_scheduled_broadcasts' eligibility EXACTLY
+  // (see 20260821100000_speed_up_manager_scheduled_broadcast_claim.sql's
+  // own doc comment). A real-Postgres proof that the two functions
+  // genuinely agree, not just that their SQL text looks similar.
+  // -------------------------------------------------------------------
+  describe("peek_due_manager_scheduled_broadcasts", () => {
+    async function insertScheduled(
+      id: string,
+      overrides: Partial<{
+        status: string;
+        scheduledForOffsetMs: number;
+        claimedAtOffsetMs: number | null;
+        batchId: string | null;
+      }> = {},
+    ) {
+      const status = overrides.status ?? "scheduled";
+      const scheduledForOffsetMs = overrides.scheduledForOffsetMs ?? -1000;
+      const claimedAtOffsetMs = overrides.claimedAtOffsetMs ?? null;
+      const batchId = overrides.batchId ?? null;
+      await db.query(
+        `insert into public.manager_scheduled_broadcasts
+           (id, create_idempotency_key, status, audience_kind, target_person_ids, title, body, scheduled_for,
+            created_by_person_id, created_by_person_name, claimed_at, batch_id)
+         values ($1, $6, $2, 'person', '{p_1}', 't', 'b', now() + ($3 || ' milliseconds')::interval,
+           'p_manager', 'מנהל',
+           case when $4::bigint is null then null else now() + ($4 || ' milliseconds')::interval end,
+           $5)`,
+        [id, status, scheduledForOffsetMs, claimedAtOffsetMs, batchId, `create:${id}`],
+      );
+    }
+
+    async function insertBatch(id: string, idempotencyKey: string) {
+      await db.query(
+        `insert into public.manager_notification_batches
+           (id, idempotency_key, created_by_person_id, created_by_person_name, audience_kind, title, body)
+         values ($1, $2, 'p_manager', 'מנהל', 'person', 't', 'b')`,
+        [id, idempotencyKey],
+      );
+    }
+
+    async function peek(): Promise<number> {
+      const result = await db.query("select public.peek_due_manager_scheduled_broadcasts() as count");
+      return Number(result.rows[0].count);
+    }
+
+    // This suite shares one database/table across every `it` in the file
+    // with no per-test cleanup (see the file's own top docstring/`beforeAll`)
+    // -- earlier describe blocks' rows (and, in principle, a stale 'claimed'
+    // row from THIS suite's own earlier claim tests aging past the 90-second
+    // window as later tests run) remain in the table. So every assertion
+    // here is a BEFORE/AFTER delta around the row(s) it inserts, never an
+    // absolute count.
+
+    it("38. inserting a due, still-'scheduled' broadcast increases the count by exactly one -- exactly what claim_due_manager_scheduled_broadcasts would pick up", async () => {
+      const before = await peek();
+      await insertScheduled("dddddddd-0000-0000-0000-000000000002", { scheduledForOffsetMs: -1000 });
+      expect(await peek()).toBe(before + 1);
+    });
+
+    it("39. inserting a future, still-'scheduled' broadcast does NOT change the count", async () => {
+      const before = await peek();
+      await insertScheduled("dddddddd-0000-0000-0000-000000000001", { scheduledForOffsetMs: 60_000 });
+      expect(await peek()).toBe(before);
+    });
+
+    it("40. CRITICAL: a fresh 'claimed' row with a batch_id does NOT increase the count -- batch_id must never bypass the lease, mirroring the claim function's own fix for the same bug", async () => {
+      await insertBatch("eeeeeeee-0000-0000-0000-000000000001", "scheduled:peek-checkpointed");
+      const before = await peek();
+      await insertScheduled("dddddddd-0000-0000-0000-000000000003", {
+        status: "claimed",
+        claimedAtOffsetMs: 0, // just claimed -- lease still live
+        batchId: "eeeeeeee-0000-0000-0000-000000000001",
+      });
+      expect(await peek()).toBe(before);
+    });
+
+    it("40b. once that same claimed+batch_id row's lease expires, it DOES increase the count -- peek and claim agree on the lease boundary in both directions", async () => {
+      await insertBatch("eeeeeeee-0000-0000-0000-000000000002", "scheduled:peek-checkpointed-stale");
+      const before = await peek();
+      await insertScheduled("dddddddd-0000-0000-0000-000000000009", {
+        status: "claimed",
+        claimedAtOffsetMs: -100_000, // past the 90-second lease
+        batchId: "eeeeeeee-0000-0000-0000-000000000002",
+      });
+      expect(await peek()).toBe(before + 1);
+    });
+
+    it("41. a stale 'claimed' row with no batch_id (past 90s) increases the count; a fresh one still within the window does not -- exactly the claim function's own boundary", async () => {
+      const before = await peek();
+      await insertScheduled("dddddddd-0000-0000-0000-000000000004", {
+        status: "claimed",
+        claimedAtOffsetMs: -100_000, // stale
+        batchId: null,
+      });
+      expect(await peek()).toBe(before + 1);
+
+      const beforeFresh = await peek();
+      await insertScheduled("dddddddd-0000-0000-0000-000000000005", {
+        status: "claimed",
+        claimedAtOffsetMs: -30_000, // fresh, still in-flight
+        batchId: null,
+      });
+      expect(await peek()).toBe(beforeFresh);
+    });
+
+    it("42. never claims/mutates anything -- a peek immediately followed by a real claim still finds the same row claimable", async () => {
+      await insertScheduled("dddddddd-0000-0000-0000-000000000006", { scheduledForOffsetMs: -1000 });
+
+      const before = await peek();
+      expect(before).toBeGreaterThanOrEqual(1);
+
+      const result = await db.query("select * from public.claim_due_manager_scheduled_broadcasts(100)");
+      expect(result.rows.map((r) => r.id)).toContain("dddddddd-0000-0000-0000-000000000006");
+
+      // This test only proves peek() itself performed no write, by
+      // re-querying the exact row it reported and confirming the claim
+      // independently succeeded (a freshly-claimed row now has a live
+      // lease, so it correctly stops counting as "due" from peek's point
+      // of view immediately afterward -- see test 40 above).
+    });
+
+    it("43. dispatched/cancelled rows are never counted", async () => {
+      const before = await peek();
+      await insertScheduled("dddddddd-0000-0000-0000-000000000007", { status: "dispatched", scheduledForOffsetMs: -1000 });
+      await insertScheduled("dddddddd-0000-0000-0000-000000000008", { status: "cancelled", scheduledForOffsetMs: -1000 });
+      expect(await peek()).toBe(before);
+    });
+
+    it("44. anon/authenticated cannot execute the function at all", async () => {
+      await db.query("set role authenticated");
+      try {
+        await expect(db.query("select public.peek_due_manager_scheduled_broadcasts()")).rejects.toThrow(
+          /permission denied/i,
+        );
+      } finally {
+        await db.query("reset role");
+      }
     });
   });
 });

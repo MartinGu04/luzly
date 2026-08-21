@@ -1257,3 +1257,23 @@ export async function peekDueManagerScheduledBroadcastsCount(): Promise<number> 
   if (error) throw error;
   return count ?? 0;
 }
+
+/**
+ * The dedicated once-a-minute scheduled worker's cheap "is there any work
+ * at all" pre-check -- unlike `peekDueManagerScheduledBroadcastsCount`
+ * above (a `'scheduled'`-only display estimate), this calls
+ * `peek_due_manager_scheduled_broadcasts`, the SQL function that mirrors
+ * `claim_due_manager_scheduled_broadcasts`'s exact two-way, lease-only
+ * eligibility (due-scheduled, or claimed with an expired 90-second lease
+ * -- `batch_id`'s presence never bypasses the lease, see
+ * `20260821100000_speed_up_manager_scheduled_broadcast_claim.sql`).
+ * Missing a recoverable claimed row here would mean a crashed dispatch is
+ * never resumed until some later, unrelated broadcast happens to come due.
+ * Read-only -- never claims/mutates.
+ */
+export async function peekAnyManagerScheduledBroadcastWorkDue(): Promise<number> {
+  const supabase = getNotificationServiceClient();
+  const { data, error } = await supabase.rpc("peek_due_manager_scheduled_broadcasts");
+  if (error) throw error;
+  return (data as number | null) ?? 0;
+}

@@ -1,5 +1,21 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+/**
+ * Regression guard for the main 5-minute worker's FALLBACK role in
+ * scheduled-broadcast dispatch (spec revision: the dedicated once-a-minute
+ * worker -- `scheduledWorker.ts` / `POST /internal/notifications/scheduled`
+ * -- is the PRIMARY, minute-precision owner, but that worker's Cron job is
+ * configured manually outside this repository; if it's ever missing,
+ * disabled, or temporarily broken, this main tick must still dispatch due
+ * schedules every 5 minutes rather than silently stopping scheduled-
+ * broadcast delivery altogether). This file previously asserted the
+ * OPPOSITE (that the main tick never touches scheduled broadcasts at all)
+ * under an earlier "single ownership" design that was reverted -- see
+ * `pipeline.ts`'s own docstring for why overlapping workers remain safe
+ * (the uniform claimed_at-vs-lease claim is the concurrency boundary, not
+ * which worker happens to run it).
+ */
+
 const fetchFreshWorkbookRead = vi.fn();
 const resolveNotificationRecipients = vi.fn();
 const runChangeDetection = vi.fn();
@@ -48,6 +64,7 @@ function setupHappyDefaults() {
   resolveNotificationRecipients.mockResolvedValue({ resolved: new Map(), unmappedCount: 0, ambiguousEmailCount: 0, noEmailCount: 0 });
   runChangeDetection.mockResolvedValue({ baselineAction: "unchanged", semanticChangesDetected: 0, pendingChangesOpen: 0, jobsCreated: 0 });
   runReminders.mockResolvedValue(ZERO_REMINDERS_SUMMARY);
+  runDueScheduledBroadcastDispatch.mockResolvedValue({ claimed: 0, dispatched: 0, failed: 0 });
   runDelivery.mockResolvedValue({
     jobsClaimed: 0,
     deliveriesSucceeded: 0,
@@ -66,7 +83,7 @@ afterEach(() => {
   vi.resetModules();
 });
 
-describe("runNotificationWorkerTick -- scheduled broadcast phase wiring", () => {
+describe("runNotificationWorkerTick -- scheduled-broadcast fallback phase wiring", () => {
   it("in 'send' mode, dispatches due scheduled broadcasts using THIS tick's own already-fetched roster, before delivery runs", async () => {
     setupHappyDefaults();
     const callOrder: string[] = [];
@@ -117,5 +134,14 @@ describe("runNotificationWorkerTick -- scheduled broadcast phase wiring", () => 
     expect(result.summary.scheduledBroadcastsFailed).toBe(0);
     expect(runDueScheduledBroadcastDispatch).not.toHaveBeenCalled();
     expect(runDelivery).not.toHaveBeenCalled();
+  });
+
+  it("this main tick's own fallback dispatch reuses the EXACT SAME runDueScheduledBroadcastDispatch the dedicated worker uses -- never a second/duplicated dispatch implementation", async () => {
+    setupHappyDefaults();
+
+    const { runNotificationWorkerTick } = await loadModule();
+    await runNotificationWorkerTick("send");
+
+    expect(runDueScheduledBroadcastDispatch).toHaveBeenCalledTimes(1);
   });
 });

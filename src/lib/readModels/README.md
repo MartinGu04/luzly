@@ -226,6 +226,19 @@ giant read model.
   triggers a second/third Google fetch — a manager hitting
   `/manager/fairness` costs exactly the same 2 fetches (1 personal-loader
   + 1 manager batch) as hitting `/manager`.
+- **Lightweight polling boundary.** The same file's `loadManagerPersonnelContext()`
+  is a deliberately NARROWER sibling for background/polling reads that
+  only need "is this caller a manager" plus the roster (the Manager
+  communication area's ~17s scheduled/recent-broadcast status polls --
+  see `lib/notifications/scheduledBroadcastActions.ts`/
+  `manualBroadcastActions.ts`). It skips `loadManagerWorkbookContext`'s
+  `getRequestPersonalSchedule()` gate entirely (which unconditionally
+  parses Schedule/Settings/Potential just to authorize) and instead goes
+  straight to `getAuthenticatedIdentity()` + a personnel-ONLY
+  `getWorkbookSnapshot(["personnel"])` + the same
+  `resolveIdentityAgainstPeople`/`isManager` check -- no second identity
+  model, still fail-closed, still never trusts manager status from the
+  client.
 - **`lib/domain/fairnessTable.ts`** — `FairnessPersonRow` /
   `FairnessTotalsRow` / `FairnessTargets`, the domain-owned shapes
   `lib/parsers/fairness.ts` produces (same convention as

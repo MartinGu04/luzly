@@ -43,6 +43,27 @@ export type WorkerTickResult =
  * spec section 24: "SEND NO PUSH". `mode: "send"` is the real path:
  * persists baseline/observed/pending-change/job state and actually
  * delivers through PR #29's push pipeline.
+ *
+ * Scheduled-broadcast dispatch (`runDueScheduledBroadcastDispatch`) is
+ * also run here, BEFORE delivery, as a FALLBACK -- the dedicated
+ * once-a-minute worker (`scheduledWorker.ts` /
+ * `POST /internal/notifications/scheduled`) is the PRIMARY, minute-
+ * precision owner, but that worker's Cron job is configured manually
+ * outside this repository (see that module's own docs); if it's ever
+ * missing, disabled, or temporarily broken, this main tick still
+ * dispatches due schedules every 5 minutes rather than silently stopping
+ * scheduled-broadcast delivery altogether. This costs essentially
+ * nothing extra: `people` is already fetched fresh for this tick's other
+ * phases. Running it before delivery keeps freshly-created jobs eligible
+ * for THIS SAME tick's `runDelivery()` call, exactly like PR #79's
+ * original ordering. Safe under overlapping workers by construction: the
+ * dedicated worker and this fallback both go through the same
+ * `claim_due_manager_scheduled_broadcasts` one-row-at-a-time claim with
+ * its uniform `claimed_at`-vs-90-second-lease eligibility (see
+ * `runDueScheduledBroadcastDispatch`'s own doc comment) -- whichever
+ * claims a row first owns it for the lease, the other simply claims a
+ * DIFFERENT due row (or none). Downstream batch/job idempotency remains
+ * defense-in-depth, never the primary concurrency mechanism.
  */
 export async function runNotificationWorkerTick(mode: WorkerMode): Promise<WorkerTickResult> {
   const startedAt = performance.now();
@@ -89,9 +110,10 @@ export async function runNotificationWorkerTick(mode: WorkerMode): Promise<Worke
   let scheduledBroadcastsFailed = 0;
   if (persist) {
     // Runs BEFORE delivery so a scheduled broadcast's freshly-created
-    // `notification_jobs` rows (category `manager_broadcast`, `scheduled_for:
-    // now()`) are eligible for `runDelivery()`'s own claim in THIS same
-    // tick, rather than waiting a further cadence period.
+    // `notification_jobs` rows are eligible for `runDelivery()`'s own
+    // claim in THIS same tick, rather than waiting a further cadence
+    // period. See this function's own docstring for why this fallback
+    // phase exists alongside the dedicated once-a-minute worker.
     const scheduledResult = await runStage("scheduled_broadcasts", () =>
       runDueScheduledBroadcastDispatch(people),
     );

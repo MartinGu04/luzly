@@ -9,9 +9,8 @@ vi.mock("./getRequestPersonalSchedule", () => ({ getRequestPersonalSchedule }));
 vi.mock("@/lib/auth/currentUser", () => ({ getAuthenticatedIdentity }));
 vi.mock("@/lib/sync", () => ({ getWorkbookSnapshot }));
 
-const { loadManagerWorkbookContext, getManagerWorkbookSheet, MANAGER_WORKBOOK_SOURCES } = await import(
-  "./managerWorkbookContext"
-);
+const { loadManagerWorkbookContext, loadManagerPersonnelContext, getManagerWorkbookSheet, MANAGER_WORKBOOK_SOURCES } =
+  await import("./managerWorkbookContext");
 
 function personnelSheet(rows: (string | boolean)[][]): RawSheet {
   return { name: 'כ"א', values: rows };
@@ -180,6 +179,82 @@ describe("loadManagerWorkbookContext — manager authorization", () => {
     getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(true));
     await loadManagerWorkbookContext();
     expect(getRequestPersonalSchedule).toHaveBeenCalledTimes(1);
+  });
+});
+
+function personnelOnlySnapshot(rows: (string | boolean)[][] = MANAGER_PERSONNEL_ROWS) {
+  return { fetchedAt: "2026-08-21T17:32:00.000Z", sheets: [personnelSheet(rows)] };
+}
+
+describe("loadManagerPersonnelContext -- the lightweight polling authorization path", () => {
+  beforeEach(() => {
+    getWorkbookSnapshot.mockResolvedValue(personnelOnlySnapshot());
+  });
+
+  it("never calls getRequestPersonalSchedule -- does NOT load/parse Schedule, Settings, or Potential, unlike loadManagerWorkbookContext", async () => {
+    await loadManagerPersonnelContext();
+    expect(getRequestPersonalSchedule).not.toHaveBeenCalled();
+  });
+
+  it("fetches ONLY the personnel source via the cached getWorkbookSnapshot -- never the full 5-source manager set, never a second fetch", async () => {
+    await loadManagerPersonnelContext();
+    expect(getWorkbookSnapshot).toHaveBeenCalledTimes(1);
+    expect(getWorkbookSnapshot).toHaveBeenCalledWith(["personnel"]);
+  });
+
+  it("an unauthenticated caller triggers no workbook read at all", async () => {
+    getAuthenticatedIdentity.mockResolvedValue({ status: "unauthenticated" });
+    const result = await loadManagerPersonnelContext();
+    expect(result).toEqual({ status: "unauthenticated" });
+    expect(getWorkbookSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("an authenticated caller with no usable email triggers no workbook read at all", async () => {
+    getAuthenticatedIdentity.mockResolvedValue({ status: "missing_email", userId: "u1" });
+    const result = await loadManagerPersonnelContext();
+    expect(result).toEqual({ status: "missing_email" });
+    expect(getWorkbookSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("an email absent from כ\"א fails closed as unmapped", async () => {
+    getAuthenticatedIdentity.mockResolvedValue({
+      status: "authenticated",
+      userId: "u2",
+      email: "stranger@example.invalid",
+      avatarUrl: null,
+    });
+    const result = await loadManagerPersonnelContext();
+    expect(result).toEqual({ status: "unmapped" });
+  });
+
+  it("a mapped but NON-manager person fails closed as forbidden -- manager status is never trusted from the client", async () => {
+    getAuthenticatedIdentity.mockResolvedValue({
+      status: "authenticated",
+      userId: "u3",
+      email: "noa@example.invalid",
+      avatarUrl: null,
+    });
+    const result = await loadManagerPersonnelContext();
+    expect(result).toEqual({ status: "forbidden" });
+  });
+
+  it("success: returns the re-verified manager and the parsed roster, nothing else (no snapshot, no avatarUrl -- this caller never needs them)", async () => {
+    const result = await loadManagerPersonnelContext();
+    expect(result.status).toBe("ok");
+    if (result.status === "ok") {
+      expect(result.context.manager.name).toBe("דני מנהל");
+      expect(result.context.people).toHaveLength(2);
+      expect(result.context).not.toHaveProperty("snapshot");
+      expect(result.context).not.toHaveProperty("avatarUrl");
+    }
+  });
+
+  it("reuses the SAME parsePersonnelSheet/resolveIdentityAgainstPeople model -- a fresh snapshot where the manager flag flips also fails closed", async () => {
+    getWorkbookSnapshot.mockResolvedValue(
+      personnelOnlySnapshot([["שם", "מייל", "מנהל"], ["דני מנהל", "dani@example.invalid", false]]),
+    );
+    const result = await loadManagerPersonnelContext();
+    expect(result).toEqual({ status: "forbidden" });
   });
 });
 

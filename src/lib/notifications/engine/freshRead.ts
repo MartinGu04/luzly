@@ -21,6 +21,7 @@ export type FreshWorkbookReadResult =
   | { status: "configuration_error"; message: string };
 
 const REQUIRED_SOURCES: SheetSourceKey[] = ["personnel", "schedule", "settings"];
+const PERSONNEL_ONLY_SOURCES: SheetSourceKey[] = ["personnel"];
 
 function getSheetByKey(snapshot: RawWorkbookSnapshot, key: SheetSourceKey): RawSheet {
   const name = SHEET_SOURCES[key];
@@ -66,4 +67,26 @@ export async function fetchFreshWorkbookRead(): Promise<FreshWorkbookReadResult>
     status: "ok",
     read: { people, events, shiftSchedule, fetchedAt: snapshot.fetchedAt },
   };
+}
+
+export interface FreshPersonnelRead {
+  people: Person[];
+  fetchedAt: string;
+}
+
+/**
+ * The dedicated scheduled-broadcast worker's fresh read path: personnel
+ * ONLY, never schedule/settings. Same fresh/uncached `fetchRawWorkbookSnapshot`
+ * call and the same `parsePersonnelSheet` this codebase uses everywhere
+ * else (never a second personnel-parsing model) -- just a narrower source
+ * list, since dispatching a scheduled broadcast only ever needs current
+ * roster/auth-readiness state (`dispatchScheduledBroadcast` re-resolves
+ * recipients fresh against `people`), never Schedule or Settings data.
+ * This is the performance-critical piece that lets a once-a-minute worker
+ * avoid the full three-sheet read `fetchFreshWorkbookRead` above performs.
+ */
+export async function fetchFreshPersonnelRead(): Promise<FreshPersonnelRead> {
+  const snapshot = await fetchRawWorkbookSnapshot(PERSONNEL_ONLY_SOURCES);
+  const people = parsePersonnelSheet(getSheetByKey(snapshot, "personnel"));
+  return { people, fetchedAt: snapshot.fetchedAt };
 }

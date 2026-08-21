@@ -1,6 +1,6 @@
 "use server";
 
-import { loadManagerWorkbookContext } from "@/lib/readModels/managerWorkbookContext";
+import { loadManagerPersonnelContext, loadManagerWorkbookContext } from "@/lib/readModels/managerWorkbookContext";
 import { getJerusalemLocalNow } from "@/lib/time/jerusalemClock";
 import {
   cancelScheduledBroadcast,
@@ -212,9 +212,18 @@ export type ListActiveScheduledBroadcastsResult =
   | { ok: true; items: ScheduledBroadcastView[] }
   | { ok: false; error: string };
 
-/** The "🕒 התראות מתוזמנות" section's own data -- manager-gated exactly like every other action here. */
+/**
+ * The "🕒 התראות מתוזמנות" section's own data -- polled every ~17s while
+ * there are active items (spec §7), so this deliberately uses the
+ * LIGHTWEIGHT `loadManagerPersonnelContext` boundary (personnel-only,
+ * cached workbook read) rather than `loadManagerWorkbookContext` -- this
+ * action needs nothing from Schedule/Settings/Potential, and repeating
+ * that full parse on every poll would be wasted work and needlessly
+ * couples this poll to unrelated Schedule/Settings health. Still
+ * manager-gated exactly like every other action here.
+ */
 export async function listActiveScheduledBroadcastsAction(): Promise<ListActiveScheduledBroadcastsResult> {
-  const contextResult = await loadManagerWorkbookContext(["personnel"]);
+  const contextResult = await loadManagerPersonnelContext();
   if (contextResult.status !== "ok") return { ok: false, error: contextResult.status };
 
   const rows = await listActiveManagerScheduledBroadcasts();
