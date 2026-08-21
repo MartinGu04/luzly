@@ -1015,7 +1015,15 @@ function toScheduledBroadcastRow(row: Record<string, unknown>): ManagerScheduled
     targetPersonIds: (row.target_person_ids as string[] | null) ?? [],
     title: row.title as string,
     body: row.body as string,
-    scheduledFor: row.scheduled_for as string,
+    // Canonicalized here, ONCE, at this row's one mapping boundary --
+    // Postgres/PostgREST can represent the identical `timestamptz`
+    // instant as either `+00:00` or `.000Z`; every downstream consumer
+    // of `ManagerScheduledBroadcastRow.scheduledFor` (dispatch,
+    // create-idempotency replay comparison, the UI's local-time view)
+    // must be able to trust a single canonical string form and never
+    // re-normalize it itself. See `scheduledBroadcast.ts`'s
+    // `isSameLogicalScheduledCreateRequest` for exactly why this matters.
+    scheduledFor: new Date(row.scheduled_for as string).toISOString(),
     createdByPersonId: row.created_by_person_id as string,
     createdByPersonName: row.created_by_person_name as string,
     lastChangedByPersonId: (row.last_changed_by_person_id as string | null) ?? null,

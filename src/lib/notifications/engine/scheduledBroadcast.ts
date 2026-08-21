@@ -18,6 +18,7 @@ import {
   claimDueManagerScheduledBroadcasts,
   claimManagerScheduledBroadcastNow,
   getManagerNotificationBatchById,
+  getManagerScheduledBroadcastByCreateIdempotencyKey,
   getManagerScheduledBroadcastById,
   insertManagerNotificationBatchIfAbsent,
   insertManagerScheduledBroadcastIfAbsent,
@@ -33,13 +34,12 @@ export type { BroadcastAudienceKind } from "./store";
 export type { ManagerScheduledBroadcastRow, ManagerScheduledBroadcastStatus } from "./store";
 
 /**
- * Israel-local civil date + clock time -> a validated future UTC instant,
- * or `null` for anything invalid (bad date, out-of-range hour/minute, a
- * moment that is not genuinely in the future, or a local wall-clock time
- * that does not exist). Reuses the domain's own calendar-date validation
- * (`parseCalendarDate`) and the codebase's one canonical local-time-to-
- * instant conversion (`jerusalemLocalTimeToInstant`) -- never hand-rolls
- * either.
+ * Israel-local civil date + clock time -> the UTC instant it refers to, or
+ * `null` for anything structurally invalid (bad date, out-of-range hour/
+ * minute, or a local wall-clock time that does not exist). Reuses the
+ * domain's own calendar-date validation (`parseCalendarDate`) and the
+ * codebase's one canonical local-time-to-instant conversion
+ * (`jerusalemLocalTimeToInstant`) -- never hand-rolls either.
  *
  * `jerusalemLocalTimeToInstant` was written for a handful of FIXED
  * reminder hours (20:00/18:00/09:00, never near midnight) and its own
@@ -67,8 +67,18 @@ export type { ManagerScheduledBroadcastRow, ManagerScheduledBroadcastStatus } fr
  * deterministically picked -- acceptable for V1 (see this feature's own
  * spec), since the manager's requested wall-clock time is still exactly
  * honored either way.
+ *
+ * Deliberately does NOT check "is this in the future" -- that rule only
+ * applies to a genuinely NEW create/edit, never to resolving what a
+ * CREATE-IDEMPOTENCY replay candidate's requested instant was (see
+ * `createScheduledBroadcast`): a retry of an already-successful create,
+ * arriving after its own scheduled time has since passed, must still be
+ * able to compute the SAME instant the original request produced in
+ * order to recognize itself as a replay. Callers that need the future
+ * rule (a genuinely new create, or any edit) use
+ * `resolveValidatedScheduleInstant` below instead.
  */
-function resolveValidatedScheduleInstant(dateStr: string, hour: number, minute: number): Date | null {
+function resolveScheduledInstant(dateStr: string, hour: number, minute: number): Date | null {
   if (!parseCalendarDate(dateStr)) return null;
   if (!Number.isInteger(hour) || hour < 0 || hour > 23) return null;
   if (!Number.isInteger(minute) || minute < 0 || minute > 59) return null;
@@ -78,6 +88,13 @@ function resolveValidatedScheduleInstant(dateStr: string, hour: number, minute: 
   const roundTrip = getJerusalemLocalNow(instant);
   if (roundTrip.date !== dateStr || roundTrip.minuteOfDay !== hour * 60 + minute) return null;
 
+  return instant;
+}
+
+/** `resolveScheduledInstant` plus the "must be in the future" rule -- used by a genuinely NEW create and by every edit (never a replay candidate, see that function's own docstring). */
+function resolveValidatedScheduleInstant(dateStr: string, hour: number, minute: number): Date | null {
+  const instant = resolveScheduledInstant(dateStr, hour, minute);
+  if (!instant) return null;
   if (instant.getTime() <= Date.now()) return null;
   return instant;
 }
@@ -177,6 +194,17 @@ export type CreateScheduledBroadcastOutcome =
  * the roster at request time, not client-supplied, so a roster that
  * changed between two near-simultaneous requests must never itself
  * manufacture a false conflict.
+ *
+ * `scheduledFor` is compared as a plain string -- safe ONLY because both
+ * sides are already canonical ISO-8601 (`.toISOString()`) by the time
+ * they reach here: `stored.scheduledFor` was canonicalized once, at the
+ * store's own row-mapping boundary (`toScheduledBroadcastRow`), and
+ * `candidate.scheduledFor` is always `Date#toISOString()`'s own output
+ * (see `createScheduledBroadcast`). Postgres/PostgREST can otherwise
+ * represent the identical `timestamptz` instant as `+00:00` instead of
+ * `.000Z` -- comparing RAW, uncanonicalized strings here would treat a
+ * genuine replay as a false conflict. Never compare instants as strings
+ * anywhere they might not already be canonical.
  */
 function isSameLogicalScheduledCreateRequest(
   stored: Pick<ManagerScheduledBroadcastRow, "createdByPersonId" | "audienceKind" | "targetPersonIds" | "title" | "body" | "scheduledFor">,
@@ -198,6 +226,34 @@ function isSameLogicalScheduledCreateRequest(
   return sameIdSet(stored.targetPersonIds, candidate.targetPersonIds);
 }
 
+/** Whatever `createScheduledBroadcast`'s candidate request represents, independent of whether it turns out to be a fresh create or a replay -- built once from request-shape-only validation, before either the roster or "still in the future" is consulted. */
+interface ScheduledCreateCandidate {
+  createdByPersonId: string;
+  audienceKind: BroadcastAudienceKind;
+  /** The client's own requested ids, NOT yet validated against any roster -- see `createScheduledBroadcast`'s own docstring for why a replay must never require this. */
+  targetPersonIds: readonly string[];
+  title: string;
+  body: string;
+  scheduledForInstant: Date;
+}
+
+/** Resolves an already-found existing row (via a reused `create_idempotency_key`) as either a safe replay (returns it unchanged) or a genuine conflict (fails closed) -- shared by the initial-lookup path and the race path below. */
+function resolveExistingScheduledCreate(
+  existing: ManagerScheduledBroadcastRow,
+  candidate: ScheduledCreateCandidate,
+): CreateScheduledBroadcastOutcome {
+  const isReplay = isSameLogicalScheduledCreateRequest(existing, {
+    createdByPersonId: candidate.createdByPersonId,
+    audienceKind: candidate.audienceKind,
+    targetPersonIds: candidate.targetPersonIds,
+    title: candidate.title,
+    body: candidate.body,
+    scheduledFor: candidate.scheduledForInstant.toISOString(),
+  });
+  if (!isReplay) return { ok: false, error: "idempotency_conflict" };
+  return { ok: true, row: existing };
+}
+
 /**
  * Saves a new scheduled broadcast -- deliberately creates NO
  * `notification_jobs` yet (see this module's own file docstring / the
@@ -205,41 +261,91 @@ function isSameLogicalScheduledCreateRequest(
  * roster right now and frozen into `target_person_ids` -- a person added
  * to כ"א afterward can never silently join this schedule.
  *
- * Idempotent by `createIdempotencyKey`: a genuinely new key inserts and
- * returns the fresh row. A reused key finds the EXISTING row instead --
- * if it represents the exact same logical request
- * (`isSameLogicalScheduledCreateRequest`), that existing row is returned
- * unchanged (a safe replay); any mismatch fails closed as
- * `idempotency_conflict`, never creating a second row and never
- * mutating the existing one. Because this NEVER performs an `update` on
- * conflict, even a very late replay of the original create request can
- * never overwrite an edit the manager made to the row afterward.
+ * Idempotent by `createIdempotencyKey`, but -- critically -- a REPLAY of
+ * an already-successful create must be recognized independently of
+ * whatever has changed in the outside world SINCE that original success:
+ * the scheduled instant may have already passed, and a targeted person
+ * may have since left the roster. Neither is a reason to reject a retry
+ * that is really just asking "did my earlier request already succeed?".
+ * So this looks the key up FIRST:
+ *
+ *  1. Build the candidate from request-shape-only validation alone
+ *     (title/body trimming, audience cardinality, and resolving the
+ *     requested local date/time to an instant WITHOUT the "must be in
+ *     the future" rule -- `resolveScheduledInstant`) -- nothing here
+ *     depends on the current roster or the current clock.
+ *  2. If `createIdempotencyKey` already has a row, decide replay vs.
+ *     conflict from the candidate exactly as built above -- never
+ *     re-validate it as if it were a fresh request today
+ *     (`resolveExistingScheduledCreate`).
+ *  3. Only when the key is genuinely new does this apply the NEW-CREATE-
+ *     only rules: `targetPersonIds` must resolve against the FRESH
+ *     roster (`resolveAudience`) and the instant must still be in the
+ *     future.
+ *  4. `insertManagerScheduledBroadcastIfAbsent` can still lose a race to
+ *     a concurrent identical request between step 2's lookup and its own
+ *     insert -- if so, it resolves that race the SAME way as step 2,
+ *     never by retrying the insert or treating it as a fresh row.
+ *
+ * A reused key whose stored row is NOT the same logical request fails
+ * closed as `idempotency_conflict`, never creating a second row and
+ * never mutating the existing one -- this path NEVER performs an
+ * `update` on conflict, so even a very late replay of the original
+ * create request can never overwrite an edit the manager made to the row
+ * afterward (an edit changes the row's content, so a stale replay of the
+ * pre-edit request correctly stops matching it and fails closed, rather
+ * than silently reverting the edit).
  */
 export async function createScheduledBroadcast(input: CreateScheduledBroadcastInput): Promise<CreateScheduledBroadcastOutcome> {
-  const validated = validateScheduledBroadcastFields(input);
-  if (!validated.ok) return validated;
+  const title = validateText(input.title, BROADCAST_TITLE_MAX_LENGTH);
+  if (title === null) return { ok: false, error: "invalid_title" };
+
+  const body = validateText(input.body, BROADCAST_BODY_MAX_LENGTH);
+  if (body === null) return { ok: false, error: "invalid_body" };
+
+  if (!validateAudienceCardinality(input.audienceKind, input.targetPersonIds)) {
+    return { ok: false, error: "invalid_audience" };
+  }
+
+  const scheduledForInstant = resolveScheduledInstant(input.scheduledDate, input.scheduledHour, input.scheduledMinute);
+  if (!scheduledForInstant) return { ok: false, error: "invalid_schedule" };
+
+  const candidate: ScheduledCreateCandidate = {
+    createdByPersonId: input.manager.id,
+    audienceKind: input.audienceKind,
+    targetPersonIds: input.targetPersonIds,
+    title,
+    body,
+    scheduledForInstant,
+  };
+
+  const existing = await getManagerScheduledBroadcastByCreateIdempotencyKey(input.createIdempotencyKey);
+  if (existing) return resolveExistingScheduledCreate(existing, candidate);
+
+  // Genuinely new -- only NOW do the NEW-CREATE-only rules apply: the
+  // roster and "still in the future" as they stand RIGHT NOW.
+  const targets = resolveAudience(input.audienceKind, input.people, input.targetPersonIds);
+  if (targets === null) return { ok: false, error: "invalid_targets" };
+  if (targets.length === 0) return { ok: false, error: "no_targets" };
+  if (scheduledForInstant.getTime() <= Date.now()) return { ok: false, error: "invalid_schedule" };
+
+  const canonicalTargetPersonIds = [...new Set(targets.map((person) => person.id))];
 
   const { row, created } = await insertManagerScheduledBroadcastIfAbsent({
     createIdempotencyKey: input.createIdempotencyKey,
     audienceKind: input.audienceKind,
-    targetPersonIds: validated.fields.canonicalTargetPersonIds,
-    title: validated.fields.title,
-    body: validated.fields.body,
-    scheduledFor: validated.fields.scheduledForInstant.toISOString(),
+    targetPersonIds: canonicalTargetPersonIds,
+    title,
+    body,
+    scheduledFor: scheduledForInstant.toISOString(),
     createdByPersonId: input.manager.id,
     createdByPersonName: input.manager.name,
   });
 
   if (!created) {
-    const isReplay = isSameLogicalScheduledCreateRequest(row, {
-      createdByPersonId: input.manager.id,
-      audienceKind: input.audienceKind,
-      targetPersonIds: validated.fields.canonicalTargetPersonIds,
-      title: validated.fields.title,
-      body: validated.fields.body,
-      scheduledFor: validated.fields.scheduledForInstant.toISOString(),
-    });
-    if (!isReplay) return { ok: false, error: "idempotency_conflict" };
+    // Race: some other request inserted this exact key between our lookup
+    // above and this insert -- resolve it the same way, never a retry.
+    return resolveExistingScheduledCreate(row, { ...candidate, targetPersonIds: canonicalTargetPersonIds });
   }
 
   return { ok: true, row };

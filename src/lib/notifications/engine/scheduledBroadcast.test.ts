@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Person } from "@/lib/domain/types";
 import { jerusalemLocalTimeToInstant } from "@/lib/time/jerusalemClock";
 
@@ -7,6 +7,7 @@ function person(overrides: Partial<Person> & Pick<Person, "id" | "name">): Perso
 }
 
 const insertManagerScheduledBroadcastIfAbsent = vi.fn();
+const getManagerScheduledBroadcastByCreateIdempotencyKey = vi.fn();
 const getManagerScheduledBroadcastById = vi.fn();
 const updateManagerScheduledBroadcastIfEditable = vi.fn();
 const cancelManagerScheduledBroadcastIfEditable = vi.fn();
@@ -25,6 +26,7 @@ const resolvePersonIdentity = vi.fn();
 async function loadModule() {
   vi.doMock("./store", () => ({
     insertManagerScheduledBroadcastIfAbsent,
+    getManagerScheduledBroadcastByCreateIdempotencyKey,
     getManagerScheduledBroadcastById,
     updateManagerScheduledBroadcastIfEditable,
     cancelManagerScheduledBroadcastIfEditable,
@@ -39,6 +41,13 @@ async function loadModule() {
   vi.doMock("./recipients", () => ({ fetchAllUserIdsByEmail, fetchAllSubscribedUserIds, resolvePersonIdentity }));
   return import("./scheduledBroadcast");
 }
+
+beforeEach(() => {
+  // Default: no prior create attempt under this key -- most tests exercise
+  // a genuinely NEW create; the idempotency-specific describe block below
+  // overrides this per test.
+  getManagerScheduledBroadcastByCreateIdempotencyKey.mockResolvedValue(null);
+});
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -244,8 +253,14 @@ describe("createScheduledBroadcast -- create-exactly-once idempotency (separate 
   // The exact instant `createScheduledBroadcast` will resolve CREATE_INPUT's
   // own date/hour/minute to -- a stored row must match this exactly for the
   // replay comparison (`isSameLogicalScheduledCreateRequest`) to treat it as
-  // the SAME logical request.
+  // the SAME logical request. (By the time a REAL stored row reaches this
+  // comparison it has already been canonicalized once, at the store's own
+  // mapping boundary -- see `scheduledBroadcastStore.test.ts` for the
+  // `+00:00` vs `.000Z` proof; this file mocks the store entirely, so its
+  // fixtures already use the canonical form the real store guarantees.)
   const CREATE_INPUT_SCHEDULED_FOR = jerusalemLocalTimeToInstant(FUTURE_DATE, 20, 0).toISOString();
+  const PAST_DATE = "2020-01-01";
+  const PAST_SCHEDULED_FOR = jerusalemLocalTimeToInstant(PAST_DATE, 20, 0).toISOString();
 
   it("a genuinely new key inserts and returns the fresh row", async () => {
     insertManagerScheduledBroadcastIfAbsent.mockResolvedValue({ row: scheduledRow(), created: true });
@@ -254,49 +269,137 @@ describe("createScheduledBroadcast -- create-exactly-once idempotency (separate 
     const result = await createScheduledBroadcast(CREATE_INPUT);
 
     expect(result).toEqual({ ok: true, row: scheduledRow() });
+    expect(getManagerScheduledBroadcastByCreateIdempotencyKey).toHaveBeenCalledWith("idem-create-1");
     expect(insertManagerScheduledBroadcastIfAbsent).toHaveBeenCalledWith(
       expect.objectContaining({ createIdempotencyKey: "idem-create-1" }),
     );
   });
 
-  it("a retry with the SAME key and the SAME logical request returns the ORIGINAL row, never a second one", async () => {
-    // The store found an existing row (created: false) whose stored
-    // content is IDENTICAL to this retry's own request.
+  it("a retry with the SAME key and the SAME logical request returns the ORIGINAL row, never a second one, and never calls insert at all", async () => {
     const originalRow = scheduledRow({
       id: "sb_original",
       audienceKind: "person",
       targetPersonIds: ["p_a"],
       scheduledFor: CREATE_INPUT_SCHEDULED_FOR,
     });
-    insertManagerScheduledBroadcastIfAbsent.mockResolvedValue({ row: originalRow, created: false });
+    getManagerScheduledBroadcastByCreateIdempotencyKey.mockResolvedValue(originalRow);
     const { createScheduledBroadcast } = await loadModule();
 
     const result = await createScheduledBroadcast(CREATE_INPUT);
 
     expect(result).toEqual({ ok: true, row: originalRow });
+    expect(insertManagerScheduledBroadcastIfAbsent).not.toHaveBeenCalled();
   });
 
-  it("fails closed with idempotency_conflict when a reused key's stored row has genuinely different content -- never silently returns the mismatched row", async () => {
-    insertManagerScheduledBroadcastIfAbsent.mockResolvedValue({
-      row: scheduledRow({ title: "כותרת אחרת לגמרי" }), // mismatched vs. CREATE_INPUT.title
-      created: false,
+  it("an exact retry after the scheduled time has already passed returns the existing row -- never invalid_schedule (a replay must not re-decide whether the original create would still be valid today)", async () => {
+    const originalRow = scheduledRow({
+      id: "sb_original",
+      audienceKind: "person",
+      targetPersonIds: ["p_a"],
+      scheduledFor: PAST_SCHEDULED_FOR,
     });
+    getManagerScheduledBroadcastByCreateIdempotencyKey.mockResolvedValue(originalRow);
+    const { createScheduledBroadcast } = await loadModule();
+
+    const result = await createScheduledBroadcast({ ...CREATE_INPUT, scheduledDate: PAST_DATE });
+
+    expect(result).toEqual({ ok: true, row: originalRow });
+  });
+
+  it("an exact retry after the targeted person disappeared from the fresh roster returns the existing row -- never invalid_targets", async () => {
+    const originalRow = scheduledRow({
+      id: "sb_original",
+      audienceKind: "person",
+      targetPersonIds: ["p_a"],
+      scheduledFor: CREATE_INPUT_SCHEDULED_FOR,
+    });
+    getManagerScheduledBroadcastByCreateIdempotencyKey.mockResolvedValue(originalRow);
+    const { createScheduledBroadcast } = await loadModule();
+
+    // p_a is no longer in the fresh roster at all.
+    const result = await createScheduledBroadcast({ ...CREATE_INPUT, people: [MANAGER] });
+
+    expect(result).toEqual({ ok: true, row: originalRow });
+  });
+
+  it("a genuinely NEW key with a past time still fails invalid_schedule -- the future rule only relaxes for a REPLAY, never for an actually-new create", async () => {
+    const { createScheduledBroadcast } = await loadModule();
+    const result = await createScheduledBroadcast({ ...CREATE_INPUT, scheduledDate: PAST_DATE });
+    expect(result).toEqual({ ok: false, error: "invalid_schedule" });
+    expect(insertManagerScheduledBroadcastIfAbsent).not.toHaveBeenCalled();
+  });
+
+  it("a genuinely NEW key with a target id no longer in the roster still fails invalid_targets -- the roster rule only relaxes for a REPLAY", async () => {
+    const { createScheduledBroadcast } = await loadModule();
+    const result = await createScheduledBroadcast({ ...CREATE_INPUT, people: [MANAGER] });
+    expect(result).toEqual({ ok: false, error: "invalid_targets" });
+    expect(insertManagerScheduledBroadcastIfAbsent).not.toHaveBeenCalled();
+  });
+
+  it("fails closed with idempotency_conflict when a reused key's stored title differs -- never silently returns the mismatched row", async () => {
+    getManagerScheduledBroadcastByCreateIdempotencyKey.mockResolvedValue(
+      scheduledRow({ scheduledFor: CREATE_INPUT_SCHEDULED_FOR, title: "כותרת אחרת לגמרי" }),
+    );
+    const { createScheduledBroadcast } = await loadModule();
+    const result = await createScheduledBroadcast(CREATE_INPUT);
+    expect(result).toEqual({ ok: false, error: "idempotency_conflict" });
+  });
+
+  it("fails closed with idempotency_conflict when a reused key's stored body differs", async () => {
+    getManagerScheduledBroadcastByCreateIdempotencyKey.mockResolvedValue(
+      scheduledRow({ scheduledFor: CREATE_INPUT_SCHEDULED_FOR, body: "תוכן אחר לגמרי" }),
+    );
+    const { createScheduledBroadcast } = await loadModule();
+    const result = await createScheduledBroadcast(CREATE_INPUT);
+    expect(result).toEqual({ ok: false, error: "idempotency_conflict" });
+  });
+
+  it("fails closed with idempotency_conflict when a reused key's stored time differs", async () => {
+    getManagerScheduledBroadcastByCreateIdempotencyKey.mockResolvedValue(
+      scheduledRow({ scheduledFor: jerusalemLocalTimeToInstant(FUTURE_DATE, 21, 0).toISOString() }),
+    );
+    const { createScheduledBroadcast } = await loadModule();
+    const result = await createScheduledBroadcast(CREATE_INPUT);
+    expect(result).toEqual({ ok: false, error: "idempotency_conflict" });
+  });
+
+  it("fails closed with idempotency_conflict when a reused key's stored audience differs", async () => {
+    getManagerScheduledBroadcastByCreateIdempotencyKey.mockResolvedValue(
+      scheduledRow({ scheduledFor: CREATE_INPUT_SCHEDULED_FOR, audienceKind: "people", targetPersonIds: ["p_a", "p_b"] }),
+    );
+    const { createScheduledBroadcast } = await loadModule();
+    const result = await createScheduledBroadcast(CREATE_INPUT);
+    expect(result).toEqual({ ok: false, error: "idempotency_conflict" });
+  });
+
+  it("a very late replay of the ORIGINAL request, after the row was intentionally edited, fails closed rather than reverting the edit -- the edit is never touched or overwritten", async () => {
+    // A manager edited title/body after the original create -- the stored
+    // row no longer represents CREATE_INPUT's own (pre-edit) content.
+    const editedRow = scheduledRow({
+      id: "sb_original",
+      scheduledFor: CREATE_INPUT_SCHEDULED_FOR,
+      title: "כותרת אחרי עריכה",
+      lastChangedByPersonId: "p_manager",
+      lastChangedByPersonName: "דני מנהל",
+    });
+    getManagerScheduledBroadcastByCreateIdempotencyKey.mockResolvedValue(editedRow);
     const { createScheduledBroadcast } = await loadModule();
 
     const result = await createScheduledBroadcast(CREATE_INPUT);
 
     expect(result).toEqual({ ok: false, error: "idempotency_conflict" });
+    expect(insertManagerScheduledBroadcastIfAbsent).not.toHaveBeenCalled();
+    expect(updateManagerScheduledBroadcastIfEditable).not.toHaveBeenCalled();
   });
 
   it("'everyone' replay comparison skips target-id comparison, same as the immediate-send engine's own rule (a roster that grew between two near-simultaneous requests must never itself manufacture a false conflict)", async () => {
-    insertManagerScheduledBroadcastIfAbsent.mockResolvedValue({
-      row: scheduledRow({
+    getManagerScheduledBroadcastByCreateIdempotencyKey.mockResolvedValue(
+      scheduledRow({
         audienceKind: "everyone",
         targetPersonIds: ["p_manager", "p_a"], // stored BEFORE the roster grew
         scheduledFor: CREATE_INPUT_SCHEDULED_FOR,
       }),
-      created: false,
-    });
+    );
     const { createScheduledBroadcast } = await loadModule();
 
     const result = await createScheduledBroadcast({
@@ -319,6 +422,25 @@ describe("createScheduledBroadcast -- create-exactly-once idempotency (separate 
     expect(insertManagerScheduledBroadcastIfAbsent).toHaveBeenCalledWith(
       expect.objectContaining({ createIdempotencyKey: "idem-create-2" }),
     );
+  });
+
+  it("a concurrent request wins the race between our own lookup and our own insert -- we still resolve to exactly one row, never retry the insert", async () => {
+    // Our own lookup found nothing (genuine race window), so we proceed to
+    // insert -- but by the time our insert runs, a concurrent identical
+    // request has already created the row under the same key.
+    const winnerRow = scheduledRow({
+      id: "sb_winner",
+      audienceKind: "person",
+      targetPersonIds: ["p_a"],
+      scheduledFor: CREATE_INPUT_SCHEDULED_FOR,
+    });
+    insertManagerScheduledBroadcastIfAbsent.mockResolvedValue({ row: winnerRow, created: false });
+    const { createScheduledBroadcast } = await loadModule();
+
+    const result = await createScheduledBroadcast(CREATE_INPUT);
+
+    expect(result).toEqual({ ok: true, row: winnerRow });
+    expect(insertManagerScheduledBroadcastIfAbsent).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -14,7 +14,11 @@ type Row = Record<string, unknown>;
  * proves for `manager_notification_batches`'s idempotency_key.
  */
 function makeFakeSupabase(scheduledRows: Row[] = [], batchRows: Row[] = []) {
-  const scheduled = [...scheduledRows];
+  // A raw fixture that doesn't care about scheduled_for's own value still
+  // needs a real, parseable timestamptz -- the column is NOT NULL in
+  // production. Individual tests override this when the value itself
+  // matters (e.g. the PostgREST offset-representation proof below).
+  const scheduled: Row[] = scheduledRows.map((row): Row => ({ scheduled_for: "2026-08-23T17:00:00.000Z", ...row }));
   const batches = [...batchRows];
   let idCounter = scheduled.length;
 
@@ -194,6 +198,22 @@ describe("insertManagerScheduledBroadcastIfAbsent", () => {
     expect(second.row.id).not.toBe(first.row.id);
     expect(scheduled).toHaveLength(2);
   });
+
+  it("canonicalizes a PostgREST offset-representation scheduled_for on the conflict-lookup path -- a genuine retry must never see a raw representation difference as a mismatch", async () => {
+    // Postgres/PostgREST can represent the identical timestamptz instant as
+    // '+00:00' instead of the '.000Z' form application code always writes
+    // via Date#toISOString() -- simulate that here rather than only ever
+    // echoing back exactly what was inserted.
+    const { client } = makeFakeSupabase([
+      { id: "sb_existing", create_idempotency_key: "idem-offset", scheduled_for: "2026-08-23T17:00:00+00:00" },
+    ]);
+    const { insertManagerScheduledBroadcastIfAbsent } = await loadModule(client);
+
+    const { row, created } = await insertManagerScheduledBroadcastIfAbsent(newInput({ createIdempotencyKey: "idem-offset" }));
+
+    expect(created).toBe(false);
+    expect(row.scheduledFor).toBe("2026-08-23T17:00:00.000Z");
+  });
 });
 
 describe("getManagerScheduledBroadcastByCreateIdempotencyKey", () => {
@@ -210,6 +230,16 @@ describe("getManagerScheduledBroadcastByCreateIdempotencyKey", () => {
 
     const found = await getManagerScheduledBroadcastByCreateIdempotencyKey("idem-lookup");
     expect(found?.id).toBe(row.id);
+  });
+
+  it("canonicalizes a PostgREST offset-representation scheduled_for the same way, independent of which query path found the row", async () => {
+    const { client } = makeFakeSupabase([
+      { id: "sb_existing", create_idempotency_key: "idem-offset-2", scheduled_for: "2026-08-23T17:00:00+00:00" },
+    ]);
+    const { getManagerScheduledBroadcastByCreateIdempotencyKey } = await loadModule(client);
+
+    const found = await getManagerScheduledBroadcastByCreateIdempotencyKey("idem-offset-2");
+    expect(found?.scheduledFor).toBe("2026-08-23T17:00:00.000Z");
   });
 });
 
@@ -338,7 +368,7 @@ describe("claimDueManagerScheduledBroadcasts / claimManagerScheduledBroadcastNow
   it("claimDueManagerScheduledBroadcasts calls the RPC with the given limit and maps rows", async () => {
     const { client } = makeFakeSupabase();
     (client.rpc as ReturnType<typeof vi.fn>).mockResolvedValue({
-      data: [{ id: "sb_1", status: "claimed", target_person_ids: [] }],
+      data: [{ id: "sb_1", status: "claimed", target_person_ids: [], scheduled_for: "2026-08-23T17:00:00.000Z" }],
       error: null,
     });
     const { claimDueManagerScheduledBroadcasts } = await loadModule(client);
