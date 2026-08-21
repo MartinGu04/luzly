@@ -412,4 +412,179 @@ describe.skipIf(!databaseAvailable)("notification engine SQL functions -- real P
       }
     });
   });
+
+  // -------------------------------------------------------------------
+  // claim_due_manager_scheduled_broadcasts / claim_manager_scheduled_broadcast_now
+  // -- a GENUINE proof of the scheduled-broadcast feature's own
+  // concurrency-safety functions (worker-tick bulk claim + "שלח עכשיו"'s
+  // single-row claim), same rationale as `claim_due_notification_jobs`
+  // above: the property under test IS Postgres's own row-locking/guarded-
+  // update behavior, which a mock cannot honestly prove.
+  // -------------------------------------------------------------------
+
+  describe("claim_due_manager_scheduled_broadcasts", () => {
+    async function insertScheduled(
+      id: string,
+      overrides: Partial<{ status: string; scheduledForOffsetMs: number; claimedAtOffsetMs: number | null; batchId: string | null }> = {},
+    ) {
+      const status = overrides.status ?? "scheduled";
+      const scheduledForOffsetMs = overrides.scheduledForOffsetMs ?? -1000;
+      const claimedAtOffsetMs = overrides.claimedAtOffsetMs ?? null;
+      const batchId = overrides.batchId ?? null;
+      await db.query(
+        `insert into public.manager_scheduled_broadcasts
+           (id, status, audience_kind, target_person_ids, title, body, scheduled_for,
+            created_by_person_id, created_by_person_name, claimed_at, batch_id)
+         values ($1, $2, 'person', '{p_1}', 't', 'b', now() + ($3 || ' milliseconds')::interval,
+           'p_manager', 'מנהל',
+           case when $4::bigint is null then null else now() + ($4 || ' milliseconds')::interval end,
+           $5)`,
+        [id, status, scheduledForOffsetMs, claimedAtOffsetMs, batchId],
+      );
+    }
+
+    async function insertBatch(id: string) {
+      await db.query(
+        `insert into public.manager_notification_batches
+           (id, idempotency_key, created_by_person_id, created_by_person_name, audience_kind, title, body)
+         values ($1, $2, 'p_manager', 'מנהל', 'person', 't', 'b')`,
+        [id, `scheduled:${id}`],
+      );
+    }
+
+    it("20. only a due, still-'scheduled' broadcast is claimed -- a future one is left alone", async () => {
+      await insertScheduled("aaaaaaaa-0000-0000-0000-000000000001", { scheduledForOffsetMs: -1000 });
+      await insertScheduled("aaaaaaaa-0000-0000-0000-000000000002", { scheduledForOffsetMs: 60_000 });
+
+      const result = await db.query("select * from public.claim_due_manager_scheduled_broadcasts(100)");
+      const claimedIds = result.rows.map((row) => row.id);
+
+      expect(claimedIds).toContain("aaaaaaaa-0000-0000-0000-000000000001");
+      expect(claimedIds).not.toContain("aaaaaaaa-0000-0000-0000-000000000002");
+      expect(result.rows.find((row) => row.id === "aaaaaaaa-0000-0000-0000-000000000001").status).toBe("claimed");
+    });
+
+    it("21. a second claim call never re-claims an already-'claimed' row -- the exclusivity a worker tick relies on", async () => {
+      await insertScheduled("aaaaaaaa-0000-0000-0000-000000000003", { scheduledForOffsetMs: -1000 });
+
+      const first = await db.query("select * from public.claim_due_manager_scheduled_broadcasts(100)");
+      expect(first.rows.map((r) => r.id)).toContain("aaaaaaaa-0000-0000-0000-000000000003");
+
+      const second = await db.query("select * from public.claim_due_manager_scheduled_broadcasts(100)");
+      expect(second.rows.map((r) => r.id)).not.toContain("aaaaaaaa-0000-0000-0000-000000000003");
+    });
+
+    it("22. a 'claimed' row with NO batch_id, stuck past the crash-recovery window, is reset to 'scheduled' and immediately re-claimable", async () => {
+      await insertScheduled("aaaaaaaa-0000-0000-0000-000000000004", {
+        status: "claimed",
+        scheduledForOffsetMs: -1000,
+        claimedAtOffsetMs: -10 * 60_000,
+        batchId: null,
+      });
+
+      const result = await db.query("select * from public.claim_due_manager_scheduled_broadcasts(100)");
+      const row = result.rows.find((r) => r.id === "aaaaaaaa-0000-0000-0000-000000000004");
+      expect(row).toBeDefined();
+      expect(row.status).toBe("claimed");
+    });
+
+    it("23. a 'claimed' row that already HAS a batch_id is always resumable, even if its claim is fresh (not stale) -- a checkpointed dispatch is never left stranded", async () => {
+      await insertBatch("bbbbbbbb-0000-0000-0000-000000000001");
+      await insertScheduled("aaaaaaaa-0000-0000-0000-000000000005", {
+        status: "claimed",
+        scheduledForOffsetMs: -1000,
+        claimedAtOffsetMs: 0, // just claimed -- NOT past the stale-reclaim window
+        batchId: "bbbbbbbb-0000-0000-0000-000000000001",
+      });
+
+      const result = await db.query("select * from public.claim_due_manager_scheduled_broadcasts(100)");
+      expect(result.rows.map((r) => r.id)).toContain("aaaaaaaa-0000-0000-0000-000000000005");
+    });
+
+    it("24. a 'claimed' row with NO batch_id that is still within the crash-recovery window is NOT reclaimed -- a normal in-flight dispatch is left alone", async () => {
+      await insertScheduled("aaaaaaaa-0000-0000-0000-000000000006", {
+        status: "claimed",
+        scheduledForOffsetMs: -1000,
+        claimedAtOffsetMs: -30_000, // 30s ago -- well within the 4-minute window
+        batchId: null,
+      });
+
+      const result = await db.query("select * from public.claim_due_manager_scheduled_broadcasts(100)");
+      expect(result.rows.map((r) => r.id)).not.toContain("aaaaaaaa-0000-0000-0000-000000000006");
+    });
+
+    it("25. anon/authenticated cannot execute the function at all", async () => {
+      await db.query("set role authenticated");
+      try {
+        await expect(db.query("select * from public.claim_due_manager_scheduled_broadcasts(100)")).rejects.toThrow(
+          /permission denied/i,
+        );
+      } finally {
+        await db.query("reset role");
+      }
+    });
+  });
+
+  describe("claim_manager_scheduled_broadcast_now", () => {
+    async function insertScheduled(id: string, status: string, scheduledForOffsetMs: number) {
+      await db.query(
+        `insert into public.manager_scheduled_broadcasts
+           (id, status, audience_kind, target_person_ids, title, body, scheduled_for, created_by_person_id, created_by_person_name)
+         values ($1, $2, 'person', '{p_1}', 't', 'b', now() + ($3 || ' milliseconds')::interval, 'p_manager', 'מנהל')`,
+        [id, status, scheduledForOffsetMs],
+      );
+    }
+
+    it("26. claims a still-'scheduled' broadcast regardless of how far in the future scheduled_for is", async () => {
+      await insertScheduled("cccccccc-0000-0000-0000-000000000001", "scheduled", 3_600_000);
+
+      const result = await db.query("select * from public.claim_manager_scheduled_broadcast_now($1)", [
+        "cccccccc-0000-0000-0000-000000000001",
+      ]);
+
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0].status).toBe("claimed");
+    });
+
+    it("27. returns nothing for a broadcast that is already claimed, dispatched, or cancelled -- the truthful 'already started' signal", async () => {
+      await insertScheduled("cccccccc-0000-0000-0000-000000000002", "claimed", -1000);
+      await insertScheduled("cccccccc-0000-0000-0000-000000000003", "dispatched", -1000);
+      await insertScheduled("cccccccc-0000-0000-0000-000000000004", "cancelled", -1000);
+
+      for (const id of [
+        "cccccccc-0000-0000-0000-000000000002",
+        "cccccccc-0000-0000-0000-000000000003",
+        "cccccccc-0000-0000-0000-000000000004",
+      ]) {
+        const result = await db.query("select * from public.claim_manager_scheduled_broadcast_now($1)", [id]);
+        expect(result.rows).toHaveLength(0);
+      }
+    });
+
+    it("28. a second 'שלח עכשיו' claim on the same broadcast never succeeds twice -- exactly one logical dispatch", async () => {
+      await insertScheduled("cccccccc-0000-0000-0000-000000000005", "scheduled", -1000);
+
+      const first = await db.query("select * from public.claim_manager_scheduled_broadcast_now($1)", [
+        "cccccccc-0000-0000-0000-000000000005",
+      ]);
+      const second = await db.query("select * from public.claim_manager_scheduled_broadcast_now($1)", [
+        "cccccccc-0000-0000-0000-000000000005",
+      ]);
+
+      expect(first.rows).toHaveLength(1);
+      expect(second.rows).toHaveLength(0);
+    });
+
+    it("29. anon/authenticated cannot execute the function at all", async () => {
+      await insertScheduled("cccccccc-0000-0000-0000-000000000006", "scheduled", -1000);
+      await db.query("set role authenticated");
+      try {
+        await expect(
+          db.query("select * from public.claim_manager_scheduled_broadcast_now($1)", ["cccccccc-0000-0000-0000-000000000006"]),
+        ).rejects.toThrow(/permission denied/i);
+      } finally {
+        await db.query("reset role");
+      }
+    });
+  });
 });

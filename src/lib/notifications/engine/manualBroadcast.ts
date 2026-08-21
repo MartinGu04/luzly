@@ -18,8 +18,16 @@ export const MANAGER_BROADCAST_CATEGORY = "manager_broadcast";
 export interface BroadcastUnresolvedPerson {
   personId: string;
   personName: string;
-  /** Mirrors `PersonNotificationReadiness`'s own three non-`ready`/non-`no_push_subscription` states -- this person has no safe auth user id to target at all. */
-  reason: "missing_email" | "ambiguous_email" | "unmapped_account";
+  /**
+   * Mirrors `PersonNotificationReadiness`'s own three non-`ready`/non-`no_push_subscription`
+   * states -- this person has no safe auth user id to target at all.
+   * `"no_longer_in_roster"` is scheduled-dispatch-only (see
+   * `scheduledBroadcast.ts`): a stored person-id snapshot whose id no
+   * longer matches any current roster member -- never produced by an
+   * immediate send, whose audience is always resolved against the SAME
+   * fresh roster it validates against.
+   */
+  reason: "missing_email" | "ambiguous_email" | "unmapped_account" | "no_longer_in_roster";
 }
 
 export interface SendManagerBroadcastResult {
@@ -67,7 +75,8 @@ export interface SendManagerBroadcastInput {
   idempotencyKey: string;
 }
 
-function validateText(value: string, maxLength: number): string | null {
+/** Exported for `scheduledBroadcast.ts`'s create/edit validation -- the exact same title/body rule an immediate send enforces, never a second copy of it. */
+export function validateText(value: string, maxLength: number): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   if (trimmed === "" || trimmed.length > maxLength) return null;
@@ -87,7 +96,8 @@ function validateText(value: string, maxLength: number): string | null {
  * only fails with one generic `invalid_targets`, never "does id X map to
  * a real account" (that would let a client probe roster membership).
  */
-function resolveAudience(
+/** Exported for `scheduledBroadcast.ts`'s create/edit path -- same fail-closed audience-resolution rule an immediate send uses (an intentional audience change is a fresh, fully re-validated request). Never reused for DISPATCH-time resolution of an already-stored snapshot, which has different semantics (see that module's own `resolveScheduledDispatchTargets`). */
+export function resolveAudience(
   audienceKind: BroadcastAudienceKind,
   people: readonly Person[],
   targetPersonIds: readonly string[],
@@ -114,7 +124,8 @@ function resolveAudience(
  * `resolveAudience`). Runs AFTER deduping, so harmless repeated ids in
  * the request never trigger a false `"invalid_audience"`.
  */
-function validateAudienceCardinality(audienceKind: BroadcastAudienceKind, targetPersonIds: readonly string[]): boolean {
+/** Exported for `scheduledBroadcast.ts`'s create/edit path -- same cardinality rule an immediate send enforces. */
+export function validateAudienceCardinality(audienceKind: BroadcastAudienceKind, targetPersonIds: readonly string[]): boolean {
   const uniqueCount = new Set(targetPersonIds).size;
   if (audienceKind === "person") return uniqueCount === 1;
   if (audienceKind === "people") return uniqueCount >= 1;
