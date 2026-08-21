@@ -874,20 +874,23 @@ export async function getManagerNotificationBatchByIdempotencyKey(
   return data ? toBatchRow(data as Record<string, unknown>) : null;
 }
 
+export interface ManagerNotificationBatchUpsertResult {
+  row: ManagerNotificationBatchRow;
+  /** `true` only when THIS call genuinely inserted the row. `false` means `idempotency_key` already existed -- `row` is the ORIGINAL stored batch, never overwritten by this call's (possibly different) payload. The caller MUST compare `row` against its own current request before creating any jobs -- see `manualBroadcast.ts`'s `isSameLogicalBroadcastRequest`; this function itself does not decide whether a reused key represents a legitimate replay or a mutated request. */
+  created: boolean;
+}
+
 /**
  * Idempotent by `idempotency_key` -- a genuinely new batch inserts and
- * returns its own fresh row; a retried/double-submitted composer click
- * carrying the SAME key hits the unique constraint and this returns the
- * ALREADY-EXISTING batch row instead (its ORIGINAL stored counts, never
- * silently overwritten by a second, possibly-different recomputation).
- * The caller reuses that existing batch's `id` to build the exact same
- * per-recipient job `dedupe_key`s, so a retried send can never create a
- * second job for any recipient either -- double-layer idempotency, on top
- * of `notification_jobs.dedupe_key`'s own uniqueness.
+ * returns its own fresh row with `created: true`. A retried/double-
+ * submitted composer click carrying the SAME key hits the unique
+ * constraint and this returns the ALREADY-EXISTING batch row instead
+ * (`created: false`, the row's ORIGINAL stored values, never silently
+ * overwritten by a second, possibly-different payload).
  */
 export async function insertManagerNotificationBatchIfAbsent(
   batch: NewManagerNotificationBatch,
-): Promise<ManagerNotificationBatchRow> {
+): Promise<ManagerNotificationBatchUpsertResult> {
   const supabase = getNotificationServiceClient();
   const { data, error } = await supabase
     .from("manager_notification_batches")
@@ -910,11 +913,11 @@ export async function insertManagerNotificationBatchIfAbsent(
   if (error) {
     if ((error as { code?: string }).code === "23505") {
       const existing = await getManagerNotificationBatchByIdempotencyKey(batch.idempotencyKey);
-      if (existing) return existing;
+      if (existing) return { row: existing, created: false };
     }
     throw error;
   }
-  return toBatchRow(data as Record<string, unknown>);
+  return { row: toBatchRow(data as Record<string, unknown>), created: true };
 }
 
 /** A bounded recent-history read for the composer's own small audit list -- never a full archive. */

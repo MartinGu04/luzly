@@ -140,7 +140,7 @@ describe("sendManagerBroadcastNotification -- title/body validation", () => {
     expect(result).toEqual({ ok: false, error: "invalid_title" });
   });
 
-  it("rejects when the resolved audience is empty (no targets selected)", async () => {
+  it("rejects an empty 'people' selection as an audience-cardinality violation ('people' requires at least one id)", async () => {
     const { sendManagerBroadcastNotification } = await loadModule(makeFakeSupabase([]));
     const result = await sendManagerBroadcastNotification({
       manager: MANAGER,
@@ -151,7 +151,109 @@ describe("sendManagerBroadcastNotification -- title/body validation", () => {
       body: "תוכן",
       idempotencyKey: "idem-1",
     });
+    expect(result).toEqual({ ok: false, error: "invalid_audience" });
+  });
+
+  it("rejects an 'everyone' send against an empty roster as no_targets -- 'everyone' has no id-based cardinality rule, but an empty roster is still nothing to send to", async () => {
+    const { sendManagerBroadcastNotification } = await loadModule(makeFakeSupabase([]));
+    const result = await sendManagerBroadcastNotification({
+      manager: MANAGER,
+      people: [],
+      audienceKind: "everyone",
+      targetPersonIds: [],
+      title: "כותרת",
+      body: "תוכן",
+      idempotencyKey: "idem-1",
+    });
     expect(result).toEqual({ ok: false, error: "no_targets" });
+  });
+});
+
+describe("sendManagerBroadcastNotification -- server-side audience cardinality (independent of the UI)", () => {
+  it("'person' with zero ids is rejected", async () => {
+    const { sendManagerBroadcastNotification } = await loadModule(makeFakeSupabase([]));
+    const result = await sendManagerBroadcastNotification({
+      manager: MANAGER,
+      people: [MANAGER, person({ id: "p_1", name: "אחד" })],
+      audienceKind: "person",
+      targetPersonIds: [],
+      title: "כותרת",
+      body: "תוכן",
+      idempotencyKey: "idem-1",
+    });
+    expect(result).toEqual({ ok: false, error: "invalid_audience" });
+  });
+
+  it("'person' with MORE THAN ONE id is rejected -- a tampered client can never submit a single-person audienceKind with a multi-person payload", async () => {
+    const { sendManagerBroadcastNotification } = await loadModule(makeFakeSupabase([]));
+    const result = await sendManagerBroadcastNotification({
+      manager: MANAGER,
+      people: [MANAGER, person({ id: "p_1", name: "אחד" }), person({ id: "p_2", name: "שתיים" })],
+      audienceKind: "person",
+      targetPersonIds: ["p_1", "p_2"],
+      title: "כותרת",
+      body: "תוכן",
+      idempotencyKey: "idem-1",
+    });
+    expect(result).toEqual({ ok: false, error: "invalid_audience" });
+  });
+
+  it("'person' with the SAME id repeated twice is still exactly one target -- deduped before the cardinality check, never a false rejection", async () => {
+    const dana = person({ id: "p_dana", name: "דנה", email: "dana@example.invalid" });
+    const { client, jobsByDedupeKey } = makeFakeSupabase([{ id: "user-dana", email: "dana@example.invalid" }], ["user-dana"]);
+    const { sendManagerBroadcastNotification } = await loadModule(client);
+
+    const outcome = await sendManagerBroadcastNotification({
+      manager: MANAGER,
+      people: [MANAGER, dana],
+      audienceKind: "person",
+      targetPersonIds: ["p_dana", "p_dana"],
+      title: "כותרת",
+      body: "תוכן",
+      idempotencyKey: "idem-dupe-id",
+    });
+
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result.resolvedRecipientCount).toBe(1);
+    expect(jobsByDedupeKey.size).toBe(1);
+  });
+
+  it("'people' with exactly one id is a valid audience -- only 'person' is capped at exactly one", async () => {
+    const dana = person({ id: "p_dana", name: "דנה", email: "dana@example.invalid" });
+    const { client } = makeFakeSupabase([{ id: "user-dana", email: "dana@example.invalid" }], ["user-dana"]);
+    const { sendManagerBroadcastNotification } = await loadModule(client);
+
+    const outcome = await sendManagerBroadcastNotification({
+      manager: MANAGER,
+      people: [MANAGER, dana],
+      audienceKind: "people",
+      targetPersonIds: ["p_dana"],
+      title: "כותרת",
+      body: "תוכן",
+      idempotencyKey: "idem-1",
+    });
+    expect(outcome.ok).toBe(true);
+  });
+
+  it("'everyone' ignores targetPersonIds entirely for cardinality purposes -- a client can never shrink 'everyone' to a subset by tampering with ids", async () => {
+    const dana = person({ id: "p_dana", name: "דנה", email: "dana@example.invalid" });
+    const { client, jobsByDedupeKey } = makeFakeSupabase([{ id: "user-dana", email: "dana@example.invalid" }], []);
+    const { sendManagerBroadcastNotification } = await loadModule(client);
+
+    const outcome = await sendManagerBroadcastNotification({
+      manager: MANAGER,
+      people: [dana],
+      audienceKind: "everyone",
+      targetPersonIds: [], // "everyone" with a deliberately empty id list is still valid -- the roster decides, not the client.
+      title: "כותרת",
+      body: "תוכן",
+      idempotencyKey: "idem-1",
+    });
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result.resolvedRecipientCount).toBe(1);
+    expect(jobsByDedupeKey.size).toBe(1);
   });
 });
 
@@ -301,9 +403,12 @@ describe("sendManagerBroadcastNotification -- recipient resolution", () => {
     );
   });
 
-  it("candidate ids outside the roster are silently ignored, never targeted -- 'people' resolves ONLY through real roster membership", async () => {
+  it("a candidate id outside the roster fails the WHOLE request closed -- never silently shrinks to whichever ids did resolve, and creates zero jobs", async () => {
     const dana = person({ id: "p_dana", name: "דנה", email: "dana@example.invalid" });
-    const { client, jobsByDedupeKey } = makeFakeSupabase([{ id: "user-dana", email: "dana@example.invalid" }], ["user-dana"]);
+    const { client, jobsByDedupeKey, batchesByIdempotencyKey } = makeFakeSupabase(
+      [{ id: "user-dana", email: "dana@example.invalid" }],
+      ["user-dana"],
+    );
     const { sendManagerBroadcastNotification } = await loadModule(client);
 
     const outcome = await sendManagerBroadcastNotification({
@@ -316,10 +421,37 @@ describe("sendManagerBroadcastNotification -- recipient resolution", () => {
       idempotencyKey: "idem-tampered",
     });
 
+    expect(outcome).toEqual({ ok: false, error: "invalid_targets" });
+    expect(jobsByDedupeKey.size).toBe(0);
+    expect(batchesByIdempotencyKey.size).toBe(0);
+  });
+
+  it("a real, valid roster id is never itself the problem -- only the presence of an invalid one fails the request", async () => {
+    const dana = person({ id: "p_dana", name: "דנה", email: "dana@example.invalid" });
+    const noa = person({ id: "p_noa", name: "נועה", email: "noa@example.invalid" });
+    const { client, jobsByDedupeKey } = makeFakeSupabase(
+      [
+        { id: "user-dana", email: "dana@example.invalid" },
+        { id: "user-noa", email: "noa@example.invalid" },
+      ],
+      ["user-dana", "user-noa"],
+    );
+    const { sendManagerBroadcastNotification } = await loadModule(client);
+
+    const outcome = await sendManagerBroadcastNotification({
+      manager: MANAGER,
+      people: [MANAGER, dana, noa],
+      audienceKind: "people",
+      targetPersonIds: ["p_dana", "p_noa"],
+      title: "כותרת",
+      body: "תוכן",
+      idempotencyKey: "idem-valid",
+    });
+
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) return;
-    expect(outcome.result.resolvedRecipientCount).toBe(1);
-    expect(jobsByDedupeKey.size).toBe(1);
+    expect(outcome.result.resolvedRecipientCount).toBe(2);
+    expect(jobsByDedupeKey.size).toBe(2);
   });
 });
 
@@ -374,6 +506,112 @@ describe("sendManagerBroadcastNotification -- idempotency", () => {
     await sendManagerBroadcastNotification({ ...base, idempotencyKey: "idem-b" });
 
     expect(batchesByIdempotencyKey.size).toBe(2);
+    expect(jobsByDedupeKey.size).toBe(2);
+  });
+
+  it("reusing the SAME idempotency key with a DIFFERENT recipient fails closed as idempotency_conflict and creates NO additional job -- the exact bug this pass fixes", async () => {
+    const dana = person({ id: "p_dana", name: "דנה", email: "dana@example.invalid" });
+    const noa = person({ id: "p_noa", name: "נועה", email: "noa@example.invalid" });
+    const { client, jobsByDedupeKey } = makeFakeSupabase(
+      [
+        { id: "user-dana", email: "dana@example.invalid" },
+        { id: "user-noa", email: "noa@example.invalid" },
+      ],
+      ["user-dana", "user-noa"],
+    );
+    const { sendManagerBroadcastNotification } = await loadModule(client);
+
+    const first = await sendManagerBroadcastNotification({
+      manager: MANAGER,
+      people: [MANAGER, dana, noa],
+      audienceKind: "person",
+      targetPersonIds: ["p_dana"],
+      title: "כותרת",
+      body: "תוכן",
+      idempotencyKey: "idem-shared",
+    });
+    expect(first.ok).toBe(true);
+    expect(jobsByDedupeKey.size).toBe(1);
+
+    const second = await sendManagerBroadcastNotification({
+      manager: MANAGER,
+      people: [MANAGER, dana, noa],
+      audienceKind: "person",
+      targetPersonIds: ["p_noa"], // a DIFFERENT recipient, same key
+      title: "כותרת",
+      body: "תוכן",
+      idempotencyKey: "idem-shared",
+    });
+
+    expect(second).toEqual({ ok: false, error: "idempotency_conflict" });
+    // Still exactly the ORIGINAL job -- noa never got one.
+    expect(jobsByDedupeKey.size).toBe(1);
+    expect([...jobsByDedupeKey.values()][0].recipient_user_id).toBe("user-dana");
+  });
+
+  it("reusing the SAME idempotency key with DIFFERENT title/body fails closed and never mutates or extends the original batch", async () => {
+    const dana = person({ id: "p_dana", name: "דנה", email: "dana@example.invalid" });
+    const { client, jobsByDedupeKey, batchesByIdempotencyKey } = makeFakeSupabase(
+      [{ id: "user-dana", email: "dana@example.invalid" }],
+      ["user-dana"],
+    );
+    const { sendManagerBroadcastNotification } = await loadModule(client);
+
+    await sendManagerBroadcastNotification({
+      manager: MANAGER,
+      people: [MANAGER, dana],
+      audienceKind: "person",
+      targetPersonIds: ["p_dana"],
+      title: "כותרת מקורית",
+      body: "תוכן מקורי",
+      idempotencyKey: "idem-content",
+    });
+
+    const second = await sendManagerBroadcastNotification({
+      manager: MANAGER,
+      people: [MANAGER, dana],
+      audienceKind: "person",
+      targetPersonIds: ["p_dana"],
+      title: "כותרת שונה לגמרי",
+      body: "תוכן מקורי",
+      idempotencyKey: "idem-content",
+    });
+
+    expect(second).toEqual({ ok: false, error: "idempotency_conflict" });
+    expect(batchesByIdempotencyKey.get("idem-content")?.title).toBe("כותרת מקורית");
+    expect(jobsByDedupeKey.size).toBe(1);
+  });
+
+  it("a genuine replay of the identical request (same manager/audience/targets/title/body) safely retries missing job creation, never a conflict", async () => {
+    const dana = person({ id: "p_dana", name: "דנה", email: "dana@example.invalid" });
+    const noa = person({ id: "p_noa", name: "נועה", email: "noa@example.invalid" });
+    const { client, jobsByDedupeKey } = makeFakeSupabase(
+      [
+        { id: "user-dana", email: "dana@example.invalid" },
+        { id: "user-noa", email: "noa@example.invalid" },
+      ],
+      ["user-dana", "user-noa"],
+    );
+    const { sendManagerBroadcastNotification } = await loadModule(client);
+
+    const input = {
+      manager: MANAGER,
+      people: [MANAGER, dana, noa],
+      audienceKind: "people" as const,
+      targetPersonIds: ["p_dana", "p_noa"],
+      title: "כותרת",
+      body: "תוכן",
+      idempotencyKey: "idem-replay",
+    };
+
+    const first = await sendManagerBroadcastNotification(input);
+    // A different array ORDER for the same two ids -- canonical set comparison must still treat this as the same request.
+    const second = await sendManagerBroadcastNotification({ ...input, targetPersonIds: ["p_noa", "p_dana"] });
+
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(true);
+    if (!first.ok || !second.ok) return;
+    expect(second.result.batchId).toBe(first.result.batchId);
     expect(jobsByDedupeKey.size).toBe(2);
   });
 });

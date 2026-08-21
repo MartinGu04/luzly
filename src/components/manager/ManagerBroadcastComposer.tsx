@@ -42,7 +42,10 @@ const ERROR_LABELS: Record<string, string> = {
   forbidden: "רק מנהל/ת יכול/ה לשלוח התראה.",
   invalid_title: `כותרת ההתראה חייבת להיות בין 1 ל-${BROADCAST_TITLE_MAX_LENGTH} תווים.`,
   invalid_body: `תוכן ההתראה חייב להיות בין 1 ל-${BROADCAST_BODY_MAX_LENGTH} תווים.`,
+  invalid_audience: "בחירת \"אדם מסוים\" דורשת בדיוק איש/אשת צוות אחד/ת.",
+  invalid_targets: "הבחירה אינה תקפה יותר. נסה/י לבחור מחדש.",
   no_targets: "לא נבחרו אנשי צוות תקפים לשליחה.",
+  idempotency_conflict: "השליחה הקודמת עדיין בעיבוד או שונה מהבקשה הזו. נסה/י שוב.",
 };
 
 function errorLabel(error: string): string {

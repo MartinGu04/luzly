@@ -962,12 +962,13 @@ function newBatch(overrides: Record<string, unknown> = {}) {
 }
 
 describe("insertManagerNotificationBatchIfAbsent / getManagerNotificationBatchByIdempotencyKey / listRecentManagerNotificationBatches", () => {
-  it("inserts a genuinely new batch and returns its full mapped row", async () => {
+  it("inserts a genuinely new batch, returns its full mapped row, and reports created: true", async () => {
     const { client } = makeBatchesFakeSupabase();
     const { insertManagerNotificationBatchIfAbsent } = await loadModule(client);
 
-    const row = await insertManagerNotificationBatchIfAbsent(newBatch());
+    const { row, created } = await insertManagerNotificationBatchIfAbsent(newBatch());
 
+    expect(created).toBe(true);
     expect(row).toMatchObject({
       idempotencyKey: "idem-1",
       createdByPersonId: "p_manager",
@@ -984,15 +985,17 @@ describe("insertManagerNotificationBatchIfAbsent / getManagerNotificationBatchBy
     expect(row.id).toBeTruthy();
   });
 
-  it("a retried insert with the SAME idempotency key returns the ALREADY-EXISTING row, never a second one", async () => {
+  it("a retried insert with the SAME idempotency key returns created: false and the ALREADY-EXISTING row, never a second one", async () => {
     const { client, byIdempotencyKey } = makeBatchesFakeSupabase();
     const { insertManagerNotificationBatchIfAbsent } = await loadModule(client);
 
     const first = await insertManagerNotificationBatchIfAbsent(newBatch());
     const second = await insertManagerNotificationBatchIfAbsent(newBatch({ title: "כותרת אחרת בכלל" }));
 
-    expect(second.id).toBe(first.id);
-    expect(second.title).toBe("כותרת"); // the ORIGINAL stored title, never overwritten by the retry's payload
+    expect(first.created).toBe(true);
+    expect(second.created).toBe(false);
+    expect(second.row.id).toBe(first.row.id);
+    expect(second.row.title).toBe("כותרת"); // the ORIGINAL stored title, never overwritten by the retry's payload
     expect(byIdempotencyKey.size).toBe(1);
   });
 

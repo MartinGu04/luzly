@@ -6,6 +6,7 @@ import {
   insertManagerNotificationBatchIfAbsent,
   insertNotificationJobIfAbsent,
   type BroadcastAudienceKind,
+  type ManagerNotificationBatchRow,
 } from "./store";
 
 export type { BroadcastAudienceKind } from "./store";
@@ -31,7 +32,16 @@ export interface SendManagerBroadcastResult {
 
 export type SendManagerBroadcastOutcome =
   | { ok: true; result: SendManagerBroadcastResult }
-  | { ok: false; error: "invalid_title" | "invalid_body" | "no_targets" };
+  | {
+      ok: false;
+      error:
+        | "invalid_title"
+        | "invalid_body"
+        | "invalid_audience"
+        | "invalid_targets"
+        | "no_targets"
+        | "idempotency_conflict";
+    };
 
 export interface SendManagerBroadcastInput {
   /** The sending manager -- already verified `isManager === true` by the caller (`manualBroadcastActions.ts`). Identifies the batch's audit row only, never a recipient. */
@@ -39,11 +49,11 @@ export interface SendManagerBroadcastInput {
   /** The full, freshly-parsed personnel roster -- the ONLY source `targetPersonIds`/`"everyone"` are resolved against. Never trusts a client-supplied roster. */
   people: readonly Person[];
   audienceKind: BroadcastAudienceKind;
-  /** Candidate roster person ids for `"person"`/`"people"` -- untrusted client input, filtered down to real `people` membership below. Ignored for `"everyone"`. */
+  /** Candidate roster person ids for `"person"`/`"people"` -- untrusted client input. Every id MUST be a genuine member of `people`, or the whole request fails closed (see `resolveAudience`). Ignored for `"everyone"`. */
   targetPersonIds: readonly string[];
   title: string;
   body: string;
-  /** Client-generated per-compose-session key; the ONE thing that makes a retried/double-submitted send idempotent at the batch level (see `insertManagerNotificationBatchIfAbsent`). */
+  /** Client-generated per-compose-session key; the ONE thing that makes a retried/double-submitted send idempotent at the batch level (see `insertManagerNotificationBatchIfAbsent` and `isSameLogicalBroadcastRequest`). */
   idempotencyKey: string;
 }
 
@@ -54,15 +64,90 @@ function validateText(value: string, maxLength: number): string | null {
   return trimmed;
 }
 
-/** `"everyone"` means every person currently in the (freshly re-fetched) personnel roster -- never every Supabase auth account. `"person"`/`"people"` are resolved identically: only ids that are genuinely members of `people` survive, so a tampered/stale client id can never target anyone outside the manager's own roster. */
+/**
+ * `"everyone"` means every person currently in the (freshly re-fetched)
+ * personnel roster -- never every Supabase auth account, and never
+ * dependent on client-supplied ids at all. `"person"`/`"people"` resolve
+ * ONLY through genuine `people` membership: every requested id (after
+ * deduping harmless repeats) must match a real roster person, or the
+ * WHOLE request fails closed (`null`) -- a single stale/tampered/unknown
+ * id must never silently shrink the audience to "whatever did resolve";
+ * it must nuke the whole request before anything is created (see caller).
+ * Deliberately never reveals WHICH id was invalid or why -- the caller
+ * only fails with one generic `invalid_targets`, never "does id X map to
+ * a real account" (that would let a client probe roster membership).
+ */
 function resolveAudience(
   audienceKind: BroadcastAudienceKind,
   people: readonly Person[],
   targetPersonIds: readonly string[],
-): Person[] {
+): Person[] | null {
   if (audienceKind === "everyone") return [...people];
-  const idSet = new Set(targetPersonIds);
-  return people.filter((person) => idSet.has(person.id));
+
+  const byId = new Map(people.map((person) => [person.id, person]));
+  const uniqueIds = [...new Set(targetPersonIds)];
+  const resolved: Person[] = [];
+  for (const id of uniqueIds) {
+    const person = byId.get(id);
+    if (!person) return null;
+    resolved.push(person);
+  }
+  return resolved;
+}
+
+/**
+ * Server-side audience CARDINALITY, independent of anything the UI
+ * happens to enforce -- a tampered client must never be able to submit
+ * `audienceKind: "person"` with more than one id (or zero) while the
+ * audit row claims a single-person send. `"people"` requires at least
+ * one id; `"everyone"` has no id-based cardinality at all (see
+ * `resolveAudience`). Runs AFTER deduping, so harmless repeated ids in
+ * the request never trigger a false `"invalid_audience"`.
+ */
+function validateAudienceCardinality(audienceKind: BroadcastAudienceKind, targetPersonIds: readonly string[]): boolean {
+  const uniqueCount = new Set(targetPersonIds).size;
+  if (audienceKind === "person") return uniqueCount === 1;
+  if (audienceKind === "people") return uniqueCount >= 1;
+  return true; // "everyone"
+}
+
+/** Canonical (order-independent) target-id comparison -- a client resubmitting the same people in a different array order must never register as a different logical request. */
+function sameIdSet(a: readonly string[], b: readonly string[]): boolean {
+  const setA = new Set(a);
+  const setB = new Set(b);
+  if (setA.size !== setB.size) return false;
+  for (const id of setA) if (!setB.has(id)) return false;
+  return true;
+}
+
+/**
+ * Whether `candidate` is a REPLAY of the exact same logical request the
+ * stored batch (found via a reused `idempotency_key`) already represents
+ * -- sending manager, audience kind, title, body, and (for `"person"`/
+ * `"people"`) the canonical target-id SET. `"everyone"` deliberately never
+ * compares target ids: that audience is server-derived from the roster at
+ * send time, not client-supplied, so a roster that changed by one person
+ * between two nearly-simultaneous requests must never itself manufacture
+ * a false `idempotency_conflict` for an "everyone" send. A mismatch on
+ * ANY compared field means this is a genuinely different request that
+ * happens to reuse an old key -- never a safe replay.
+ */
+export function isSameLogicalBroadcastRequest(
+  stored: Pick<ManagerNotificationBatchRow, "createdByPersonId" | "audienceKind" | "targetPersonIds" | "title" | "body">,
+  candidate: {
+    createdByPersonId: string;
+    audienceKind: BroadcastAudienceKind;
+    targetPersonIds: readonly string[];
+    title: string;
+    body: string;
+  },
+): boolean {
+  if (stored.createdByPersonId !== candidate.createdByPersonId) return false;
+  if (stored.audienceKind !== candidate.audienceKind) return false;
+  if (stored.title !== candidate.title) return false;
+  if (stored.body !== candidate.body) return false;
+  if (stored.audienceKind === "everyone") return true;
+  return sameIdSet(stored.targetPersonIds, candidate.targetPersonIds);
 }
 
 /**
@@ -73,13 +158,16 @@ function resolveAudience(
  * view and the worker's own recipient targeting already share) -- never
  * trusts a client-supplied auth user id, email, or readiness status.
  *
- * Creates (or, on a retried/duplicate submission, safely reuses) exactly
- * ONE `manager_notification_batches` audit row, then exactly one
- * `notification_jobs` row per DISTINCT resolved Supabase auth user id
- * (both push-capable and inbox-only recipients get a job -- push delivery
- * is a separate, best-effort layer the existing worker owns on top; see
- * `insertNotificationJobIfAbsent`'s own dedupe-by-`dedupe_key` guarantee
- * for why a retry can never duplicate any recipient's job).
+ * Idempotency is a TWO-part guarantee, not just "insert with a unique
+ * key": `idempotency_key` alone would let a reused key silently ADD
+ * recipients or change content on a later request while reusing the
+ * first request's batch id. So once an existing batch is found for the
+ * key, this ALWAYS compares it (`isSameLogicalBroadcastRequest`) against
+ * the CURRENT request before creating a single job: a genuine replay
+ * (identical manager/audience/targets/title/body) safely continues,
+ * relying on `notification_jobs.dedupe_key` to make any missing-job
+ * creation idempotent too; anything else fails closed as
+ * `idempotency_conflict`, creating ZERO new jobs.
  */
 export async function sendManagerBroadcastNotification(
   input: SendManagerBroadcastInput,
@@ -90,7 +178,12 @@ export async function sendManagerBroadcastNotification(
   const body = validateText(input.body, BROADCAST_BODY_MAX_LENGTH);
   if (body === null) return { ok: false, error: "invalid_body" };
 
+  if (!validateAudienceCardinality(input.audienceKind, input.targetPersonIds)) {
+    return { ok: false, error: "invalid_audience" };
+  }
+
   const targets = resolveAudience(input.audienceKind, input.people, input.targetPersonIds);
+  if (targets === null) return { ok: false, error: "invalid_targets" };
   if (targets.length === 0) return { ok: false, error: "no_targets" };
 
   const [emailToAccount, subscribedUserIds] = await Promise.all([
@@ -127,12 +220,14 @@ export async function sendManagerBroadcastNotification(
   const recipientsByUserId = new Map<string, { userId: string }>();
   for (const recipient of [...pushCapable, ...inboxOnly]) recipientsByUserId.set(recipient.userId, recipient);
 
-  const batch = await insertManagerNotificationBatchIfAbsent({
+  const canonicalTargetPersonIds = [...new Set(targets.map((person) => person.id))];
+
+  const { row: batch, created } = await insertManagerNotificationBatchIfAbsent({
     idempotencyKey: input.idempotencyKey,
     createdByPersonId: input.manager.id,
     createdByPersonName: input.manager.name,
     audienceKind: input.audienceKind,
-    targetPersonIds: targets.map((person) => person.id),
+    targetPersonIds: canonicalTargetPersonIds,
     title,
     body,
     resolvedRecipientCount: recipientsByUserId.size,
@@ -140,6 +235,17 @@ export async function sendManagerBroadcastNotification(
     inboxOnlyCount: inboxOnly.length,
     unresolvedCount: unresolved.length,
   });
+
+  if (!created) {
+    const isReplay = isSameLogicalBroadcastRequest(batch, {
+      createdByPersonId: input.manager.id,
+      audienceKind: input.audienceKind,
+      targetPersonIds: canonicalTargetPersonIds,
+      title,
+      body,
+    });
+    if (!isReplay) return { ok: false, error: "idempotency_conflict" };
+  }
 
   const scheduledFor = new Date().toISOString();
   await Promise.all(
