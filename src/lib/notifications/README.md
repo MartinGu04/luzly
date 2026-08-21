@@ -54,3 +54,16 @@ on top of this directory's PR #29 delivery primitives. See
 `engine/README.md` for the module layout, and
 `src/app/internal/notifications/tick/route.ts` for the secured entry
 point Supabase Cron calls every 5 minutes in production.
+
+### PR #79 + minute-level precision follow-up -- manager scheduled broadcasts
+
+A manager can schedule a manual broadcast for a future Asia/Jerusalem
+instant instead of sending it immediately. Dispatch precision is owned
+SOLELY by a second, much narrower dedicated worker --
+`src/app/internal/notifications/scheduled/route.ts`, driven by Supabase
+Cron once a MINUTE -- never by the main 5-minute tick above (see
+`engine/README.md`'s own section for why). The manager's open
+communication screen reflects a background dispatch via lightweight
+polling, never Realtime/WebSocket -- see
+`components/manager/ManagerScheduledBroadcastsSection.tsx` and
+`ManagerRecentBroadcastsSection.tsx`.

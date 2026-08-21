@@ -113,4 +113,23 @@ describe("ManagerBroadcastArea -- wiring between the composer and its two list s
     expect(scheduledProps.mock.calls.at(-1)?.[0].reloadToken).toBe(scheduledTokenBefore + 1);
     expect(recentProps.mock.calls.at(-1)?.[0].reloadToken).toBe(recentTokenBefore + 1);
   });
+
+  it("starts with the recent section's polling gated off (no active schedules reported yet)", () => {
+    render(<ManagerBroadcastArea roster={ROSTER} adoptionPeople={ADOPTION} />);
+    expect(recentProps.mock.calls.at(-1)?.[0].pollWhileActive).toBe(false);
+  });
+
+  it("the scheduled section's onActiveChange(true) turns on the recent section's pollWhileActive (spec §7)", () => {
+    render(<ManagerBroadcastArea roster={ROSTER} adoptionPeople={ADOPTION} />);
+
+    act(() => {
+      (scheduledProps.mock.calls.at(-1)?.[0].onActiveChange as (active: boolean) => void)(true);
+    });
+    expect(recentProps.mock.calls.at(-1)?.[0].pollWhileActive).toBe(true);
+
+    act(() => {
+      (scheduledProps.mock.calls.at(-1)?.[0].onActiveChange as (active: boolean) => void)(false);
+    });
+    expect(recentProps.mock.calls.at(-1)?.[0].pollWhileActive).toBe(false);
+  });
 });

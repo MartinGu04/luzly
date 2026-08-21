@@ -18,7 +18,25 @@ interface ManagerScheduledBroadcastsSectionProps {
   /** Fired after a successful send-now/cancel -- the parent also refreshes "נשלחו לאחרונה" on send-now. */
   onChanged: () => void;
   editingId: string | null;
+  /**
+   * Fired after every load (initial, reload-token-triggered, or a
+   * background poll tick) with whether this section currently has any
+   * active (not-yet-dispatched) item. Lets the parent gate
+   * `ManagerRecentBroadcastsSection`'s own polling on "the communication
+   * area has active scheduled broadcasts" (spec §7) without that section
+   * needing its own copy of this list.
+   */
+  onActiveChange?: (active: boolean) => void;
 }
+
+/**
+ * A background worker can dispatch a due schedule at any moment -- without
+ * this, the manager would only ever see the move from "🕒 התראות מתוזמנות"
+ * to "נשלחו לאחרונה" after a manual page refresh (spec §7). ~15-20s per
+ * the spec's own preferred UX; deliberately lightweight polling, never a
+ * Realtime/WebSocket subscription.
+ */
+const POLL_INTERVAL_MS = 17_000;
 
 function audienceLabel(item: ScheduledBroadcastView): string {
   if (item.audienceKind === "everyone") return "כולם";
@@ -57,6 +75,7 @@ export function ManagerScheduledBroadcastsSection({
   onEdit,
   onChanged,
   editingId,
+  onActiveChange,
 }: ManagerScheduledBroadcastsSectionProps) {
   const [items, setItems] = useState<ScheduledBroadcastView[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -64,26 +83,49 @@ export function ManagerScheduledBroadcastsSection({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<{ id: string; message: string } | null>(null);
 
+  // A chained setTimeout (never setInterval) -- the next poll is only ever
+  // scheduled once the CURRENT fetch has fully settled, which is what
+  // makes overlapping polling requests structurally impossible here
+  // (spec §7). Stops re-scheduling itself the moment there are no active
+  // items left, resuming automatically once `reloadToken` bumps for any
+  // other reason (a create/edit/cancel/send-now elsewhere). This never
+  // touches `editingId`/the composer's own state -- a background refresh
+  // can only ever change which items are LISTED here, never what the
+  // manager currently has open for editing.
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+    async function load() {
       try {
         const result = await listActiveScheduledBroadcastsAction();
         if (cancelled) return;
         if (result.ok) {
           setItems(result.items);
           setLoadError(null);
+          onActiveChange?.(result.items.length > 0);
+          if (result.items.length > 0) {
+            timeoutId = setTimeout(load, POLL_INTERVAL_MS);
+          }
         } else {
           setLoadError(result.error);
+          onActiveChange?.(false);
         }
       } catch {
-        if (!cancelled) setLoadError("unknown");
+        if (!cancelled) {
+          setLoadError("unknown");
+          onActiveChange?.(false);
+        }
       }
-    })();
+    }
+
+    load();
+
     return () => {
       cancelled = true;
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
     };
-  }, [reloadToken]);
+  }, [reloadToken, onActiveChange]);
 
   async function handleSendNow(id: string) {
     setBusyId(id);

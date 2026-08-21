@@ -160,3 +160,88 @@ describe("ManagerScheduledBroadcastsSection", () => {
     await waitFor(() => expect(listActiveScheduledBroadcastsAction).toHaveBeenCalledTimes(2));
   });
 });
+
+describe("ManagerScheduledBroadcastsSection -- background polling (spec §7)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("reports active=true and polls again after ~17s while there is at least one active item", async () => {
+    vi.useFakeTimers();
+    listActiveScheduledBroadcastsAction.mockResolvedValue({ ok: true, items: [item()] });
+    const onActiveChange = vi.fn();
+    render(
+      <ManagerScheduledBroadcastsSection
+        reloadToken={0}
+        editingId={null}
+        onEdit={vi.fn()}
+        onChanged={vi.fn()}
+        onActiveChange={onActiveChange}
+      />,
+    );
+
+    await vi.waitFor(() => expect(listActiveScheduledBroadcastsAction).toHaveBeenCalledTimes(1));
+    expect(onActiveChange).toHaveBeenLastCalledWith(true);
+
+    // Never polls again before the interval elapses -- no overlapping requests.
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(listActiveScheduledBroadcastsAction).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(8_000);
+    expect(listActiveScheduledBroadcastsAction).toHaveBeenCalledTimes(2);
+  });
+
+  it("stops polling (and reports active=false) once the list becomes empty", async () => {
+    vi.useFakeTimers();
+    listActiveScheduledBroadcastsAction.mockResolvedValueOnce({ ok: true, items: [item()] });
+    listActiveScheduledBroadcastsAction.mockResolvedValue({ ok: true, items: [] });
+    const onActiveChange = vi.fn();
+    render(
+      <ManagerScheduledBroadcastsSection
+        reloadToken={0}
+        editingId={null}
+        onEdit={vi.fn()}
+        onChanged={vi.fn()}
+        onActiveChange={onActiveChange}
+      />,
+    );
+
+    await vi.waitFor(() => expect(listActiveScheduledBroadcastsAction).toHaveBeenCalledTimes(1));
+    await vi.advanceTimersByTimeAsync(17_000);
+    await vi.waitFor(() => expect(listActiveScheduledBroadcastsAction).toHaveBeenCalledTimes(2));
+    expect(onActiveChange).toHaveBeenLastCalledWith(false);
+
+    // No further polling once empty -- advancing well past another interval calls nothing more.
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(listActiveScheduledBroadcastsAction).toHaveBeenCalledTimes(2);
+  });
+
+  it("clears the pending poll timer on unmount -- no leaked timer keeps firing after the manager navigates away", async () => {
+    vi.useFakeTimers();
+    listActiveScheduledBroadcastsAction.mockResolvedValue({ ok: true, items: [item()] });
+    const { unmount } = render(
+      <ManagerScheduledBroadcastsSection reloadToken={0} editingId={null} onEdit={vi.fn()} onChanged={vi.fn()} />,
+    );
+
+    await vi.waitFor(() => expect(listActiveScheduledBroadcastsAction).toHaveBeenCalledTimes(1));
+    unmount();
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(listActiveScheduledBroadcastsAction).toHaveBeenCalledTimes(1);
+  });
+
+  it("a poll tick never disrupts the item currently being edited -- editingId/composer state is untouched by a background refresh", async () => {
+    vi.useFakeTimers();
+    listActiveScheduledBroadcastsAction.mockResolvedValue({ ok: true, items: [item({ id: "sb_1" })] });
+    render(
+      <ManagerScheduledBroadcastsSection reloadToken={0} editingId="sb_1" onEdit={vi.fn()} onChanged={vi.fn()} />,
+    );
+
+    await vi.waitFor(() => expect(screen.getByText("✏️ בעריכה כעת")).toBeInTheDocument());
+    await vi.advanceTimersByTimeAsync(17_000);
+    await vi.waitFor(() => expect(listActiveScheduledBroadcastsAction).toHaveBeenCalledTimes(2));
+
+    // Still shows the same editing indicator -- the poll re-fetched the list but never reset editingId itself (that's parent-owned).
+    expect(screen.getByText("✏️ בעריכה כעת")).toBeInTheDocument();
+  });
+});

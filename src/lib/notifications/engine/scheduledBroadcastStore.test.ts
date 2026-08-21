@@ -391,3 +391,32 @@ describe("claimDueManagerScheduledBroadcasts / claimManagerScheduledBroadcastNow
     });
   });
 });
+
+describe("peekAnyManagerScheduledBroadcastWorkDue -- the dedicated worker's cheap pre-check", () => {
+  it("calls peek_due_manager_scheduled_broadcasts and returns its count, never claiming/mutating", async () => {
+    const { client } = makeFakeSupabase();
+    (client.rpc as ReturnType<typeof vi.fn>).mockResolvedValue({ data: 3, error: null });
+    const { peekAnyManagerScheduledBroadcastWorkDue } = await loadModule(client);
+
+    const count = await peekAnyManagerScheduledBroadcastWorkDue();
+
+    expect(client.rpc).toHaveBeenCalledWith("peek_due_manager_scheduled_broadcasts");
+    expect(count).toBe(3);
+  });
+
+  it("returns 0 when the RPC reports nothing due/recoverable", async () => {
+    const { client } = makeFakeSupabase();
+    (client.rpc as ReturnType<typeof vi.fn>).mockResolvedValue({ data: 0, error: null });
+    const { peekAnyManagerScheduledBroadcastWorkDue } = await loadModule(client);
+
+    expect(await peekAnyManagerScheduledBroadcastWorkDue()).toBe(0);
+  });
+
+  it("throws when the RPC errors, rather than silently reporting no work", async () => {
+    const { client } = makeFakeSupabase();
+    (client.rpc as ReturnType<typeof vi.fn>).mockResolvedValue({ data: null, error: { message: "boom" } });
+    const { peekAnyManagerScheduledBroadcastWorkDue } = await loadModule(client);
+
+    await expect(peekAnyManagerScheduledBroadcastWorkDue()).rejects.toBeTruthy();
+  });
+});

@@ -100,8 +100,15 @@ describe("notification worker + calendar feed service-role boundary guard", () =
       return results;
     }
 
-    const workerRouteFile = path.join(srcRoot, "app", "internal", "notifications", "tick", "route.ts");
-    const otherRouteFiles = findRouteFiles(path.resolve(__dirname)).filter((file) => file !== workerRouteFile);
+    const workerRouteFiles = new Set([
+      path.join(srcRoot, "app", "internal", "notifications", "tick", "route.ts"),
+      // The minute-level-precision follow-up's dedicated scheduled-broadcast
+      // worker -- reuses the EXACT SAME NOTIFICATION_WORKER_SECRET/worker-auth
+      // trust boundary as the route above, never a second one, so it belongs
+      // in this same allow-list rather than being treated as a public route.
+      path.join(srcRoot, "app", "internal", "notifications", "scheduled", "route.ts"),
+    ]);
+    const otherRouteFiles = findRouteFiles(path.resolve(__dirname)).filter((file) => !workerRouteFiles.has(file));
     expect(otherRouteFiles.length).toBeGreaterThan(0);
 
     const FORBIDDEN_PATTERNS = [

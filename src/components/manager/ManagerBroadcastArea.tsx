@@ -24,6 +24,7 @@ export function ManagerBroadcastArea({ roster, adoptionPeople }: ManagerBroadcas
   const [editingItem, setEditingItem] = useState<ScheduledBroadcastView | null>(null);
   const [scheduledReloadToken, setScheduledReloadToken] = useState(0);
   const [recentReloadToken, setRecentReloadToken] = useState(0);
+  const [hasActiveScheduledBroadcasts, setHasActiveScheduledBroadcasts] = useState(false);
 
   function refreshBoth() {
     setScheduledReloadToken((token) => token + 1);
@@ -45,8 +46,9 @@ export function ManagerBroadcastArea({ roster, adoptionPeople }: ManagerBroadcas
         editingId={editingItem?.id ?? null}
         onEdit={setEditingItem}
         onChanged={refreshBoth}
+        onActiveChange={setHasActiveScheduledBroadcasts}
       />
-      <ManagerRecentBroadcastsSection reloadToken={recentReloadToken} />
+      <ManagerRecentBroadcastsSection reloadToken={recentReloadToken} pollWhileActive={hasActiveScheduledBroadcasts} />
     </div>
   );
 }

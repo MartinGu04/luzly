@@ -5,9 +5,8 @@ import { fetchFreshWorkbookRead } from "./freshRead";
 import { resolveNotificationRecipients } from "./recipients";
 import { runChangeDetection } from "./changeDetection";
 import { runReminders } from "./reminders";
-import { runDueScheduledBroadcastDispatch } from "./scheduledBroadcast";
 import { runDelivery, type DeliverySummary } from "./delivery";
-import { peekDueJobsCount, peekDueManagerScheduledBroadcastsCount } from "./store";
+import { peekDueJobsCount } from "./store";
 import { runStage } from "./workerErrors";
 
 export type WorkerMode = "dry_run" | "send";
@@ -21,9 +20,6 @@ export interface WorkerTickSummary {
   pendingChanges: number;
   jobsCreated: number;
   jobsDue: number;
-  scheduledBroadcastsDue: number;
-  scheduledBroadcastsDispatched: number;
-  scheduledBroadcastsFailed: number;
   recipientCount: number;
   recipientsUnmapped: number;
   recipientsAmbiguous: number;
@@ -84,26 +80,6 @@ export async function runNotificationWorkerTick(mode: WorkerMode): Promise<Worke
     }),
   );
 
-  let scheduledBroadcastsDue: number;
-  let scheduledBroadcastsDispatched = 0;
-  let scheduledBroadcastsFailed = 0;
-  if (persist) {
-    // Runs BEFORE delivery so a scheduled broadcast's freshly-created
-    // `notification_jobs` rows (category `manager_broadcast`, `scheduled_for:
-    // now()`) are eligible for `runDelivery()`'s own claim in THIS same
-    // tick, rather than waiting a further cadence period.
-    const scheduledResult = await runStage("scheduled_broadcasts", () =>
-      runDueScheduledBroadcastDispatch(people),
-    );
-    scheduledBroadcastsDue = scheduledResult.claimed;
-    scheduledBroadcastsDispatched = scheduledResult.dispatched;
-    scheduledBroadcastsFailed = scheduledResult.failed;
-  } else {
-    scheduledBroadcastsDue = await runStage("scheduled_broadcasts_due_lookup", () =>
-      peekDueManagerScheduledBroadcastsCount(),
-    );
-  }
-
   let deliverySummary: DeliverySummary | null = null;
   let jobsDue: number;
   if (persist) {
@@ -134,9 +110,6 @@ export async function runNotificationWorkerTick(mode: WorkerMode): Promise<Worke
       remindersSummary.almashCheckInJobs +
       remindersSummary.constraintsJobs,
     jobsDue,
-    scheduledBroadcastsDue,
-    scheduledBroadcastsDispatched,
-    scheduledBroadcastsFailed,
     recipientCount: recipientResolution.resolved.size,
     recipientsUnmapped: recipientResolution.unmappedCount,
     recipientsAmbiguous: recipientResolution.ambiguousEmailCount,
@@ -158,8 +131,7 @@ function logWorkerTick(summary: WorkerTickSummary, delivery: DeliverySummary | n
   console.log(
     `[notifications] tick complete mode=${summary.mode} week=${summary.currentWeek} baseline=${summary.baselineAction} ` +
       `changes=${summary.semanticChangesDetected} pending=${summary.pendingChanges} jobsCreated=${summary.jobsCreated} ` +
-      `jobsDue=${summary.jobsDue} scheduledBroadcastsDue=${summary.scheduledBroadcastsDue} ` +
-      `scheduledBroadcastsDispatched=${summary.scheduledBroadcastsDispatched} scheduledBroadcastsFailed=${summary.scheduledBroadcastsFailed} ` +
+      `jobsDue=${summary.jobsDue} ` +
       `recipients=${summary.recipientCount} unmapped=${summary.recipientsUnmapped} ` +
       `ambiguous=${summary.recipientsAmbiguous} noEmail=${summary.recipientsNoEmail} duration=${summary.durationMs}ms`,
   );
