@@ -40,13 +40,20 @@ const CLEARED_BEFORE_STORAGE_KEY = "mi-ma-mo:manager-recent-broadcasts:cleared-b
  * parse as a date): all of these return `null`, which means "no cutoff,
  * show normal history" -- never a thrown error, never an accidental
  * over-hide from garbage input.
+ *
+ * Re-canonicalizes a valid stored value through `Date.parse` ->
+ * `new Date(ms).toISOString()` before returning it, so downstream
+ * comparisons never need to re-derive this -- see this file's own
+ * "chronological, not lexicographic" note above `parseCreatedAtMs`.
  */
 function readClearedBeforeIso(): string | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = window.localStorage.getItem(CLEARED_BEFORE_STORAGE_KEY);
-    if (typeof raw !== "string" || raw.trim() === "" || Number.isNaN(Date.parse(raw))) return null;
-    return raw;
+    if (typeof raw !== "string" || raw.trim() === "") return null;
+    const parsedMs = Date.parse(raw);
+    if (Number.isNaN(parsedMs)) return null;
+    return new Date(parsedMs).toISOString();
   } catch {
     return null;
   }
@@ -59,6 +66,25 @@ function writeClearedBeforeIso(iso: string): void {
   } catch {
     // Intentionally ignored -- see docstring above.
   }
+}
+
+/**
+ * CHRONOLOGICAL, not lexicographic. `createdAt` (both from the server and
+ * from a stored cutoff) is a valid ISO-8601 timestamp, but two valid ISO
+ * timestamps can use different textual representations for the SAME or a
+ * differently-ordered instant -- e.g. "2026-08-21T10:00:00+03:00" (07:00Z)
+ * sorts AFTER "2026-08-21T08:00:00.000Z" (08:00Z) as plain strings despite
+ * being chronologically EARLIER. Every cutoff comparison in this file goes
+ * through this parser (epoch milliseconds) rather than `>`/`<` on the raw
+ * strings, specifically to avoid that class of bug. Returns `null` for
+ * anything that doesn't parse -- callers fail OPEN on that (never hide a
+ * row merely because ITS OWN timestamp happens to be malformed; only a
+ * malformed STORED CUTOFF fails closed to "no cutoff" -- see
+ * `readClearedBeforeIso`).
+ */
+function parseCreatedAtMs(iso: string): number | null {
+  const ms = Date.parse(iso);
+  return Number.isNaN(ms) ? null : ms;
 }
 
 function audienceLabel(item: RecentManagerBroadcastView): string {
@@ -173,15 +199,18 @@ export function ManagerRecentBroadcastsSection({ reloadToken, pollWhileActive }:
     if (!items || items.length === 0) return;
     // The newest createdAt among what's CURRENTLY LOADED (never the
     // client's own clock -- clock drift must not accidentally hide a
-    // genuinely future/just-created broadcast). The store already orders
-    // newest-first, but this reduces defensively rather than assuming
-    // that ordering.
-    const newestCreatedAt = items.reduce(
-      (max, item) => (item.createdAt > max ? item.createdAt : max),
-      items[0].createdAt,
-    );
-    writeClearedBeforeIso(newestCreatedAt);
-    setClearedBeforeIso(newestCreatedAt);
+    // genuinely future/just-created broadcast), compared CHRONOLOGICALLY
+    // (see `parseCreatedAtMs`'s own docstring) -- never assumes the
+    // store's own newest-first ordering, and never assumes every
+    // timestamp shares one textual representation.
+    const maxMs = items.reduce((max, item) => {
+      const ms = parseCreatedAtMs(item.createdAt);
+      return ms !== null && ms > max ? ms : max;
+    }, Number.NEGATIVE_INFINITY);
+    if (!Number.isFinite(maxMs)) return; // every loaded item had an unparseable createdAt -- nothing sane to cut off, fail safe by doing nothing
+    const cutoffIso = new Date(maxMs).toISOString();
+    writeClearedBeforeIso(cutoffIso);
+    setClearedBeforeIso(cutoffIso);
   }
 
   // A transient background-poll failure must never hide already-loaded
@@ -194,8 +223,18 @@ export function ManagerRecentBroadcastsSection({ reloadToken, pollWhileActive }:
 
   // Hide anything at or before the cutoff (spec: `createdAt <= cutoff` is
   // hidden) -- purely a client-side view filter over the same bounded
-  // server list, never a second fetch/page.
-  const visibleItems = clearedBeforeIso === null ? items : items.filter((item) => item.createdAt > clearedBeforeIso);
+  // server list, never a second fetch/page. Compared CHRONOLOGICALLY, not
+  // as strings (see `parseCreatedAtMs`) -- an item whose OWN `createdAt`
+  // fails to parse fails OPEN (stays visible) rather than being silently
+  // hidden by a bad comparison.
+  const cutoffMs = clearedBeforeIso === null ? null : parseCreatedAtMs(clearedBeforeIso);
+  const visibleItems =
+    cutoffMs === null
+      ? items
+      : items.filter((item) => {
+          const itemMs = parseCreatedAtMs(item.createdAt);
+          return itemMs === null || itemMs > cutoffMs;
+        });
 
   if (visibleItems.length === 0) return null;
 

@@ -428,3 +428,85 @@ describe("ManagerRecentBroadcastsSection -- 'נקה מהתצוגה' (visual-only
     vi.useRealTimers();
   });
 });
+
+describe("ManagerRecentBroadcastsSection -- cutoff comparisons are CHRONOLOGICAL, not lexicographic", () => {
+  // "+03:00" (07:00Z) sorts AFTER ".000Z" (08:00Z) as plain strings despite
+  // being chronologically EARLIER -- these two fixtures exist specifically
+  // to catch a regression back to string comparison.
+  const EARLIER_BUT_STRING_GREATER = "2026-08-21T10:00:00+03:00"; // = 07:00:00Z
+  const LATER_BUT_STRING_SMALLER = "2026-08-21T08:00:00.000Z"; // = 08:00:00Z
+
+  it("1. the clear cutoff is chosen by actual chronological time -- the numerically-later item wins even though its ISO string sorts smaller", async () => {
+    const items = [
+      { ...RECENT_ITEM, id: "batch_a", title: "מוקדם במחרוזת", createdAt: EARLIER_BUT_STRING_GREATER },
+      { ...RECENT_ITEM, id: "batch_b", title: "מאוחר במחרוזת", createdAt: LATER_BUT_STRING_SMALLER },
+    ];
+    getRecentManagerBroadcastsAction.mockResolvedValue({ ok: true, items });
+    render(<ManagerRecentBroadcastsSection reloadToken={0} pollWhileActive={false} />);
+
+    await waitFor(() => expect(screen.getByText("מוקדם במחרוזת")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("נקה מהתצוגה"));
+
+    // Both items are at-or-before the TRUE (chronological) cutoff, so both disappear.
+    expect(screen.queryByText("נשלחו לאחרונה")).toBeNull();
+
+    const stored = window.localStorage.getItem(CLEARED_BEFORE_STORAGE_KEY);
+    expect(stored).not.toBeNull();
+    // The stored cutoff must equal the chronologically later instant (08:00Z), not the
+    // lexicographically-larger string (which would incorrectly be the 07:00Z one).
+    expect(new Date(stored!).getTime()).toBe(new Date(LATER_BUT_STRING_SMALLER).getTime());
+  });
+
+  it("2. after clearing, an item chronologically NEWER than the cutoff appears even though its ISO string would sort smaller", async () => {
+    // Cutoff = the 08:00Z instant, written in its ".000Z" form.
+    window.localStorage.setItem(CLEARED_BEFORE_STORAGE_KEY, LATER_BUT_STRING_SMALLER);
+    // A genuinely later broadcast (09:00Z) but expressed with a "+00:30" offset
+    // whose raw string ("...T09:30:00+00:30") still sorts BEFORE ".000Z" lexicographically.
+    const trulyNewerButStringSmaller = "2026-08-21T09:30:00+00:30"; // = 09:00:00Z, after the 08:00Z cutoff
+    const newTitle = "שידור אמיתי חדש";
+    getRecentManagerBroadcastsAction.mockResolvedValue({
+      ok: true,
+      items: [{ ...RECENT_ITEM, id: "batch_new", title: newTitle, createdAt: trulyNewerButStringSmaller }],
+    });
+
+    render(<ManagerRecentBroadcastsSection reloadToken={0} pollWhileActive={false} />);
+
+    await waitFor(() => expect(screen.getByText(newTitle)).toBeInTheDocument());
+  });
+
+  it("3. an item chronologically OLDER than (or exactly AT) the cutoff stays hidden, regardless of string ordering", async () => {
+    window.localStorage.setItem(CLEARED_BEFORE_STORAGE_KEY, LATER_BUT_STRING_SMALLER); // cutoff = 08:00Z
+    getRecentManagerBroadcastsAction.mockResolvedValue({
+      ok: true,
+      // Exactly AT the cutoff instant, textually different ("+03:00" form) -- still hidden (<=).
+      items: [{ ...RECENT_ITEM, id: "batch_same", title: "בדיוק בגבול", createdAt: "2026-08-21T11:00:00+03:00" }],
+    });
+
+    render(<ManagerRecentBroadcastsSection reloadToken={0} pollWhileActive={false} />);
+
+    await waitFor(() => expect(getRecentManagerBroadcastsAction).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText("בדיוק בגבול")).toBeNull();
+    expect(screen.queryByText("נשלחו לאחרונה")).toBeNull();
+  });
+
+  it("4. the existing malformed-localStorage fail-safe behavior is unchanged by the chronological rewrite", async () => {
+    window.localStorage.setItem(CLEARED_BEFORE_STORAGE_KEY, "not-a-real-date");
+    getRecentManagerBroadcastsAction.mockResolvedValue({ ok: true, items: makeItems(3) });
+    render(<ManagerRecentBroadcastsSection reloadToken={0} pollWhileActive={false} />);
+
+    await waitFor(() => expect(screen.getByText("שידור 3")).toBeInTheDocument());
+    expect(screen.getByText("שידור 1")).toBeInTheDocument();
+  });
+
+  it("an item with its OWN malformed createdAt fails OPEN (stays visible) rather than being silently hidden", async () => {
+    window.localStorage.setItem(CLEARED_BEFORE_STORAGE_KEY, LATER_BUT_STRING_SMALLER);
+    getRecentManagerBroadcastsAction.mockResolvedValue({
+      ok: true,
+      items: [{ ...RECENT_ITEM, id: "batch_bad", title: "תאריך שבור", createdAt: "not-a-real-date" }],
+    });
+
+    render(<ManagerRecentBroadcastsSection reloadToken={0} pollWhileActive={false} />);
+
+    await waitFor(() => expect(screen.getByText("תאריך שבור")).toBeInTheDocument());
+  });
+});
