@@ -39,7 +39,14 @@ beforeEach(() => {
   loadManagerWorkbookContext.mockReset().mockResolvedValue(okContext());
   sendManagerBroadcastNotification.mockReset().mockResolvedValue({
     ok: true,
-    result: { batchId: "batch_1", resolvedRecipientCount: 1, pushCapableCount: 1, inboxOnlyCount: 0, unresolved: [] },
+    result: {
+      batchId: "batch_1",
+      resolvedRecipientCount: 1,
+      pushCapableCount: 1,
+      inboxOnlyCount: 0,
+      unresolvedCount: 0,
+      unresolved: [],
+    },
   });
   listRecentManagerNotificationBatches.mockReset().mockResolvedValue([]);
 });
@@ -110,6 +117,7 @@ describe("sendManagerBroadcastAction -- happy path", () => {
       resolvedRecipientCount: 1,
       pushCapableCount: 1,
       inboxOnlyCount: 0,
+      unresolvedCount: 0,
       unresolved: [],
     });
   });

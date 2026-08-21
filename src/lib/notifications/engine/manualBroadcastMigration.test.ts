@@ -45,4 +45,8 @@ describe("manager_notification_batches migration -- security shape (text-level o
     expect(sql).not.toMatch(/^\s*recipient_\w+\s/im);
     expect(sql).not.toMatch(/^\s*\w*email\w*\s+text/im);
   });
+
+  it("persists the batch's ORIGINAL resolved auth recipient user ids as its own immutability anchor for idempotent replay", () => {
+    expect(sql).toMatch(/resolved_recipient_user_ids uuid\[\] not null default '\{\}'/i);
+  });
 });

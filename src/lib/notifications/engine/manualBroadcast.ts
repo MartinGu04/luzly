@@ -27,6 +27,16 @@ export interface SendManagerBroadcastResult {
   resolvedRecipientCount: number;
   pushCapableCount: number;
   inboxOnlyCount: number;
+  unresolvedCount: number;
+  /**
+   * The per-person unresolved breakdown -- populated ONLY when this call
+   * genuinely created the batch (freshly computed, describing exactly
+   * what just happened). On a replay of an existing batch this is always
+   * `[]`: the detailed breakdown was never persisted (only the count
+   * was), so a replay can never truthfully reconstruct it -- `unresolvedCount`
+   * above is still accurate either way (sourced from the STORED batch),
+   * this array simply has less detail on a replay than on a fresh send.
+   */
   unresolved: BroadcastUnresolvedPerson[];
 }
 
@@ -158,16 +168,27 @@ export function isSameLogicalBroadcastRequest(
  * view and the worker's own recipient targeting already share) -- never
  * trusts a client-supplied auth user id, email, or readiness status.
  *
- * Idempotency is a TWO-part guarantee, not just "insert with a unique
- * key": `idempotency_key` alone would let a reused key silently ADD
- * recipients or change content on a later request while reusing the
- * first request's batch id. So once an existing batch is found for the
- * key, this ALWAYS compares it (`isSameLogicalBroadcastRequest`) against
- * the CURRENT request before creating a single job: a genuine replay
- * (identical manager/audience/targets/title/body) safely continues,
- * relying on `notification_jobs.dedupe_key` to make any missing-job
- * creation idempotent too; anything else fails closed as
- * `idempotency_conflict`, creating ZERO new jobs.
+ * Idempotency is a THREE-part guarantee, not just "insert with a unique
+ * key":
+ * 1. `idempotency_key` alone would let a reused key silently ADD
+ *    recipients or change content on a later request while reusing the
+ *    first request's batch id -- so once an existing batch is found, this
+ *    ALWAYS compares it (`isSameLogicalBroadcastRequest`) against the
+ *    CURRENT request's manager/audience/targets/title/body before
+ *    creating a single job. Any mismatch fails closed as
+ *    `idempotency_conflict`, creating ZERO new jobs.
+ * 2. Even a genuine replay (identical logical request) must never
+ *    re-resolve recipients from the CURRENT roster/auth state: a roster
+ *    that grew, or a person whose email/auth mapping newly resolved,
+ *    between the original send and a retried/duplicate submission could
+ *    otherwise silently add a recipient under the OLD batch id. So a
+ *    replay reuses the batch's own STORED `resolvedRecipientUserIds`
+ *    (frozen at creation) for job creation, never a fresh resolution --
+ *    the batch's logical recipient set is immutable once created.
+ * 3. Within that frozen recipient set, `notification_jobs.dedupe_key`
+ *    still makes any MISSING job creation safely retryable (e.g. the
+ *    original attempt crashed after creating only some jobs) without
+ *    ever duplicating a job that already exists.
  */
 export async function sendManagerBroadcastNotification(
   input: SendManagerBroadcastInput,
@@ -216,9 +237,10 @@ export async function sendManagerBroadcastNotification(
 
   // Two roster people can structurally share one email/auth account -- a
   // real notification job is created once per DISTINCT userId, never once
-  // per roster row, so a shared account is never double-jobbed.
-  const recipientsByUserId = new Map<string, { userId: string }>();
-  for (const recipient of [...pushCapable, ...inboxOnly]) recipientsByUserId.set(recipient.userId, recipient);
+  // per roster row, so a shared account is never double-jobbed. This is
+  // the FRESHLY resolved set -- used to create the batch when it's
+  // genuinely new, but NEVER used for job creation on a replay (see below).
+  const freshRecipientUserIds = [...new Set([...pushCapable, ...inboxOnly].map((recipient) => recipient.userId))].sort();
 
   const canonicalTargetPersonIds = [...new Set(targets.map((person) => person.id))];
 
@@ -228,13 +250,20 @@ export async function sendManagerBroadcastNotification(
     createdByPersonName: input.manager.name,
     audienceKind: input.audienceKind,
     targetPersonIds: canonicalTargetPersonIds,
+    resolvedRecipientUserIds: freshRecipientUserIds,
     title,
     body,
-    resolvedRecipientCount: recipientsByUserId.size,
+    resolvedRecipientCount: freshRecipientUserIds.length,
     pushCapableCount: pushCapable.length,
     inboxOnlyCount: inboxOnly.length,
     unresolvedCount: unresolved.length,
   });
+
+  // On a genuinely NEW batch, the freshly-resolved set above IS what was
+  // just persisted. On a REUSED key, the batch's recipient set is frozen
+  // -- job creation must use ONLY the STORED ids, never this call's own
+  // (possibly different) fresh resolution.
+  let jobRecipientUserIds = freshRecipientUserIds;
 
   if (!created) {
     const isReplay = isSameLogicalBroadcastRequest(batch, {
@@ -245,18 +274,19 @@ export async function sendManagerBroadcastNotification(
       body,
     });
     if (!isReplay) return { ok: false, error: "idempotency_conflict" };
+    jobRecipientUserIds = batch.resolvedRecipientUserIds;
   }
 
   const scheduledFor = new Date().toISOString();
   await Promise.all(
-    [...recipientsByUserId.values()].map((recipient) =>
+    jobRecipientUserIds.map((recipientUserId) =>
       insertNotificationJobIfAbsent({
         category: MANAGER_BROADCAST_CATEGORY,
-        recipientUserId: recipient.userId,
+        recipientUserId,
         title,
         body,
         path: "/",
-        dedupeKey: `manual:${batch.id}:${recipient.userId}`,
+        dedupeKey: `manual:${batch.id}:${recipientUserId}`,
         scheduledFor,
         sourceRef: `manual:${batch.id}`,
       }),
@@ -270,7 +300,10 @@ export async function sendManagerBroadcastNotification(
       resolvedRecipientCount: batch.resolvedRecipientCount,
       pushCapableCount: batch.pushCapableCount,
       inboxOnlyCount: batch.inboxOnlyCount,
-      unresolved,
+      unresolvedCount: batch.unresolvedCount,
+      // Only meaningful right after a genuine creation -- see this
+      // field's own doc comment on `SendManagerBroadcastResult`.
+      unresolved: created ? unresolved : [],
     },
   };
 }

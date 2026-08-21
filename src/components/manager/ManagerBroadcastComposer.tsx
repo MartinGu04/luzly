@@ -314,7 +314,7 @@ export function ManagerBroadcastComposer({ roster, adoptionPeople }: ManagerBroa
               <ul className="mt-1 space-y-0.5 text-xs">
                 <li>{result.pushCapableCount} מיועדים גם ל-Push</li>
                 <li>{result.inboxOnlyCount} יקבלו במרכז ההתראות בלבד</li>
-                {result.unresolved.length > 0 ? <li>{result.unresolved.length} מהבחירה לא ניתנים לשליחה</li> : null}
+                {result.unresolvedCount > 0 ? <li>{result.unresolvedCount} מהבחירה לא ניתנים לשליחה</li> : null}
               </ul>
             </div>
           ) : (

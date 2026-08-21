@@ -28,6 +28,7 @@ export type SendManagerBroadcastActionResult =
       resolvedRecipientCount: number;
       pushCapableCount: number;
       inboxOnlyCount: number;
+      unresolvedCount: number;
       unresolved: BroadcastUnresolvedPerson[];
     }
   | { ok: false; error: string };
@@ -95,6 +96,7 @@ export async function sendManagerBroadcastAction(
     resolvedRecipientCount: outcome.result.resolvedRecipientCount,
     pushCapableCount: outcome.result.pushCapableCount,
     inboxOnlyCount: outcome.result.inboxOnlyCount,
+    unresolvedCount: outcome.result.unresolvedCount,
     unresolved: outcome.result.unresolved,
   };
 }

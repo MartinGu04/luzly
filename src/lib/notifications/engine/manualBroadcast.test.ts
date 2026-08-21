@@ -614,4 +614,213 @@ describe("sendManagerBroadcastNotification -- idempotency", () => {
     expect(second.result.batchId).toBe(first.result.batchId);
     expect(jobsByDedupeKey.size).toBe(2);
   });
+
+  it("an 'everyone' replay after the roster grows does NOT add a job for the new person -- the batch's resolved recipient set is frozen at creation", async () => {
+    const dana = person({ id: "p_dana", name: "דנה", email: "dana@example.invalid" });
+    const noa = person({ id: "p_noa", name: "נועה", email: "noa@example.invalid" });
+    const itay = person({ id: "p_itay", name: "איתי", email: "itay@example.invalid" });
+    const { client, jobsByDedupeKey } = makeFakeSupabase(
+      [
+        { id: "user-dana", email: "dana@example.invalid" },
+        { id: "user-noa", email: "noa@example.invalid" },
+        { id: "user-itay", email: "itay@example.invalid" },
+      ],
+      ["user-dana", "user-noa", "user-itay"],
+    );
+    const { sendManagerBroadcastNotification } = await loadModule(client);
+
+    const first = await sendManagerBroadcastNotification({
+      manager: MANAGER,
+      people: [MANAGER, dana, noa],
+      audienceKind: "everyone",
+      targetPersonIds: [],
+      title: "כותרת",
+      body: "תוכן",
+      idempotencyKey: "idem-roster-growth",
+    });
+    expect(first.ok).toBe(true);
+    expect(jobsByDedupeKey.size).toBe(2);
+
+    const second = await sendManagerBroadcastNotification({
+      manager: MANAGER,
+      people: [MANAGER, dana, noa, itay], // the roster grew between the original send and this replay.
+      audienceKind: "everyone",
+      targetPersonIds: [],
+      title: "כותרת",
+      body: "תוכן",
+      idempotencyKey: "idem-roster-growth", // SAME key -- a replay, not a new send.
+    });
+
+    expect(second.ok).toBe(true);
+    if (!first.ok || !second.ok) return;
+    expect(second.result.batchId).toBe(first.result.batchId);
+    // itay must NEVER get a job under this old batch -- the resolved recipient set is frozen.
+    expect(jobsByDedupeKey.size).toBe(2);
+    const recipientIds = [...jobsByDedupeKey.values()].map((job) => job.recipient_user_id).sort();
+    expect(recipientIds).toEqual(["user-dana", "user-noa"]);
+  });
+
+  it("a selected person unresolved at first send who later becomes mapped does NOT get a job on replay -- becoming resolvable never expands a frozen batch", async () => {
+    const quinn = person({ id: "p_quinn", name: "קווין" }); // no email at first send.
+    const users: FakeUser[] = [];
+    const { client, jobsByDedupeKey } = makeFakeSupabase(users, []);
+    const { sendManagerBroadcastNotification } = await loadModule(client);
+
+    const first = await sendManagerBroadcastNotification({
+      manager: MANAGER,
+      people: [MANAGER, quinn],
+      audienceKind: "person",
+      targetPersonIds: ["p_quinn"],
+      title: "כותרת",
+      body: "תוכן",
+      idempotencyKey: "idem-becomes-mapped",
+    });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.result.resolvedRecipientCount).toBe(0);
+    expect(jobsByDedupeKey.size).toBe(0);
+
+    // quinn now has an email AND a mapped auth account -- simulating them becoming resolvable later.
+    const quinnMapped = person({ id: "p_quinn", name: "קווין", email: "quinn@example.invalid" });
+    users.push({ id: "user-quinn", email: "quinn@example.invalid" });
+
+    const second = await sendManagerBroadcastNotification({
+      manager: MANAGER,
+      people: [MANAGER, quinnMapped],
+      audienceKind: "person",
+      targetPersonIds: ["p_quinn"],
+      title: "כותרת",
+      body: "תוכן",
+      idempotencyKey: "idem-becomes-mapped", // SAME key -- a replay.
+    });
+
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.result.batchId).toBe(first.result.batchId);
+    // quinn must never get a job under the old batch, even though they're now resolvable.
+    expect(jobsByDedupeKey.size).toBe(0);
+  });
+
+  it("a mapped recipient whose auth mapping changes before replay is never redirected -- the OLD batch stays pointed at the ORIGINAL resolved user id", async () => {
+    const sam = person({ id: "p_sam", name: "סם", email: "sam@example.invalid" });
+    const users: FakeUser[] = [{ id: "user-sam-old", email: "sam@example.invalid" }];
+    const { client, jobsByDedupeKey } = makeFakeSupabase(users, ["user-sam-old"]);
+    const { sendManagerBroadcastNotification } = await loadModule(client);
+
+    const first = await sendManagerBroadcastNotification({
+      manager: MANAGER,
+      people: [MANAGER, sam],
+      audienceKind: "person",
+      targetPersonIds: ["p_sam"],
+      title: "כותרת",
+      body: "תוכן",
+      idempotencyKey: "idem-remapped",
+    });
+    expect(first.ok).toBe(true);
+    expect(jobsByDedupeKey.size).toBe(1);
+    expect([...jobsByDedupeKey.values()][0].recipient_user_id).toBe("user-sam-old");
+
+    // sam's email now resolves to a DIFFERENT auth account (e.g. the account was recreated).
+    users[0] = { id: "user-sam-new", email: "sam@example.invalid" };
+
+    const second = await sendManagerBroadcastNotification({
+      manager: MANAGER,
+      people: [MANAGER, sam],
+      audienceKind: "person",
+      targetPersonIds: ["p_sam"],
+      title: "כותרת",
+      body: "תוכן",
+      idempotencyKey: "idem-remapped", // SAME key -- a replay.
+    });
+
+    expect(second.ok).toBe(true);
+    if (!first.ok || !second.ok) return;
+    expect(second.result.batchId).toBe(first.result.batchId);
+    // Still exactly the ORIGINAL job -- never redirected to the newly-mapped auth user.
+    expect(jobsByDedupeKey.size).toBe(1);
+    expect([...jobsByDedupeKey.values()][0].recipient_user_id).toBe("user-sam-old");
+  });
+
+  it("a genuine replay after PARTIAL job creation still creates the missing ORIGINAL recipient's job, without duplicating the one that already succeeded", async () => {
+    const dana = person({ id: "p_dana", name: "דנה", email: "dana@example.invalid" });
+    const noa = person({ id: "p_noa", name: "נועה", email: "noa@example.invalid" });
+    const { client, jobsByDedupeKey } = makeFakeSupabase(
+      [
+        { id: "user-dana", email: "dana@example.invalid" },
+        { id: "user-noa", email: "noa@example.invalid" },
+      ],
+      ["user-dana", "user-noa"],
+    );
+    const { sendManagerBroadcastNotification } = await loadModule(client);
+
+    const input = {
+      manager: MANAGER,
+      people: [MANAGER, dana, noa],
+      audienceKind: "people" as const,
+      targetPersonIds: ["p_dana", "p_noa"],
+      title: "כותרת",
+      body: "תוכן",
+      idempotencyKey: "idem-partial",
+    };
+
+    const first = await sendManagerBroadcastNotification(input);
+    expect(first.ok).toBe(true);
+    expect(jobsByDedupeKey.size).toBe(2);
+
+    // Simulate the original attempt only PARTIALLY succeeding -- e.g. it crashed
+    // after dana's job was created but before noa's was.
+    const noaJobKey = [...jobsByDedupeKey.entries()].find(([, job]) => job.recipient_user_id === "user-noa")?.[0];
+    expect(noaJobKey).toBeTruthy();
+    jobsByDedupeKey.delete(noaJobKey!);
+    expect(jobsByDedupeKey.size).toBe(1);
+
+    const second = await sendManagerBroadcastNotification(input); // genuine replay, same key.
+
+    expect(second.ok).toBe(true);
+    if (!first.ok || !second.ok) return;
+    expect(second.result.batchId).toBe(first.result.batchId);
+    expect(jobsByDedupeKey.size).toBe(2);
+    const recipientIds = [...jobsByDedupeKey.values()].map((job) => job.recipient_user_id).sort();
+    expect(recipientIds).toEqual(["user-dana", "user-noa"]);
+  });
+
+  it("a DIFFERENT idempotency key is a genuinely new send and MAY reflect the current/new roster state", async () => {
+    const dana = person({ id: "p_dana", name: "דנה", email: "dana@example.invalid" });
+    const noa = person({ id: "p_noa", name: "נועה", email: "noa@example.invalid" });
+    const users: FakeUser[] = [{ id: "user-dana", email: "dana@example.invalid" }];
+    const { client, jobsByDedupeKey } = makeFakeSupabase(users, ["user-dana"]);
+    const { sendManagerBroadcastNotification } = await loadModule(client);
+
+    const first = await sendManagerBroadcastNotification({
+      manager: MANAGER,
+      people: [MANAGER, dana],
+      audienceKind: "everyone",
+      targetPersonIds: [],
+      title: "כותרת",
+      body: "תוכן",
+      idempotencyKey: "idem-key-a",
+    });
+    expect(first.ok).toBe(true);
+    expect(jobsByDedupeKey.size).toBe(1);
+
+    // The roster grows AND a new auth mapping appears -- but this is a genuinely new send (a different key).
+    users.push({ id: "user-noa", email: "noa@example.invalid" });
+
+    const second = await sendManagerBroadcastNotification({
+      manager: MANAGER,
+      people: [MANAGER, dana, noa],
+      audienceKind: "everyone",
+      targetPersonIds: [],
+      title: "כותרת",
+      body: "תוכן",
+      idempotencyKey: "idem-key-b", // DIFFERENT key -- a new logical batch, free to use current state.
+    });
+
+    expect(second.ok).toBe(true);
+    if (!first.ok || !second.ok) return;
+    expect(second.result.batchId).not.toBe(first.result.batchId);
+    expect(second.result.resolvedRecipientCount).toBe(2);
+    // dana's original job under batch A, plus a fresh dana+noa pair under the new batch B.
+    expect(jobsByDedupeKey.size).toBe(3);
+  });
 });

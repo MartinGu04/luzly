@@ -816,6 +816,8 @@ export interface NewManagerNotificationBatch {
   createdByPersonName: string;
   audienceKind: BroadcastAudienceKind;
   targetPersonIds: readonly string[];
+  /** The EXACT set of resolved Supabase auth user ids this batch's jobs were (or are about to be) created for -- the batch's own immutability anchor. See the migration's own doc comment. */
+  resolvedRecipientUserIds: readonly string[];
   title: string;
   body: string;
   resolvedRecipientCount: number;
@@ -831,6 +833,7 @@ export interface ManagerNotificationBatchRow {
   createdByPersonName: string;
   audienceKind: BroadcastAudienceKind;
   targetPersonIds: string[];
+  resolvedRecipientUserIds: string[];
   title: string;
   body: string;
   resolvedRecipientCount: number;
@@ -841,7 +844,7 @@ export interface ManagerNotificationBatchRow {
 }
 
 const MANAGER_NOTIFICATION_BATCH_COLUMNS =
-  "id, idempotency_key, created_by_person_id, created_by_person_name, audience_kind, target_person_ids, title, body, resolved_recipient_count, push_capable_count, inbox_only_count, unresolved_count, created_at";
+  "id, idempotency_key, created_by_person_id, created_by_person_name, audience_kind, target_person_ids, resolved_recipient_user_ids, title, body, resolved_recipient_count, push_capable_count, inbox_only_count, unresolved_count, created_at";
 
 function toBatchRow(row: Record<string, unknown>): ManagerNotificationBatchRow {
   return {
@@ -851,6 +854,7 @@ function toBatchRow(row: Record<string, unknown>): ManagerNotificationBatchRow {
     createdByPersonName: row.created_by_person_name as string,
     audienceKind: row.audience_kind as BroadcastAudienceKind,
     targetPersonIds: (row.target_person_ids as string[] | null) ?? [],
+    resolvedRecipientUserIds: (row.resolved_recipient_user_ids as string[] | null) ?? [],
     title: row.title as string,
     body: row.body as string,
     resolvedRecipientCount: row.resolved_recipient_count as number,
@@ -900,6 +904,7 @@ export async function insertManagerNotificationBatchIfAbsent(
       created_by_person_name: batch.createdByPersonName,
       audience_kind: batch.audienceKind,
       target_person_ids: batch.targetPersonIds,
+      resolved_recipient_user_ids: batch.resolvedRecipientUserIds,
       title: batch.title,
       body: batch.body,
       resolved_recipient_count: batch.resolvedRecipientCount,
