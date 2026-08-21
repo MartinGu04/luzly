@@ -705,6 +705,121 @@ describe.skipIf(!databaseAvailable)("notification engine SQL functions -- real P
       expect(existingBatch.rows).toHaveLength(1); // exactly one -- proving the precondition for "never a second batch" on the retry
     });
 
+    // ---------------------------------------------------------------------
+    // `runDueScheduledBroadcastDispatch` now claims exactly ONE row per
+    // call (never a bulk `claim_due_manager_scheduled_broadcasts(limit)`)
+    // so a large backlog never gets a single shared `claimed_at` stamped
+    // across many rows before their own dispatch has even begun (see that
+    // function's own doc comment). These tests prove the SQL side of that
+    // design at `p_limit = 1` explicitly, since that is the exact call the
+    // application now always makes.
+    // ---------------------------------------------------------------------
+
+    it("48. a backlog of several due rows is correctly distributed between two overlapping workers, each claiming one row at a time -- neither ever reclaims a row the other already holds", async () => {
+      const ids = [
+        "aaaaaaaa-0000-0000-0000-000000000011",
+        "aaaaaaaa-0000-0000-0000-000000000012",
+        "aaaaaaaa-0000-0000-0000-000000000013",
+        "aaaaaaaa-0000-0000-0000-000000000014",
+      ];
+      for (const id of ids) {
+        await insertScheduled(id, { scheduledForOffsetMs: -1000 });
+      }
+
+      const claimedByWorkerA: string[] = [];
+      const claimedByWorkerB: string[] = [];
+
+      // Simulates two minute-workers interleaving one-row claims over the same backlog.
+      for (let i = 0; i < ids.length; i++) {
+        const worker = i % 2 === 0 ? "A" : "B";
+        const result = await db.query("select * from public.claim_due_manager_scheduled_broadcasts(1)");
+        expect(result.rows).toHaveLength(1);
+        (worker === "A" ? claimedByWorkerA : claimedByWorkerB).push(result.rows[0].id);
+      }
+
+      const allClaimed = [...claimedByWorkerA, ...claimedByWorkerB];
+      // Every row claimed exactly once, across both workers, no duplicates and nothing missed.
+      expect(new Set(allClaimed).size).toBe(ids.length);
+      for (const id of ids) expect(allClaimed).toContain(id);
+      // No overlap between what each worker holds.
+      expect(claimedByWorkerA.some((id) => claimedByWorkerB.includes(id))).toBe(false);
+    });
+
+    it("49. a row later in a backlog is not assigned a lease until a one-row claim actually reaches it -- unclaimed rows keep status='scheduled' with no claimed_at while earlier rows are still being processed", async () => {
+      const first = "aaaaaaaa-0000-0000-0000-000000000015";
+      const second = "aaaaaaaa-0000-0000-0000-000000000016";
+      await insertScheduled(first, { scheduledForOffsetMs: -2000 });
+      await insertScheduled(second, { scheduledForOffsetMs: -1000 });
+
+      const firstClaim = await db.query("select * from public.claim_due_manager_scheduled_broadcasts(1)");
+      expect(firstClaim.rows.map((r) => r.id)).toEqual([first]);
+
+      // While "processing" the first row, the second must still be untouched -- scheduled, no lease.
+      const stillUnclaimed = await db.query(
+        "select status, claimed_at from public.manager_scheduled_broadcasts where id = $1",
+        [second],
+      );
+      expect(stillUnclaimed.rows[0].status).toBe("scheduled");
+      expect(stillUnclaimed.rows[0].claimed_at).toBeNull();
+
+      const secondClaim = await db.query("select * from public.claim_due_manager_scheduled_broadcasts(1)");
+      expect(secondClaim.rows.map((r) => r.id)).toEqual([second]);
+    });
+
+    it("50. a genuinely crashed single-row claim (p_limit=1) is still recoverable after the 90-second lease expires", async () => {
+      await insertScheduled("aaaaaaaa-0000-0000-0000-000000000017", {
+        status: "claimed",
+        scheduledForOffsetMs: -1000,
+        claimedAtOffsetMs: -100_000, // past the lease
+        batchId: null,
+      });
+
+      const result = await db.query("select * from public.claim_due_manager_scheduled_broadcasts(1)");
+      expect(result.rows.map((r) => r.id)).toContain("aaaaaaaa-0000-0000-0000-000000000017");
+    });
+
+    it("51. a single dispatch still under the 90-second lease (p_limit=1) cannot be reclaimed by another one-row claim", async () => {
+      await insertScheduled("aaaaaaaa-0000-0000-0000-000000000018", {
+        status: "claimed",
+        scheduledForOffsetMs: -1000,
+        claimedAtOffsetMs: -2000, // fresh -- actively being processed
+        batchId: null,
+      });
+
+      const result = await db.query("select * from public.claim_due_manager_scheduled_broadcasts(1)");
+      expect(result.rows.map((r) => r.id)).not.toContain("aaaaaaaa-0000-0000-0000-000000000018");
+    });
+
+    it("52. the dedicated once-a-minute worker and the main 5-minute fallback tick share the SAME claim function -- a fresh claim by one is invisible to the other, and each can independently pick up a DIFFERENT due row", async () => {
+      const ownedByDedicatedWorker = "aaaaaaaa-0000-0000-0000-000000000019";
+      const dueForMainTickFallback = "aaaaaaaa-0000-0000-0000-00000000001a";
+      await insertBatch("bbbbbbbb-0000-0000-0000-000000000005");
+      // Simulates the dedicated worker having just claimed+checkpointed one schedule, still actively dispatching it.
+      await insertScheduled(ownedByDedicatedWorker, {
+        status: "claimed",
+        scheduledForOffsetMs: -1000,
+        claimedAtOffsetMs: -2000,
+        batchId: "bbbbbbbb-0000-0000-0000-000000000005",
+      });
+      // A second, independent schedule the dedicated worker hasn't reached yet.
+      await insertScheduled(dueForMainTickFallback, { scheduledForOffsetMs: -1000 });
+
+      // The main tick's own fallback dispatch (a separate call site, same RPC) claims one row.
+      const mainTickClaim = await db.query("select * from public.claim_due_manager_scheduled_broadcasts(1)");
+
+      // It must never pick up the dedicated worker's still-live claim...
+      expect(mainTickClaim.rows.map((r) => r.id)).not.toContain(ownedByDedicatedWorker);
+      // ...it independently claims the OTHER due row instead.
+      expect(mainTickClaim.rows.map((r) => r.id)).toEqual([dueForMainTickFallback]);
+
+      // The dedicated worker's row remains exactly as it left it -- untouched by the main tick's claim attempt.
+      const stillOwned = await db.query("select status, batch_id from public.manager_scheduled_broadcasts where id = $1", [
+        ownedByDedicatedWorker,
+      ]);
+      expect(stillOwned.rows[0].status).toBe("claimed");
+      expect(stillOwned.rows[0].batch_id).toBe("bbbbbbbb-0000-0000-0000-000000000005");
+    });
+
     it("25. anon/authenticated cannot execute the function at all", async () => {
       await db.query("set role authenticated");
       try {

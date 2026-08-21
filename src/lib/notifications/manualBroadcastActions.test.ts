@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const loadManagerWorkbookContext = vi.fn();
+const loadManagerPersonnelContext = vi.fn();
 const sendManagerBroadcastNotification = vi.fn();
 const listRecentManagerNotificationBatches = vi.fn();
 
 vi.mock("@/lib/readModels/managerWorkbookContext", () => ({
   loadManagerWorkbookContext: (...args: unknown[]) => loadManagerWorkbookContext(...args),
+  loadManagerPersonnelContext: (...args: unknown[]) => loadManagerPersonnelContext(...args),
 }));
 vi.mock("./engine/manualBroadcast", () => ({
   sendManagerBroadcastNotification: (...args: unknown[]) => sendManagerBroadcastNotification(...args),
@@ -24,6 +26,10 @@ function okContext(overrides: Partial<{ manager: typeof MANAGER; people: typeof 
   return { status: "ok" as const, context: { manager: MANAGER, people: PEOPLE, snapshot: {} as never, avatarUrl: null, ...overrides } };
 }
 
+function okPersonnelContext(overrides: Partial<{ manager: typeof MANAGER; people: typeof PEOPLE }> = {}) {
+  return { status: "ok" as const, context: { manager: MANAGER, people: PEOPLE, ...overrides } };
+}
+
 function validInput(overrides: Partial<Parameters<typeof sendManagerBroadcastAction>[0]> = {}) {
   return {
     audienceKind: "person" as const,
@@ -37,6 +43,7 @@ function validInput(overrides: Partial<Parameters<typeof sendManagerBroadcastAct
 
 beforeEach(() => {
   loadManagerWorkbookContext.mockReset().mockResolvedValue(okContext());
+  loadManagerPersonnelContext.mockReset().mockResolvedValue(okPersonnelContext());
   sendManagerBroadcastNotification.mockReset().mockResolvedValue({
     ok: true,
     result: {
@@ -131,10 +138,17 @@ describe("sendManagerBroadcastAction -- happy path", () => {
 
 describe("getRecentManagerBroadcastsAction", () => {
   it("is manager-gated exactly like the send action", async () => {
-    loadManagerWorkbookContext.mockResolvedValue({ status: "forbidden" });
+    loadManagerPersonnelContext.mockResolvedValue({ status: "forbidden" });
     const result = await getRecentManagerBroadcastsAction();
     expect(result).toEqual({ ok: false, error: "forbidden" });
     expect(listRecentManagerNotificationBatches).not.toHaveBeenCalled();
+  });
+
+  it("uses the LIGHTWEIGHT loadManagerPersonnelContext boundary, never the full loadManagerWorkbookContext -- this is a ~17s poll alongside the scheduled-broadcast list", async () => {
+    listRecentManagerNotificationBatches.mockResolvedValue([]);
+    await getRecentManagerBroadcastsAction();
+    expect(loadManagerPersonnelContext).toHaveBeenCalledTimes(1);
+    expect(loadManagerWorkbookContext).not.toHaveBeenCalled();
   });
 
   it("maps recent batch rows to a safe view", async () => {

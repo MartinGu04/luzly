@@ -50,10 +50,18 @@ export interface ScheduledBroadcastWorkerTickSummary {
  *    category may now deliver up to ~4 minutes sooner than it otherwise
  *    would have, which is a strict improvement, never a correctness risk.
  *
- * Scheduled-broadcast dispatch is now owned SOLELY by this worker --
- * `pipeline.ts`'s main tick no longer calls `runDueScheduledBroadcastDispatch`
- * at all, so there is exactly one predictable claim loop for this table,
- * not two independently-scheduled ones racing each other.
+ * This worker is the PRIMARY, minute-precision owner of scheduled-
+ * broadcast dispatch. `pipeline.ts`'s main 5-minute tick ALSO still calls
+ * `runDueScheduledBroadcastDispatch` as a deliberate FALLBACK -- this
+ * worker's own Cron job is configured manually outside the repository,
+ * so if it's ever missing/disabled/broken, scheduled broadcasts still go
+ * out (just on the slower 5-minute cadence) rather than stopping
+ * entirely. Two independently-scheduled callers of the same claim
+ * function are safe by construction: `claim_due_manager_scheduled_broadcasts`'s
+ * uniform `claimed_at`-vs-90-second-lease eligibility (see
+ * `runDueScheduledBroadcastDispatch`'s own doc comment) means whichever
+ * caller claims a row first owns it for the lease; the other can only
+ * ever claim a DIFFERENT due row, never the same live one.
  */
 export async function runScheduledBroadcastWorkerTick(): Promise<ScheduledBroadcastWorkerTickSummary> {
   const startedAt = performance.now();

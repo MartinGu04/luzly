@@ -94,17 +94,24 @@ export function ManagerScheduledBroadcastsSection({
   // manager currently has open for editing.
   //
   // A THROWN failure (network hiccup, transient 5xx, ...) is deliberately
-  // NOT treated the same as `result.ok === false`: the latter is a
-  // successfully-returned, typed, permanent state (`forbidden`,
-  // `unauthenticated`, etc. -- retrying won't change it, so polling stops
-  // and reports inactive, same as before). A throw means we simply don't
-  // know the current state -- "unknown" is not "empty" -- so it must
-  // never report `onActiveChange(false)` (which would incorrectly shut
-  // down the recent-sends section's own polling too), and must still
-  // retry on the next tick rather than dying silently. This is what lets
-  // the manager recover live status automatically after a transient
-  // failure, including one on the very first load, without a page
-  // refresh.
+  // NOT treated the same as `result.ok === false`. This action is backed
+  // by `loadManagerPersonnelContext` (the lightweight polling-auth
+  // boundary -- see its own docstring), whose error union is exactly
+  // `unauthenticated | missing_email | unmapped | ambiguous_identity |
+  // forbidden` -- every one of those is a genuinely PERMANENT, structural
+  // state (lost session, misconfigured/unmapped identity, not a manager)
+  // that no amount of retrying fixes, and critically it can NEVER be
+  // `configuration_error` (that status only exists on the heavier
+  // `loadManagerWorkbookContext` path, which builds a `ShiftSchedule` --
+  // something this lightweight path never touches). So a typed
+  // `result.ok === false` is safe to treat as a deliberate stop, exactly
+  // as before. A THROW, by contrast, means we simply don't know the
+  // current state -- "unknown" is not "empty" -- so it must never report
+  // `onActiveChange(false)` (which would incorrectly shut down the
+  // recent-sends section's own polling too), and must still retry on the
+  // next tick rather than dying silently. This is what lets the manager
+  // recover live status automatically after a transient failure,
+  // including one on the very first load, without a page refresh.
   useEffect(() => {
     let cancelled = false;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;

@@ -94,8 +94,8 @@ implements; this file is the module map.
 - `pipeline.ts` -- the top-level orchestrator
   (`runNotificationWorkerTick(mode)`). `mode: "dry_run"` computes the
   same summary shape while skipping every mutating store call and the
-  entire delivery phase; `mode: "send"` is the real path. Does NOT own
-  manager scheduled-broadcast dispatch -- see below.
+  entire delivery phase; `mode: "send"` is the real path. Also runs
+  manager scheduled-broadcast dispatch as a FALLBACK -- see below.
 - `scheduledWorker.ts` -- the minute-level-precision follow-up's own
   orchestrator (`runScheduledBroadcastWorkerTick()`), driving
   `POST /internal/notifications/scheduled`, Supabase Cron's once-a-minute
@@ -107,15 +107,21 @@ implements; this file is the module map.
   `runDueScheduledBroadcastDispatch`/`dispatchScheduledBroadcast`
   (`scheduledBroadcast.ts`) PR #79 built, then `runDelivery()` in the
   SAME invocation so a freshly-dispatched job doesn't wait for a separate
-  delivery pass. This is now the SOLE normal owner of scheduled-broadcast
-  dispatch -- `pipeline.ts`'s main 5-minute tick no longer calls
-  `runDueScheduledBroadcastDispatch` at all, so there is exactly one
-  predictable claim loop for `manager_scheduled_broadcasts`, not two
-  independently-scheduled ones. Calling `runDelivery()` from both this
-  worker and the main tick is safe by construction (`for update skip
-  locked` claiming + per-device terminal delivery states, see
-  `delivery.ts`) -- the only effect is an already-due job of any category
-  delivering somewhat sooner.
+  delivery pass. This is the PRIMARY, minute-precision owner of
+  scheduled-broadcast dispatch; `pipeline.ts`'s main 5-minute tick ALSO
+  still calls `runDueScheduledBroadcastDispatch`, as a deliberate
+  fallback in case this worker's manually-configured Cron job is ever
+  missing, disabled, or broken -- two independently-scheduled callers of
+  the same claim function are safe by construction (see
+  `runDueScheduledBroadcastDispatch`'s own doc comment: it claims and
+  dispatches ONE row at a time, so `claim_due_manager_scheduled_broadcasts`'s
+  uniform `claimed_at`-vs-90-second-lease eligibility is always what a
+  row's lease is actually measured against, never a stale bulk-claim
+  timestamp). Calling `runDelivery()` from both this worker and the main
+  tick is likewise safe by construction (`for update skip locked`
+  claiming + per-device terminal delivery states, see `delivery.ts`) --
+  the only effect is an already-due job of any category delivering
+  somewhat sooner.
 
 ## Concurrency
 

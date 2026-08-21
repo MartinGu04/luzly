@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const loadManagerWorkbookContext = vi.fn();
+const loadManagerPersonnelContext = vi.fn();
 const createScheduledBroadcast = vi.fn();
 const editScheduledBroadcast = vi.fn();
 const cancelScheduledBroadcast = vi.fn();
@@ -9,6 +10,7 @@ const listActiveManagerScheduledBroadcasts = vi.fn();
 
 vi.mock("@/lib/readModels/managerWorkbookContext", () => ({
   loadManagerWorkbookContext: (...args: unknown[]) => loadManagerWorkbookContext(...args),
+  loadManagerPersonnelContext: (...args: unknown[]) => loadManagerPersonnelContext(...args),
 }));
 vi.mock("./engine/scheduledBroadcast", () => ({
   createScheduledBroadcast: (...args: unknown[]) => createScheduledBroadcast(...args),
@@ -33,6 +35,10 @@ const PEOPLE = [MANAGER];
 
 function okContext() {
   return { status: "ok" as const, context: { manager: MANAGER, people: PEOPLE, snapshot: {} as never, avatarUrl: null } };
+}
+
+function okPersonnelContext() {
+  return { status: "ok" as const, context: { manager: MANAGER, people: PEOPLE } };
 }
 
 function validInput(overrides: Partial<Record<string, unknown>> = {}) {
@@ -76,6 +82,7 @@ function storedRow(overrides: Partial<Record<string, unknown>> = {}) {
 
 beforeEach(() => {
   loadManagerWorkbookContext.mockReset().mockResolvedValue(okContext());
+  loadManagerPersonnelContext.mockReset().mockResolvedValue(okPersonnelContext());
   createScheduledBroadcast.mockReset().mockResolvedValue({ ok: true, row: storedRow() });
   editScheduledBroadcast.mockReset().mockResolvedValue({ ok: true, row: storedRow() });
   cancelScheduledBroadcast.mockReset().mockResolvedValue({ ok: true });
@@ -218,10 +225,17 @@ describe("sendScheduledBroadcastNowAction", () => {
 
 describe("listActiveScheduledBroadcastsAction", () => {
   it("is manager-gated exactly like every other action here", async () => {
-    loadManagerWorkbookContext.mockResolvedValue({ status: "forbidden" });
+    loadManagerPersonnelContext.mockResolvedValue({ status: "forbidden" });
     const result = await listActiveScheduledBroadcastsAction();
     expect(result).toEqual({ ok: false, error: "forbidden" });
     expect(listActiveManagerScheduledBroadcasts).not.toHaveBeenCalled();
+  });
+
+  it("uses the LIGHTWEIGHT loadManagerPersonnelContext boundary, never the full loadManagerWorkbookContext -- this is a ~17s poll, not a Personal Schedule/Manager read-model request", async () => {
+    listActiveManagerScheduledBroadcasts.mockResolvedValue([]);
+    await listActiveScheduledBroadcastsAction();
+    expect(loadManagerPersonnelContext).toHaveBeenCalledTimes(1);
+    expect(loadManagerWorkbookContext).not.toHaveBeenCalled();
   });
 
   it("maps stored rows to safe views with derived local date/time fields", async () => {

@@ -58,11 +58,14 @@ point Supabase Cron calls every 5 minutes in production.
 ### PR #79 + minute-level precision follow-up -- manager scheduled broadcasts
 
 A manager can schedule a manual broadcast for a future Asia/Jerusalem
-instant instead of sending it immediately. Dispatch precision is owned
-SOLELY by a second, much narrower dedicated worker --
-`src/app/internal/notifications/scheduled/route.ts`, driven by Supabase
-Cron once a MINUTE -- never by the main 5-minute tick above (see
-`engine/README.md`'s own section for why). The manager's open
+instant instead of sending it immediately. Minute-level dispatch
+precision is owned PRIMARILY by a second, much narrower dedicated worker
+-- `src/app/internal/notifications/scheduled/route.ts`, driven by
+Supabase Cron once a MINUTE -- with the main 5-minute tick above also
+still dispatching due schedules as a deliberate fallback, in case the
+dedicated worker's manually-configured Cron job is ever missing,
+disabled, or broken (see `engine/README.md`'s own section for why
+overlapping callers of the same claim are safe). The manager's open
 communication screen reflects a background dispatch via lightweight
 polling, never Realtime/WebSocket -- see
 `components/manager/ManagerScheduledBroadcastsSection.tsx` and

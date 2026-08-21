@@ -1,6 +1,6 @@
 "use server";
 
-import { loadManagerWorkbookContext } from "@/lib/readModels/managerWorkbookContext";
+import { loadManagerPersonnelContext, loadManagerWorkbookContext } from "@/lib/readModels/managerWorkbookContext";
 import {
   sendManagerBroadcastNotification,
   type BroadcastAudienceKind,
@@ -118,9 +118,18 @@ export type GetRecentManagerBroadcastsResult =
   | { ok: true; items: RecentManagerBroadcastView[] }
   | { ok: false; error: string };
 
-/** A small, bounded "recent sends" list for the composer -- reuses `manager_notification_batches`'s own audit columns, never a second history mechanism. Manager-gated exactly like the send action itself. */
+/**
+ * A small, bounded "recent sends" list for the composer -- reuses
+ * `manager_notification_batches`'s own audit columns, never a second
+ * history mechanism. Polled every ~17s alongside the scheduled-broadcast
+ * list (spec §7), so this uses the same LIGHTWEIGHT
+ * `loadManagerPersonnelContext` boundary as `listActiveScheduledBroadcastsAction`
+ * -- personnel-only, cached workbook read -- rather than
+ * `loadManagerWorkbookContext`'s full Personal Schedule read-model gate.
+ * Still manager-gated exactly like the send action itself.
+ */
 export async function getRecentManagerBroadcastsAction(): Promise<GetRecentManagerBroadcastsResult> {
-  const contextResult = await loadManagerWorkbookContext(["personnel"]);
+  const contextResult = await loadManagerPersonnelContext();
   if (contextResult.status !== "ok") return { ok: false, error: contextResult.status };
 
   const rows = await listRecentManagerNotificationBatches(RECENT_MANAGER_BROADCASTS_LIMIT);

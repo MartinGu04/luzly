@@ -133,3 +133,80 @@ export async function loadManagerWorkbookContext(
     context: { manager: identityResult.person, people, snapshot, avatarUrl: personalResult.avatarUrl },
   };
 }
+
+export type ManagerPersonnelContextResult =
+  | { status: "unauthenticated" }
+  | { status: "missing_email" }
+  | { status: "unmapped" }
+  | { status: "ambiguous_identity" }
+  /** Authenticated + mapped, but `person.isManager !== true`. */
+  | { status: "forbidden" }
+  | { status: "ok"; context: { manager: Person; people: Person[] } };
+
+/**
+ * The LIGHTWEIGHT manager-authorization boundary for background/polling
+ * reads that only ever need to know "is this caller a manager" plus the
+ * roster (e.g. the Manager communication area's ~17s scheduled/recent
+ * broadcast status polls -- see `scheduledBroadcastActions.ts`/
+ * `manualBroadcastActions.ts`). Deliberately NOT `loadManagerWorkbookContext`
+ * above: that helper's FIRST step is `getRequestPersonalSchedule()`, which
+ * unconditionally loads and parses the full Personal Schedule read model
+ * (personnel + schedule + settings + both Potential periods, including
+ * building a `ShiftSchedule` that can itself fail closed as a
+ * `configuration_error`) purely as its authorization gate, before this
+ * function's caller's actual `sources` parameter is even consulted. That
+ * is the right authorization path for an actual Personal Schedule/Manager
+ * read-model request, but it is the WRONG one for a lightweight status
+ * poll that only ever needs the roster -- repeating that full parse every
+ * ~17 seconds does real CPU work on every poll (the 30-second workbook
+ * cache only saves the Google round trip, not the parsing), and
+ * needlessly couples an unrelated feature's polling to Schedule/Settings/
+ * Potential health.
+ *
+ * This function needs, and fetches, ONLY:
+ * 1. The authenticated Supabase identity (`getAuthenticatedIdentity`,
+ *    always a live, server-verified check -- never trusts anything the
+ *    client sent, and an unauthenticated/email-less caller returns
+ *    immediately, before any workbook fetch or DB read of any kind).
+ * 2. A personnel-ONLY workbook snapshot via `getWorkbookSnapshot`
+ *    (`lib/sync`'s existing shared, short-TTL cache) -- NEVER the
+ *    uncached `fetchRawWorkbookSnapshot`/`resolveCurrentPerson()` path,
+ *    so a poll never forces a fresh Google request on its own; it reuses
+ *    whatever `["personnel"]`-keyed snapshot any other personnel-only
+ *    caller in this process recently fetched (its own canonical cache
+ *    key, entirely separate from the 5-source manager/personal-schedule
+ *    cache entries -- see `getWorkbookSnapshot`'s own docs).
+ * 3. The EXISTING `parsePersonnelSheet` parser and the EXISTING
+ *    fail-closed `resolveIdentityAgainstPeople` mapping -- no second
+ *    identity-matching model, no new personnel-parsing code path.
+ * 4. `person.isManager === true`, checked server-side against the
+ *    freshly-resolved `Person` -- never trusted from the client, exactly
+ *    like every other manager-only entry point in this codebase.
+ *
+ * A non-manager (or any non-"ok" identity state) fails closed to a
+ * typed, non-"ok" status, same shape as `ManagerWorkbookContextResult`
+ * above, before the caller's own privileged DB read (listing scheduled/
+ * recent broadcasts) ever runs.
+ */
+export async function loadManagerPersonnelContext(): Promise<ManagerPersonnelContextResult> {
+  const identity = await getAuthenticatedIdentity();
+  if (identity.status === "unauthenticated") return { status: "unauthenticated" };
+  if (identity.status === "missing_email") return { status: "missing_email" };
+
+  const snapshot = await getWorkbookSnapshot(["personnel"]);
+  const people = parsePersonnelSheet(getManagerWorkbookSheet(snapshot, "personnel"));
+  // `identity.status` is "authenticated" at this point, so
+  // `resolveIdentityAgainstPeople` can only return "unmapped",
+  // "ambiguous_identity", or "ok" -- never re-derive unauthenticated/
+  // missing_email from it.
+  const identityResult = resolveIdentityAgainstPeople(identity, people);
+
+  if (identityResult.status === "unmapped" || identityResult.status === "ambiguous_identity") {
+    return { status: identityResult.status };
+  }
+  if (identityResult.status !== "ok" || !identityResult.person.isManager) {
+    return { status: "forbidden" };
+  }
+
+  return { status: "ok", context: { manager: identityResult.person, people } };
+}

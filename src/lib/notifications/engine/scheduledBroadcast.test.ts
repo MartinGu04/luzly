@@ -717,11 +717,11 @@ describe("dispatchScheduledBroadcast -- resuming after a crash checkpoint", () =
 });
 
 describe("runDueScheduledBroadcastDispatch -- the worker tick's own phase", () => {
-  it("claims due broadcasts and dispatches each sequentially, summarizing successes/failures", async () => {
-    claimDueManagerScheduledBroadcasts.mockResolvedValue([
-      scheduledRow({ id: "sb_1" }),
-      scheduledRow({ id: "sb_2" }),
-    ]);
+  it("claims ONE row at a time (never a bulk claim), dispatching each fully before claiming the next, summarizing successes/failures", async () => {
+    claimDueManagerScheduledBroadcasts
+      .mockResolvedValueOnce([scheduledRow({ id: "sb_1" })])
+      .mockResolvedValueOnce([scheduledRow({ id: "sb_2" })])
+      .mockResolvedValueOnce([]); // nothing left -- the loop stops here, never reaching the limit
     fetchAllUserIdsByEmail.mockResolvedValue(new Map());
     fetchAllSubscribedUserIds.mockResolvedValue([]);
     resolvePersonIdentity.mockReturnValue({ status: "no_email" });
@@ -776,6 +776,46 @@ describe("runDueScheduledBroadcastDispatch -- the worker tick's own phase", () =
     expect(summary).toEqual({ claimed: 2, dispatched: 1, failed: 1 });
     expect(markManagerScheduledBroadcastDispatched).toHaveBeenCalledTimes(1);
     expect(markManagerScheduledBroadcastDispatched).toHaveBeenCalledWith("sb_1");
+    // Every claim call asks for exactly ONE row -- never a bulk claim.
+    expect(claimDueManagerScheduledBroadcasts).toHaveBeenCalledTimes(3);
+    for (const call of claimDueManagerScheduledBroadcasts.mock.calls) {
+      expect(call).toEqual([1]);
+    }
+  });
+
+  it("stops claiming once the per-tick limit is reached, without ever asking the store for more than one row at a time", async () => {
+    claimDueManagerScheduledBroadcasts
+      .mockResolvedValueOnce([scheduledRow({ id: "sb_1" })])
+      .mockResolvedValueOnce([scheduledRow({ id: "sb_2" })]);
+    fetchAllUserIdsByEmail.mockResolvedValue(new Map());
+    fetchAllSubscribedUserIds.mockResolvedValue([]);
+    resolvePersonIdentity.mockReturnValue({ status: "no_email" });
+    insertManagerNotificationBatchIfAbsent.mockResolvedValue({
+      row: {
+        id: "batch_x",
+        idempotencyKey: "scheduled:x",
+        createdByPersonId: "p_manager",
+        createdByPersonName: "דני מנהל",
+        audienceKind: "people",
+        targetPersonIds: ["p_a", "p_b"],
+        resolvedRecipientUserIds: [],
+        title: "כותרת",
+        body: "תוכן",
+        resolvedRecipientCount: 0,
+        pushCapableCount: 0,
+        inboxOnlyCount: 0,
+        unresolvedCount: 2,
+        createdAt: "2026-08-23T17:00:01.000Z",
+      },
+      created: true,
+    });
+
+    const { runDueScheduledBroadcastDispatch } = await loadModule();
+    const summary = await runDueScheduledBroadcastDispatch([MANAGER, PERSON_A, PERSON_B], 2);
+
+    expect(summary.claimed).toBe(2);
+    // The limit was reached after exactly 2 successful one-row claims -- no third claim call was ever made.
+    expect(claimDueManagerScheduledBroadcasts).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -873,9 +913,11 @@ describe("sendScheduledBroadcastNow -- 'שלח עכשיו' uses the SAME dispatc
   });
 
   it("automatic due dispatch (no send-now actor) keeps the ORIGINAL scheduling manager as the batch's sender", async () => {
-    claimDueManagerScheduledBroadcasts.mockResolvedValue([
-      scheduledRow({ createdByPersonId: "p_manager", createdByPersonName: "דני מנהל", sentNowByPersonId: null, sentNowByPersonName: null }),
-    ]);
+    claimDueManagerScheduledBroadcasts
+      .mockResolvedValueOnce([
+        scheduledRow({ createdByPersonId: "p_manager", createdByPersonName: "דני מנהל", sentNowByPersonId: null, sentNowByPersonName: null }),
+      ])
+      .mockResolvedValueOnce([]);
     fetchAllUserIdsByEmail.mockResolvedValue(new Map());
     fetchAllSubscribedUserIds.mockResolvedValue([]);
     resolvePersonIdentity.mockReturnValue({ status: "no_email" });
