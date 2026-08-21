@@ -885,3 +885,151 @@ describe("upsertPendingReminderJob -- hotfix regression guard", () => {
     await expect(upsertPendingReminderJob(newJob())).rejects.toThrow("db down");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Manager manual broadcast batches
+// ---------------------------------------------------------------------------
+
+interface FakeBatchRow {
+  id: string;
+  idempotency_key: string;
+  created_by_person_id: string;
+  created_by_person_name: string;
+  audience_kind: string;
+  target_person_ids: string[];
+  title: string;
+  body: string;
+  resolved_recipient_count: number;
+  push_capable_count: number;
+  inbox_only_count: number;
+  unresolved_count: number;
+  created_at: string;
+}
+
+function makeBatchesFakeSupabase(initialRows: FakeBatchRow[] = []) {
+  const byIdempotencyKey = new Map(initialRows.map((row) => [row.idempotency_key, row]));
+  let counter = initialRows.length;
+
+  const client = {
+    from: (table: string) => {
+      if (table !== "manager_notification_batches") throw new Error(`unexpected table ${table}`);
+      return {
+        insert: (row: Record<string, unknown>) => ({
+          select: () => ({
+            single: async () => {
+              const key = row.idempotency_key as string;
+              if (byIdempotencyKey.has(key)) return { data: null, error: { code: "23505" } };
+              counter += 1;
+              const stored = { id: `batch_${counter}`, created_at: "2026-08-21T08:00:00.000Z", ...row } as FakeBatchRow;
+              byIdempotencyKey.set(key, stored);
+              return { data: stored, error: null };
+            },
+          }),
+        }),
+        select: () => ({
+          eq: (_column: string, value: string) => ({
+            maybeSingle: async () => ({ data: byIdempotencyKey.get(value) ?? null, error: null }),
+          }),
+          order: () => ({
+            limit: async (limit: number) => ({
+              data: [...byIdempotencyKey.values()].slice(0, limit),
+              error: null,
+            }),
+          }),
+        }),
+      };
+    },
+  };
+
+  return { client, byIdempotencyKey };
+}
+
+function newBatch(overrides: Record<string, unknown> = {}) {
+  return {
+    idempotencyKey: "idem-1",
+    createdByPersonId: "p_manager",
+    createdByPersonName: "דני מנהל",
+    audienceKind: "person" as const,
+    targetPersonIds: ["p_1"],
+    resolvedRecipientUserIds: ["user_1"],
+    title: "כותרת",
+    body: "תוכן",
+    resolvedRecipientCount: 1,
+    pushCapableCount: 1,
+    inboxOnlyCount: 0,
+    unresolvedCount: 0,
+    ...overrides,
+  };
+}
+
+describe("insertManagerNotificationBatchIfAbsent / getManagerNotificationBatchByIdempotencyKey / listRecentManagerNotificationBatches", () => {
+  it("inserts a genuinely new batch, returns its full mapped row, and reports created: true", async () => {
+    const { client } = makeBatchesFakeSupabase();
+    const { insertManagerNotificationBatchIfAbsent } = await loadModule(client);
+
+    const { row, created } = await insertManagerNotificationBatchIfAbsent(newBatch());
+
+    expect(created).toBe(true);
+    expect(row).toMatchObject({
+      idempotencyKey: "idem-1",
+      createdByPersonId: "p_manager",
+      createdByPersonName: "דני מנהל",
+      audienceKind: "person",
+      targetPersonIds: ["p_1"],
+      resolvedRecipientUserIds: ["user_1"],
+      title: "כותרת",
+      body: "תוכן",
+      resolvedRecipientCount: 1,
+      pushCapableCount: 1,
+      inboxOnlyCount: 0,
+      unresolvedCount: 0,
+    });
+    expect(row.id).toBeTruthy();
+  });
+
+  it("a retried insert with the SAME idempotency key returns created: false and the ALREADY-EXISTING row, never a second one", async () => {
+    const { client, byIdempotencyKey } = makeBatchesFakeSupabase();
+    const { insertManagerNotificationBatchIfAbsent } = await loadModule(client);
+
+    const first = await insertManagerNotificationBatchIfAbsent(newBatch());
+    const second = await insertManagerNotificationBatchIfAbsent(newBatch({ title: "כותרת אחרת בכלל" }));
+
+    expect(first.created).toBe(true);
+    expect(second.created).toBe(false);
+    expect(second.row.id).toBe(first.row.id);
+    expect(second.row.title).toBe("כותרת"); // the ORIGINAL stored title, never overwritten by the retry's payload
+    expect(byIdempotencyKey.size).toBe(1);
+  });
+
+  it("getManagerNotificationBatchByIdempotencyKey returns null for an unknown key", async () => {
+    const { client } = makeBatchesFakeSupabase();
+    const { getManagerNotificationBatchByIdempotencyKey } = await loadModule(client);
+
+    expect(await getManagerNotificationBatchByIdempotencyKey("nope")).toBeNull();
+  });
+
+  it("listRecentManagerNotificationBatches maps every stored row", async () => {
+    const { client } = makeBatchesFakeSupabase([
+      {
+        id: "batch_1",
+        idempotency_key: "idem-1",
+        created_by_person_id: "p_manager",
+        created_by_person_name: "דני מנהל",
+        audience_kind: "everyone",
+        target_person_ids: ["p_1", "p_2"],
+        title: "כותרת",
+        body: "תוכן",
+        resolved_recipient_count: 2,
+        push_capable_count: 1,
+        inbox_only_count: 1,
+        unresolved_count: 0,
+        created_at: "2026-08-21T08:00:00.000Z",
+      },
+    ]);
+    const { listRecentManagerNotificationBatches } = await loadModule(client);
+
+    const rows = await listRecentManagerNotificationBatches();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id: "batch_1", audienceKind: "everyone", resolvedRecipientCount: 2 });
+  });
+});

@@ -78,14 +78,14 @@ export function ManagerAdoptionSection({ view }: ManagerAdoptionSectionProps) {
 
   if (allEmpty) {
     return (
-      <Panel variant="compact" className="text-sm text-muted">
+      <Panel variant="compact" className="text-sm text-muted" data-testid="manager-adoption-section">
         אין אנשי צוות להצגה.
       </Panel>
     );
   }
 
   return (
-    <Panel variant="panel">
+    <Panel variant="panel" data-testid="manager-adoption-section">
       <div className="flex flex-col gap-4">
         <NudgeGroup group={view.notLoggedInGroup} />
         <NudgeGroup group={view.notificationsOffGroup} />

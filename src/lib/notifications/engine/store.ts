@@ -800,3 +800,143 @@ export async function deletePushSubscriptionById(subscriptionId: string): Promis
   const { error } = await supabase.from("push_subscriptions").delete().eq("id", subscriptionId);
   if (error) throw error;
 }
+
+// ---------------------------------------------------------------------------
+// Manager manual broadcast batches -- audit + idempotency ONLY. Per-recipient
+// delivery state stays entirely owned by `notification_jobs`/
+// `notification_deliveries` above; this table never duplicates it (see
+// `lib/notifications/engine/manualBroadcast.ts`, the one caller).
+// ---------------------------------------------------------------------------
+
+export type BroadcastAudienceKind = "person" | "people" | "everyone";
+
+export interface NewManagerNotificationBatch {
+  idempotencyKey: string;
+  createdByPersonId: string;
+  createdByPersonName: string;
+  audienceKind: BroadcastAudienceKind;
+  targetPersonIds: readonly string[];
+  /** The EXACT set of resolved Supabase auth user ids this batch's jobs were (or are about to be) created for -- the batch's own immutability anchor. See the migration's own doc comment. */
+  resolvedRecipientUserIds: readonly string[];
+  title: string;
+  body: string;
+  resolvedRecipientCount: number;
+  pushCapableCount: number;
+  inboxOnlyCount: number;
+  unresolvedCount: number;
+}
+
+export interface ManagerNotificationBatchRow {
+  id: string;
+  idempotencyKey: string;
+  createdByPersonId: string;
+  createdByPersonName: string;
+  audienceKind: BroadcastAudienceKind;
+  targetPersonIds: string[];
+  resolvedRecipientUserIds: string[];
+  title: string;
+  body: string;
+  resolvedRecipientCount: number;
+  pushCapableCount: number;
+  inboxOnlyCount: number;
+  unresolvedCount: number;
+  createdAt: string;
+}
+
+const MANAGER_NOTIFICATION_BATCH_COLUMNS =
+  "id, idempotency_key, created_by_person_id, created_by_person_name, audience_kind, target_person_ids, resolved_recipient_user_ids, title, body, resolved_recipient_count, push_capable_count, inbox_only_count, unresolved_count, created_at";
+
+function toBatchRow(row: Record<string, unknown>): ManagerNotificationBatchRow {
+  return {
+    id: row.id as string,
+    idempotencyKey: row.idempotency_key as string,
+    createdByPersonId: row.created_by_person_id as string,
+    createdByPersonName: row.created_by_person_name as string,
+    audienceKind: row.audience_kind as BroadcastAudienceKind,
+    targetPersonIds: (row.target_person_ids as string[] | null) ?? [],
+    resolvedRecipientUserIds: (row.resolved_recipient_user_ids as string[] | null) ?? [],
+    title: row.title as string,
+    body: row.body as string,
+    resolvedRecipientCount: row.resolved_recipient_count as number,
+    pushCapableCount: row.push_capable_count as number,
+    inboxOnlyCount: row.inbox_only_count as number,
+    unresolvedCount: row.unresolved_count as number,
+    createdAt: row.created_at as string,
+  };
+}
+
+export async function getManagerNotificationBatchByIdempotencyKey(
+  idempotencyKey: string,
+): Promise<ManagerNotificationBatchRow | null> {
+  const supabase = getNotificationServiceClient();
+  const { data, error } = await supabase
+    .from("manager_notification_batches")
+    .select(MANAGER_NOTIFICATION_BATCH_COLUMNS)
+    .eq("idempotency_key", idempotencyKey)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? toBatchRow(data as Record<string, unknown>) : null;
+}
+
+export interface ManagerNotificationBatchUpsertResult {
+  row: ManagerNotificationBatchRow;
+  /** `true` only when THIS call genuinely inserted the row. `false` means `idempotency_key` already existed -- `row` is the ORIGINAL stored batch, never overwritten by this call's (possibly different) payload. The caller MUST compare `row` against its own current request before creating any jobs -- see `manualBroadcast.ts`'s `isSameLogicalBroadcastRequest`; this function itself does not decide whether a reused key represents a legitimate replay or a mutated request. */
+  created: boolean;
+}
+
+/**
+ * Idempotent by `idempotency_key` -- a genuinely new batch inserts and
+ * returns its own fresh row with `created: true`. A retried/double-
+ * submitted composer click carrying the SAME key hits the unique
+ * constraint and this returns the ALREADY-EXISTING batch row instead
+ * (`created: false`, the row's ORIGINAL stored values, never silently
+ * overwritten by a second, possibly-different payload).
+ */
+export async function insertManagerNotificationBatchIfAbsent(
+  batch: NewManagerNotificationBatch,
+): Promise<ManagerNotificationBatchUpsertResult> {
+  const supabase = getNotificationServiceClient();
+  const { data, error } = await supabase
+    .from("manager_notification_batches")
+    .insert({
+      idempotency_key: batch.idempotencyKey,
+      created_by_person_id: batch.createdByPersonId,
+      created_by_person_name: batch.createdByPersonName,
+      audience_kind: batch.audienceKind,
+      target_person_ids: batch.targetPersonIds,
+      resolved_recipient_user_ids: batch.resolvedRecipientUserIds,
+      title: batch.title,
+      body: batch.body,
+      resolved_recipient_count: batch.resolvedRecipientCount,
+      push_capable_count: batch.pushCapableCount,
+      inbox_only_count: batch.inboxOnlyCount,
+      unresolved_count: batch.unresolvedCount,
+    })
+    .select(MANAGER_NOTIFICATION_BATCH_COLUMNS)
+    .single();
+
+  if (error) {
+    if ((error as { code?: string }).code === "23505") {
+      const existing = await getManagerNotificationBatchByIdempotencyKey(batch.idempotencyKey);
+      if (existing) return { row: existing, created: false };
+    }
+    throw error;
+  }
+  return { row: toBatchRow(data as Record<string, unknown>), created: true };
+}
+
+/** A bounded recent-history read for the composer's own small audit list -- never a full archive. */
+export const RECENT_MANAGER_BROADCASTS_LIMIT = 10;
+
+export async function listRecentManagerNotificationBatches(
+  limit: number = RECENT_MANAGER_BROADCASTS_LIMIT,
+): Promise<ManagerNotificationBatchRow[]> {
+  const supabase = getNotificationServiceClient();
+  const { data, error } = await supabase
+    .from("manager_notification_batches")
+    .select(MANAGER_NOTIFICATION_BATCH_COLUMNS)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return ((data ?? []) as Record<string, unknown>[]).map(toBatchRow);
+}

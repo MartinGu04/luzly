@@ -6,6 +6,7 @@ interface PanelProps {
   variant?: PanelVariant;
   className?: string;
   children: ReactNode;
+  "data-testid"?: string;
 }
 
 const VARIANT_CLASSES: Record<PanelVariant, string> = {
@@ -24,6 +25,10 @@ const VARIANT_CLASSES: Record<PanelVariant, string> = {
  * for a section that itself IS the critical finding (not just an icon/badge
  * inside an otherwise-neutral panel).
  */
-export function Panel({ variant = "panel", className = "", children }: PanelProps) {
-  return <div className={`${VARIANT_CLASSES[variant]} ${className}`}>{children}</div>;
+export function Panel({ variant = "panel", className = "", children, "data-testid": dataTestId }: PanelProps) {
+  return (
+    <div className={`${VARIANT_CLASSES[variant]} ${className}`} data-testid={dataTestId}>
+      {children}
+    </div>
+  );
 }
