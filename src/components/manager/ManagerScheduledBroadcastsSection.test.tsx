@@ -245,3 +245,152 @@ describe("ManagerScheduledBroadcastsSection -- background polling (spec §7)", (
     expect(screen.getByText("✏️ בעריכה כעת")).toBeInTheDocument();
   });
 });
+
+describe("ManagerScheduledBroadcastsSection -- polling survives a transient failure (fix for a resilience bug)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("1 & 5. an active list, then a throw on the next poll, still schedules exactly one retry later -- no overlapping requests", async () => {
+    vi.useFakeTimers();
+    listActiveScheduledBroadcastsAction
+      .mockResolvedValueOnce({ ok: true, items: [item()] })
+      .mockRejectedValueOnce(new Error("network hiccup"))
+      .mockResolvedValue({ ok: true, items: [item()] });
+
+    render(<ManagerScheduledBroadcastsSection reloadToken={0} editingId={null} onEdit={vi.fn()} onChanged={vi.fn()} />);
+
+    await vi.waitFor(() => expect(listActiveScheduledBroadcastsAction).toHaveBeenCalledTimes(1));
+    await vi.advanceTimersByTimeAsync(17_000);
+    await vi.waitFor(() => expect(listActiveScheduledBroadcastsAction).toHaveBeenCalledTimes(2)); // the throwing poll
+
+    // Never a second concurrent call before the retry interval elapses.
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(listActiveScheduledBroadcastsAction).toHaveBeenCalledTimes(2);
+
+    await vi.advanceTimersByTimeAsync(8_000);
+    await vi.waitFor(() => expect(listActiveScheduledBroadcastsAction).toHaveBeenCalledTimes(3)); // the recovery retry
+  });
+
+  it("2 & 7. a transient failure never calls onActiveChange(false) -- the last known active state (and therefore recent-sends polling) is preserved", async () => {
+    vi.useFakeTimers();
+    listActiveScheduledBroadcastsAction
+      .mockResolvedValueOnce({ ok: true, items: [item()] })
+      .mockRejectedValueOnce(new Error("network hiccup"));
+    const onActiveChange = vi.fn();
+
+    render(
+      <ManagerScheduledBroadcastsSection
+        reloadToken={0}
+        editingId={null}
+        onEdit={vi.fn()}
+        onChanged={vi.fn()}
+        onActiveChange={onActiveChange}
+      />,
+    );
+
+    await vi.waitFor(() => expect(listActiveScheduledBroadcastsAction).toHaveBeenCalledTimes(1));
+    expect(onActiveChange).toHaveBeenLastCalledWith(true);
+
+    await vi.advanceTimersByTimeAsync(17_000);
+    await vi.waitFor(() => expect(listActiveScheduledBroadcastsAction).toHaveBeenCalledTimes(2));
+
+    // Still the last call is "true" -- the throw never downgraded it to false.
+    expect(onActiveChange).toHaveBeenLastCalledWith(true);
+    expect(onActiveChange).not.toHaveBeenCalledWith(false);
+  });
+
+  it("3. after the transient failure, a later successful EMPTY result correctly reports false and stops polling", async () => {
+    vi.useFakeTimers();
+    listActiveScheduledBroadcastsAction
+      .mockResolvedValueOnce({ ok: true, items: [item()] })
+      .mockRejectedValueOnce(new Error("network hiccup"))
+      .mockResolvedValue({ ok: true, items: [] });
+    const onActiveChange = vi.fn();
+
+    render(
+      <ManagerScheduledBroadcastsSection
+        reloadToken={0}
+        editingId={null}
+        onEdit={vi.fn()}
+        onChanged={vi.fn()}
+        onActiveChange={onActiveChange}
+      />,
+    );
+
+    await vi.waitFor(() => expect(listActiveScheduledBroadcastsAction).toHaveBeenCalledTimes(1));
+    await vi.advanceTimersByTimeAsync(17_000);
+    await vi.waitFor(() => expect(listActiveScheduledBroadcastsAction).toHaveBeenCalledTimes(2)); // throws
+    await vi.advanceTimersByTimeAsync(17_000);
+    await vi.waitFor(() => expect(listActiveScheduledBroadcastsAction).toHaveBeenCalledTimes(3)); // empty, real answer
+
+    expect(onActiveChange).toHaveBeenLastCalledWith(false);
+
+    // No further polling once genuinely empty.
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(listActiveScheduledBroadcastsAction).toHaveBeenCalledTimes(3);
+  });
+
+  it("4. an INITIAL load failure (nothing has ever succeeded yet) still retries and can recover to an active list without a manual refresh", async () => {
+    vi.useFakeTimers();
+    listActiveScheduledBroadcastsAction
+      .mockRejectedValueOnce(new Error("network hiccup on first load"))
+      .mockResolvedValue({ ok: true, items: [item()] });
+    const onActiveChange = vi.fn();
+
+    render(
+      <ManagerScheduledBroadcastsSection
+        reloadToken={0}
+        editingId={null}
+        onEdit={vi.fn()}
+        onChanged={vi.fn()}
+        onActiveChange={onActiveChange}
+      />,
+    );
+
+    await vi.waitFor(() => expect(listActiveScheduledBroadcastsAction).toHaveBeenCalledTimes(1));
+    expect(onActiveChange).not.toHaveBeenCalledWith(false);
+    expect(screen.queryByText("🕒 התראות מתוזמנות")).toBeNull();
+
+    await vi.advanceTimersByTimeAsync(17_000);
+    await vi.waitFor(() => expect(listActiveScheduledBroadcastsAction).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(screen.getByText("🕒 התראות מתוזמנות")).toBeInTheDocument());
+    expect(onActiveChange).toHaveBeenLastCalledWith(true);
+  });
+
+  it("6. clears the retry timer on unmount just like the normal poll timer", async () => {
+    vi.useFakeTimers();
+    listActiveScheduledBroadcastsAction.mockRejectedValue(new Error("always fails"));
+    const { unmount } = render(
+      <ManagerScheduledBroadcastsSection reloadToken={0} editingId={null} onEdit={vi.fn()} onChanged={vi.fn()} />,
+    );
+
+    await vi.waitFor(() => expect(listActiveScheduledBroadcastsAction).toHaveBeenCalledTimes(1));
+    unmount();
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(listActiveScheduledBroadcastsAction).toHaveBeenCalledTimes(1);
+  });
+
+  it("a typed, permanent ok:false result (e.g. forbidden) still stops polling and reports inactive -- only an unknown/thrown failure is treated as transient", async () => {
+    vi.useFakeTimers();
+    listActiveScheduledBroadcastsAction.mockResolvedValue({ ok: false, error: "forbidden" });
+    const onActiveChange = vi.fn();
+
+    render(
+      <ManagerScheduledBroadcastsSection
+        reloadToken={0}
+        editingId={null}
+        onEdit={vi.fn()}
+        onChanged={vi.fn()}
+        onActiveChange={onActiveChange}
+      />,
+    );
+
+    await vi.waitFor(() => expect(listActiveScheduledBroadcastsAction).toHaveBeenCalledTimes(1));
+    expect(onActiveChange).toHaveBeenLastCalledWith(false);
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(listActiveScheduledBroadcastsAction).toHaveBeenCalledTimes(1);
+  });
+});

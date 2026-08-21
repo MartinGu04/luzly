@@ -55,9 +55,34 @@ describe("manager scheduled broadcast claim-window migration -- security shape (
     expect(sql).not.toMatch(/create index/i);
   });
 
-  it("shrinks the pre-checkpoint stale-claim window from 4 minutes to 90 seconds", () => {
+  it("shrinks the stale-claim lease from 4 minutes to 90 seconds", () => {
     expect(sql).not.toMatch(/interval '4 minutes'/i);
-    expect(sql).toMatch(/status = 'claimed' and batch_id is null and claimed_at < now\(\) - interval '90 seconds'/i);
+    expect(sql).toMatch(/status = 'claimed' and claimed_at < now\(\) - interval '90 seconds'/i);
+  });
+
+  it("CRITICAL: batch_id is NEVER part of the eligibility condition -- a fresh 'claimed' row with a checkpointed batch_id is NOT immediately reclaimable, only a lease-expired one is (the bug this migration was rewritten to fix)", () => {
+    // Strip `--` line comments first -- the doc comment above legitimately
+    // discusses `batch_id is not null` as the BUG being fixed, so a raw
+    // scan of the whole file text would false-positive on that prose.
+    // Only the actual SQL matters here.
+    const sqlOnly = sql
+      .split("\n")
+      .map((line) => line.replace(/--.*$/, ""))
+      .join("\n");
+
+    expect(sqlOnly).not.toMatch(/batch_id is not null/i);
+    expect(sqlOnly).not.toMatch(/batch_id is null and claimed_at/i);
+
+    // Every 'claimed' eligibility branch (a WHERE/OR clause -- always
+    // "status = 'claimed' and ...)", never the UPDATE's own unrelated
+    // "set status = 'claimed', claimed_at = now()" SET clause) must be
+    // the SAME uniform claimed_at-vs-lease check, never gated on batch_id.
+    const claimedBranches = sqlOnly.match(/status = 'claimed' and [^\n]*/gi) ?? [];
+    expect(claimedBranches.length).toBeGreaterThan(0);
+    for (const branch of claimedBranches) {
+      expect(branch).not.toMatch(/batch_id/i);
+      expect(branch).toMatch(/claimed_at < now\(\) - interval '90 seconds'/i);
+    }
   });
 
   it("the claim function still never resets a claimed row back to 'scheduled'", () => {
@@ -84,13 +109,12 @@ describe("manager scheduled broadcast claim-window migration -- security shape (
     expect(sql).toMatch(/grant execute on function public\.peek_due_manager_scheduled_broadcasts\(\) to service_role/i);
   });
 
-  it("the peek function mirrors the exact same three-way eligibility condition as the claim function -- never allowed to drift", () => {
+  it("the peek function mirrors the exact same two-way, lease-only eligibility condition as the claim function -- never allowed to drift", () => {
     const claimMatch = sql.match(/claim_due_manager_scheduled_broadcasts[\s\S]*?\$\$;/i)?.[0] ?? "";
     const peekMatch = sql.match(/peek_due_manager_scheduled_broadcasts[\s\S]*?\$\$;/i)?.[0] ?? "";
     for (const clause of [
       "status = 'scheduled' and scheduled_for <= now\\(\\)",
-      "status = 'claimed' and batch_id is not null",
-      "status = 'claimed' and batch_id is null and claimed_at < now\\(\\) - interval '90 seconds'",
+      "status = 'claimed' and claimed_at < now\\(\\) - interval '90 seconds'",
     ]) {
       expect(claimMatch).toMatch(new RegExp(clause, "i"));
       expect(peekMatch).toMatch(new RegExp(clause, "i"));

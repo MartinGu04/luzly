@@ -92,6 +92,19 @@ export function ManagerScheduledBroadcastsSection({
   // touches `editingId`/the composer's own state -- a background refresh
   // can only ever change which items are LISTED here, never what the
   // manager currently has open for editing.
+  //
+  // A THROWN failure (network hiccup, transient 5xx, ...) is deliberately
+  // NOT treated the same as `result.ok === false`: the latter is a
+  // successfully-returned, typed, permanent state (`forbidden`,
+  // `unauthenticated`, etc. -- retrying won't change it, so polling stops
+  // and reports inactive, same as before). A throw means we simply don't
+  // know the current state -- "unknown" is not "empty" -- so it must
+  // never report `onActiveChange(false)` (which would incorrectly shut
+  // down the recent-sends section's own polling too), and must still
+  // retry on the next tick rather than dying silently. This is what lets
+  // the manager recover live status automatically after a transient
+  // failure, including one on the very first load, without a page
+  // refresh.
   useEffect(() => {
     let cancelled = false;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
@@ -114,7 +127,11 @@ export function ManagerScheduledBroadcastsSection({
       } catch {
         if (!cancelled) {
           setLoadError("unknown");
-          onActiveChange?.(false);
+          // Deliberately no onActiveChange(false) here -- a transient
+          // failure tells us nothing about whether active schedules
+          // exist, so the last known active state (and therefore the
+          // recent-sends section's own polling) is left untouched.
+          timeoutId = setTimeout(load, POLL_INTERVAL_MS);
         }
       }
     }

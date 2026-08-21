@@ -24,8 +24,11 @@ export interface ScheduledBroadcastWorkerTickSummary {
  * NOT a copy of it and NOT a "run everything every minute" shortcut:
  *
  * 1. A cheap, read-only Supabase pre-check (`peekAnyManagerScheduledBroadcastWorkDue`,
- *    which mirrors the claim function's own three-way eligibility --
- *    due-scheduled, or claimed-with-batch, or stale-claimed-without-batch).
+ *    which mirrors the claim function's own two-way, lease-only
+ *    eligibility -- due-scheduled, or claimed with an expired 90-second
+ *    lease. `batch_id`'s presence never bypasses the lease -- see
+ *    `20260821100000_speed_up_manager_scheduled_broadcast_claim.sql`'s
+ *    own doc comment for why that matters under overlapping invocations.
  *    When it finds nothing, this returns immediately: no Google/workbook
  *    request, no personnel parsing, no dispatch, no delivery. A minute
  *    with nothing to do costs one small Postgres query, never a Sheets
