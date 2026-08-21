@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 const getRecentManagerBroadcastsAction = vi.fn();
 
@@ -9,9 +9,12 @@ vi.mock("@/lib/notifications/manualBroadcastActions", () => ({
 
 const { ManagerRecentBroadcastsSection } = await import("./ManagerRecentBroadcastsSection");
 
+const CLEARED_BEFORE_STORAGE_KEY = "mi-ma-mo:manager-recent-broadcasts:cleared-before";
+
 afterEach(() => {
   cleanup();
   getRecentManagerBroadcastsAction.mockReset();
+  window.localStorage.clear();
 });
 
 describe("ManagerRecentBroadcastsSection", () => {
@@ -259,5 +262,169 @@ describe("ManagerRecentBroadcastsSection -- polling survives a transient failure
     // 4. no further polling occurs.
     await vi.advanceTimersByTimeAsync(60_000);
     expect(getRecentManagerBroadcastsAction).toHaveBeenCalledTimes(2);
+  });
+});
+
+/** N synthetic items, newest first (matches the server's own `created_at desc` ordering) -- distinct minute-apart timestamps so ordering/cutoff comparisons are unambiguous. */
+function makeItems(count: number): (typeof RECENT_ITEM)[] {
+  return Array.from({ length: count }, (_, index) => ({
+    ...RECENT_ITEM,
+    id: `batch_${count - index}`,
+    title: `שידור ${count - index}`,
+    createdAt: new Date(Date.parse("2026-08-21T08:00:00.000Z") + (count - index) * 60_000).toISOString(),
+  }));
+}
+
+describe("ManagerRecentBroadcastsSection -- compact view (spec: default 3, הצג עוד / הצג פחות)", () => {
+  it("1-3 items: no 'הצג עוד' control at all", async () => {
+    getRecentManagerBroadcastsAction.mockResolvedValue({ ok: true, items: makeItems(3) });
+    render(<ManagerRecentBroadcastsSection reloadToken={0} pollWhileActive={false} />);
+
+    await waitFor(() => expect(screen.getByText("שידור 3")).toBeInTheDocument());
+    expect(screen.getByText("שידור 1")).toBeInTheDocument();
+    expect(screen.queryByText(/הצג עוד/)).toBeNull();
+  });
+
+  it("4-10 items: shows only the latest 3 by default, with the correct remaining count", async () => {
+    getRecentManagerBroadcastsAction.mockResolvedValue({ ok: true, items: makeItems(7) });
+    render(<ManagerRecentBroadcastsSection reloadToken={0} pollWhileActive={false} />);
+
+    await waitFor(() => expect(screen.getByText("שידור 7")).toBeInTheDocument());
+    expect(screen.getByText("שידור 6")).toBeInTheDocument();
+    expect(screen.getByText("שידור 5")).toBeInTheDocument();
+    expect(screen.queryByText("שידור 4")).toBeNull();
+    expect(screen.queryByText("שידור 1")).toBeNull();
+    expect(screen.getByText("הצג עוד (4)")).toBeInTheDocument();
+  });
+
+  it("expand: reveals every currently-available item (up to the server's own 10-row limit), never fetching a second page", async () => {
+    getRecentManagerBroadcastsAction.mockResolvedValue({ ok: true, items: makeItems(10) });
+    render(<ManagerRecentBroadcastsSection reloadToken={0} pollWhileActive={false} />);
+
+    await waitFor(() => expect(screen.getByText("הצג עוד (7)")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("הצג עוד (7)"));
+
+    for (let n = 1; n <= 10; n++) expect(screen.getByText(`שידור ${n}`)).toBeInTheDocument();
+    expect(screen.getByText("הצג פחות")).toBeInTheDocument();
+    expect(getRecentManagerBroadcastsAction).toHaveBeenCalledTimes(1); // no extra fetch triggered by expanding
+  });
+
+  it("collapse: 'הצג פחות' returns to showing only the latest 3", async () => {
+    getRecentManagerBroadcastsAction.mockResolvedValue({ ok: true, items: makeItems(6) });
+    render(<ManagerRecentBroadcastsSection reloadToken={0} pollWhileActive={false} />);
+
+    await waitFor(() => expect(screen.getByText("הצג עוד (3)")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("הצג עוד (3)"));
+    await waitFor(() => expect(screen.getByText("שידור 1")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByText("הצג פחות"));
+    expect(screen.queryByText("שידור 1")).toBeNull();
+    expect(screen.getByText("שידור 6")).toBeInTheDocument();
+    expect(screen.getByText("הצג עוד (3)")).toBeInTheDocument();
+  });
+});
+
+describe("ManagerRecentBroadcastsSection -- 'נקה מהתצוגה' (visual-only local cleanup)", () => {
+  it("clear: currently-visible items disappear immediately, with no refetch", async () => {
+    getRecentManagerBroadcastsAction.mockResolvedValue({ ok: true, items: makeItems(3) });
+    render(<ManagerRecentBroadcastsSection reloadToken={0} pollWhileActive={false} />);
+
+    await waitFor(() => expect(screen.getByText("שידור 3")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("נקה מהתצוגה"));
+
+    expect(screen.queryByText("נשלחו לאחרונה")).toBeNull();
+    expect(screen.queryByText("שידור 3")).toBeNull();
+    expect(getRecentManagerBroadcastsAction).toHaveBeenCalledTimes(1); // no refetch triggered by clearing
+  });
+
+  it("clear is VISUAL ONLY -- no server mutation action exists or is called; the only side effect is a localStorage write", async () => {
+    getRecentManagerBroadcastsAction.mockResolvedValue({ ok: true, items: makeItems(2) });
+    render(<ManagerRecentBroadcastsSection reloadToken={0} pollWhileActive={false} />);
+
+    await waitFor(() => expect(screen.getByText("שידור 2")).toBeInTheDocument());
+    expect(window.localStorage.getItem(CLEARED_BEFORE_STORAGE_KEY)).toBeNull();
+
+    fireEvent.click(screen.getByText("נקה מהתצוגה"));
+
+    // The ONLY mocked server action in this test file is the read action above --
+    // clearing never calls it again, and there is no delete/mutation action to call at all.
+    expect(getRecentManagerBroadcastsAction).toHaveBeenCalledTimes(1);
+    expect(window.localStorage.getItem(CLEARED_BEFORE_STORAGE_KEY)).not.toBeNull();
+  });
+
+  it("the localStorage cutoff survives a component remount (e.g. a page refresh)", async () => {
+    getRecentManagerBroadcastsAction.mockResolvedValue({ ok: true, items: makeItems(3) });
+    const { unmount } = render(<ManagerRecentBroadcastsSection reloadToken={0} pollWhileActive={false} />);
+
+    await waitFor(() => expect(screen.getByText("שידור 3")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("נקה מהתצוגה"));
+    expect(screen.queryByText("נשלחו לאחרונה")).toBeNull();
+    unmount();
+
+    render(<ManagerRecentBroadcastsSection reloadToken={0} pollWhileActive={false} />);
+    await waitFor(() => expect(getRecentManagerBroadcastsAction).toHaveBeenCalledTimes(2));
+    // Same items re-delivered by the mocked poll -- still hidden after remount.
+    expect(screen.queryByText("נשלחו לאחרונה")).toBeNull();
+  });
+
+  it("a malformed localStorage value fails safely -- normal history still shows, nothing is hidden", async () => {
+    window.localStorage.setItem(CLEARED_BEFORE_STORAGE_KEY, "not-a-real-date");
+    getRecentManagerBroadcastsAction.mockResolvedValue({ ok: true, items: makeItems(3) });
+    render(<ManagerRecentBroadcastsSection reloadToken={0} pollWhileActive={false} />);
+
+    await waitFor(() => expect(screen.getByText("שידור 3")).toBeInTheDocument());
+    expect(screen.getByText("שידור 1")).toBeInTheDocument();
+  });
+
+  it("after clearing, an OLD item returned again by a later poll stays hidden", async () => {
+    vi.useFakeTimers();
+    const oldItems = makeItems(3);
+    getRecentManagerBroadcastsAction.mockResolvedValue({ ok: true, items: oldItems });
+
+    render(<ManagerRecentBroadcastsSection reloadToken={0} pollWhileActive={true} />);
+    await vi.waitFor(() => expect(screen.getByText("שידור 3")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByText("נקה מהתצוגה"));
+    expect(screen.queryByText("נשלחו לאחרונה")).toBeNull();
+
+    // The next poll re-delivers the EXACT SAME (now-stale) items -- still hidden.
+    await vi.advanceTimersByTimeAsync(17_000);
+    await vi.waitFor(() => expect(getRecentManagerBroadcastsAction).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText("נשלחו לאחרונה")).toBeNull();
+    expect(screen.queryByText("שידור 3")).toBeNull();
+
+    vi.useRealTimers();
+  });
+
+  it("after clearing, a GENUINELY NEWER broadcast dispatched later becomes visible automatically", async () => {
+    vi.useFakeTimers();
+    const oldItems = makeItems(3);
+    const newestOldCreatedAt = oldItems[0].createdAt;
+    const newBroadcast = {
+      ...RECENT_ITEM,
+      id: "batch_new",
+      title: "שידור חדש",
+      createdAt: new Date(Date.parse(newestOldCreatedAt) + 60_000).toISOString(),
+    };
+
+    getRecentManagerBroadcastsAction
+      .mockResolvedValueOnce({ ok: true, items: oldItems })
+      .mockResolvedValue({ ok: true, items: [newBroadcast, ...oldItems] });
+
+    render(<ManagerRecentBroadcastsSection reloadToken={0} pollWhileActive={true} />);
+    await vi.waitFor(() => expect(screen.getByText("שידור 3")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByText("נקה מהתצוגה"));
+    expect(screen.queryByText("נשלחו לאחרונה")).toBeNull();
+
+    // A background dispatch lands a genuinely newer batch on the next poll.
+    await vi.advanceTimersByTimeAsync(17_000);
+    await vi.waitFor(() => expect(screen.getByText("שידור חדש")).toBeInTheDocument());
+    // The old, already-cleared items remain hidden -- only the new one shows.
+    expect(screen.queryByText("שידור 3")).toBeNull();
+    expect(screen.queryByText("שידור 2")).toBeNull();
+    expect(screen.queryByText("שידור 1")).toBeNull();
+
+    vi.useRealTimers();
   });
 });
