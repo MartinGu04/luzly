@@ -36,7 +36,6 @@ function audienceLabel(item: RecentManagerBroadcastView): string {
  */
 export function ManagerRecentBroadcastsSection({ reloadToken, pollWhileActive }: ManagerRecentBroadcastsSectionProps) {
   const [items, setItems] = useState<RecentManagerBroadcastView[] | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Always loads once on mount / whenever `reloadToken` bumps (a manager's
   // own action elsewhere). The chained setTimeout re-fetch beyond that is
@@ -46,6 +45,19 @@ export function ManagerRecentBroadcastsSection({ reloadToken, pollWhileActive }:
   // (spec §7's "pause when there are no active schedules"). Chaining
   // (never setInterval) keeps overlapping requests structurally
   // impossible, same reasoning as the scheduled section's own poll.
+  //
+  // A THROWN failure (network hiccup, transient 5xx, ...) is deliberately
+  // NOT treated as "stop polling" while `pollWhileActive` is true -- same
+  // reasoning as `ManagerScheduledBroadcastsSection`'s own fix: "unknown"
+  // is not "empty", so this retries on the next normal interval rather
+  // than dying silently until an unrelated `reloadToken`/`pollWhileActive`
+  // change happens to resurrect it. Only a typed `result.ok === false`
+  // (a genuinely permanent manager-auth state -- see
+  // `loadManagerPersonnelContext`'s own docs for why that union can never
+  // include a transient `configuration_error`) stops scheduling further
+  // polls. Whenever `pollWhileActive` is false, no retry is ever
+  // scheduled either way -- this section simply stays quiet until the
+  // scheduled section reports active items again.
   useEffect(() => {
     let cancelled = false;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
@@ -56,15 +68,23 @@ export function ManagerRecentBroadcastsSection({ reloadToken, pollWhileActive }:
         if (cancelled) return;
         if (result.ok) {
           setItems(result.items);
-          setLoadError(null);
           if (pollWhileActive) {
             timeoutId = setTimeout(load, POLL_INTERVAL_MS);
           }
-        } else {
-          setLoadError(result.error);
         }
+        // A typed `result.ok === false` (a genuinely permanent manager-
+        // auth state) simply stops here -- no retry scheduled, and
+        // `items` is left exactly as it was (see the docstring above).
       } catch {
-        if (!cancelled) setLoadError("unknown");
+        if (!cancelled) {
+          // Deliberately no early return / state wipe here -- `items`
+          // (if anything was already loaded) is left completely
+          // untouched, so a transient failure never makes an already-
+          // visible "נשלחו לאחרונה" list disappear.
+          if (pollWhileActive) {
+            timeoutId = setTimeout(load, POLL_INTERVAL_MS);
+          }
+        }
       }
     }
 
@@ -76,7 +96,13 @@ export function ManagerRecentBroadcastsSection({ reloadToken, pollWhileActive }:
     };
   }, [reloadToken, pollWhileActive]);
 
-  if (loadError || items === null || items.length === 0) return null;
+  // A transient background-poll failure must never hide already-loaded
+  // items (see the effect's own docstring above) -- there is no error
+  // state to gate on here at all, deliberately. `items === null`
+  // (nothing has ever loaded successfully yet, including right after an
+  // initial failure) and a genuine successful empty result both still
+  // render nothing, exactly as before.
+  if (items === null || items.length === 0) return null;
 
   return (
     <Panel variant="compact" data-testid="manager-recent-broadcasts">
