@@ -244,7 +244,6 @@ function renderDutyFairnessView(model: DutyFairnessReadModel, rawPersonId: strin
         >
           <DutyFairnessDetail
             view={buildDutyFairnessCardView(selectedRow, null)}
-            normalizedLoad={selectedRow.normalizedLoad}
             previousLabel={formatFairnessScore(selectedRow.previousScore)}
           />
         </FairnessDetailOverlay>

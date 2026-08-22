@@ -578,10 +578,18 @@ describe("/fairness — Shift service-type subgrouping (PR #4 follow-up, Shift F
 });
 
 describe("/fairness — G. Duty cards", () => {
-  it("exact statuses are represented correctly, one interaction deeper in the detail overlay (the main card leads with progress/pace instead)", async () => {
+  it("the workbook's own role-based comparison target never appears anywhere -- not the below/balanced/above badge, not a second 'target' stat, not a gap figure, not a normalized-load percentage -- even one interaction deeper in the detail overlay", async () => {
     getRequestDutyFairness.mockResolvedValue({ status: "ok", model: dutyModel() });
     await renderFairnessPage({ mode: "duties", person: "p_tech" });
-    expect(screen.getByText("מתחת ליעד")).toBeInTheDocument();
+    // The row's fixture (comparisonTarget: 8, status: "below") would have
+    // rendered "מתחת ליעד" here before this fix -- personalTargetTotal (8,
+    // matching the fixture default) is the only target-shaped figure shown.
+    expect(screen.queryByText("מתחת ליעד")).toBeNull();
+    expect(screen.queryByText("מאוזן")).toBeNull();
+    expect(screen.queryByText("מעל היעד")).toBeNull();
+    expect(screen.queryByText("יעד השוואה")).toBeNull();
+    expect(screen.queryByText("פער מהיעד")).toBeNull();
+    expect(screen.queryByText(/עומס יחסי/)).toBeNull();
   });
 
   it("Duty Fairness remains UNCHANGED -- no service-type (סדיר/קבע/מילואים) subgrouping applied, no h3 subgroup headings at all", async () => {
@@ -656,10 +664,13 @@ describe("/fairness — G. Duty cards", () => {
     expect(screen.getByText("אין תורנויות משובצות לפוטנציאל המפורסם בתקופה זו.")).toBeInTheDocument();
   });
 
-  it("B. null target -> the generic unavailable-comparison status badge is still preserved one interaction deeper, in the detail overlay", async () => {
+  it("B. null target -> the detail overlay never shows the workbook's own status badge/target stat either -- personalTargetTotal is the only duty target anywhere", async () => {
     getRequestDutyFairness.mockResolvedValue({ status: "ok", model: noTargetModel() });
     await renderFairnessPage({ mode: "duties", person: "p_tech" });
-    expect(screen.getByText("לא ניתן להשוות")).toBeInTheDocument();
+    const dialog = within(screen.getByRole("dialog"));
+    expect(dialog.queryByText("לא ניתן להשוות")).toBeNull();
+    expect(dialog.queryByText("יעד השוואה")).toBeNull();
+    expect(dialog.getByText("אין תורנויות משובצות לפוטנציאל המפורסם בתקופה זו.")).toBeInTheDocument();
   });
 
   it("exemptions are visible without hover", async () => {
@@ -680,7 +691,7 @@ describe("/fairness — G. Duty cards", () => {
     expect(screen.getByTestId("metric-duty-weekend").textContent).toContain("2");
   });
 
-  it("A. null status from an unavailable currentScore (target still known) shows the known target/progress on the main card, and a generic unavailable-comparison label in the detail overlay, never claiming the target itself is missing", async () => {
+  it("A. an unavailable currentScore never blocks the personal duty target from rendering on the main card, and the detail overlay stays free of the workbook's own status vocabulary", async () => {
     getRequestDutyFairness.mockResolvedValue({
       status: "ok",
       model: dutyModel({
@@ -699,7 +710,51 @@ describe("/fairness — G. Duty cards", () => {
       }),
     });
     await renderFairnessPage({ mode: "duties", person: "p_tech" });
-    expect(screen.getByText("לא ניתן להשוות")).toBeInTheDocument();
+    expect(screen.queryByText("לא ניתן להשוות")).toBeNull();
+    expect(screen.queryByText("יעד השוואה")).toBeNull();
+  });
+
+  it("REGRESSION: the workbook's role-based comparisonTarget (8) and this person's own published-potential personalTargetTotal (5.4) never both appear as competing targets, anywhere on the page", async () => {
+    const model = dutyModel({
+      groups: [
+        {
+          key: "technician",
+          rows: [
+            dutyRow({
+              comparisonTarget: 8,
+              currentScore: 6,
+              status: "below",
+              completedAllocationTotal: 2.4,
+              personalTargetTotal: 5.4,
+              targetProgressRatio: 2.4 / 5.4,
+              remainingToTarget: 5.4 - 2.4,
+            }),
+          ],
+        },
+      ],
+    });
+
+    getRequestDutyFairness.mockResolvedValue({ status: "ok", model });
+    await renderFairnessPage({ mode: "duties" });
+    // Main card: only the personal target (5.4) appears, never the workbook's 8.
+    expect(screen.getByTestId("metric-duty-points").textContent).toContain("5.4");
+    expect(screen.getByTestId("metric-duty-points").textContent).not.toContain("8");
+    expect(screen.queryByText("מתחת ליעד")).toBeNull();
+
+    cleanup();
+    getRequestDutyFairness.mockResolvedValue({ status: "ok", model });
+    await renderFairnessPage({ mode: "duties", person: "p_tech" });
+    // Detail overlay: still only the personal target -- the workbook's own
+    // score (6) and previous score are real facts, never framed as targets,
+    // and its role-based 8/status/gap/normalized-load are never rendered.
+    const dialog = within(screen.getByRole("dialog"));
+    expect(dialog.getByText(/5\.4/)).toBeInTheDocument();
+    expect(dialog.queryByText("מתחת ליעד")).toBeNull();
+    expect(dialog.queryByText("מאוזן")).toBeNull();
+    expect(dialog.queryByText("מעל היעד")).toBeNull();
+    expect(dialog.queryByText("יעד השוואה")).toBeNull();
+    expect(dialog.queryByText("פער מהיעד")).toBeNull();
+    expect(dialog.queryByText(/עומס יחסי/)).toBeNull();
   });
 
   it('a ר"צ row appears in the supervisor section with a null target -- real completed-allocation total visible, no progress bar, and a null-comparison badge one interaction deeper', async () => {
@@ -736,7 +791,8 @@ describe("/fairness — G. Duty cards", () => {
     cleanup();
     getRequestDutyFairness.mockResolvedValue({ status: "ok", model: ratzModel() });
     await renderFairnessPage({ mode: "duties", person: "p_ratz" });
-    expect(screen.getByText("לא ניתן להשוות")).toBeInTheDocument();
+    expect(screen.queryByText("לא ניתן להשוות")).toBeNull();
+    expect(screen.queryByText("יעד השוואה")).toBeNull();
   });
 });
 
