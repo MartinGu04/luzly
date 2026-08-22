@@ -510,3 +510,302 @@ describe("ManagerRecentBroadcastsSection -- cutoff comparisons are CHRONOLOGICAL
     await waitFor(() => expect(screen.getByText("תאריך שבור")).toBeInTheDocument());
   });
 });
+
+const PENDING_ITEM = {
+  ...RECENT_ITEM,
+  scheduleCreatedAt: null as string | null,
+  scheduledFor: null as string | null,
+  sentNowAt: null as string | null,
+  firstSuccessfulPushAt: null as string | null,
+  deliveryLatencySeconds: null as number | null,
+  deliveryState: "pending" as const,
+};
+
+const SENT_ITEM = {
+  ...PENDING_ITEM,
+  firstSuccessfulPushAt: "2026-08-22T18:46:02.000Z",
+  deliveryLatencySeconds: 2,
+  deliveryState: "sent" as const,
+};
+
+describe("ManagerRecentBroadcastsSection -- compact timing row", () => {
+  it("immediate broadcast: 'נוצר HH:MM · נשלח HH:MM · Ns'", async () => {
+    getRecentManagerBroadcastsAction.mockResolvedValue({
+      ok: true,
+      items: [
+        {
+          ...RECENT_ITEM,
+          createdAt: "2026-08-22T18:46:00.000Z", // 21:46 Asia/Jerusalem (IDT, August)
+          scheduleCreatedAt: null,
+          scheduledFor: null,
+          sentNowAt: null,
+          firstSuccessfulPushAt: "2026-08-22T18:46:02.000Z", // 21:46
+          deliveryLatencySeconds: 2,
+          deliveryState: "sent",
+        },
+      ],
+    });
+    render(<ManagerRecentBroadcastsSection reloadToken={0} pollWhileActive={false} />);
+
+    await waitFor(() => expect(screen.getByText("נוצר 21:46 · נשלח 21:46 · 2 שנ׳")).toBeInTheDocument());
+  });
+
+  it("normally scheduled broadcast: 'נוצר HH:MM · תוכנן ל־HH:MM · נשלח HH:MM · Ns', latency measured from scheduled_for", async () => {
+    getRecentManagerBroadcastsAction.mockResolvedValue({
+      ok: true,
+      items: [
+        {
+          ...RECENT_ITEM,
+          createdAt: "2026-08-22T18:46:04.000Z",
+          scheduleCreatedAt: "2026-08-22T17:10:00.000Z", // 20:10
+          scheduledFor: "2026-08-22T18:46:00.000Z", // 21:46
+          sentNowAt: null,
+          firstSuccessfulPushAt: "2026-08-22T18:46:04.000Z", // 21:46, +4s
+          deliveryLatencySeconds: 4,
+          deliveryState: "sent",
+        },
+      ],
+    });
+    render(<ManagerRecentBroadcastsSection reloadToken={0} pollWhileActive={false} />);
+
+    await waitFor(() => expect(screen.getByText("נוצר 20:10 · תוכנן ל־21:46 · נשלח 21:46 · 4 שנ׳")).toBeInTheDocument());
+  });
+
+  it("scheduled broadcast manually 'שלח עכשיו': still shows the ORIGINAL scheduledFor, latency measured from sent_now_at", async () => {
+    getRecentManagerBroadcastsAction.mockResolvedValue({
+      ok: true,
+      items: [
+        {
+          ...RECENT_ITEM,
+          createdAt: "2026-08-22T18:46:00.000Z",
+          scheduleCreatedAt: "2026-08-22T17:10:00.000Z", // 20:10
+          scheduledFor: "2026-08-22T19:30:00.000Z", // 22:30 -- original, still-future schedule
+          sentNowAt: "2026-08-22T18:45:57.000Z",
+          firstSuccessfulPushAt: "2026-08-22T18:46:00.000Z", // 21:46
+          deliveryLatencySeconds: 3,
+          deliveryState: "sent",
+        },
+      ],
+    });
+    render(<ManagerRecentBroadcastsSection reloadToken={0} pollWhileActive={false} />);
+
+    await waitFor(() => expect(screen.getByText("נוצר 20:10 · תוכנן ל־22:30 · נשלח 21:46 · 3 שנ׳")).toBeInTheDocument());
+  });
+
+  it("no successful push yet -- 'ממתין לשליחה' fallback, never a fabricated sent time", async () => {
+    getRecentManagerBroadcastsAction.mockResolvedValue({ ok: true, items: [PENDING_ITEM] });
+    render(<ManagerRecentBroadcastsSection reloadToken={0} pollWhileActive={false} />);
+
+    await waitFor(() => expect(screen.getByText(/ממתין לשליחה/)).toBeInTheDocument());
+    expect(screen.queryByText(/נשלח \d/)).toBeNull();
+  });
+
+  it("zero push-capable recipients -- 'ללא Push'", async () => {
+    getRecentManagerBroadcastsAction.mockResolvedValue({
+      ok: true,
+      items: [{ ...PENDING_ITEM, pushCapableCount: 0, deliveryState: "no_push_recipients" as const }],
+    });
+    render(<ManagerRecentBroadcastsSection reloadToken={0} pollWhileActive={false} />);
+
+    await waitFor(() => expect(screen.getByText(/ללא Push/)).toBeInTheDocument());
+  });
+
+  it("terminal push failure -- 'שליחת Push נכשלה'", async () => {
+    getRecentManagerBroadcastsAction.mockResolvedValue({
+      ok: true,
+      items: [{ ...PENDING_ITEM, deliveryState: "failed" as const }],
+    });
+    render(<ManagerRecentBroadcastsSection reloadToken={0} pollWhileActive={false} />);
+
+    await waitFor(() => expect(screen.getByText(/שליחת Push נכשלה/)).toBeInTheDocument());
+  });
+
+  it("an item from an older/untyped caller (missing the new timing fields entirely) still renders a truthful pending fallback, never crashes", async () => {
+    getRecentManagerBroadcastsAction.mockResolvedValue({ ok: true, items: [RECENT_ITEM] });
+    render(<ManagerRecentBroadcastsSection reloadToken={0} pollWhileActive={false} />);
+
+    await waitFor(() => expect(screen.getByText("עדכון")).toBeInTheDocument());
+    expect(screen.getByText(/ממתין לשליחה/)).toBeInTheDocument();
+  });
+});
+
+describe("ManagerRecentBroadcastsSection -- bounded post-send quick follow-up (eventual-consistency UX)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("does NOT arm the quick follow-up on the initial mount, even when the first-loaded item is pending", async () => {
+    vi.useFakeTimers();
+    getRecentManagerBroadcastsAction.mockResolvedValue({ ok: true, items: [PENDING_ITEM] });
+
+    render(<ManagerRecentBroadcastsSection reloadToken={0} pollWhileActive={false} />);
+    await vi.waitFor(() => expect(getRecentManagerBroadcastsAction).toHaveBeenCalledTimes(1));
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(getRecentManagerBroadcastsAction).toHaveBeenCalledTimes(1);
+  });
+
+  it("does NOT arm the quick follow-up on a bare pollWhileActive flip (reloadToken unchanged) -- follows the normal ~17s cadence instead", async () => {
+    vi.useFakeTimers();
+    getRecentManagerBroadcastsAction.mockResolvedValue({ ok: true, items: [PENDING_ITEM] });
+
+    const { rerender } = render(<ManagerRecentBroadcastsSection reloadToken={0} pollWhileActive={false} />);
+    await vi.waitFor(() => expect(getRecentManagerBroadcastsAction).toHaveBeenCalledTimes(1));
+
+    rerender(<ManagerRecentBroadcastsSection reloadToken={0} pollWhileActive={true} />);
+    await vi.waitFor(() => expect(getRecentManagerBroadcastsAction).toHaveBeenCalledTimes(2));
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(getRecentManagerBroadcastsAction).toHaveBeenCalledTimes(2); // not yet -- too soon for the ~17s cadence, too late for a ~1.5s one
+    await vi.advanceTimersByTimeAsync(12_000); // total ~17s
+    expect(getRecentManagerBroadcastsAction).toHaveBeenCalledTimes(3);
+  });
+
+  it("starts a fast (~1.5s) quick follow-up when reloadToken changes and the freshly-loaded item is still pending", async () => {
+    vi.useFakeTimers();
+    getRecentManagerBroadcastsAction
+      .mockResolvedValueOnce({ ok: true, items: [] })
+      .mockResolvedValue({ ok: true, items: [PENDING_ITEM] });
+
+    const { rerender } = render(<ManagerRecentBroadcastsSection reloadToken={0} pollWhileActive={false} />);
+    await vi.waitFor(() => expect(getRecentManagerBroadcastsAction).toHaveBeenCalledTimes(1));
+
+    rerender(<ManagerRecentBroadcastsSection reloadToken={1} pollWhileActive={false} />);
+    await vi.waitFor(() => expect(getRecentManagerBroadcastsAction).toHaveBeenCalledTimes(2));
+
+    // pollWhileActive is false (no normal cadence at all), yet the quick window still fires well before 17s.
+    await vi.advanceTimersByTimeAsync(1_500);
+    await vi.waitFor(() => expect(getRecentManagerBroadcastsAction).toHaveBeenCalledTimes(3));
+  });
+
+  it("stops the quick follow-up as soon as the pending item resolves to a successful send", async () => {
+    vi.useFakeTimers();
+    getRecentManagerBroadcastsAction
+      .mockResolvedValueOnce({ ok: true, items: [] })
+      .mockResolvedValueOnce({ ok: true, items: [PENDING_ITEM] })
+      .mockResolvedValue({ ok: true, items: [SENT_ITEM] });
+
+    const { rerender } = render(<ManagerRecentBroadcastsSection reloadToken={0} pollWhileActive={false} />);
+    await vi.waitFor(() => expect(getRecentManagerBroadcastsAction).toHaveBeenCalledTimes(1));
+
+    rerender(<ManagerRecentBroadcastsSection reloadToken={1} pollWhileActive={false} />);
+    await vi.waitFor(() => expect(getRecentManagerBroadcastsAction).toHaveBeenCalledTimes(2));
+
+    await vi.advanceTimersByTimeAsync(1_500);
+    await vi.waitFor(() => expect(getRecentManagerBroadcastsAction).toHaveBeenCalledTimes(3)); // resolves here
+
+    // No further polling at all -- pollWhileActive is false and delivery already resolved.
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(getRecentManagerBroadcastsAction).toHaveBeenCalledTimes(3);
+  });
+
+  it("hard-stops the quick follow-up after its bounded window even if the item never resolves -- never becomes permanent rapid polling", async () => {
+    vi.useFakeTimers();
+    getRecentManagerBroadcastsAction
+      .mockResolvedValueOnce({ ok: true, items: [] })
+      .mockResolvedValue({ ok: true, items: [PENDING_ITEM] }); // always still pending
+
+    const { rerender } = render(<ManagerRecentBroadcastsSection reloadToken={0} pollWhileActive={false} />);
+    await vi.waitFor(() => expect(getRecentManagerBroadcastsAction).toHaveBeenCalledTimes(1));
+
+    rerender(<ManagerRecentBroadcastsSection reloadToken={1} pollWhileActive={false} />);
+    await vi.waitFor(() => expect(getRecentManagerBroadcastsAction).toHaveBeenCalledTimes(2));
+
+    // Well past the bounded (~12s) window -- some quick retries must have fired...
+    await vi.advanceTimersByTimeAsync(12_000);
+    const callsAfterWindow = getRecentManagerBroadcastsAction.mock.calls.length;
+    expect(callsAfterWindow).toBeGreaterThan(2);
+
+    // ...but it must have genuinely STOPPED by now -- pollWhileActive is false, so nothing further should ever fire again.
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(getRecentManagerBroadcastsAction).toHaveBeenCalledTimes(callsAfterWindow);
+  });
+
+  it("after the quick window ends, resumes the NORMAL ~17s cadence when pollWhileActive is true", async () => {
+    vi.useFakeTimers();
+    getRecentManagerBroadcastsAction
+      .mockResolvedValueOnce({ ok: true, items: [] })
+      .mockResolvedValue({ ok: true, items: [PENDING_ITEM] }); // never resolves within the quick window
+
+    const { rerender } = render(<ManagerRecentBroadcastsSection reloadToken={0} pollWhileActive={true} />);
+    await vi.waitFor(() => expect(getRecentManagerBroadcastsAction).toHaveBeenCalledTimes(1));
+
+    rerender(<ManagerRecentBroadcastsSection reloadToken={1} pollWhileActive={true} />);
+    await vi.waitFor(() => expect(getRecentManagerBroadcastsAction).toHaveBeenCalledTimes(2));
+
+    await vi.advanceTimersByTimeAsync(12_000); // exhausts the quick window
+    const callsAfterWindow = getRecentManagerBroadcastsAction.mock.calls.length;
+
+    // Quiet for a while (less than the normal ~17s cadence from the LAST quick call) -- no new call yet.
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(getRecentManagerBroadcastsAction).toHaveBeenCalledTimes(callsAfterWindow);
+
+    // Eventually the normal cadence resumes and fires again.
+    await vi.advanceTimersByTimeAsync(17_000);
+    expect(getRecentManagerBroadcastsAction.mock.calls.length).toBeGreaterThan(callsAfterWindow);
+  });
+
+  it("never fires an overlapping request -- the next quick-follow-up call waits for the in-flight one to resolve", async () => {
+    vi.useFakeTimers();
+    let resolveSecondCall: (value: unknown) => void = () => {};
+    getRecentManagerBroadcastsAction
+      .mockResolvedValueOnce({ ok: true, items: [] })
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSecondCall = resolve;
+          }),
+      )
+      .mockResolvedValue({ ok: true, items: [SENT_ITEM] });
+
+    const { rerender } = render(<ManagerRecentBroadcastsSection reloadToken={0} pollWhileActive={false} />);
+    await vi.waitFor(() => expect(getRecentManagerBroadcastsAction).toHaveBeenCalledTimes(1));
+
+    rerender(<ManagerRecentBroadcastsSection reloadToken={1} pollWhileActive={false} />);
+    await vi.waitFor(() => expect(getRecentManagerBroadcastsAction).toHaveBeenCalledTimes(2)); // in-flight, never resolved yet
+
+    // The quick-follow-up interval elapses several times over -- still no third call while the second is pending.
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(getRecentManagerBroadcastsAction).toHaveBeenCalledTimes(2);
+
+    resolveSecondCall({ ok: true, items: [PENDING_ITEM] });
+    await vi.waitFor(() => expect(screen.getByText(/ממתין לשליחה/)).toBeInTheDocument());
+    expect(getRecentManagerBroadcastsAction).toHaveBeenCalledTimes(2); // still just 2 immediately after it resolves
+
+    await vi.advanceTimersByTimeAsync(1_500);
+    await vi.waitFor(() => expect(getRecentManagerBroadcastsAction).toHaveBeenCalledTimes(3)); // only now does the next one fire
+  });
+
+  it("clears the quick-follow-up timer on unmount", async () => {
+    vi.useFakeTimers();
+    getRecentManagerBroadcastsAction
+      .mockResolvedValueOnce({ ok: true, items: [] })
+      .mockResolvedValue({ ok: true, items: [PENDING_ITEM] });
+
+    const { rerender, unmount } = render(<ManagerRecentBroadcastsSection reloadToken={0} pollWhileActive={false} />);
+    await vi.waitFor(() => expect(getRecentManagerBroadcastsAction).toHaveBeenCalledTimes(1));
+
+    rerender(<ManagerRecentBroadcastsSection reloadToken={1} pollWhileActive={false} />);
+    await vi.waitFor(() => expect(getRecentManagerBroadcastsAction).toHaveBeenCalledTimes(2));
+
+    unmount();
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(getRecentManagerBroadcastsAction).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not arm the quick follow-up for an item that is not push-capable, or one that already resolved on the very first reload response", async () => {
+    vi.useFakeTimers();
+    getRecentManagerBroadcastsAction
+      .mockResolvedValueOnce({ ok: true, items: [] })
+      .mockResolvedValue({ ok: true, items: [{ ...PENDING_ITEM, pushCapableCount: 0, deliveryState: "no_push_recipients" as const }] });
+
+    const { rerender } = render(<ManagerRecentBroadcastsSection reloadToken={0} pollWhileActive={false} />);
+    await vi.waitFor(() => expect(getRecentManagerBroadcastsAction).toHaveBeenCalledTimes(1));
+
+    rerender(<ManagerRecentBroadcastsSection reloadToken={1} pollWhileActive={false} />);
+    await vi.waitFor(() => expect(getRecentManagerBroadcastsAction).toHaveBeenCalledTimes(2));
+
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(getRecentManagerBroadcastsAction).toHaveBeenCalledTimes(2); // no quick retries -- nothing was ever unresolved
+  });
+});

@@ -2,13 +2,19 @@
 
 import { after } from "next/server";
 import { loadManagerPersonnelContext, loadManagerWorkbookContext } from "@/lib/readModels/managerWorkbookContext";
+import { computeDeliveryLatencySeconds } from "./broadcastTiming";
 import { runDelivery } from "./engine/delivery";
 import {
   sendManagerBroadcastNotification,
   type BroadcastAudienceKind,
   type BroadcastUnresolvedPerson,
 } from "./engine/manualBroadcast";
-import { listRecentManagerNotificationBatches, RECENT_MANAGER_BROADCASTS_LIMIT } from "./engine/store";
+import {
+  getManagerBroadcastDeliveryTiming,
+  listRecentManagerNotificationBatches,
+  RECENT_MANAGER_BROADCASTS_LIMIT,
+  type ManagerBroadcastDeliveryTiming,
+} from "./engine/store";
 import { formatWorkerErrorLog, runStage, sanitizeWorkerError, WorkerStageError } from "./engine/workerErrors";
 
 const MAX_TARGET_IDS = 5000; // generously above any realistic roster size -- a defensive upper bound, not a real limit.
@@ -145,11 +151,24 @@ export interface RecentManagerBroadcastView {
   body: string;
   audienceKind: BroadcastAudienceKind;
   createdByPersonName: string;
+  /** The batch's own creation/dispatch instant -- UNCHANGED semantics for both immediate and scheduled broadcasts. This stays the list's sort/clear-cutoff anchor (see `ManagerRecentBroadcastsSection.tsx`'s own "נקה מהתצוגה" logic); never swapped for a scheduled broadcast's original schedule-creation time, which would make a broadcast scheduled long ago (but dispatched just now) sort/clear as if it were already stale. See `scheduleCreatedAt` below for that displayed value instead. */
   createdAt: string;
   resolvedRecipientCount: number;
   pushCapableCount: number;
   inboxOnlyCount: number;
   unresolvedCount: number;
+  /** The matched `manager_scheduled_broadcasts` row's own `created_at` -- the "נוצר" instant the UI displays for a SCHEDULED broadcast (when the manager originally created/last edited the schedule). Null for an immediate broadcast, whose displayed "נוצר" is simply `createdAt` itself. */
+  scheduleCreatedAt: string | null;
+  /** The scheduled row's own `scheduled_for` -- null for an immediate broadcast. */
+  scheduledFor: string | null;
+  /** Non-null only when the scheduled broadcast was triggered early via "שלח עכשיו". */
+  sentNowAt: string | null;
+  /** Earliest successful Web Push delivery instant across every recipient/device of this batch -- a successful PUSH REQUEST, never proof of on-device receipt. Null when nothing has succeeded yet, or ever -- never substituted with `createdAt` or any other guess. */
+  firstSuccessfulPushAt: string | null;
+  /** `firstSuccessfulPushAt` minus the correct reference instant (see `computeDeliveryLatencySeconds`) -- null whenever `firstSuccessfulPushAt` is null. */
+  deliveryLatencySeconds: number | null;
+  /** A small truthful fallback for when `firstSuccessfulPushAt` is null -- see `ManagerBroadcastDeliveryTiming`'s own docstring in `engine/store.ts`. */
+  deliveryState: ManagerBroadcastDeliveryTiming["deliveryState"];
 }
 
 export type GetRecentManagerBroadcastsResult =
@@ -165,25 +184,60 @@ export type GetRecentManagerBroadcastsResult =
  * -- personnel-only, cached workbook read -- rather than
  * `loadManagerWorkbookContext`'s full Personal Schedule read-model gate.
  * Still manager-gated exactly like the send action itself.
+ *
+ * Extended (still ONE bounded read, never a second history/archive
+ * endpoint) with truthful delivery timing per batch: `getManagerBroadcastDeliveryTiming`
+ * bulk-aggregates `manager_scheduled_broadcasts`/`notification_jobs`/
+ * `notification_deliveries` for these <=10 batch ids in three queries
+ * total, then `computeDeliveryLatencySeconds` (a pure function, shared with
+ * the UI's own formatting -- see `broadcastTiming.ts`) turns that into the
+ * one duration number the UI displays. Never fakes a "sent" time from
+ * `createdAt` -- a batch with no successful delivery yet gets
+ * `firstSuccessfulPushAt: null` / `deliveryLatencySeconds: null` and a
+ * truthful `deliveryState` instead (see that field's own docstring).
  */
 export async function getRecentManagerBroadcastsAction(): Promise<GetRecentManagerBroadcastsResult> {
   const contextResult = await loadManagerPersonnelContext();
   if (contextResult.status !== "ok") return { ok: false, error: contextResult.status };
 
   const rows = await listRecentManagerNotificationBatches(RECENT_MANAGER_BROADCASTS_LIMIT);
+  const timingByBatchId = await getManagerBroadcastDeliveryTiming(rows);
+
   return {
     ok: true,
-    items: rows.map((row) => ({
-      id: row.id,
-      title: row.title,
-      body: row.body,
-      audienceKind: row.audienceKind,
-      createdByPersonName: row.createdByPersonName,
-      createdAt: row.createdAt,
-      resolvedRecipientCount: row.resolvedRecipientCount,
-      pushCapableCount: row.pushCapableCount,
-      inboxOnlyCount: row.inboxOnlyCount,
-      unresolvedCount: row.unresolvedCount,
-    })),
+    items: rows.map((row) => {
+      const timing: ManagerBroadcastDeliveryTiming = timingByBatchId.get(row.id) ?? {
+        scheduleCreatedAt: null,
+        scheduledFor: null,
+        sentNowAt: null,
+        firstSuccessfulPushAt: null,
+        deliveryState: row.pushCapableCount === 0 ? "no_push_recipients" : "pending",
+      };
+      const deliveryLatencySeconds = computeDeliveryLatencySeconds({
+        batchCreatedAt: row.createdAt,
+        scheduledFor: timing.scheduledFor,
+        sentNowAt: timing.sentNowAt,
+        firstSuccessfulPushAt: timing.firstSuccessfulPushAt,
+      });
+
+      return {
+        id: row.id,
+        title: row.title,
+        body: row.body,
+        audienceKind: row.audienceKind,
+        createdByPersonName: row.createdByPersonName,
+        createdAt: row.createdAt,
+        resolvedRecipientCount: row.resolvedRecipientCount,
+        pushCapableCount: row.pushCapableCount,
+        inboxOnlyCount: row.inboxOnlyCount,
+        unresolvedCount: row.unresolvedCount,
+        scheduleCreatedAt: timing.scheduleCreatedAt,
+        scheduledFor: timing.scheduledFor,
+        sentNowAt: timing.sentNowAt,
+        firstSuccessfulPushAt: timing.firstSuccessfulPushAt,
+        deliveryLatencySeconds,
+        deliveryState: timing.deliveryState,
+      };
+    }),
   };
 }

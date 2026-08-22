@@ -4,6 +4,7 @@ const loadManagerWorkbookContext = vi.fn();
 const loadManagerPersonnelContext = vi.fn();
 const sendManagerBroadcastNotification = vi.fn();
 const listRecentManagerNotificationBatches = vi.fn();
+const getManagerBroadcastDeliveryTiming = vi.fn();
 const after = vi.fn();
 const runDelivery = vi.fn();
 
@@ -16,6 +17,7 @@ vi.mock("./engine/manualBroadcast", () => ({
 }));
 vi.mock("./engine/store", () => ({
   listRecentManagerNotificationBatches: (...args: unknown[]) => listRecentManagerNotificationBatches(...args),
+  getManagerBroadcastDeliveryTiming: (...args: unknown[]) => getManagerBroadcastDeliveryTiming(...args),
   RECENT_MANAGER_BROADCASTS_LIMIT: 10,
 }));
 vi.mock("next/server", () => ({
@@ -64,6 +66,7 @@ beforeEach(() => {
     },
   });
   listRecentManagerNotificationBatches.mockReset().mockResolvedValue([]);
+  getManagerBroadcastDeliveryTiming.mockReset().mockResolvedValue(new Map());
   after.mockReset();
   runDelivery.mockReset().mockResolvedValue({
     jobsClaimed: 0,
@@ -255,8 +258,87 @@ describe("getRecentManagerBroadcastsAction", () => {
           pushCapableCount: 1,
           inboxOnlyCount: 1,
           unresolvedCount: 0,
+          scheduleCreatedAt: null,
+          scheduledFor: null,
+          sentNowAt: null,
+          firstSuccessfulPushAt: null,
+          deliveryLatencySeconds: null,
+          deliveryState: "pending",
         },
       ],
+    });
+  });
+
+  it("passes the bounded batch list straight through to getManagerBroadcastDeliveryTiming -- one bulk aggregation call, never one per batch", async () => {
+    const rows = [
+      { id: "b1", pushCapableCount: 1, createdAt: "2026-08-21T08:00:00.000Z" },
+      { id: "b2", pushCapableCount: 0, createdAt: "2026-08-21T08:01:00.000Z" },
+    ];
+    listRecentManagerNotificationBatches.mockResolvedValue(
+      rows.map((row) => ({
+        idempotencyKey: "k",
+        createdByPersonId: "p_manager",
+        createdByPersonName: "דני מנהל",
+        audienceKind: "everyone",
+        targetPersonIds: [],
+        title: "כותרת",
+        body: "תוכן",
+        resolvedRecipientCount: 1,
+        inboxOnlyCount: 0,
+        unresolvedCount: 0,
+        ...row,
+      })),
+    );
+    await getRecentManagerBroadcastsAction();
+
+    expect(getManagerBroadcastDeliveryTiming).toHaveBeenCalledTimes(1);
+    expect(getManagerBroadcastDeliveryTiming.mock.calls[0][0]).toMatchObject([
+      { id: "b1", pushCapableCount: 1 },
+      { id: "b2", pushCapableCount: 0 },
+    ]);
+  });
+
+  it("merges the store's aggregated timing into each item, and computes deliveryLatencySeconds via the SAME pure formula used elsewhere", async () => {
+    listRecentManagerNotificationBatches.mockResolvedValue([
+      {
+        id: "b1",
+        idempotencyKey: "k1",
+        createdByPersonId: "p_manager",
+        createdByPersonName: "דני מנהל",
+        audienceKind: "everyone",
+        targetPersonIds: [],
+        title: "כותרת",
+        body: "תוכן",
+        resolvedRecipientCount: 1,
+        pushCapableCount: 1,
+        inboxOnlyCount: 0,
+        unresolvedCount: 0,
+        createdAt: "2026-08-22T21:46:00.000Z",
+      },
+    ]);
+    getManagerBroadcastDeliveryTiming.mockResolvedValue(
+      new Map([
+        [
+          "b1",
+          {
+            scheduleCreatedAt: null,
+            scheduledFor: null,
+            sentNowAt: null,
+            firstSuccessfulPushAt: "2026-08-22T21:46:02.000Z",
+            deliveryState: "sent",
+          },
+        ],
+      ]),
+    );
+
+    const result = await getRecentManagerBroadcastsAction();
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("unreachable");
+    expect(result.items[0]).toMatchObject({
+      firstSuccessfulPushAt: "2026-08-22T21:46:02.000Z",
+      deliveryLatencySeconds: 2, // immediate broadcast -- measured from the batch's own createdAt
+      deliveryState: "sent",
     });
   });
 });
