@@ -28,15 +28,12 @@ describe("LoginScheduleRing", () => {
     expect(logo?.closest("div")?.className).not.toContain("hidden");
   });
 
-  it("hides only the night-shift card below `sm` -- it collides with content sitting right below the ring on real phones, the other cards don't", () => {
+  it("hides every floating card below `lg` -- mobile shows only the ring/ticks/logo/sweep hand, cards are desktop-only", () => {
     const { getByText } = render(<LoginScheduleRing />);
-    const nightCard = getByText("משמרת לילה").closest("div.absolute");
-    expect(nightCard?.className).toContain("hidden");
-    expect(nightCard?.className).toContain("sm:flex");
-
-    for (const title of ["משמרת ערב", "משמרת בוקר", "חופש", "תורנות"]) {
+    for (const title of ["משמרת ערב", "משמרת בוקר", "חופש", "תורנות", "משמרת לילה"]) {
       const card = getByText(title).closest("div.absolute");
-      expect(card?.className).not.toContain("hidden");
+      expect(card?.className).toContain("hidden");
+      expect(card?.className).toContain("lg:flex");
     }
   });
 });

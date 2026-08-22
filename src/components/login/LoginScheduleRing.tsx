@@ -17,6 +17,9 @@ interface FloatingCardSpec {
  * Purely decorative illustration of the product's core vocabulary (shift/
  * duty/day-off cards around a clock) -- never real schedule data, same
  * spirit as the timeline it replaces. Colors/times are illustrative only.
+ * Desktop (`lg`+) only -- see `FloatingCard`'s `hidden lg:flex`: on mobile
+ * these crowded the small ring and sat too close to the centered logo, so
+ * mobile shows just the ring/ticks/logo/sweep hand with no cards at all.
  */
 const FLOATING_CARDS: FloatingCardSpec[] = [
   {
@@ -68,15 +71,9 @@ const FLOATING_CARDS: FloatingCardSpec[] = [
 
 function FloatingCard({ card }: { card: FloatingCardSpec }) {
   const { Icon } = card;
-  // The "night" card sits near the very bottom of the ring (top-[96%] on
-  // mobile) -- on a real phone that collides with the Google CTA sitting
-  // right below the ring, unlike the other cards which stay clear. Hidden
-  // below `sm` only (this card, not the whole ring/layout); still shown
-  // from `sm` up, where the ring has more room and there's no collision.
-  const displayClassName = card.key === "night" ? "hidden sm:flex" : "flex";
   return (
     <div
-      className={`absolute ${displayClassName} w-max max-w-[7rem] items-center gap-1.5 rounded-2xl bg-[#141a22]/90 px-2 py-1.5 shadow-[0_16px_32px_-14px_rgba(0,0,0,0.6)] ring-1 ring-white/10 backdrop-blur-sm sm:max-w-[9.5rem] sm:gap-2 sm:px-2.5 sm:py-2 lg:max-w-[10rem] lg:gap-2 lg:px-3 lg:py-2 xl:max-w-[13rem] xl:gap-3 xl:rounded-3xl xl:px-4 xl:py-3 ${card.positionClassName}`}
+      className={`absolute hidden lg:flex w-max max-w-[7rem] items-center gap-1.5 rounded-2xl bg-[#141a22]/90 px-2 py-1.5 shadow-[0_16px_32px_-14px_rgba(0,0,0,0.6)] ring-1 ring-white/10 backdrop-blur-sm sm:max-w-[9.5rem] sm:gap-2 sm:px-2.5 sm:py-2 lg:max-w-[10rem] lg:gap-2 lg:px-3 lg:py-2 xl:max-w-[13rem] xl:gap-3 xl:rounded-3xl xl:px-4 xl:py-3 ${card.positionClassName}`}
     >
       <span
         className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-xl sm:h-8 sm:w-8 lg:h-9 lg:w-9 xl:h-11 xl:w-11 xl:rounded-2xl ${card.badgeClass}`}
@@ -143,9 +140,11 @@ const SWEEP_HAND_TRAIL_PATH = `M 100 100 L ${SWEEP_HAND_TRAIL.x} ${SWEEP_HAND_TR
  * desktop has, just at a smaller `clamp()` size via the wrapper below --
  * see `LoginHero`, which now renders the digital readout as its own
  * mobile-only block underneath this ring instead of inside it). Shift/
- * duty/day-off cards keep floating around its circumference, unchanged.
- * Entirely `aria-hidden` except where noted -- illustrative only, never
- * real schedule data.
+ * duty/day-off cards still float around its circumference on desktop
+ * (`lg`+) exactly as before, but are hidden entirely below `lg` -- see
+ * `FLOATING_CARDS`'s docstring -- so mobile shows only the ring/ticks/
+ * logo/sweep hand. Entirely `aria-hidden` except where noted --
+ * illustrative only, never real schedule data.
  */
 export function LoginScheduleRing() {
   return (
