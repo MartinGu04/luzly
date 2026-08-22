@@ -316,9 +316,58 @@ describe("buildDutyFairnessCardView -- Justice Table redesign: progress/remainin
     expect(view.beyondTargetLabel).toBe("1");
   });
 
-  it("paceLabel reflects the row's own paceStatus, secondary to progress", () => {
+  it("dutyStatusLabel defers to the row's own paceStatus when completed work is under way (not 0, not at/over target)", () => {
     const view = buildDutyFairnessCardView(dutyRow({ paceStatus: "below_pace" }), "/fairness?mode=duties&person=p_1");
-    expect(view.paceLabel).toBe("מתחת לקצב");
+    expect(view.dutyStatusLabel).toBe("מתחת לצפי");
+  });
+
+  it("dutyStatusLabel: on_pace and ahead_of_pace pass through unchanged too, under the SAME defer-to-paceStatus condition", () => {
+    const onPace = buildDutyFairnessCardView(dutyRow({ paceStatus: "on_pace" }), "/fairness?mode=duties&person=p_1");
+    const ahead = buildDutyFairnessCardView(dutyRow({ paceStatus: "ahead_of_pace" }), "/fairness?mode=duties&person=p_1");
+    expect(onPace.dutyStatusLabel).toBe("בהתאם לצפי");
+    expect(ahead.dutyStatusLabel).toBe("מעל לצפי");
+  });
+
+  it("dutyStatusLabel: a real zero completedAllocationTotal with a valid target shows the calm 'טרם בוצעו תורנויות' zero state, NEVER 'מתחת לצפי' -- even though the raw pace math (below_pace) would otherwise apply", () => {
+    const view = buildDutyFairnessCardView(
+      dutyRow({ completedAllocationTotal: 0, personalTargetTotal: 6, targetProgressRatio: 0, remainingToTarget: 6, paceStatus: "below_pace" }),
+      "/fairness?mode=duties&person=p_1",
+    );
+    expect(view.dutyStatusLabel).toBe("טרם בוצעו תורנויות");
+    expect(view.dutyStatusState).toBe("not_started");
+  });
+
+  it("dutyStatusLabel: completed exactly equal to target shows 'היעד הושלם', regardless of paceStatus", () => {
+    const view = buildDutyFairnessCardView(
+      dutyRow({ completedAllocationTotal: 6, personalTargetTotal: 6, targetProgressRatio: 1, remainingToTarget: 0, paceStatus: "below_pace" }),
+      "/fairness?mode=duties&person=p_1",
+    );
+    expect(view.dutyStatusLabel).toBe("היעד הושלם");
+    expect(view.dutyStatusState).toBe("target_reached");
+  });
+
+  it("dutyStatusLabel: completed beyond target shows 'מעבר ליעד', regardless of paceStatus", () => {
+    const view = buildDutyFairnessCardView(
+      dutyRow({ completedAllocationTotal: 7.2, personalTargetTotal: 6.2, targetProgressRatio: 7.2 / 6.2, remainingToTarget: 6.2 - 7.2, paceStatus: "on_pace" }),
+      "/fairness?mode=duties&person=p_1",
+    );
+    expect(view.dutyStatusLabel).toBe("מעבר ליעד");
+    expect(view.dutyStatusState).toBe("target_exceeded");
+  });
+
+  it("dutyStatusLabel: the no-target state is unaffected -- null personalTargetTotal or a real 0 target both still produce a null dutyStatusLabel, never a fabricated zero-state badge", () => {
+    const nullTarget = buildDutyFairnessCardView(
+      dutyRow({ personalTargetTotal: null, targetProgressRatio: null, remainingToTarget: null, paceStatus: null }),
+      "/fairness?mode=duties&person=p_1",
+    );
+    const zeroTarget = buildDutyFairnessCardView(
+      dutyRow({ completedAllocationTotal: 0, personalTargetTotal: 0, targetProgressRatio: null, remainingToTarget: null, paceStatus: null }),
+      "/fairness?mode=duties&person=p_1",
+    );
+    expect(nullTarget.dutyStatusLabel).toBeNull();
+    expect(nullTarget.dutyStatusState).toBeNull();
+    expect(zeroTarget.dutyStatusLabel).toBeNull();
+    expect(zeroTarget.dutyStatusState).toBeNull();
   });
 
   it("two people sharing the SAME allocationLabel get DIFFERENT progress denominators from their own personalTargetTotal -- never a shared role-based constant", () => {

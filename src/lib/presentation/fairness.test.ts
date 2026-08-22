@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   exemptionBadgeLabel,
-  formatDutyPaceLabel,
+  formatDutyStatusLabel,
   formatFairnessDelta,
   formatFairnessDeviationState,
   formatFairnessExpectedValue,
@@ -9,6 +9,7 @@ import {
   formatFairnessScore,
   formatFairnessWeekendCount,
   formatNormalizedLoad,
+  resolveDutyStatusState,
   roundToNearestHalf,
 } from "./fairness";
 
@@ -129,14 +130,69 @@ describe("formatFairnessDeviationState — Justice Table redesign: human-readabl
   });
 });
 
-describe("formatDutyPaceLabel", () => {
-  it("maps each real pace status to its own restrained Hebrew phrase", () => {
-    expect(formatDutyPaceLabel("below_pace")).toBe("מתחת לקצב");
-    expect(formatDutyPaceLabel("on_pace")).toBe("בקצב הצפוי");
-    expect(formatDutyPaceLabel("ahead_of_pace")).toBe("לפני הקצב");
+describe("formatDutyStatusLabel", () => {
+  it("maps each state to its own restrained Hebrew phrase, per the Justice Table pace/status-language refinement", () => {
+    expect(formatDutyStatusLabel("not_started")).toBe("טרם בוצעו תורנויות");
+    expect(formatDutyStatusLabel("below_pace")).toBe("מתחת לצפי");
+    expect(formatDutyStatusLabel("on_pace")).toBe("בהתאם לצפי");
+    expect(formatDutyStatusLabel("ahead_of_pace")).toBe("מעל לצפי");
+    expect(formatDutyStatusLabel("target_reached")).toBe("היעד הושלם");
+    expect(formatDutyStatusLabel("target_exceeded")).toBe("מעבר ליעד");
   });
 
   it("null -> null, never a fabricated badge", () => {
-    expect(formatDutyPaceLabel(null)).toBeNull();
+    expect(formatDutyStatusLabel(null)).toBeNull();
+  });
+
+  it("never produces the old pace-only wording it replaces", () => {
+    const allLabels = (
+      ["not_started", "below_pace", "on_pace", "ahead_of_pace", "target_reached", "target_exceeded"] as const
+    ).map((status) => formatDutyStatusLabel(status));
+    expect(allLabels).not.toContain("בקצב הצפוי");
+    expect(allLabels).not.toContain("מתחת לקצב");
+    expect(allLabels).not.toContain("לפני הקצב");
+  });
+});
+
+describe("resolveDutyStatusState — precedence, per the Justice Table pace/status-language refinement", () => {
+  it("no valid target (null, or <= 0) -> null, preserving the existing no-target state", () => {
+    expect(resolveDutyStatusState(2, null, "below_pace")).toBeNull();
+    expect(resolveDutyStatusState(2, 0, "below_pace")).toBeNull();
+    expect(resolveDutyStatusState(0, -1, null)).toBeNull();
+  });
+
+  it("completed work unavailable -> null, even with a valid target", () => {
+    expect(resolveDutyStatusState(null, 6, "below_pace")).toBeNull();
+  });
+
+  it("completed > target -> target_exceeded, regardless of paceStatus", () => {
+    expect(resolveDutyStatusState(7, 6, "below_pace")).toBe("target_exceeded");
+    expect(resolveDutyStatusState(7, 6, null)).toBe("target_exceeded");
+  });
+
+  it("completed === target -> target_reached, regardless of paceStatus", () => {
+    expect(resolveDutyStatusState(6, 6, "below_pace")).toBe("target_reached");
+    expect(resolveDutyStatusState(6, 6, "ahead_of_pace")).toBe("target_reached");
+  });
+
+  it("a completed total a few floating-point ULPs from the target is still treated as reached, never falling through to a stale pace label", () => {
+    // 0.2 summed 30 times drifts to 5.999999999999998 in real JS floating math.
+    const almostSix = Array.from({ length: 30 }, () => 0.2).reduce((sum, weight) => sum + weight, 0);
+    expect(almostSix).not.toBe(6); // demonstrates the real drift this guards against
+    expect(resolveDutyStatusState(almostSix, 6, "below_pace")).toBe("target_reached");
+  });
+
+  it("completed === 0 (with a valid target, under target) -> not_started, NEVER below_pace even though the raw pace math would say below", () => {
+    expect(resolveDutyStatusState(0, 6, "below_pace")).toBe("not_started");
+  });
+
+  it("completed > 0 and under target -> defers to the existing paceStatus, unchanged", () => {
+    expect(resolveDutyStatusState(2, 6, "below_pace")).toBe("below_pace");
+    expect(resolveDutyStatusState(3, 6, "on_pace")).toBe("on_pace");
+    expect(resolveDutyStatusState(5, 6, "ahead_of_pace")).toBe("ahead_of_pace");
+  });
+
+  it("completed > 0, under target, but paceStatus itself unavailable -> null", () => {
+    expect(resolveDutyStatusState(2, 6, null)).toBeNull();
   });
 });
