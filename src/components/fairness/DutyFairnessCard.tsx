@@ -33,16 +33,18 @@ function PaceBadge({ pace, label }: { pace: "below_pace" | "on_pace" | "ahead_of
 /**
  * Duty Fairness's own three-question hierarchy -- what has this person
  * done, what were they expected to do, where do they stand -- rebuilt
- * around the redesign's core rule: "published potential = planned target,
- * actual validated schedule = actual completed work". `completedAllocationTotal`
- * (real, weighted completed duty work) vs. `comparisonTarget` (the
- * published potential's own target) is now the PRIMARY comparison this
- * card shows -- progress bar, remaining points, and pace -- rather than the
- * workbook's own opaque `currentScore`/below-balanced-above status, which
- * moves to the detail overlay (`DutyFairnessDetail`) alongside the
- * previous-period delta. Neither `currentScore` nor the delta is deleted --
- * they're one interaction deeper, per the redesign's "two information
- * layers" rule.
+ * around the redesign's core rule: "the workbook's own personal target =
+ * planned target, actual validated schedule = actual completed work".
+ * `completedAllocationTotal` (real, weighted completed duty work) vs.
+ * `personalTargetTotal` (the workbook's own "ניקוד לפוטנציאל הנוכחי" value
+ * for this person) is now the PRIMARY comparison this card shows --
+ * progress bar, remaining points, and pace -- rather than the workbook's
+ * role-based `comparisonTarget`/below-balanced-above status, which moves to
+ * the detail overlay (`DutyFairnessDetail`) alongside the previous-period
+ * delta. Neither `currentScore` nor the delta is deleted -- they're one
+ * interaction deeper, per the redesign's "two information layers" rule
+ * (note `currentScore` and `personalTargetTotal` are the SAME workbook
+ * number -- see `DutyFairnessDetail`'s own docs).
  *
  * `hasTarget === false` (e.g. a `'ר"צ'`/"הסמכה" row with no deterministic
  * target) never renders a misleading 0%/empty progress bar -- it shows the
@@ -81,8 +83,18 @@ export function DutyFairnessCard({ view }: { view: DutyFairnessCardView }) {
       {view.hasTarget ? (
         <div className="mt-2 flex flex-col gap-1.5 rounded-lg bg-overlay-faint px-2.5 py-2">
           <div className="flex items-baseline justify-between gap-2">
+            {/* `completed / target` is a bidi-neutral numeric expression (digits +
+                "/"): inside this RTL page it has no strong character of its own to
+                anchor its logical order, so the browser's bidi algorithm can visually
+                reverse it to "target / completed". `dir="ltr"` isolates just this
+                span (per the HTML spec's own `[dir] { unicode-bidi: isolate }` UA
+                rule) so it always renders completed-before-target, while "נקודות"
+                stays in the normal RTL flow around it. */}
             <span className="text-sm font-semibold text-foreground" data-testid="metric-duty-points">
-              {view.completedAllocationLabel} / {view.personalTargetLabel} נקודות
+              <span dir="ltr">
+                {view.completedAllocationLabel} / {view.personalTargetLabel}
+              </span>{" "}
+              נקודות
             </span>
             <span className="text-xs font-medium text-muted-2" data-testid="metric-duty-progress-percent">
               {view.progressPercentLabel}

@@ -53,12 +53,11 @@ const PERIOD_SHEET_KEYS: Record<"h1" | "h2", SheetSourceKey> = {
  * columns rather than a personal `schedule` column (e.g. a duty-only
  * participant who never works shifts).
  *
- * Justice Table redesign -- `personalTargetEvents` is a SEPARATE resolved-
- * Potential event set (see its own comment below, at the call site) feeding
- * `buildDutyFairnessReadModel`'s per-person TARGET (completed/target
- * progress bar denominator): the person's own total weighted requirement in
- * the published Potential for the whole selected period, never a role-based
- * constant.
+ * Justice Table redesign -- each row's per-person TARGET (the completed/
+ * target progress bar denominator) is the workbook's own Fairness-table
+ * "ניקוד לפוטנציאל הנוכחי" value, already parsed by `parseFairnessTable`
+ * into `currentScore` and carried through `buildDutyFairnessReadModel`
+ * untouched -- never reconstructed from Potential events here.
  */
 export async function loadDutyFairnessReadModel(rawPeriod: string | null): Promise<DutyFairnessLoadResult> {
   const contextResult = await loadFairnessWorkbookContext();
@@ -102,29 +101,12 @@ export async function loadDutyFairnessReadModel(rawPeriod: string | null): Promi
   const confirmedPotentialDutyEvents = resolveConfirmedPotentialDutyEvents(potentialAllocations, extendedPeople, events);
   const eventsForCompletedAllocation = [...events, ...confirmedPotentialDutyEvents];
 
-  // Justice Table redesign -- each person's TARGET (the denominator of the
-  // completed/target progress bar) must be their own total weighted
-  // requirement in the published Potential itself, never a role-based
-  // constant. Reuses `resolveConfirmedPotentialDutyEvents` with an EMPTY
-  // `realEvents` argument -- see that function's own docs for why an empty
-  // list here means every Potential allocation resolved to a person becomes
-  // a synthetic event (the internal-duty dedup it normally performs has
-  // nothing to dedupe against), i.e. the FULL published-potential
-  // attribution for that person, untouched by which slots a real internal
-  // שיבוץ (or a swap) later happened to cover. This is deliberately a
-  // SEPARATE event set from `eventsForCompletedAllocation` above -- the
-  // published plan and the actual completed schedule are two different
-  // facts (see `buildDutyFairnessReadModel.ts`'s own docs), and mixing them
-  // here would silently let a real swap change the published target.
-  const personalTargetEvents = resolveConfirmedPotentialDutyEvents(potentialAllocations, extendedPeople, []);
-
   const model = buildDutyFairnessReadModel({
     parseResult,
     periodIdentity,
     fetchedAt: snapshot.fetchedAt,
     now,
     events: eventsForCompletedAllocation,
-    personalTargetEvents,
   });
 
   return { status: "ok", model: withAvatars(model, avatarByPersonId), person };

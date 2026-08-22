@@ -159,12 +159,13 @@ export interface DutyFairnessCardView {
   weekendLabel: string;
   exemptionBadges: string[];
   /**
-   * Justice Table redesign -- this person's own published-potential target,
-   * formatted (`DutyFairnessPersonRowView.personalTargetTotal`). This, NEVER
+   * Justice Table redesign, corrected -- this person's own workbook target
+   * (the "ניקוד לפוטנציאל הנוכחי" column), formatted
+   * (`DutyFairnessPersonRowView.personalTargetTotal`). This, NEVER
    * `targetLabel` above, is the progress bar's denominator -- two people
    * sharing the same `allocationLabel` can have different values here,
-   * because the published potential assigns them different amounts of
-   * work. `null` exactly when `hasTarget` is `false`.
+   * because the workbook publishes a personal figure for each of them.
+   * `null` exactly when `hasTarget` is `false`.
    */
   personalTargetLabel: string | null;
   /** Whether this row has a real, known personal published-potential target at all -- `false` means the main card shows `noTargetNoteLabel` instead of a progress bar/percentage (never a misleading 0%/empty bar). */
@@ -193,13 +194,11 @@ const NO_TARGET_UNAVAILABLE_NOTE = "היעד האישי אינו זמין כרג
 const NO_TARGET_ROLE_NOTE = "אין תורנויות משובצות לפוטנציאל המפורסם בתקופה זו.";
 
 /**
- * Justice Table redesign -- `personalTargetTotal === null` is a genuine
- * data gap (unresolved identity, or an unsupported guard/reserve block
- * shape in the PUBLISHED PLAN this time -- both flagged via the SAME
- * `duty_allocation_unsupported_block_shape`/`duty_identity_unresolved`
- * reasons `completedAllocationTotal` already uses). A real `0` is a
- * DIFFERENT, complete fact -- this person genuinely has no published-
- * potential assignment this period -- never conflated with the gap above.
+ * Justice Table redesign, corrected -- `personalTargetTotal === null` means
+ * the workbook's own "ניקוד לפוטנציאל הנוכחי" cell for this row is itself
+ * unavailable ("-"/blank). A real `0` is a DIFFERENT, complete fact -- the
+ * workbook itself publishes zero for this person this period -- never
+ * conflated with the gap above.
  */
 function buildNoTargetNote(row: DutyFairnessPersonRowView): string | null {
   if (row.personalTargetTotal === null) return NO_TARGET_UNAVAILABLE_NOTE;
@@ -221,9 +220,10 @@ export function buildDutyFairnessCardView(
   href: string | null,
 ): DutyFairnessCardView {
   // Justice Table redesign -- the progress bar's own "has a target at all"
-  // question is about THIS person's personalTargetTotal, never the
-  // workbook's role-based comparisonTarget (which stays exactly as it was
-  // for the detail overlay's targetLabel/gapLabel/status below).
+  // question is about THIS person's personalTargetTotal (the workbook's
+  // own "ניקוד לפוטנציאל הנוכחי" value), never the workbook's role-based
+  // comparisonTarget (which stays exactly as it was for the detail
+  // overlay's targetLabel/gapLabel/status below).
   const hasTarget = row.personalTargetTotal !== null && row.personalTargetTotal > 0;
   const { liveDutyLabel, liveDutySubLabel } = buildLiveDutyLabels(row.liveDuty);
 

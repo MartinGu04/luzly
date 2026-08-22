@@ -111,6 +111,25 @@ describe("DutyFairnessCard — Justice Table redesign: completed/target progress
     expect(screen.getByTestId("metric-duty-points")).not.toHaveTextContent("8");
   });
 
+  it("BIDI REGRESSION: 'completed / target' is isolated as LTR, so it can never visually reverse inside the surrounding RTL page -- completed stays first in source order, before the target", () => {
+    render(
+      <ul>
+        <DutyFairnessCard view={view({ completedAllocationLabel: "0", personalTargetLabel: "4.7" })} />
+      </ul>,
+    );
+    const points = screen.getByTestId("metric-duty-points");
+    // The numeric ratio must live inside its own `dir="ltr"` element -- per
+    // the HTML spec's `[dir] { unicode-bidi: isolate }` UA rule, this is
+    // what stops the browser's bidi algorithm from visually reordering a
+    // bare "0 / 4.7" (no strong character of its own) inside this RTL page.
+    const isolatedRatio = points.querySelector('[dir="ltr"]');
+    expect(isolatedRatio).not.toBeNull();
+    // Completed is presented BEFORE target in source order, inside that
+    // isolated element -- e.g. completed=0, target=4.7 must read "0 / 4.7",
+    // never "4.7 / 0".
+    expect(isolatedRatio?.textContent?.trim()).toBe("0 / 4.7");
+  });
+
   it("shows remaining points to the target when under 100%", () => {
     render(
       <ul>

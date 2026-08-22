@@ -757,6 +757,39 @@ describe("/fairness — G. Duty cards", () => {
     expect(dialog.queryByText(/עומס יחסי/)).toBeNull();
   });
 
+  it("BIDI REGRESSION: completed=0 / target=4.7 reads '0 / 4.7', never '4.7 / 0', both on the main card and one interaction deeper in the detail overlay", async () => {
+    const model = dutyModel({
+      groups: [
+        {
+          key: "technician",
+          rows: [
+            dutyRow({
+              completedAllocationTotal: 0,
+              personalTargetTotal: 4.7,
+              targetProgressRatio: 0,
+              remainingToTarget: 4.7,
+            }),
+          ],
+        },
+      ],
+    });
+
+    getRequestDutyFairness.mockResolvedValue({ status: "ok", model });
+    await renderFairnessPage({ mode: "duties" });
+    const points = screen.getByTestId("metric-duty-points");
+    const isolatedRatioOnCard = points.querySelector('[dir="ltr"]');
+    expect(isolatedRatioOnCard).not.toBeNull();
+    expect(isolatedRatioOnCard?.textContent?.trim()).toBe("0 / 4.7");
+
+    cleanup();
+    getRequestDutyFairness.mockResolvedValue({ status: "ok", model });
+    await renderFairnessPage({ mode: "duties", person: "p_tech" });
+    const dialog = screen.getByRole("dialog");
+    const isolatedRatioInDialog = dialog.querySelector('[dir="ltr"]');
+    expect(isolatedRatioInDialog).not.toBeNull();
+    expect(isolatedRatioInDialog?.textContent?.trim()).toBe("0 / 4.7");
+  });
+
   it('a ר"צ row appears in the supervisor section with a null target -- real completed-allocation total visible, no progress bar, and a null-comparison badge one interaction deeper', async () => {
     function ratzModel() {
       return dutyModel({
