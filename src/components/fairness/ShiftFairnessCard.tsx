@@ -49,27 +49,29 @@ export function ShiftFairnessCard({ view }: { view: ShiftFairnessCardView }) {
             <span className="font-medium text-foreground">משמרות שבוצעו: {view.actualLabel}</span> · {view.unavailableNote}
           </p>
         ) : (
-          <div className="mt-3 grid grid-cols-3 gap-x-2 gap-y-1 rounded-lg bg-overlay-faint px-3 py-2.5">
-            <FairnessMetric testId="metric-shift-actual" label="משמרות שבוצעו" value={view.actualLabel} />
-            <FairnessMetric testId="metric-shift-target" label="יעד אישי" value={view.targetLabel ?? "—"} />
-            <FairnessMetric
-              testId="metric-shift-gap"
-              label="פער מהיעד"
-              value={view.deviationLabel ?? "—"}
-              toneClassName={fairnessStatusTintTextClass(view.status)}
-            />
+          <div className="mt-3 flex flex-col gap-2 rounded-lg bg-overlay-faint px-3 py-2.5">
+            <div className="grid grid-cols-2 gap-x-2 gap-y-1">
+              <FairnessMetric testId="metric-shift-actual" label="משמרות שבוצעו" value={view.actualLabel} />
+              <div className="flex min-w-0 flex-col gap-0.5" data-testid="metric-shift-target">
+                <span className="text-xs leading-tight text-muted-2">צפי</span>
+                <span className="truncate text-sm font-semibold text-foreground">{view.targetLabel ?? "—"}</span>
+                {view.expectationFactorLabel ? (
+                  <span className="truncate text-[11px] leading-tight text-muted-2">{view.expectationFactorLabel}</span>
+                ) : null}
+              </div>
+            </div>
+            {/* Full-width status state row -- a human-readable phrase (e.g. "1 מתחת לצפוי") needs more room than a compact grid cell can reliably give it, especially on narrow mobile widths, so it gets its own row rather than truncating. */}
+            <div className="flex min-w-0 flex-col gap-0.5 border-t border-border pt-1.5" data-testid="metric-shift-status-state">
+              <span className="text-xs leading-tight text-muted-2">מצב מול הצפי</span>
+              <span className={`text-sm font-semibold ${fairnessStatusTintTextClass(view.status)}`}>{view.statusStateLabel}</span>
+            </div>
           </div>
         )}
 
         <div className="mt-2 flex items-center gap-4 border-t border-border pt-2 text-xs text-muted-2">
           <span data-testid="metric-shift-weekend-actual">
-            משמרות סופ&quot;ש שבוצעו <span className="font-medium text-muted">{view.weekendActualLabel}</span>
+            סופ&quot;שים <span className="font-medium text-muted">{view.weekendActualLabel}</span>
           </span>
-          {view.weekendTargetLabel ? (
-            <span data-testid="metric-shift-weekend-target">
-              יעד סופ&quot;ש <span className="font-medium text-muted">{view.weekendTargetLabel}</span>
-            </span>
-          ) : null}
         </div>
       </div>
 

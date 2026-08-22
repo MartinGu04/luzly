@@ -1,37 +1,57 @@
 import Link from "next/link";
 import type { DutyFairnessCardView } from "@/lib/presentation/fairnessCards";
 import { Avatar } from "@/components/ui/Avatar";
+import { DutyProgressBar } from "./DutyProgressBar";
 import { FairnessMetric } from "./FairnessMetric";
-import { FairnessStatusBadge, fairnessStatusTintTextClass } from "./FairnessStatusBadge";
+
+const PACE_TINT_CLASSES: Record<"below_pace" | "on_pace" | "ahead_of_pace", string> = {
+  below_pace: "bg-status-below-soft text-status-below ring-status-below-border",
+  on_pace: "bg-status-balanced-soft text-status-balanced ring-status-balanced-border",
+  ahead_of_pace: "bg-status-above-soft text-status-above ring-status-above-border",
+};
 
 /**
- * One Duty Fairness person card (PR #4 §12, redesigned PR #51 follow-up,
- * densified follow-up) -- name/allocation + status, then a compact self-
- * explanatory PRIMARY metric grid (הקצאות שבוצעו / ניקוד נוכחי / יעד
- * השוואה / פער מהיעד, the weighted completed-allocation total leading
- * since it's the intuitive fact, followed by the fairness-scoring metrics,
- * the gap tinted with the same restrained status color as the badge), then
- * a smaller SECONDARY row for the previous-period change, weekend count,
- * and any exemption badges. Deliberately a compact subset -- normalized
- * load lives in the detail overlay, not every read-model field crammed
- * onto the card. An unavailable target never fakes a gap/normalizedLoad/
- * status -- a `'ר"צ'` card, for example, can sit in the אחמ״שים section
- * showing a real score/weekend/exemptions with no comparison target at
- * all, which is expected, not an error; the completed-allocation total
- * stays visible either way, since it never depends on having a comparison
- * target.
+ * A restrained pace pill, DELIBERATELY separate from the shared
+ * `FairnessStatusBadge` -- pace ("given how much of the relevant period
+ * has passed, are they where they should be?") is its own three-word
+ * vocabulary (`lib/domain/dutyPace.ts`), not the below/balanced/above
+ * target-exceedance one, so reusing that badge's own Hebrew labels here
+ * would show the wrong words for the right color. Deliberately no icon --
+ * pace is secondary context, not a headline verdict.
+ */
+function PaceBadge({ pace, label }: { pace: "below_pace" | "on_pace" | "ahead_of_pace"; label: string }) {
+  return (
+    <span
+      data-testid="metric-duty-pace"
+      className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ring-1 ${PACE_TINT_CLASSES[pace]}`}
+    >
+      {label}
+    </span>
+  );
+}
+
+/**
+ * Duty Fairness's own three-question hierarchy -- what has this person
+ * done, what were they expected to do, where do they stand -- rebuilt
+ * around the redesign's core rule: "published potential = planned target,
+ * actual validated schedule = actual completed work". `completedAllocationTotal`
+ * (real, weighted completed duty work) vs. `comparisonTarget` (the
+ * published potential's own target) is now the PRIMARY comparison this
+ * card shows -- progress bar, remaining points, and pace -- rather than the
+ * workbook's own opaque `currentScore`/below-balanced-above status, which
+ * moves to the detail overlay (`DutyFairnessDetail`) alongside the
+ * previous-period delta. Neither `currentScore` nor the delta is deleted --
+ * they're one interaction deeper, per the redesign's "two information
+ * layers" rule.
  *
- * The PRIMARY grid is a CSS container query (`@container` on the card root,
- * `@[380px]:grid-cols-4` on the grid itself), not a viewport breakpoint --
- * deliberately, since this card's own rendered width depends on the page's
- * 1/2-card-per-row layout AND the sidebar's own responsive show/hide, not
- * directly on the viewport. A viewport breakpoint would put the row layout
- * in effect at some widths where the card itself is still too narrow (2-up
- * card grid + visible sidebar); the container query instead asks the ONE
- * question that actually matters -- "is THIS card wide enough for 4
- * metrics in a row?" -- falling back to a compact 2x2 grid whenever it
- * isn't, exactly the same fallback narrow mobile already needed, without
- * introducing a second, viewport-based codepath into the same component.
+ * `hasTarget === false` (e.g. a `'ר"צ'`/"הסמכה" row with no deterministic
+ * target) never renders a misleading 0%/empty progress bar -- it shows the
+ * real completed-work total (which may itself be a real `0`) plus
+ * `noTargetNoteLabel`, a calm explanation, never framed as a failure.
+ *
+ * A currently in-progress completion-based duty (`liveDutyLabel`) gets a
+ * small, calm LIVE strip explaining why it isn't reflected in the total
+ * yet -- never silently invisible.
  *
  * A row with no resolved `href` (unresolved source name) still renders in
  * full, just as a plain (non-clickable) card -- same convention as the
@@ -48,26 +68,40 @@ export function DutyFairnessCard({ view }: { view: DutyFairnessCardView }) {
             <p className="text-xs text-muted">{view.allocationLabel || "—"}</p>
           </div>
         </div>
-        <FairnessStatusBadge status={view.status} />
+        {view.paceLabel && view.paceStatus ? <PaceBadge pace={view.paceStatus} label={view.paceLabel} /> : null}
       </div>
 
-      <div className="mt-2 grid grid-cols-2 gap-x-2 gap-y-1 rounded-lg bg-overlay-faint px-2.5 py-2 @[380px]:grid-cols-4">
-        <FairnessMetric testId="metric-duty-allocation" label="הקצאות שבוצעו" value={view.completedAllocationLabel} />
-        <FairnessMetric testId="metric-duty-current" label="ניקוד נוכחי" value={view.currentLabel} />
-        <FairnessMetric testId="metric-duty-target" label="יעד השוואה" value={view.targetLabel ?? "—"} />
-        <FairnessMetric
-          testId="metric-duty-gap"
-          label="פער מהיעד"
-          value={view.gapLabel ?? "—"}
-          toneClassName={fairnessStatusTintTextClass(view.status)}
-        />
-      </div>
+      {view.liveDutyLabel ? (
+        <div className="mt-2 flex flex-col gap-0.5 rounded-lg bg-status-above-soft px-2.5 py-2" data-testid="metric-duty-live">
+          <span className="text-xs font-medium text-status-above">● LIVE · {view.liveDutyLabel}</span>
+          <span className="text-[11px] text-muted-2">{view.liveDutySubLabel}</span>
+        </div>
+      ) : null}
+
+      {view.hasTarget ? (
+        <div className="mt-2 flex flex-col gap-1.5 rounded-lg bg-overlay-faint px-2.5 py-2">
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="text-sm font-semibold text-foreground" data-testid="metric-duty-points">
+              {view.completedAllocationLabel} / {view.personalTargetLabel} נקודות
+            </span>
+            <span className="text-xs font-medium text-muted-2" data-testid="metric-duty-progress-percent">
+              {view.progressPercentLabel}
+            </span>
+          </div>
+          <DutyProgressBar ratio={view.progressRatio ?? 0} />
+          <span className="text-xs text-muted-2" data-testid="metric-duty-remaining">
+            {view.beyondTargetLabel ? `${view.beyondTargetLabel} נקודות מעבר לפוטנציאל` : `${view.remainingLabel} נקודות נותרו`}
+          </span>
+        </div>
+      ) : (
+        <div className="mt-2 flex flex-col gap-0.5 rounded-lg bg-overlay-faint px-2.5 py-2">
+          <FairnessMetric testId="metric-duty-allocation" label="הקצאות שבוצעו" value={view.completedAllocationLabel} />
+          {view.noTargetNoteLabel ? <span className="text-xs text-muted-2">{view.noTargetNoteLabel}</span> : null}
+        </div>
+      )}
 
       <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-1.5">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-2">
-          <span data-testid="metric-duty-delta">
-            שינוי מהתקופה הקודמת <span className="font-medium text-muted">{view.deltaLabel}</span>
-          </span>
           <span data-testid="metric-duty-weekend">
             סופ&quot;שים <span className="font-medium text-muted">{view.weekendLabel}</span>
           </span>
@@ -89,7 +123,7 @@ export function DutyFairnessCard({ view }: { view: DutyFairnessCardView }) {
   );
 
   const className =
-    "@container block rounded-xl bg-surface-1 p-3 ring-1 ring-border transition-colors duration-200" +
+    "block rounded-xl bg-surface-1 p-3 ring-1 ring-border transition-colors duration-200" +
     (view.href ? " hover:bg-overlay-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary" : "");
 
   if (view.href) {

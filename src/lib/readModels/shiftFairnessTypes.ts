@@ -2,6 +2,7 @@ import type { FairnessDataCompleteness, FairnessPeriodStatus } from "@/lib/domai
 import type { FairnessComparisonGroupKey } from "@/lib/domain/fairnessGroups";
 import type { FairnessShiftStatus } from "@/lib/domain/fairnessShiftEngine";
 import type { PersonnelServiceCategory } from "@/lib/domain/personnelType";
+import type { ShiftExpectationFactors } from "@/lib/domain/shiftExpectationFactors";
 
 /**
  * PR #2 -- the shift Fairness read model's safe projections. No email, no
@@ -39,6 +40,16 @@ export interface ShiftFairnessPersonRowView {
   weekendDeviation: number | null;
   weekendStatus: FairnessShiftStatus | null;
   dataCompleteness: FairnessDataCompleteness;
+  /**
+   * Justice Table redesign -- a small, honest breakdown of real reasons this
+   * person's `target` differs from a full-attendance peer's, reusing only
+   * already-parsed Event facts (`lib/domain/shiftExpectationFactors.ts`) --
+   * never the underlying opportunity-share formula itself. `null` whenever
+   * `target` itself is `null` (an evidence-only/unmodelable member has no
+   * "expected value" to explain in the first place) -- never computed for
+   * those rows.
+   */
+  expectationFactors: ShiftExpectationFactors | null;
   /**
    * The person's presentation-only Google avatar photo, when known --
    * `undefined`/`null` both mean "no photo, fall back to initials"; never

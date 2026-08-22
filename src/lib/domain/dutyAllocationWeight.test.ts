@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   computeCompletedDutyAllocation,
   DUTY_ALLOCATION_WEIGHT_BY_FAMILY,
+  resolveActiveDutyBlock,
   resolveGuardReserveBlockShape,
 } from "./dutyAllocationWeight";
 import type { DutyFamily, Event } from "./event";
@@ -507,5 +508,53 @@ describe("computeCompletedDutyAllocation — mixed real duties, period/cutoff fi
     const result = computeCompletedDutyAllocation([], "p1", H1_START, H1_END);
     expect(result.total).toBe(0);
     expect(result.unsupportedBlocks).toEqual([]);
+  });
+});
+
+describe("resolveActiveDutyBlock — Justice Table LIVE duty detection", () => {
+  it("is null when nothing is currently active", () => {
+    const events = block("guard", WEEKEND_BLOCK_DATES); // Thu 1 - Sun 4
+    expect(resolveActiveDutyBlock(events, "p1", "2026-01-10")).toBeNull();
+  });
+
+  it("is active on a middle day of an in-progress weekend guard block", () => {
+    const events = block("guard", WEEKEND_BLOCK_DATES); // Thu 1 - Sun 4
+    const live = resolveActiveDutyBlock(events, "p1", "2026-01-02"); // Friday, day 2 of 4
+    expect(live).toEqual({ dutyFamily: "guard", slot: 1, startDate: "2026-01-01", endDate: "2026-01-04" });
+  });
+
+  it("is null on the block's OWN final day -- that day already lets it count as completed, so it is no longer 'withheld'", () => {
+    const events = block("guard", WEEKEND_BLOCK_DATES); // Thu 1 - Sun 4
+    expect(resolveActiveDutyBlock(events, "p1", "2026-01-04")).toBeNull();
+  });
+
+  it("is null the day before the block even starts", () => {
+    const events = block("guard", WEEKEND_BLOCK_DATES); // Thu 1 - Sun 4
+    expect(resolveActiveDutyBlock(events, "p1", "2025-12-31")).toBeNull();
+  });
+
+  it("is active for a flat-allocation family (weekend_kitchen) too, not just guard/reserve", () => {
+    const events = block("weekend_kitchen", WEEKEND_KITCHEN_COMPLETE_DATES); // Thu 1 - Sat 3
+    expect(resolveActiveDutyBlock(events, "p1", "2026-01-02")).toEqual({
+      dutyFamily: "weekend_kitchen",
+      slot: 1,
+      startDate: "2026-01-01",
+      endDate: "2026-01-03",
+    });
+  });
+
+  it("day-based families (rasar, daily_kitchen) are never reported LIVE -- they already accrue per day", () => {
+    const events = block("rasar", ["2026-01-01", "2026-01-02", "2026-01-03"], { slot: null });
+    expect(resolveActiveDutyBlock(events, "p1", "2026-01-02")).toBeNull();
+  });
+
+  it("a tentative block is never reported LIVE -- not yet a settled fact", () => {
+    const events = block("guard", WEEKEND_BLOCK_DATES, { certainty: "tentative" });
+    expect(resolveActiveDutyBlock(events, "p1", "2026-01-02")).toBeNull();
+  });
+
+  it("only considers the requested person's own events", () => {
+    const events = block("guard", WEEKEND_BLOCK_DATES, { personId: "p2" });
+    expect(resolveActiveDutyBlock(events, "p1", "2026-01-02")).toBeNull();
   });
 });

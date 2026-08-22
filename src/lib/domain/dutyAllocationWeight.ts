@@ -317,3 +317,57 @@ export function computeCompletedDutyAllocation(
   if (unsupportedBlocks.length > 0) return { total: null, unsupportedBlocks };
   return { total, unsupportedBlocks: [] };
 }
+
+export interface ActiveDutyBlockInfo {
+  dutyFamily: DutyFamily;
+  slot: number | null;
+  startDate: string;
+  endDate: string;
+}
+
+/**
+ * Justice Table redesign -- the one real, CONFIRMED, completion-based duty
+ * block (flat-allocation or guard/reserve -- day-based families are
+ * deliberately excluded, see below) that is currently ACTIVE for `personId`
+ * as of `today`: `today` falls within the block's own `[startDate, endDate]`
+ * AND the block has not yet finished as of `today` (`endDate > today`,
+ * strictly) -- exactly the case where `computeCompletedDutyAllocation`
+ * still correctly contributes `0` for it (a still-in-progress block is
+ * never partially/early credited), so a "LIVE, points will be added on
+ * completion" indicator can explain why, instead of the block silently
+ * appearing to contribute nothing.
+ *
+ * Day-based families (`rasar`/`daily_kitchen`) are deliberately EXCLUDED --
+ * each real day already accrues its own contribution the moment it happens
+ * (see this module's own top-of-file docs), so there is no "points withheld
+ * until completion" state to explain for them; applying the LIVE rule to
+ * them would misrepresent already-existing per-day scoring as still
+ * pending.
+ *
+ * Blocks are built from `personId`'s ENTIRE event history (never date-range-
+ * filtered first) -- the same convention `computeCompletedDutyAllocation`
+ * already requires for correct guard/reserve shape classification. Returns
+ * only the FIRST matching block (there is never expected to be more than
+ * one truly active completion-based block for one person at once); `null`
+ * when none is active. Never mutates `events` and never affects
+ * `computeCompletedDutyAllocation`'s own total -- this is a purely
+ * additional, presentation-facing fact.
+ */
+export function resolveActiveDutyBlock(
+  events: readonly Event[],
+  personId: string,
+  today: string,
+): ActiveDutyBlockInfo | null {
+  const personEvents = events.filter((event) => event.personId === personId);
+  const blocks = buildDutyBlocks(personEvents);
+
+  for (const block of blocks) {
+    if (block.certainty !== "confirmed") continue;
+    if (isDayBasedFamily(block.dutyFamily)) continue;
+    if (block.startDate > today || block.endDate <= today) continue;
+
+    return { dutyFamily: block.dutyFamily, slot: block.slot, startDate: block.startDate, endDate: block.endDate };
+  }
+
+  return null;
+}

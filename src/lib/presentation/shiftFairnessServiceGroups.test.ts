@@ -14,12 +14,15 @@ function card(overrides: Partial<ShiftFairnessCardView> = {}): ShiftFairnessCard
     targetLabel: "4",
     deviationLabel: "0",
     status: "balanced",
+    statusStateLabel: "בהתאם לצפוי",
     weekendActualLabel: "1",
     weekendTargetLabel: "1",
     weekendDeviationLabel: "0",
     weekendStatus: "balanced",
+    weekendStatusStateLabel: "בהתאם לצפוי",
     unavailableNote: null,
     completenessNote: null,
+    expectationFactorLabel: null,
     ...overrides,
   };
 }

@@ -18,6 +18,7 @@ function shiftRow(overrides: Partial<ShiftFairnessPersonRowView> = {}): ShiftFai
     weekendDeviation: -0.2,
     weekendStatus: "balanced",
     dataCompleteness: COMPLETE_FAIRNESS_DATA,
+    expectationFactors: null,
     ...overrides,
   };
 }
@@ -32,11 +33,13 @@ describe("buildShiftFairnessCardView", () => {
       serviceCategory: "regular",
       href: "/fairness?person=p_1",
       actualLabel: "4",
-      targetLabel: "4.3",
+      // Justice Table redesign: the expected value is rounded to the
+      // nearest 0.5 for display only -- the raw target stays 4.3.
+      targetLabel: "4.5",
       deviationLabel: "-0.3",
       status: "balanced",
       weekendActualLabel: "1",
-      weekendTargetLabel: "1.2",
+      weekendTargetLabel: "1",
       unavailableNote: null,
     });
   });
@@ -60,6 +63,42 @@ describe("buildShiftFairnessCardView", () => {
     expect(view.actualLabel).toBe("4");
     expect(view.unavailableNote).toBe("לא ניתן לחשב יעד מלא לתקופה זו");
     expect(view.completenessNote).not.toBeNull();
+  });
+});
+
+describe("buildShiftFairnessCardView -- Justice Table redesign: statusStateLabel and expectationFactorLabel", () => {
+  it("renders a human-readable state instead of the raw signed gap, and rounds the target to the nearest 0.5", () => {
+    const view = buildShiftFairnessCardView(shiftRow({ target: 4.3, deviation: -0.3, status: "balanced" }), "/fairness?person=p_1");
+    expect(view.targetLabel).toBe("4.5");
+    expect(view.statusStateLabel).toBe("בהתאם לצפוי");
+  });
+
+  it("below/above states show the rounded magnitude with a direction phrase", () => {
+    const below = buildShiftFairnessCardView(shiftRow({ deviation: -1.2, status: "below" }), "/fairness?person=p_1");
+    expect(below.statusStateLabel).toBe("1 מתחת לצפוי");
+    const above = buildShiftFairnessCardView(shiftRow({ deviation: 0.9, status: "above" }), "/fairness?person=p_1");
+    expect(above.statusStateLabel).toBe("1 מעל הצפוי");
+  });
+
+  it("expectationFactorLabel is null when there is nothing to explain", () => {
+    const view = buildShiftFairnessCardView(shiftRow({ expectationFactors: null }), "/fairness?person=p_1");
+    expect(view.expectationFactorLabel).toBeNull();
+  });
+
+  it("expectationFactorLabel joins only the non-zero factors, singular/plural aware", () => {
+    const view = buildShiftFairnessCardView(
+      shiftRow({ expectationFactors: { leaveDays: 3, constraintDays: 0, referralDays: 1 } }),
+      "/fairness?person=p_1",
+    );
+    expect(view.expectationFactorLabel).toBe("3 ימי היעדרות · 1 הפניה");
+  });
+
+  it("expectationFactorLabel is null when every factor is zero", () => {
+    const view = buildShiftFairnessCardView(
+      shiftRow({ expectationFactors: { leaveDays: 0, constraintDays: 0, referralDays: 0 } }),
+      "/fairness?person=p_1",
+    );
+    expect(view.expectationFactorLabel).toBeNull();
   });
 });
 
@@ -125,6 +164,11 @@ function dutyRow(overrides: Partial<DutyFairnessPersonRowView> = {}): DutyFairne
     status: "below",
     weekendCount: 2,
     completedAllocationTotal: 5,
+    personalTargetTotal: 8,
+    targetProgressRatio: 0.625,
+    remainingToTarget: 3,
+    paceStatus: null,
+    liveDuty: null,
     exemptions: [],
     dataCompleteness: COMPLETE_FAIRNESS_DATA,
     ...overrides,
@@ -232,6 +276,126 @@ describe("buildDutyFairnessCardView -- completedAllocationLabel is the weighted 
   ])("formats %s cleanly as %s, never forced trailing zeros or floating-point noise", (value, expected) => {
     const view = buildDutyFairnessCardView(dutyRow({ completedAllocationTotal: value }), "/fairness?mode=duties&person=p_1");
     expect(view.completedAllocationLabel).toBe(expected);
+  });
+});
+
+describe("buildDutyFairnessCardView -- Justice Table redesign: progress/remaining/pace/no-target/LIVE", () => {
+  it("formats the read model's already-computed progress ratio / remaining -- completedAllocationTotal vs THIS PERSON'S OWN personalTargetTotal, never comparisonTarget or currentScore", () => {
+    const view = buildDutyFairnessCardView(
+      dutyRow({
+        completedAllocationTotal: 2.6,
+        personalTargetTotal: 6.2,
+        comparisonTarget: 4, // the workbook's unrelated role-based constant -- must never leak into the progress figures below
+        currentScore: 99,
+        targetProgressRatio: 2.6 / 6.2,
+        remainingToTarget: 6.2 - 2.6,
+      }),
+      "/fairness?mode=duties&person=p_1",
+    );
+    expect(view.hasTarget).toBe(true);
+    expect(view.personalTargetLabel).toBe("6.2");
+    expect(view.progressPercentLabel).toBe("42%");
+    expect(view.remainingLabel).toBe("3.6");
+    expect(view.beyondTargetLabel).toBeNull();
+    // The workbook's own comparison target stays a completely separate fact.
+    expect(view.targetLabel).toBe("4");
+  });
+
+  it("beyond-target: over 100% shows a positive beyond-target label and a zero-clamped remaining label", () => {
+    const view = buildDutyFairnessCardView(
+      dutyRow({
+        completedAllocationTotal: 7.2,
+        personalTargetTotal: 6.2,
+        targetProgressRatio: 7.2 / 6.2,
+        remainingToTarget: 6.2 - 7.2,
+      }),
+      "/fairness?mode=duties&person=p_1",
+    );
+    expect(view.progressPercentLabel).toBe("116%");
+    expect(view.remainingLabel).toBe("0");
+    expect(view.beyondTargetLabel).toBe("1");
+  });
+
+  it("paceLabel reflects the row's own paceStatus, secondary to progress", () => {
+    const view = buildDutyFairnessCardView(dutyRow({ paceStatus: "below_pace" }), "/fairness?mode=duties&person=p_1");
+    expect(view.paceLabel).toBe("מתחת לקצב");
+  });
+
+  it("two people sharing the SAME allocationLabel get DIFFERENT progress denominators from their own personalTargetTotal -- never a shared role-based constant", () => {
+    const lightlyLoaded = buildDutyFairnessCardView(
+      dutyRow({ personId: "p_a", allocationLabel: "טכנאי", completedAllocationTotal: 2, personalTargetTotal: 4, targetProgressRatio: 0.5 }),
+      "/fairness?mode=duties&person=p_a",
+    );
+    const heavilyLoaded = buildDutyFairnessCardView(
+      dutyRow({ personId: "p_b", allocationLabel: "טכנאי", completedAllocationTotal: 2, personalTargetTotal: 10, targetProgressRatio: 0.2 }),
+      "/fairness?mode=duties&person=p_b",
+    );
+    expect(lightlyLoaded.personalTargetLabel).toBe("4");
+    expect(heavilyLoaded.personalTargetLabel).toBe("10");
+    expect(lightlyLoaded.progressPercentLabel).toBe("50%");
+    expect(heavilyLoaded.progressPercentLabel).toBe("20%");
+  });
+
+  it("a real zero personalTargetTotal (genuinely no published-potential assignment) -> hasTarget false, no progress bar figures, the 'no duties assigned' note -- never 0%/empty bar", () => {
+    const view = buildDutyFairnessCardView(
+      dutyRow({
+        allocationLabel: 'ר"צ',
+        personalTargetTotal: 0,
+        targetProgressRatio: null,
+        remainingToTarget: null,
+        paceStatus: null,
+        completedAllocationTotal: 0,
+      }),
+      "/fairness?mode=duties&person=p_1",
+    );
+    expect(view.hasTarget).toBe(false);
+    expect(view.personalTargetLabel).toBe("0");
+    expect(view.progressPercentLabel).toBe("—");
+    expect(view.noTargetNoteLabel).toBe("אין תורנויות משובצות לפוטנציאל המפורסם בתקופה זו.");
+  });
+
+  it("a null personalTargetTotal (a genuine data gap -- unresolved identity or an unsupported block shape in the PLAN) gets its OWN distinct note, never confused with a real zero", () => {
+    const view = buildDutyFairnessCardView(
+      dutyRow({
+        personalTargetTotal: null,
+        targetProgressRatio: null,
+        remainingToTarget: null,
+        paceStatus: null,
+      }),
+      "/fairness?mode=duties&person=p_1",
+    );
+    expect(view.hasTarget).toBe(false);
+    expect(view.personalTargetLabel).toBeNull();
+    expect(view.noTargetNoteLabel).toBe("היעד האישי אינו זמין כרגע בנתונים.");
+  });
+
+  it("duty_target_unavailable (the workbook's OWN role-based target note missing) never affects the personal progress bar at all -- it's a separate, unrelated fact", () => {
+    const view = buildDutyFairnessCardView(
+      dutyRow({
+        comparisonTarget: null,
+        dataCompleteness: { status: "partial", reasons: ["duty_target_unavailable"] },
+        // personalTargetTotal/targetProgressRatio/remainingToTarget deliberately left at their normal (real) defaults.
+      }),
+      "/fairness?mode=duties&person=p_1",
+    );
+    expect(view.hasTarget).toBe(true);
+    expect(view.noTargetNoteLabel).toBeNull();
+    expect(view.progressPercentLabel).not.toBe("—");
+  });
+
+  it("liveDuty renders a calm label plus the fixed 'points added on completion' companion text", () => {
+    const view = buildDutyFairnessCardView(
+      dutyRow({ liveDuty: { dutyFamily: "guard", slot: 2 } }),
+      "/fairness?mode=duties&person=p_1",
+    );
+    expect(view.liveDutyLabel).toBe("שמירה 2 פעילה כרגע");
+    expect(view.liveDutySubLabel).toBe("הנקודות יתווספו עם סיום התורנות");
+  });
+
+  it("null liveDuty -> both live labels null", () => {
+    const view = buildDutyFairnessCardView(dutyRow({ liveDuty: null }), "/fairness?mode=duties&person=p_1");
+    expect(view.liveDutyLabel).toBeNull();
+    expect(view.liveDutySubLabel).toBeNull();
   });
 });
 
