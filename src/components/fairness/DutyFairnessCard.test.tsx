@@ -18,6 +18,7 @@ function view(overrides: Partial<DutyFairnessCardView> = {}): DutyFairnessCardVi
     completedAllocationLabel: "2.9",
     currentLabel: "6",
     targetLabel: "8",
+    personalTargetLabel: "8",
     deltaLabel: "+1.00",
     gapLabel: "-2.00",
     status: "below",
@@ -90,13 +91,24 @@ describe("DutyFairnessCard — Justice Table redesign: completed/target progress
   it("shows completed/target points, the progress percentage, and a progress bar reflecting progressRatio", () => {
     render(
       <ul>
-        <DutyFairnessCard view={view({ completedAllocationLabel: "2.6", targetLabel: "6.2", progressPercentLabel: "42%", progressRatio: 0.42 })} />
+        <DutyFairnessCard view={view({ completedAllocationLabel: "2.6", personalTargetLabel: "6.2", progressPercentLabel: "42%", progressRatio: 0.42 })} />
       </ul>,
     );
     expect(screen.getByTestId("metric-duty-points")).toHaveTextContent("2.6");
     expect(screen.getByTestId("metric-duty-points")).toHaveTextContent("6.2");
     expect(screen.getByTestId("metric-duty-progress-percent")).toHaveTextContent("42%");
     expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "42");
+  });
+
+  it("never shows the workbook's role-based comparison target as the points denominator, even when it differs from the person's own personalTargetLabel", () => {
+    render(
+      <ul>
+        <DutyFairnessCard view={view({ completedAllocationLabel: "2.4", personalTargetLabel: "5.7", targetLabel: "8" })} />
+      </ul>,
+    );
+    expect(screen.getByTestId("metric-duty-points")).toHaveTextContent("2.4");
+    expect(screen.getByTestId("metric-duty-points")).toHaveTextContent("5.7");
+    expect(screen.getByTestId("metric-duty-points")).not.toHaveTextContent("8");
   });
 
   it("shows remaining points to the target when under 100%", () => {

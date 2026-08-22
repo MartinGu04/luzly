@@ -82,7 +82,7 @@ export function DutyFairnessCard({ view }: { view: DutyFairnessCardView }) {
         <div className="mt-2 flex flex-col gap-1.5 rounded-lg bg-overlay-faint px-2.5 py-2">
           <div className="flex items-baseline justify-between gap-2">
             <span className="text-sm font-semibold text-foreground" data-testid="metric-duty-points">
-              {view.completedAllocationLabel} / {view.targetLabel} נקודות
+              {view.completedAllocationLabel} / {view.personalTargetLabel} נקודות
             </span>
             <span className="text-xs font-medium text-muted-2" data-testid="metric-duty-progress-percent">
               {view.progressPercentLabel}

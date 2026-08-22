@@ -101,24 +101,54 @@ export interface DutyFairnessPersonRowView {
    */
   completedAllocationTotal: number | null;
   /**
-   * Justice Table redesign -- "how much of the published-potential target
-   * is completed", strictly `completedAllocationTotal / comparisonTarget`
-   * (reusing `computeNormalizedLoad` outright, the exact same "ratio with
+   * Justice Table redesign -- this specific person's own TARGET: the total
+   * weighted requirement attributed to them in the published Potential
+   * across the WHOLE selected period (never capped at "today" -- a target
+   * describes the whole plan, not only what's already happened). Computed
+   * via the SAME weighting engine as `completedAllocationTotal`
+   * (`computeCompletedDutyAllocation`), just over the resolved-Potential
+   * event set instead of the real schedule.
+   *
+   * Deliberately NEVER `comparisonTarget` (the workbook's role-based X/2X
+   * constant, e.g. a flat 4 for every אחמ״ש or 8 for every טכנאי,
+   * regardless of what any specific person was actually assigned) -- two
+   * people with the SAME `allocationLabel` can have completely different
+   * `personalTargetTotal`s, because the published potential assigns them
+   * different amounts of work. A swap moves who performed a duty (reflected
+   * in `completedAllocationTotal`, from the real schedule) without moving
+   * who it was published for (reflected here, from the Potential sheet's
+   * own resolved source labels) -- see `dutyFairness.ts`'s
+   * `personalTargetEvents` docs for why the two event sets are kept
+   * separate rather than merged.
+   *
+   * `null` for the SAME two reasons as `completedAllocationTotal` above
+   * (`duty_identity_unresolved`, or `duty_allocation_unsupported_block_shape`
+   * for an unclassifiable guard/reserve block in the PLAN this time, not
+   * the actual schedule) -- both flagged via `dataCompleteness`. A real `0`
+   * (this person genuinely has no published-potential assignment this
+   * period) is a normal, complete, truthful outcome, never a gap.
+   */
+  personalTargetTotal: number | null;
+  /**
+   * "how much of `personalTargetTotal` is completed", strictly
+   * `completedAllocationTotal / personalTargetTotal` (reusing
+   * `computeNormalizedLoad` outright, the exact same "ratio with
    * null-safety" math `normalizedLoad` already uses -- just applied to the
-   * REAL completed-work total instead of the workbook's opaque
-   * `currentScore`, per the redesign's own "published potential = planned
-   * target, actual validated schedule = actual completed work" rule).
-   * `null` whenever either side is unavailable, exactly like
-   * `normalizedLoad`. Can legitimately exceed `1` (over 100% of target) --
-   * never clamped, since that is real, truthful data (see
-   * `remainingToTarget` below for the signed complement).
+   * REAL completed-work total and this person's OWN published-potential
+   * total, per the redesign's own "published potential = planned target,
+   * actual validated schedule = actual completed work" rule). `null`
+   * whenever either side is unavailable, exactly like `normalizedLoad`. Can
+   * legitimately exceed `1` (over 100% of target) -- never clamped, since
+   * that is real, truthful data (see `remainingToTarget` below for the
+   * signed complement).
    */
   targetProgressRatio: number | null;
   /**
-   * `comparisonTarget - completedAllocationTotal` -- signed, so a negative
-   * value means the target was exceeded (see `remainingToTarget < 0` ->
-   * "X points beyond potential" in presentation). `null` whenever either
-   * side is unavailable -- never a guessed remaining amount.
+   * `personalTargetTotal - completedAllocationTotal` -- signed, so a
+   * negative value means the target was exceeded (see
+   * `remainingToTarget < 0` -> "X points beyond potential" in
+   * presentation). `null` whenever either side is unavailable -- never a
+   * guessed remaining amount.
    */
   remainingToTarget: number | null;
   /**

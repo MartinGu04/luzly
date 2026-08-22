@@ -654,11 +654,17 @@ describe("buildDutyFairnessReadModel — completedAllocationTotal: weighted, ind
 describe("buildDutyFairnessReadModel — Justice Table redesign: progress/remaining/pace", () => {
   const targets: FairnessTargets = { supervisorTarget: 4, technicianTarget: 8 };
 
-  it("targetProgressRatio is completedAllocationTotal / comparisonTarget, an entirely different figure from normalizedLoad (currentScore-based)", () => {
+  it("personalTargetTotal is derived from personalTargetEvents (the published Potential), completely independent of comparisonTarget/targets -- and targetProgressRatio uses it, never the workbook role-based constant", () => {
     const events: Event[] = [
       dutyEvent({ personId: "p1", date: "2026-02-01" }),
       dutyEvent({ personId: "p1", date: "2026-02-08" }),
     ]; // 2 rasar days -> completedAllocationTotal 0.4
+    const personalTargetEvents: Event[] = [
+      dutyEvent({ personId: "p1", date: "2026-03-01" }),
+      dutyEvent({ personId: "p1", date: "2026-03-08" }),
+      dutyEvent({ personId: "p1", date: "2026-03-15" }),
+      dutyEvent({ personId: "p1", date: "2026-03-22" }),
+    ]; // 4 rasar days -> personalTargetTotal 0.8, unrelated to targets.technicianTarget (8)
     const model = buildDutyFairnessReadModel({
       parseResult: parseResult({
         personRows: [personRow({ resolvedPersonId: "p1", allocationLabel: "טכנאי", currentScore: 6 })],
@@ -668,15 +674,63 @@ describe("buildDutyFairnessReadModel — Justice Table redesign: progress/remain
       fetchedAt: "2026-08-15T10:00:00.000Z",
       now: NOW,
       events,
+      personalTargetEvents,
     });
     const row = model.groups.find((g) => g.key === "technician")?.rows[0];
     expect(row?.completedAllocationTotal).toBeCloseTo(0.4);
-    expect(row?.targetProgressRatio).toBeCloseTo(0.05); // 0.4 / 8
-    expect(row?.normalizedLoad).toBeCloseTo(0.75); // 6 / 8 -- currentScore-based, unaffected
+    expect(row?.personalTargetTotal).toBeCloseTo(0.8);
+    expect(row?.targetProgressRatio).toBeCloseTo(0.5); // 0.4 / 0.8 -- NOT 0.4 / 8
+    expect(row?.normalizedLoad).toBeCloseTo(0.75); // 6 / 8 -- currentScore/comparisonTarget-based, entirely unaffected
   });
 
-  it("remainingToTarget is signed: positive while under target, negative ('beyond potential') once exceeded", () => {
-    const under: Event[] = [dutyEvent({ personId: "p1", date: "2026-02-01" })]; // 0.2
+  it("two people with the SAME allocationLabel (hence the SAME workbook comparisonTarget) get DIFFERENT personalTargetTotal/targetProgressRatio, from their own personalTargetEvents", () => {
+    const lightPersonRow = personRow({ resolvedPersonId: "p_light", allocationLabel: "טכנאי" });
+    const heavyPersonRow = personRow({ resolvedPersonId: "p_heavy", allocationLabel: "טכנאי" });
+
+    const events: Event[] = [
+      dutyEvent({ personId: "p_light", date: "2026-02-01" }), // 0.2 completed
+      dutyEvent({ personId: "p_heavy", date: "2026-02-01" }), // 0.2 completed -- SAME as p_light
+    ];
+    const personalTargetEvents: Event[] = [
+      dutyEvent({ personId: "p_light", date: "2026-03-01" }), // 1 rasar day -> personal target 0.2
+      dutyEvent({ personId: "p_heavy", date: "2026-03-01" }),
+      dutyEvent({ personId: "p_heavy", date: "2026-03-08" }),
+      dutyEvent({ personId: "p_heavy", date: "2026-03-15" }),
+      dutyEvent({ personId: "p_heavy", date: "2026-03-22" }), // 4 rasar days -> personal target 0.8
+    ];
+
+    const model = buildDutyFairnessReadModel({
+      parseResult: parseResult({ personRows: [lightPersonRow, heavyPersonRow], targets }),
+      periodIdentity: { key: "h1", year: 2026 },
+      fetchedAt: "2026-08-15T10:00:00.000Z",
+      now: NOW,
+      events,
+      personalTargetEvents,
+    });
+    const rows = model.groups.find((g) => g.key === "technician")?.rows ?? [];
+    const lightRow = rows.find((r) => r.personId === "p_light");
+    const heavyRow = rows.find((r) => r.personId === "p_heavy");
+
+    expect(lightRow?.completedAllocationTotal).toBeCloseTo(0.2);
+    expect(heavyRow?.completedAllocationTotal).toBeCloseTo(0.2);
+    // Same completed work, same workbook comparisonTarget (both טכנאי) --
+    // but genuinely different personal targets and therefore progress.
+    expect(lightRow?.comparisonTarget).toBe(heavyRow?.comparisonTarget);
+    expect(lightRow?.personalTargetTotal).toBeCloseTo(0.2);
+    expect(heavyRow?.personalTargetTotal).toBeCloseTo(0.8);
+    expect(lightRow?.targetProgressRatio).toBeCloseTo(1); // 0.2 / 0.2
+    expect(heavyRow?.targetProgressRatio).toBeCloseTo(0.25); // 0.2 / 0.8
+  });
+
+  it("remainingToTarget is signed: positive while under target, negative ('beyond potential') once exceeded -- against personalTargetTotal, never comparisonTarget", () => {
+    const under: Event[] = [dutyEvent({ personId: "p1", date: "2026-02-01" })]; // 0.2 completed
+    const underTarget: Event[] = [
+      dutyEvent({ personId: "p1", date: "2026-03-01" }),
+      dutyEvent({ personId: "p1", date: "2026-03-08" }),
+      dutyEvent({ personId: "p1", date: "2026-03-15" }),
+      dutyEvent({ personId: "p1", date: "2026-03-22" }),
+      dutyEvent({ personId: "p1", date: "2026-03-29" }),
+    ]; // 5 rasar days -> personal target 1.0
     const modelUnder = buildDutyFairnessReadModel({
       parseResult: parseResult({
         personRows: [personRow({ resolvedPersonId: "p1", allocationLabel: "טכנאי" })],
@@ -686,9 +740,11 @@ describe("buildDutyFairnessReadModel — Justice Table redesign: progress/remain
       fetchedAt: "2026-08-15T10:00:00.000Z",
       now: NOW,
       events: under,
+      personalTargetEvents: underTarget,
     });
     const rowUnder = modelUnder.groups.find((g) => g.key === "technician")?.rows[0];
-    expect(rowUnder?.remainingToTarget).toBeCloseTo(7.8); // 8 - 0.2
+    expect(rowUnder?.personalTargetTotal).toBeCloseTo(1);
+    expect(rowUnder?.remainingToTarget).toBeCloseTo(0.8); // 1.0 - 0.2
 
     const overEvents: Event[] = [
       guardEvent("2026-01-01"), // weekend 1.0
@@ -696,6 +752,7 @@ describe("buildDutyFairnessReadModel — Justice Table redesign: progress/remain
       guardEvent("2026-01-03"),
       guardEvent("2026-01-04"),
     ];
+    const overTargetEvents: Event[] = [guardEvent("2026-02-01", { slot: 2 })]; // single_day -> personal target 0.25
     const modelOver = buildDutyFairnessReadModel({
       parseResult: parseResult({
         personRows: [personRow({ resolvedPersonId: "p1", allocationLabel: 'אחמ"ש' })],
@@ -705,14 +762,20 @@ describe("buildDutyFairnessReadModel — Justice Table redesign: progress/remain
       fetchedAt: "2026-08-15T10:00:00.000Z",
       now: NOW,
       events: overEvents,
+      personalTargetEvents: overTargetEvents,
     });
     const rowOver = modelOver.groups.find((g) => g.key === "supervisor")?.rows[0];
     expect(rowOver?.completedAllocationTotal).toBe(1);
-    expect(rowOver?.remainingToTarget).toBe(3); // 4 - 1
+    expect(rowOver?.personalTargetTotal).toBeCloseTo(0.25);
+    expect(rowOver?.remainingToTarget).toBeCloseTo(-0.75); // 0.25 - 1
   });
 
-  it("remainingToTarget/targetProgressRatio are null with no target, even with real completed work", () => {
+  it("personalTargetTotal/targetProgressRatio/remainingToTarget/paceStatus are all null when the PLANNED total itself can't be classified (an unsupported guard/reserve block shape in the published potential)", () => {
     const events: Event[] = [dutyEvent({ personId: "p_rats", date: "2026-02-01" })];
+    const personalTargetEvents: Event[] = [
+      guardEvent("2026-02-05", { personId: "p_rats" }),
+      guardEvent("2026-02-06", { personId: "p_rats" }),
+    ]; // a real 2-day block -- no matching business rule
     const model = buildDutyFairnessReadModel({
       parseResult: parseResult({
         personRows: [personRow({ resolvedPersonId: "p_rats", allocationLabel: 'ר"צ' })],
@@ -722,11 +785,33 @@ describe("buildDutyFairnessReadModel — Justice Table redesign: progress/remain
       fetchedAt: "2026-08-15T10:00:00.000Z",
       now: NOW,
       events,
+      personalTargetEvents,
     });
     const row = model.groups.find((g) => g.key === "supervisor")?.rows[0];
     expect(row?.completedAllocationTotal).toBeCloseTo(0.2);
+    expect(row?.personalTargetTotal).toBeNull();
     expect(row?.targetProgressRatio).toBeNull();
     expect(row?.remainingToTarget).toBeNull();
+    expect(row?.paceStatus).toBeNull();
+    expect(row?.dataCompleteness.reasons).toContain("duty_allocation_unsupported_block_shape");
+  });
+
+  it("a real zero personalTargetTotal (no personalTargetEvents supplied at all) makes progress/pace null, never a divide-by-zero/guessed 0%", () => {
+    const events: Event[] = [dutyEvent({ personId: "p1", date: "2026-02-01" })]; // 0.2 completed
+    const model = buildDutyFairnessReadModel({
+      parseResult: parseResult({
+        personRows: [personRow({ resolvedPersonId: "p1", allocationLabel: "טכנאי" })],
+        targets,
+      }),
+      periodIdentity: { key: "h1", year: 2026 },
+      fetchedAt: "2026-08-15T10:00:00.000Z",
+      now: NOW,
+      events,
+      // personalTargetEvents omitted -> defaults to [] -> personalTargetTotal 0
+    });
+    const row = model.groups.find((g) => g.key === "technician")?.rows[0];
+    expect(row?.personalTargetTotal).toBe(0);
+    expect(row?.targetProgressRatio).toBeNull();
     expect(row?.paceStatus).toBeNull();
   });
 
@@ -737,9 +822,8 @@ describe("buildDutyFairnessReadModel — Justice Table redesign: progress/remain
     const events: Event[] = [
       dutyEvent({ personId: "p1", date: "2026-01-05" }),
       dutyEvent({ personId: "p1", date: "2026-02-05" }),
-      dutyEvent({ personId: "p1", date: "2026-03-05" }),
-      dutyEvent({ personId: "p1", date: "2026-04-05" }),
-    ]; // 4 rasar days -> 0.8 completed
+    ]; // 2 rasar days -> 0.4 completed
+    const personalTargetEvents: Event[] = [guardEvent("2026-05-01")]; // single_day -> personal target 0.25
     const model = buildDutyFairnessReadModel({
       parseResult: parseResult({
         personRows: [personRow({ resolvedPersonId: "p1", allocationLabel: "טכנאי" })],
@@ -749,20 +833,28 @@ describe("buildDutyFairnessReadModel — Justice Table redesign: progress/remain
       fetchedAt: "2026-08-15T10:00:00.000Z",
       now: NOW, // period already closed
       events,
+      personalTargetEvents,
     });
     const row = model.groups.find((g) => g.key === "technician")?.rows[0];
-    // 0.8/8 = 10% progress vs. 100% elapsed -> well below pace.
-    expect(row?.targetProgressRatio).toBeCloseTo(0.1);
-    expect(row?.paceStatus).toBe("below_pace");
+    // 0.4/0.25 = 160% progress vs. 100% elapsed -> well ahead of pace.
+    expect(row?.targetProgressRatio).toBeCloseTo(1.6);
+    expect(row?.paceStatus).toBe("ahead_of_pace");
   });
 
   it("paceStatus is on_pace when progress and elapsed% roughly match", () => {
     // H2 2026: Jul 1 - Dec 31 (183 days). now = 2026-09-29 -> 90 days elapsed, ~49.2%.
     const now: LocalNow = { date: "2026-09-29", minuteOfDay: 600 };
-    // Two confirmed Thu-Sun weekend guard blocks (2026-07-02 and 2026-08-06
-    // are both real Thursdays) -> 1.0 each, 2.0 total. Target (supervisor) 4
-    // -> 50% progress, matching the ~49% elapsed time within the ±5pp band.
+    // A confirmed Thu-Sun weekend guard block (2026-07-02 is a real
+    // Thursday) -> completedAllocationTotal 1.0.
     const events: Event[] = [
+      guardEvent("2026-07-02"),
+      guardEvent("2026-07-03"),
+      guardEvent("2026-07-04"),
+      guardEvent("2026-07-05"),
+    ];
+    // Personal target: two such weekend blocks -> personalTargetTotal 2.0.
+    // 1.0 / 2.0 = 50% progress, matching the ~49% elapsed time within ±5pp.
+    const personalTargetEvents: Event[] = [
       guardEvent("2026-07-02"),
       guardEvent("2026-07-03"),
       guardEvent("2026-07-04"),
@@ -781,9 +873,11 @@ describe("buildDutyFairnessReadModel — Justice Table redesign: progress/remain
       fetchedAt: "2026-09-29T10:00:00.000Z",
       now,
       events,
+      personalTargetEvents,
     });
     const row = model.groups.find((g) => g.key === "supervisor")?.rows[0];
-    expect(row?.completedAllocationTotal).toBe(2);
+    expect(row?.completedAllocationTotal).toBe(1);
+    expect(row?.personalTargetTotal).toBeCloseTo(2);
     expect(row?.targetProgressRatio).toBeCloseTo(0.5);
     expect(row?.paceStatus).toBe("on_pace");
   });

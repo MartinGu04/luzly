@@ -43,6 +43,7 @@ function dutyFairnessRow(overrides: Partial<DutyFairnessPersonRowView> = {}): Du
     status: null,
     weekendCount: null,
     completedAllocationTotal: null,
+    personalTargetTotal: null,
     targetProgressRatio: null,
     remainingToTarget: null,
     paceStatus: null,

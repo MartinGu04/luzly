@@ -89,6 +89,7 @@ function dutyRow(overrides: Partial<DutyFairnessPersonRowView> = {}): DutyFairne
     status: "below",
     weekendCount: 2,
     completedAllocationTotal: 5,
+    personalTargetTotal: 8,
     targetProgressRatio: 0.625,
     remainingToTarget: 3,
     paceStatus: null,
@@ -635,8 +636,10 @@ describe("/fairness — G. Duty cards", () => {
               comparisonTarget: null,
               gapToTarget: null,
               status: null,
+              personalTargetTotal: 0,
               targetProgressRatio: null,
               remainingToTarget: null,
+              paceStatus: null,
             }),
           ],
         },
@@ -650,7 +653,7 @@ describe("/fairness — G. Duty cards", () => {
     expect(screen.queryByRole("progressbar")).toBeNull();
     expect(screen.queryByTestId("metric-duty-progress-percent")).toBeNull();
     expect(screen.getByTestId("metric-duty-allocation").textContent).toContain("5");
-    expect(screen.getByText("אין יעד מוגדר לתפקיד/הקצאה זו בתקופה הנוכחית.")).toBeInTheDocument();
+    expect(screen.getByText("אין תורנויות משובצות לפוטנציאל המפורסם בתקופה זו.")).toBeInTheDocument();
   });
 
   it("B. null target -> the generic unavailable-comparison status badge is still preserved one interaction deeper, in the detail overlay", async () => {
@@ -713,8 +716,10 @@ describe("/fairness — G. Duty cards", () => {
                 comparisonTarget: null,
                 gapToTarget: null,
                 status: null,
+                personalTargetTotal: 0,
                 targetProgressRatio: null,
                 remainingToTarget: null,
+                paceStatus: null,
               }),
             ],
           },

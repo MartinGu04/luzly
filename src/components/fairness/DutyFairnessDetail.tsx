@@ -42,7 +42,7 @@ export function DutyFairnessDetail({ view, normalizedLoad, previousLabel }: Duty
 
       {view.hasTarget ? (
         <p className="text-sm text-muted">
-          <span className="text-muted-2">התקדמות מול היעד המפורסם:</span> {view.completedAllocationLabel} / {view.targetLabel} נקודות
+          <span className="text-muted-2">התקדמות מול היעד המפורסם:</span> {view.completedAllocationLabel} / {view.personalTargetLabel} נקודות
           ({view.progressPercentLabel})
           {view.beyondTargetLabel
             ? ` · ${view.beyondTargetLabel} נקודות מעבר לפוטנציאל`

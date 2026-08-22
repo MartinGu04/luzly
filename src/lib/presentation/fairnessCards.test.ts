@@ -164,6 +164,7 @@ function dutyRow(overrides: Partial<DutyFairnessPersonRowView> = {}): DutyFairne
     status: "below",
     weekendCount: 2,
     completedAllocationTotal: 5,
+    personalTargetTotal: 8,
     targetProgressRatio: 0.625,
     remainingToTarget: 3,
     paceStatus: null,
@@ -279,11 +280,12 @@ describe("buildDutyFairnessCardView -- completedAllocationLabel is the weighted 
 });
 
 describe("buildDutyFairnessCardView -- Justice Table redesign: progress/remaining/pace/no-target/LIVE", () => {
-  it("formats the read model's already-computed progress ratio / remaining -- (completedAllocationTotal vs comparisonTarget, NOT currentScore)", () => {
+  it("formats the read model's already-computed progress ratio / remaining -- completedAllocationTotal vs THIS PERSON'S OWN personalTargetTotal, never comparisonTarget or currentScore", () => {
     const view = buildDutyFairnessCardView(
       dutyRow({
         completedAllocationTotal: 2.6,
-        comparisonTarget: 6.2,
+        personalTargetTotal: 6.2,
+        comparisonTarget: 4, // the workbook's unrelated role-based constant -- must never leak into the progress figures below
         currentScore: 99,
         targetProgressRatio: 2.6 / 6.2,
         remainingToTarget: 6.2 - 2.6,
@@ -291,16 +293,19 @@ describe("buildDutyFairnessCardView -- Justice Table redesign: progress/remainin
       "/fairness?mode=duties&person=p_1",
     );
     expect(view.hasTarget).toBe(true);
+    expect(view.personalTargetLabel).toBe("6.2");
     expect(view.progressPercentLabel).toBe("42%");
     expect(view.remainingLabel).toBe("3.6");
     expect(view.beyondTargetLabel).toBeNull();
+    // The workbook's own comparison target stays a completely separate fact.
+    expect(view.targetLabel).toBe("4");
   });
 
   it("beyond-target: over 100% shows a positive beyond-target label and a zero-clamped remaining label", () => {
     const view = buildDutyFairnessCardView(
       dutyRow({
         completedAllocationTotal: 7.2,
-        comparisonTarget: 6.2,
+        personalTargetTotal: 6.2,
         targetProgressRatio: 7.2 / 6.2,
         remainingToTarget: 6.2 - 7.2,
       }),
@@ -316,11 +321,26 @@ describe("buildDutyFairnessCardView -- Justice Table redesign: progress/remainin
     expect(view.paceLabel).toBe("מתחת לקצב");
   });
 
-  it("no target at all (e.g. ר\"צ): hasTarget false, no progress bar figures, a role-level note -- never 0%/empty bar", () => {
+  it("two people sharing the SAME allocationLabel get DIFFERENT progress denominators from their own personalTargetTotal -- never a shared role-based constant", () => {
+    const lightlyLoaded = buildDutyFairnessCardView(
+      dutyRow({ personId: "p_a", allocationLabel: "טכנאי", completedAllocationTotal: 2, personalTargetTotal: 4, targetProgressRatio: 0.5 }),
+      "/fairness?mode=duties&person=p_a",
+    );
+    const heavilyLoaded = buildDutyFairnessCardView(
+      dutyRow({ personId: "p_b", allocationLabel: "טכנאי", completedAllocationTotal: 2, personalTargetTotal: 10, targetProgressRatio: 0.2 }),
+      "/fairness?mode=duties&person=p_b",
+    );
+    expect(lightlyLoaded.personalTargetLabel).toBe("4");
+    expect(heavilyLoaded.personalTargetLabel).toBe("10");
+    expect(lightlyLoaded.progressPercentLabel).toBe("50%");
+    expect(heavilyLoaded.progressPercentLabel).toBe("20%");
+  });
+
+  it("a real zero personalTargetTotal (genuinely no published-potential assignment) -> hasTarget false, no progress bar figures, the 'no duties assigned' note -- never 0%/empty bar", () => {
     const view = buildDutyFairnessCardView(
       dutyRow({
         allocationLabel: 'ר"צ',
-        comparisonTarget: null,
+        personalTargetTotal: 0,
         targetProgressRatio: null,
         remainingToTarget: null,
         paceStatus: null,
@@ -329,21 +349,38 @@ describe("buildDutyFairnessCardView -- Justice Table redesign: progress/remainin
       "/fairness?mode=duties&person=p_1",
     );
     expect(view.hasTarget).toBe(false);
+    expect(view.personalTargetLabel).toBe("0");
     expect(view.progressPercentLabel).toBe("—");
-    expect(view.noTargetNoteLabel).toBe("אין יעד מוגדר לתפקיד/הקצאה זו בתקופה הנוכחית.");
+    expect(view.noTargetNoteLabel).toBe("אין תורנויות משובצות לפוטנציאל המפורסם בתקופה זו.");
   });
 
-  it("target temporarily unavailable (duty_target_unavailable) gets its own distinct note, not the generic 'no target' one", () => {
+  it("a null personalTargetTotal (a genuine data gap -- unresolved identity or an unsupported block shape in the PLAN) gets its OWN distinct note, never confused with a real zero", () => {
     const view = buildDutyFairnessCardView(
       dutyRow({
-        comparisonTarget: null,
+        personalTargetTotal: null,
         targetProgressRatio: null,
         remainingToTarget: null,
-        dataCompleteness: { status: "partial", reasons: ["duty_target_unavailable"] },
+        paceStatus: null,
       }),
       "/fairness?mode=duties&person=p_1",
     );
-    expect(view.noTargetNoteLabel).toBe("היעד לתקופה זו אינו זמין כרגע בנתונים.");
+    expect(view.hasTarget).toBe(false);
+    expect(view.personalTargetLabel).toBeNull();
+    expect(view.noTargetNoteLabel).toBe("היעד האישי אינו זמין כרגע בנתונים.");
+  });
+
+  it("duty_target_unavailable (the workbook's OWN role-based target note missing) never affects the personal progress bar at all -- it's a separate, unrelated fact", () => {
+    const view = buildDutyFairnessCardView(
+      dutyRow({
+        comparisonTarget: null,
+        dataCompleteness: { status: "partial", reasons: ["duty_target_unavailable"] },
+        // personalTargetTotal/targetProgressRatio/remainingToTarget deliberately left at their normal (real) defaults.
+      }),
+      "/fairness?mode=duties&person=p_1",
+    );
+    expect(view.hasTarget).toBe(true);
+    expect(view.noTargetNoteLabel).toBeNull();
+    expect(view.progressPercentLabel).not.toBe("—");
   });
 
   it("liveDuty renders a calm label plus the fixed 'points added on completion' companion text", () => {

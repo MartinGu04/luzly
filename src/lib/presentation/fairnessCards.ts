@@ -151,17 +151,27 @@ export interface DutyFairnessCardView {
   /** "הקצאות שבוצעו" -- the weighted completed-allocation total, formatted with the same clean-decimal rules as `currentLabel` (never forced trailing zeros). See `DutyFairnessPersonRowView.completedAllocationTotal`'s own docs for why it's independent of `status`/`targetLabel`, and for the two distinct reasons it can be "—". */
   completedAllocationLabel: string;
   currentLabel: string;
+  /** The workbook's own role-based X/2X comparison target ("יעד השוואה") -- the ORIGINAL, unchanged Duty Fairness feature (detail overlay only). NEVER the progress bar's own denominator -- see `personalTargetLabel` for that. */
   targetLabel: string | null;
   deltaLabel: string;
   gapLabel: string | null;
   status: FairnessStatus | null;
   weekendLabel: string;
   exemptionBadges: string[];
-  /** Whether this row has a real, known comparison target at all -- `false` means the main card shows `noTargetNoteLabel` instead of a progress bar/percentage (never a misleading 0%/empty bar). */
+  /**
+   * Justice Table redesign -- this person's own published-potential target,
+   * formatted (`DutyFairnessPersonRowView.personalTargetTotal`). This, NEVER
+   * `targetLabel` above, is the progress bar's denominator -- two people
+   * sharing the same `allocationLabel` can have different values here,
+   * because the published potential assigns them different amounts of
+   * work. `null` exactly when `hasTarget` is `false`.
+   */
+  personalTargetLabel: string | null;
+  /** Whether this row has a real, known personal published-potential target at all -- `false` means the main card shows `noTargetNoteLabel` instead of a progress bar/percentage (never a misleading 0%/empty bar). */
   hasTarget: boolean;
   /** The raw `targetProgressRatio`, for the progress bar's own fill math -- can exceed `1`. `null` exactly when `hasTarget` is `false`. */
   progressRatio: number | null;
-  /** "42%" -- `completedAllocationTotal / comparisonTarget`, reusing `formatNormalizedLoad`'s existing rounding. `"—"` when `hasTarget` is `false`. */
+  /** "42%" -- `completedAllocationTotal / personalTargetTotal`, reusing `formatNormalizedLoad`'s existing rounding. `"—"` when `hasTarget` is `false`. */
   progressPercentLabel: string;
   /** "3.6" points still remaining to reach the target -- clamped at 0 (see `beyondTargetLabel` for the over-target complement). `"—"` when unavailable. */
   remainingLabel: string;
@@ -179,12 +189,22 @@ export interface DutyFairnessCardView {
   liveDutySubLabel: string | null;
 }
 
-const NO_TARGET_UNAVAILABLE_NOTE = "היעד לתקופה זו אינו זמין כרגע בנתונים.";
-const NO_TARGET_ROLE_NOTE = "אין יעד מוגדר לתפקיד/הקצאה זו בתקופה הנוכחית.";
+const NO_TARGET_UNAVAILABLE_NOTE = "היעד האישי אינו זמין כרגע בנתונים.";
+const NO_TARGET_ROLE_NOTE = "אין תורנויות משובצות לפוטנציאל המפורסם בתקופה זו.";
 
+/**
+ * Justice Table redesign -- `personalTargetTotal === null` is a genuine
+ * data gap (unresolved identity, or an unsupported guard/reserve block
+ * shape in the PUBLISHED PLAN this time -- both flagged via the SAME
+ * `duty_allocation_unsupported_block_shape`/`duty_identity_unresolved`
+ * reasons `completedAllocationTotal` already uses). A real `0` is a
+ * DIFFERENT, complete fact -- this person genuinely has no published-
+ * potential assignment this period -- never conflated with the gap above.
+ */
 function buildNoTargetNote(row: DutyFairnessPersonRowView): string | null {
-  if (row.comparisonTarget !== null) return null;
-  return row.dataCompleteness.reasons.includes("duty_target_unavailable") ? NO_TARGET_UNAVAILABLE_NOTE : NO_TARGET_ROLE_NOTE;
+  if (row.personalTargetTotal === null) return NO_TARGET_UNAVAILABLE_NOTE;
+  if (row.personalTargetTotal === 0) return NO_TARGET_ROLE_NOTE;
+  return null;
 }
 
 function buildLiveDutyLabels(liveDuty: DutyFairnessPersonRowView["liveDuty"]): {
@@ -200,7 +220,11 @@ export function buildDutyFairnessCardView(
   row: DutyFairnessPersonRowView,
   href: string | null,
 ): DutyFairnessCardView {
-  const hasTarget = row.comparisonTarget !== null;
+  // Justice Table redesign -- the progress bar's own "has a target at all"
+  // question is about THIS person's personalTargetTotal, never the
+  // workbook's role-based comparisonTarget (which stays exactly as it was
+  // for the detail overlay's targetLabel/gapLabel/status below).
+  const hasTarget = row.personalTargetTotal !== null && row.personalTargetTotal > 0;
   const { liveDutyLabel, liveDutySubLabel } = buildLiveDutyLabels(row.liveDuty);
 
   return {
@@ -213,6 +237,7 @@ export function buildDutyFairnessCardView(
     completedAllocationLabel: formatFairnessScore(row.completedAllocationTotal),
     currentLabel: formatFairnessScore(row.currentScore),
     targetLabel: row.comparisonTarget !== null ? formatFairnessScore(row.comparisonTarget) : null,
+    personalTargetLabel: row.personalTargetTotal !== null ? formatFairnessScore(row.personalTargetTotal) : null,
     deltaLabel: formatFairnessDelta(row.delta),
     gapLabel: row.gapToTarget !== null ? formatFairnessGap(row.gapToTarget) : null,
     status: row.status,

@@ -472,3 +472,121 @@ describe("loadDutyFairnessReadModel — Duty-Fairness-local Potential-derived co
     expect(NADAV.isSupervisor).toBe(false);
   });
 });
+
+describe("loadDutyFairnessReadModel — Justice Table redesign: personalTargetTotal is each person's OWN published-potential total, never a role-based constant", () => {
+  const DANI = person({ id: "p_dani", name: "דני טכנאי", isTechnician: true });
+  const NOA = person({ id: "p_noa", name: "נועה טכנאית", isTechnician: true });
+
+  function contextWithTwoTechnicians(h2OperationalRows: string[][], scheduleRows: string[][] = []) {
+    return {
+      status: "ok" as const,
+      context: {
+        person: DANI,
+        people: [DANI, NOA],
+        avatarByPersonId: new Map<string, string | null>(),
+        snapshot: {
+          fetchedAt: "2026-08-15T10:00:00.000Z",
+          sheets: [
+            { name: 'כ"א', values: [] },
+            {
+              name: "משמרות + תורנויות",
+              values: [["תאריך", "יום", DANI.name, NOA.name], ...scheduleRows],
+            },
+            {
+              name: 'פוטנציאל תקש"אס 1-6/2026',
+              values: [["תאריך", "יום", 'רס"ר 1'], [], FAIRNESS_HEADER],
+            },
+            {
+              name: 'פוטנציאל תקש"אס 7-12/2026',
+              values: [
+                ["תאריך", "יום", 'רס"ר 1'],
+                ...h2OperationalRows,
+                [],
+                FAIRNESS_HEADER,
+                [DANI.name, "טכנאי", "5", "6", "0", "-"],
+                [NOA.name, "טכנאי", "5", "6", "0", "-"],
+              ],
+            },
+          ],
+        },
+      },
+    };
+  }
+
+  it("two technicians with the SAME allocationLabel get DIFFERENT personalTargetTotal, from their own resolved Potential assignments", async () => {
+    // Dani: 3 real רס"ר operational days published (0.2 each -> 0.6 total).
+    // Noa: 1 real רס"ר operational day published (0.2 total).
+    loadFairnessWorkbookContext.mockResolvedValue(
+      contextWithTwoTechnicians([
+        ["01/07/2026", "ד", DANI.name],
+        ["02/07/2026", "ה", DANI.name],
+        ["03/07/2026", "ו", DANI.name],
+        ["10/07/2026", "ו", NOA.name],
+      ]),
+    );
+    const result = await loadDutyFairnessReadModel("h2");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+
+    const technicianGroup = result.model.groups.find((g) => g.key === "technician");
+    const daniRow = technicianGroup?.rows.find((r) => r.personId === DANI.id);
+    const noaRow = technicianGroup?.rows.find((r) => r.personId === NOA.id);
+
+    expect(daniRow?.personalTargetTotal).toBeCloseTo(0.6);
+    expect(noaRow?.personalTargetTotal).toBeCloseTo(0.2);
+    // Same role, same workbook comparisonTarget -- but a genuinely different personal target.
+    expect(daniRow?.comparisonTarget).toBe(noaRow?.comparisonTarget);
+    expect(daniRow?.personalTargetTotal).not.toBe(noaRow?.personalTargetTotal);
+  });
+
+  it("progress is computed against each person's OWN personalTargetTotal, so identical completed work yields different progress percentages", async () => {
+    // NOW is mocked to 2026-08-15 (beforeEach). Dani's 2 EXTRA published days
+    // are dated in the FUTURE (after "now") -- they still count toward his
+    // full-period personalTargetTotal (a target describes the whole plan),
+    // but never toward completedAllocationTotal (which stays capped at
+    // "today", same existing rule every other real/potential Event already
+    // follows). Both technicians actually COMPLETE exactly one real רס"ר day
+    // each, dated in the past.
+    loadFairnessWorkbookContext.mockResolvedValue(
+      contextWithTwoTechnicians(
+        [
+          ["01/07/2026", "ד", DANI.name], // past -- matches Dani's own real schedule below
+          ["20/08/2026", "ה", DANI.name], // future -- target only
+          ["21/08/2026", "ו", DANI.name], // future -- target only
+          ["10/07/2026", "ו", NOA.name], // past -- matches Noa's own real schedule below
+        ],
+        [
+          ["01/07/2026", "ד", 'רס"ר', ""],
+          ["10/07/2026", "", "", 'רס"ר'],
+        ],
+      ),
+    );
+    const result = await loadDutyFairnessReadModel("h2");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+
+    const technicianGroup = result.model.groups.find((g) => g.key === "technician");
+    const daniRow = technicianGroup?.rows.find((r) => r.personId === DANI.id);
+    const noaRow = technicianGroup?.rows.find((r) => r.personId === NOA.id);
+
+    expect(daniRow?.completedAllocationTotal).toBeCloseTo(0.2);
+    expect(noaRow?.completedAllocationTotal).toBeCloseTo(0.2);
+    expect(daniRow?.personalTargetTotal).toBeCloseTo(0.6);
+    expect(noaRow?.personalTargetTotal).toBeCloseTo(0.2);
+    // Same completed work, but Dani's own target (0.6) is 3x Noa's (0.2) -> very different progress.
+    expect(daniRow?.targetProgressRatio).toBeCloseTo(0.2 / 0.6);
+    expect(noaRow?.targetProgressRatio).toBeCloseTo(1);
+    expect(daniRow?.targetProgressRatio).not.toBeCloseTo(noaRow?.targetProgressRatio ?? -1);
+  });
+
+  it("a person with zero published-potential assignments this period gets a real personalTargetTotal of 0, never an invented role-based fallback", async () => {
+    loadFairnessWorkbookContext.mockResolvedValue(contextWithTwoTechnicians([["01/07/2026", "ד", DANI.name]]));
+    const result = await loadDutyFairnessReadModel("h2");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    const technicianGroup = result.model.groups.find((g) => g.key === "technician");
+    const noaRow = technicianGroup?.rows.find((r) => r.personId === NOA.id);
+    expect(noaRow?.personalTargetTotal).toBe(0);
+    expect(noaRow?.targetProgressRatio).toBeNull();
+  });
+});

@@ -50,6 +50,23 @@ export interface BuildDutyFairnessReadModelInput {
    * unknown data) for any existing caller/test that predates this field.
    */
   events?: readonly Event[];
+  /**
+   * Justice Table redesign -- resolved Potential ("published potential")
+   * duty events, used ONLY to derive each row's `personalTargetTotal`: this
+   * specific person's own total weighted requirement across the WHOLE
+   * selected period, via the SAME `computeCompletedDutyAllocation` weighting
+   * engine `completedAllocationTotal` already uses, just over a DIFFERENT
+   * event set (the published plan, not the actual schedule) and a
+   * DIFFERENT date range (the full period, never capped at "today" -- a
+   * target describes the whole plan, not only what's already happened).
+   * Deliberately a SEPARATE array from `events` above -- the published
+   * potential and the actually-performed schedule are two different facts
+   * (a swap moves who performed a duty without moving who it was published
+   * for), and merging the two arrays would blur that distinction. Defaults
+   * to an empty array -- the safe direction (nobody has a known personal
+   * target) for any existing caller/test that predates this field.
+   */
+  personalTargetEvents?: readonly Event[];
 }
 
 /**
@@ -78,7 +95,7 @@ export interface BuildDutyFairnessReadModelInput {
  * label -- landing in a group never by itself grants a target.
  */
 export function buildDutyFairnessReadModel(input: BuildDutyFairnessReadModelInput): DutyFairnessReadModel {
-  const { parseResult, periodIdentity, fetchedAt, now, events = [] } = input;
+  const { parseResult, periodIdentity, fetchedAt, now, events = [], personalTargetEvents = [] } = input;
   const { personRows, totals, targets } = parseResult;
 
   const periodStartDate = fairnessPeriodStartDate(periodIdentity);
@@ -98,7 +115,18 @@ export function buildDutyFairnessReadModel(input: BuildDutyFairnessReadModelInpu
   const periodElapsedPercent = computePeriodElapsedPercent(periodStartDate, periodEndDate, effectiveEndDate);
 
   const rows = personRows.map((row, index) =>
-    toRowView(row, targets, index, events, periodStartDate, effectiveEndDate, periodStatus, periodElapsedPercent),
+    toRowView(
+      row,
+      targets,
+      index,
+      events,
+      personalTargetEvents,
+      periodStartDate,
+      periodEndDate,
+      effectiveEndDate,
+      periodStatus,
+      periodElapsedPercent,
+    ),
   );
   const sortedRows = [...rows].sort(compareDutyFairnessRows);
 
@@ -122,7 +150,9 @@ function toRowView(
   targets: FairnessTargets,
   index: number,
   events: readonly Event[],
+  personalTargetEvents: readonly Event[],
   periodStartDate: string,
+  periodEndDate: string,
   effectiveEndDate: string,
   periodStatus: FairnessPeriodStatus,
   periodElapsedPercent: number | null,
@@ -156,14 +186,33 @@ function toRowView(
     }
   }
 
+  // Justice Table redesign -- the person's own TARGET: their total weighted
+  // requirement in the published Potential across the WHOLE selected period
+  // (never capped at "today" -- unlike `completedAllocationTotal` above,
+  // which only counts what's already happened). Reuses the EXACT SAME
+  // weighting engine (`computeCompletedDutyAllocation`), just over the
+  // resolved-Potential event set instead of the real schedule -- see
+  // `personalTargetEvents`'s own docs. Deliberately NEVER
+  // `comparisonTarget` (the workbook's role-based X/2X constant, which
+  // stays exactly as it was for `gapToTarget`/`normalizedLoad`/`status`
+  // below -- a genuinely separate, pre-existing feature this redesign does
+  // not touch).
+  let personalTargetTotal: number | null = null;
+  if (row.resolvedPersonId !== null) {
+    const planned = computeCompletedDutyAllocation(personalTargetEvents, row.resolvedPersonId, periodStartDate, periodEndDate);
+    personalTargetTotal = planned.total;
+    if (planned.unsupportedBlocks.length > 0) reasons.push("duty_allocation_unsupported_block_shape");
+  }
+
   // "published potential = planned target, actual validated schedule =
   // actual completed work" -- reuses the EXACT SAME ratio-with-null-safety
   // math `computeNormalizedLoad` already established for the workbook's
   // own currentScore/target, just applied to the real completed-work total
-  // instead (see `targetProgressRatio`'s own docs -- no new formula).
-  const targetProgressRatio = computeNormalizedLoad(completedAllocationTotal, comparisonTarget);
+  // and the person's OWN published-potential total instead (see
+  // `targetProgressRatio`'s own docs -- no new formula).
+  const targetProgressRatio = computeNormalizedLoad(completedAllocationTotal, personalTargetTotal);
   const remainingToTarget =
-    comparisonTarget !== null && completedAllocationTotal !== null ? comparisonTarget - completedAllocationTotal : null;
+    personalTargetTotal !== null && completedAllocationTotal !== null ? personalTargetTotal - completedAllocationTotal : null;
   const paceStatus: DutyPaceStatus | null =
     targetProgressRatio !== null && periodElapsedPercent !== null
       ? resolveDutyPaceStatus(targetProgressRatio * 100, periodElapsedPercent)
@@ -183,6 +232,7 @@ function toRowView(
     status: resolveDutyFairnessStatus(currentScore, comparisonTarget),
     weekendCount: row.weekendCount,
     completedAllocationTotal,
+    personalTargetTotal,
     targetProgressRatio,
     remainingToTarget,
     paceStatus,
