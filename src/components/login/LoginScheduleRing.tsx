@@ -1,4 +1,3 @@
-import type { ReactNode } from "react";
 import Image from "next/image";
 import { Calendar, Moon, Sun, TreePalm, Users } from "lucide-react";
 import { BRAND_SYMBOL } from "@/lib/config/brandAssets";
@@ -18,6 +17,9 @@ interface FloatingCardSpec {
  * Purely decorative illustration of the product's core vocabulary (shift/
  * duty/day-off cards around a clock) -- never real schedule data, same
  * spirit as the timeline it replaces. Colors/times are illustrative only.
+ * Desktop (`lg`+) only -- see `FloatingCard`'s `hidden lg:flex`: on mobile
+ * these crowded the small ring and sat too close to the centered logo, so
+ * mobile shows just the ring/ticks/logo/sweep hand with no cards at all.
  */
 const FLOATING_CARDS: FloatingCardSpec[] = [
   {
@@ -27,7 +29,7 @@ const FLOATING_CARDS: FloatingCardSpec[] = [
     Icon: Calendar,
     dotClass: "bg-[#d98a9c]",
     badgeClass: "bg-[#4a2530]",
-    positionClassName: "top-[-4%] left-[0%] sm:top-[-2%] sm:left-[4%] lg:top-[6%] lg:left-[30%]",
+    positionClassName: "top-[-8%] left-[-2%] sm:top-[-2%] sm:left-[4%] lg:top-[6%] lg:left-[30%]",
   },
   {
     key: "morning",
@@ -36,7 +38,7 @@ const FLOATING_CARDS: FloatingCardSpec[] = [
     Icon: Sun,
     dotClass: "bg-[#6fc3f7]",
     badgeClass: "bg-[#1f4f6e]",
-    positionClassName: "top-[0%] right-[-4%] sm:top-[2%] sm:right-[0%] lg:top-[16%] lg:left-[0%] lg:right-auto",
+    positionClassName: "top-[20%] right-[-6%] sm:top-[2%] sm:right-[0%] lg:top-[16%] lg:left-[0%] lg:right-auto",
   },
   {
     key: "off",
@@ -69,15 +71,9 @@ const FLOATING_CARDS: FloatingCardSpec[] = [
 
 function FloatingCard({ card }: { card: FloatingCardSpec }) {
   const { Icon } = card;
-  // The "night" card sits near the very bottom of the ring (top-[96%] on
-  // mobile) -- on a real phone that collides with the Google CTA sitting
-  // right below the ring, unlike the other cards which stay clear. Hidden
-  // below `sm` only (this card, not the whole ring/layout); still shown
-  // from `sm` up, where the ring has more room and there's no collision.
-  const displayClassName = card.key === "night" ? "hidden sm:flex" : "flex";
   return (
     <div
-      className={`absolute ${displayClassName} w-max max-w-[8.25rem] items-center gap-1.5 rounded-2xl bg-[#141a22]/90 px-2 py-1.5 shadow-[0_16px_32px_-14px_rgba(0,0,0,0.6)] ring-1 ring-white/10 backdrop-blur-sm sm:max-w-[9.5rem] sm:gap-2 sm:px-2.5 sm:py-2 lg:max-w-[10rem] lg:gap-2 lg:px-3 lg:py-2 xl:max-w-[13rem] xl:gap-3 xl:rounded-3xl xl:px-4 xl:py-3 ${card.positionClassName}`}
+      className={`absolute hidden lg:flex w-max max-w-[7rem] items-center gap-1.5 rounded-2xl bg-[#141a22]/90 px-2 py-1.5 shadow-[0_16px_32px_-14px_rgba(0,0,0,0.6)] ring-1 ring-white/10 backdrop-blur-sm sm:max-w-[9.5rem] sm:gap-2 sm:px-2.5 sm:py-2 lg:max-w-[10rem] lg:gap-2 lg:px-3 lg:py-2 xl:max-w-[13rem] xl:gap-3 xl:rounded-3xl xl:px-4 xl:py-3 ${card.positionClassName}`}
     >
       <span
         className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-xl sm:h-8 sm:w-8 lg:h-9 lg:w-9 xl:h-11 xl:w-11 xl:rounded-2xl ${card.badgeClass}`}
@@ -136,24 +132,23 @@ const SWEEP_HAND_LEAD = sweepHandPoint(0);
 const SWEEP_HAND_TRAIL = sweepHandPoint(-SWEEP_HAND_TRAIL_DEGREES);
 const SWEEP_HAND_TRAIL_PATH = `M 100 100 L ${SWEEP_HAND_TRAIL.x} ${SWEEP_HAND_TRAIL.y} A ${SWEEP_HAND_RADIUS} ${SWEEP_HAND_RADIUS} 0 0 1 ${SWEEP_HAND_LEAD.x} ${SWEEP_HAND_LEAD.y} Z`;
 
-interface LoginScheduleRingProps {
-  /** The mobile-only centered content (the stacked `LoginClockReadout`) -- desktop shows the glowing brand mark instead, since the desktop clock readout already lives in the text column. */
-  children: ReactNode;
-}
-
 /**
- * The login hero's decorative clock/schedule composition (visual reference
- * supplied directly for this redesign). Desktop: a tick-marked ring with
- * the brand mark glowing at its center and shift/duty/day-off cards
- * floating around its circumference. Mobile: no ring graphic -- just the
- * live clock/date centered, with the same cards scattered around it in a
- * different (not merely scaled) arrangement, per the supplied mobile
- * reference. Entirely `aria-hidden` except where noted -- illustrative
- * only, never real schedule data.
+ * The login hero's decorative clock/schedule composition -- the SAME
+ * tick-marked ring, glowing brand mark, and rotating sweep hand at every
+ * viewport size (mobile used to swap this ring graphic out for a plain
+ * centered digital readout; now mobile gets the identical clock face
+ * desktop has, just at a smaller `clamp()` size via the wrapper below --
+ * see `LoginHero`, which now renders the digital readout as its own
+ * mobile-only block underneath this ring instead of inside it). Shift/
+ * duty/day-off cards still float around its circumference on desktop
+ * (`lg`+) exactly as before, but are hidden entirely below `lg` -- see
+ * `FLOATING_CARDS`'s docstring -- so mobile shows only the ring/ticks/
+ * logo/sweep hand. Entirely `aria-hidden` except where noted --
+ * illustrative only, never real schedule data.
  */
-export function LoginScheduleRing({ children }: LoginScheduleRingProps) {
+export function LoginScheduleRing() {
   return (
-    <div className="relative mx-auto w-[clamp(13rem,58vw,17rem)] sm:w-[clamp(19rem,88vw,26rem)] lg:mx-0 lg:w-[clamp(24rem,32vw,30rem)] xl:w-[clamp(30rem,42vw,42rem)]">
+    <div className="relative mx-auto w-[clamp(10.5rem,50vw,14rem)] sm:w-[clamp(19rem,88vw,26rem)] lg:mx-0 lg:w-[clamp(24rem,32vw,30rem)] xl:w-[clamp(30rem,42vw,42rem)]">
       <div className="relative aspect-square w-full">
         <div
           aria-hidden="true"
@@ -161,7 +156,7 @@ export function LoginScheduleRing({ children }: LoginScheduleRingProps) {
           style={{ background: "radial-gradient(closest-side, rgba(120,169,204,0.18), transparent 72%)" }}
         />
 
-        <svg viewBox="0 0 200 200" aria-hidden="true" className="absolute inset-0 hidden h-full w-full lg:block">
+        <svg viewBox="0 0 200 200" aria-hidden="true" className="absolute inset-0 h-full w-full">
           <circle cx="100" cy="100" r="96" fill="none" stroke="rgba(255,255,255,0.14)" strokeWidth="1" />
           {TICKS.map((tick) => (
             <line
@@ -208,7 +203,7 @@ export function LoginScheduleRing({ children }: LoginScheduleRingProps) {
         </svg>
 
         <div className="absolute inset-0 flex items-center justify-center">
-          <div className="relative hidden h-[38%] w-[38%] items-center justify-center lg:flex">
+          <div className="relative flex h-[38%] w-[38%] items-center justify-center">
             <div
               aria-hidden="true"
               className="absolute inset-0 rounded-full opacity-60 blur-xl"
@@ -223,8 +218,6 @@ export function LoginScheduleRing({ children }: LoginScheduleRingProps) {
               className="relative h-full w-full drop-shadow-[0_8px_24px_rgba(0,0,0,0.5)]"
             />
           </div>
-
-          <div className="lg:hidden">{children}</div>
         </div>
 
         {FLOATING_CARDS.map((card) => (

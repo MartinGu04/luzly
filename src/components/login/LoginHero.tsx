@@ -27,9 +27,17 @@ interface LoginHeroProps {
  * `col-start`/`row-start`, while the ring occupies the other column,
  * row-spanned to center beside all three. Below `lg`, the grid collapses
  * to one column and `order-*` sequences the pieces into the mobile
- * reference's actual order (headline block, then the ring -- with the
- * live clock moved inside it -- then the CTA) -- a genuine reflow, not
- * the desktop layout merely scaled down.
+ * reference's actual order (headline block, then the ring, then the
+ * CTA) -- a genuine reflow, not the desktop layout merely scaled down.
+ * `LoginScheduleRing` itself now renders the identical tick-marked/
+ * sweep-hand clock face at every breakpoint (previously mobile-only
+ * swapped it for the plain digital readout) -- mobile keeps that digital
+ * readout too, nested directly under the ring inside the SAME `order-2`
+ * grid item (a tight `gap-3` flex column, not the grid's own `gap-y-6`)
+ * so relocating it out of the ring's center doesn't add a full extra grid
+ * row's worth of spacing -- narrow phones (e.g. iPhone SE) are short
+ * enough that the CTA below would otherwise drop out of the first
+ * viewport.
  */
 export function LoginHero({ initialClockTime, weekdayLabel, dayNumber, monthLabel, hasAuthError }: LoginHeroProps) {
   return (
@@ -51,8 +59,9 @@ export function LoginHero({ initialClockTime, weekdayLabel, dayNumber, monthLabe
           </p>
         </div>
 
-        <div className="order-2 flex justify-center lg:order-none lg:col-start-1 lg:row-span-3 lg:row-start-1 lg:justify-start">
-          <LoginScheduleRing>
+        <div className="order-2 flex flex-col items-center gap-3 lg:order-none lg:col-start-1 lg:row-span-3 lg:row-start-1 lg:items-start lg:gap-0">
+          <LoginScheduleRing />
+          <div className="lg:hidden">
             <LoginClockReadout
               variant="stacked"
               initialClockTime={initialClockTime}
@@ -60,7 +69,7 @@ export function LoginHero({ initialClockTime, weekdayLabel, dayNumber, monthLabe
               dayNumber={dayNumber}
               monthLabel={monthLabel}
             />
-          </LoginScheduleRing>
+          </div>
         </div>
 
         <div className="hidden lg:col-start-2 lg:row-start-2 lg:block">
