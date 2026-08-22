@@ -16,11 +16,12 @@ function Stat({ label, value }: { label: string; value: string }) {
 
 /**
  * Duty Fairness person detail (PR #4 §16, redesigned for the Justice Table
- * UX pass, and corrected in two follow-up passes) -- the completed/target
- * progress summary (remaining or beyond-target, plus pace) leads, exactly
- * like the main card, then a LIVE strip when relevant, then a plain stat
- * grid of the workbook's own record for this person (previous/current
- * score, the change since last period, weekend count).
+ * UX pass, and corrected/refined in several follow-up passes) -- the
+ * completed/target progress summary (remaining or beyond-target, plus the
+ * `dutyStatusLabel` "how are they doing" state) leads, exactly like the
+ * main card, then a LIVE strip when relevant, then a plain stat grid of
+ * the workbook's own record for this person (previous/current score, the
+ * change since last period, weekend count).
  *
  * Deliberately NO SECOND "target": the workbook's own role-based X/2X
  * comparison target, its below/balanced/above status badge, its gap-to-
@@ -63,7 +64,7 @@ export function DutyFairnessDetail({ view, previousLabel }: DutyFairnessDetailPr
           {view.beyondTargetLabel
             ? ` · ${view.beyondTargetLabel} נקודות מעבר לפוטנציאל`
             : ` · ${view.remainingLabel} נקודות נותרו`}
-          {view.paceLabel ? ` · ${view.paceLabel}` : ""}
+          {view.dutyStatusLabel ? ` · ${view.dutyStatusLabel}` : ""}
         </p>
       ) : view.noTargetNoteLabel ? (
         <p className="text-sm text-muted">{view.noTargetNoteLabel}</p>

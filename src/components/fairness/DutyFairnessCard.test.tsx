@@ -29,8 +29,8 @@ function view(overrides: Partial<DutyFairnessCardView> = {}): DutyFairnessCardVi
     progressPercentLabel: "36%",
     remainingLabel: "5.1",
     beyondTargetLabel: null,
-    paceLabel: null,
-    paceStatus: null,
+    dutyStatusLabel: null,
+    dutyStatusState: null,
     noTargetNoteLabel: null,
     liveDutyLabel: null,
     liveDutySubLabel: null,
@@ -150,22 +150,108 @@ describe("DutyFairnessCard — Justice Table redesign: completed/target progress
     expect(screen.getByTestId("metric-duty-remaining")).toHaveTextContent("מעבר לפוטנציאל");
   });
 
-  it("shows the pace badge when known, secondary to the progress figures", () => {
+  it("shows the duty status badge when known, secondary to the progress figures", () => {
     render(
       <ul>
-        <DutyFairnessCard view={view({ paceLabel: "מתחת לקצב", paceStatus: "below_pace" })} />
+        <DutyFairnessCard view={view({ dutyStatusLabel: "מתחת לצפי", dutyStatusState: "below_pace" })} />
       </ul>,
     );
-    expect(screen.getByTestId("metric-duty-pace")).toHaveTextContent("מתחת לקצב");
+    expect(screen.getByTestId("metric-duty-pace")).toHaveTextContent("מתחת לצפי");
   });
 
-  it("renders no pace badge when pace is unknown", () => {
+  it("renders no status badge when it is unknown", () => {
     render(
       <ul>
-        <DutyFairnessCard view={view({ paceLabel: null, paceStatus: null })} />
+        <DutyFairnessCard view={view({ dutyStatusLabel: null, dutyStatusState: null })} />
       </ul>,
     );
     expect(screen.queryByTestId("metric-duty-pace")).toBeNull();
+  });
+});
+
+describe("DutyFairnessCard — Justice Table refinement: natural pace/status language, zero state never reads as 'already behind'", () => {
+  it("ZERO STATE REGRESSION: 0 completed points with a valid target shows the calm 'טרם בוצעו תורנויות', never 'מתחת לצפי' -- even though the raw pace comparison would classify it as below pace", () => {
+    render(
+      <ul>
+        <DutyFairnessCard
+          view={view({
+            completedAllocationLabel: "0",
+            dutyStatusLabel: "טרם בוצעו תורנויות",
+            dutyStatusState: "not_started",
+          })}
+        />
+      </ul>,
+    );
+    const badge = screen.getByTestId("metric-duty-pace");
+    expect(badge).toHaveTextContent("טרם בוצעו תורנויות");
+    expect(badge).not.toHaveTextContent("מתחת לצפי");
+  });
+
+  it("the zero-state badge gets a calm NEUTRAL treatment, never the 'below' warning tint", () => {
+    render(
+      <ul>
+        <DutyFairnessCard view={view({ dutyStatusLabel: "טרם בוצעו תורנויות", dutyStatusState: "not_started" })} />
+      </ul>,
+    );
+    const badge = screen.getByTestId("metric-duty-pace");
+    expect(badge.className).toContain("text-muted");
+    expect(badge.className).not.toContain("text-status-below");
+  });
+
+  it("on_pace reads as 'בהתאם לצפי'", () => {
+    render(
+      <ul>
+        <DutyFairnessCard view={view({ dutyStatusLabel: "בהתאם לצפי", dutyStatusState: "on_pace" })} />
+      </ul>,
+    );
+    expect(screen.getByTestId("metric-duty-pace")).toHaveTextContent("בהתאם לצפי");
+  });
+
+  it("below-pace reads as 'מתחת לצפי'", () => {
+    render(
+      <ul>
+        <DutyFairnessCard view={view({ dutyStatusLabel: "מתחת לצפי", dutyStatusState: "below_pace" })} />
+      </ul>,
+    );
+    expect(screen.getByTestId("metric-duty-pace")).toHaveTextContent("מתחת לצפי");
+  });
+
+  it("ahead-of-pace reads as 'מעל לצפי'", () => {
+    render(
+      <ul>
+        <DutyFairnessCard view={view({ dutyStatusLabel: "מעל לצפי", dutyStatusState: "ahead_of_pace" })} />
+      </ul>,
+    );
+    expect(screen.getByTestId("metric-duty-pace")).toHaveTextContent("מעל לצפי");
+  });
+
+  it("reaching the target exactly reads as 'היעד הושלם'", () => {
+    render(
+      <ul>
+        <DutyFairnessCard view={view({ dutyStatusLabel: "היעד הושלם", dutyStatusState: "target_reached" })} />
+      </ul>,
+    );
+    expect(screen.getByTestId("metric-duty-pace")).toHaveTextContent("היעד הושלם");
+  });
+
+  it("exceeding the target reads as 'מעבר ליעד'", () => {
+    render(
+      <ul>
+        <DutyFairnessCard view={view({ dutyStatusLabel: "מעבר ליעד", dutyStatusState: "target_exceeded" })} />
+      </ul>,
+    );
+    expect(screen.getByTestId("metric-duty-pace")).toHaveTextContent("מעבר ליעד");
+  });
+
+  it("never shows the old pace-only wording this refinement replaces", () => {
+    render(
+      <ul>
+        <DutyFairnessCard view={view({ dutyStatusLabel: "בהתאם לצפי", dutyStatusState: "on_pace" })} />
+      </ul>,
+    );
+    expect(screen.queryByText("בקצב הצפוי")).toBeNull();
+    expect(screen.queryByText("מתחת לקצב")).toBeNull();
+    expect(screen.queryByText("לפני הקצב")).toBeNull();
   });
 });
 

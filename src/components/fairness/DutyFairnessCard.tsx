@@ -1,29 +1,42 @@
 import Link from "next/link";
+import type { DutyStatusState } from "@/lib/presentation/fairness";
 import type { DutyFairnessCardView } from "@/lib/presentation/fairnessCards";
 import { Avatar } from "@/components/ui/Avatar";
 import { DutyProgressBar } from "./DutyProgressBar";
 import { FairnessMetric } from "./FairnessMetric";
 
-const PACE_TINT_CLASSES: Record<"below_pace" | "on_pace" | "ahead_of_pace", string> = {
+/**
+ * `"not_started"` gets a CALM NEUTRAL treatment (the same neutral tone
+ * `FairnessStatusBadge` uses for its own "unavailable" state), deliberately
+ * NOT the "below" warning tint -- "0 completed, nothing done yet" is a
+ * plain fact, never a verdict that this person is already behind.
+ * `"target_reached"`/`"target_exceeded"` share the same positive "above"
+ * tint as `"ahead_of_pace"` -- reaching or exceeding a target is never
+ * framed as a problem.
+ */
+const DUTY_STATUS_TINT_CLASSES: Record<DutyStatusState, string> = {
+  not_started: "bg-overlay-soft text-muted ring-border-strong",
   below_pace: "bg-status-below-soft text-status-below ring-status-below-border",
   on_pace: "bg-status-balanced-soft text-status-balanced ring-status-balanced-border",
   ahead_of_pace: "bg-status-above-soft text-status-above ring-status-above-border",
+  target_reached: "bg-status-above-soft text-status-above ring-status-above-border",
+  target_exceeded: "bg-status-above-soft text-status-above ring-status-above-border",
 };
 
 /**
- * A restrained pace pill, DELIBERATELY separate from the shared
- * `FairnessStatusBadge` -- pace ("given how much of the relevant period
- * has passed, are they where they should be?") is its own three-word
- * vocabulary (`lib/domain/dutyPace.ts`), not the below/balanced/above
- * target-exceedance one, so reusing that badge's own Hebrew labels here
- * would show the wrong words for the right color. Deliberately no icon --
- * pace is secondary context, not a headline verdict.
+ * A restrained status pill, DELIBERATELY separate from the shared
+ * `FairnessStatusBadge` -- this "how are they doing" state
+ * (`resolveDutyStatusState`, `lib/presentation/fairness.ts`) is its own
+ * vocabulary, not the below/balanced/above target-exceedance one, so
+ * reusing that badge's own Hebrew labels here would show the wrong words
+ * for the right color. Deliberately no icon -- this is secondary context,
+ * not a headline verdict.
  */
-function PaceBadge({ pace, label }: { pace: "below_pace" | "on_pace" | "ahead_of_pace"; label: string }) {
+function DutyStatusBadge({ status, label }: { status: DutyStatusState; label: string }) {
   return (
     <span
       data-testid="metric-duty-pace"
-      className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ring-1 ${PACE_TINT_CLASSES[pace]}`}
+      className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ring-1 ${DUTY_STATUS_TINT_CLASSES[status]}`}
     >
       {label}
     </span>
@@ -70,7 +83,7 @@ export function DutyFairnessCard({ view }: { view: DutyFairnessCardView }) {
             <p className="text-xs text-muted">{view.allocationLabel || "—"}</p>
           </div>
         </div>
-        {view.paceLabel && view.paceStatus ? <PaceBadge pace={view.paceStatus} label={view.paceLabel} /> : null}
+        {view.dutyStatusLabel && view.dutyStatusState ? <DutyStatusBadge status={view.dutyStatusState} label={view.dutyStatusLabel} /> : null}
       </div>
 
       {view.liveDutyLabel ? (

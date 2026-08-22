@@ -1,10 +1,9 @@
-import type { DutyPaceStatus } from "@/lib/domain/dutyPace";
 import type { FairnessDataCompletenessReason, FairnessStatus } from "@/lib/domain/fairnessFoundation";
 import type { PersonnelServiceCategory } from "@/lib/domain/personnelType";
 import type { ShiftExpectationFactors } from "@/lib/domain/shiftExpectationFactors";
 import {
   exemptionBadgeLabel,
-  formatDutyPaceLabel,
+  formatDutyStatusLabel,
   formatFairnessDelta,
   formatFairnessDeviationState,
   formatFairnessExpectedValue,
@@ -12,6 +11,8 @@ import {
   formatFairnessScore,
   formatFairnessWeekendCount,
   formatNormalizedLoad,
+  resolveDutyStatusState,
+  type DutyStatusState,
 } from "@/lib/presentation/fairness";
 import { dutyFamilyLabel } from "@/lib/presentation/labels";
 import type { DutyFairnessPersonRowView } from "@/lib/readModels/dutyFairnessTypes";
@@ -178,10 +179,16 @@ export interface DutyFairnessCardView {
   remainingLabel: string;
   /** "1.0" points beyond the target, ONLY when the target was exceeded -- `null` otherwise (including when there is no target at all). */
   beyondTargetLabel: string | null;
-  /** "מתחת לקצב" / "בקצב הצפוי" / "לפני הקצב" -- secondary to progress, `null` when pace cannot be computed. */
-  paceLabel: string | null;
-  /** The raw pace status backing `paceLabel`, for the UI's own pace-specific tinting (deliberately not the below/balanced/above `FairnessStatus` vocabulary). `null` exactly when `paceLabel` is `null`. */
-  paceStatus: DutyPaceStatus | null;
+  /**
+   * "טרם בוצעו תורנויות" / "מתחת לצפי" / "בהתאם לצפי" / "מעל לצפי" /
+   * "היעד הושלם" / "מעבר ליעד" -- the ONE mutually-exclusive "how are they
+   * doing" state (`resolveDutyStatusState`'s own docs for the full
+   * precedence), secondary to progress. `null` when it cannot be computed
+   * (no target, or completed work unknown).
+   */
+  dutyStatusLabel: string | null;
+  /** The raw state backing `dutyStatusLabel`, for the UI's own tinting (deliberately not the below/balanced/above `FairnessStatus` vocabulary). `null` exactly when `dutyStatusLabel` is `null`. */
+  dutyStatusState: DutyStatusState | null;
   /** Set only when `hasTarget` is `false` -- distinguishes "this role has no target at all" from "the target note itself is temporarily missing", never a generic "0%"/empty bar. */
   noTargetNoteLabel: string | null;
   /** "שמירה 1 פעילה כרגע" -- a real, currently in-progress completion-based duty not yet reflected in `completedAllocationLabel`. `null` when nothing is currently live. */
@@ -226,6 +233,7 @@ export function buildDutyFairnessCardView(
   // overlay's targetLabel/gapLabel/status below).
   const hasTarget = row.personalTargetTotal !== null && row.personalTargetTotal > 0;
   const { liveDutyLabel, liveDutySubLabel } = buildLiveDutyLabels(row.liveDuty);
+  const dutyStatusState = resolveDutyStatusState(row.completedAllocationTotal, row.personalTargetTotal, row.paceStatus);
 
   return {
     key: row.key,
@@ -249,8 +257,8 @@ export function buildDutyFairnessCardView(
     remainingLabel: formatFairnessScore(row.remainingToTarget !== null ? Math.max(row.remainingToTarget, 0) : null),
     beyondTargetLabel:
       row.remainingToTarget !== null && row.remainingToTarget < 0 ? formatFairnessScore(Math.abs(row.remainingToTarget)) : null,
-    paceLabel: formatDutyPaceLabel(row.paceStatus),
-    paceStatus: row.paceStatus,
+    dutyStatusLabel: formatDutyStatusLabel(dutyStatusState),
+    dutyStatusState,
     noTargetNoteLabel: buildNoTargetNote(row),
     liveDutyLabel,
     liveDutySubLabel,
