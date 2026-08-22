@@ -529,17 +529,17 @@ const SENT_ITEM = {
 };
 
 describe("ManagerRecentBroadcastsSection -- compact timing row", () => {
-  it("immediate broadcast: 'נוצר HH:MM · נשלח HH:MM · Ns'", async () => {
+  it("1. same-day immediate broadcast: 'נוצר DD/MM HH:mm · נשלח DD/MM HH:mm · Ns'", async () => {
     getRecentManagerBroadcastsAction.mockResolvedValue({
       ok: true,
       items: [
         {
           ...RECENT_ITEM,
-          createdAt: "2026-08-22T18:46:00.000Z", // 21:46 Asia/Jerusalem (IDT, August)
+          createdAt: "2026-08-22T18:45:00.000Z", // 22/08 21:45 Asia/Jerusalem (IDT, August)
           scheduleCreatedAt: null,
           scheduledFor: null,
           sentNowAt: null,
-          firstSuccessfulPushAt: "2026-08-22T18:46:02.000Z", // 21:46
+          firstSuccessfulPushAt: "2026-08-22T18:45:02.000Z", // 22/08 21:45, +2s
           deliveryLatencySeconds: 2,
           deliveryState: "sent",
         },
@@ -547,20 +547,20 @@ describe("ManagerRecentBroadcastsSection -- compact timing row", () => {
     });
     render(<ManagerRecentBroadcastsSection reloadToken={0} pollWhileActive={false} />);
 
-    await waitFor(() => expect(screen.getByText("נוצר 21:46 · נשלח 21:46 · 2 שנ׳")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("נוצר 22/08 21:45 · נשלח 22/08 21:45 · 2 שנ׳")).toBeInTheDocument());
   });
 
-  it("normally scheduled broadcast: 'נוצר HH:MM · תוכנן ל־HH:MM · נשלח HH:MM · Ns', latency measured from scheduled_for", async () => {
+  it("normally scheduled broadcast: 'נוצר DD/MM HH:mm · תוכנן ל־DD/MM HH:mm · נשלח DD/MM HH:mm · Ns', latency measured from scheduled_for", async () => {
     getRecentManagerBroadcastsAction.mockResolvedValue({
       ok: true,
       items: [
         {
           ...RECENT_ITEM,
           createdAt: "2026-08-22T18:46:04.000Z",
-          scheduleCreatedAt: "2026-08-22T17:10:00.000Z", // 20:10
-          scheduledFor: "2026-08-22T18:46:00.000Z", // 21:46
+          scheduleCreatedAt: "2026-08-22T17:10:00.000Z", // 22/08 20:10
+          scheduledFor: "2026-08-22T18:46:00.000Z", // 22/08 21:46
           sentNowAt: null,
-          firstSuccessfulPushAt: "2026-08-22T18:46:04.000Z", // 21:46, +4s
+          firstSuccessfulPushAt: "2026-08-22T18:46:04.000Z", // 22/08 21:46, +4s
           deliveryLatencySeconds: 4,
           deliveryState: "sent",
         },
@@ -568,7 +568,9 @@ describe("ManagerRecentBroadcastsSection -- compact timing row", () => {
     });
     render(<ManagerRecentBroadcastsSection reloadToken={0} pollWhileActive={false} />);
 
-    await waitFor(() => expect(screen.getByText("נוצר 20:10 · תוכנן ל־21:46 · נשלח 21:46 · 4 שנ׳")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByText("נוצר 22/08 20:10 · תוכנן ל־22/08 21:46 · נשלח 22/08 21:46 · 4 שנ׳")).toBeInTheDocument(),
+    );
   });
 
   it("scheduled broadcast manually 'שלח עכשיו': still shows the ORIGINAL scheduledFor, latency measured from sent_now_at", async () => {
@@ -578,10 +580,10 @@ describe("ManagerRecentBroadcastsSection -- compact timing row", () => {
         {
           ...RECENT_ITEM,
           createdAt: "2026-08-22T18:46:00.000Z",
-          scheduleCreatedAt: "2026-08-22T17:10:00.000Z", // 20:10
-          scheduledFor: "2026-08-22T19:30:00.000Z", // 22:30 -- original, still-future schedule
+          scheduleCreatedAt: "2026-08-22T17:10:00.000Z", // 22/08 20:10
+          scheduledFor: "2026-08-22T19:30:00.000Z", // 22/08 22:30 -- original, still-future schedule
           sentNowAt: "2026-08-22T18:45:57.000Z",
-          firstSuccessfulPushAt: "2026-08-22T18:46:00.000Z", // 21:46
+          firstSuccessfulPushAt: "2026-08-22T18:46:00.000Z", // 22/08 21:46
           deliveryLatencySeconds: 3,
           deliveryState: "sent",
         },
@@ -589,7 +591,32 @@ describe("ManagerRecentBroadcastsSection -- compact timing row", () => {
     });
     render(<ManagerRecentBroadcastsSection reloadToken={0} pollWhileActive={false} />);
 
-    await waitFor(() => expect(screen.getByText("נוצר 20:10 · תוכנן ל־22:30 · נשלח 21:46 · 3 שנ׳")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByText("נוצר 22/08 20:10 · תוכנן ל־22/08 22:30 · נשלח 22/08 21:46 · 3 שנ׳")).toBeInTheDocument(),
+    );
+  });
+
+  it("2. scheduled notification crossing midnight (Asia/Jerusalem): the DATE rolls forward between תוכנן ל and נוצר, not just the clock", async () => {
+    getRecentManagerBroadcastsAction.mockResolvedValue({
+      ok: true,
+      items: [
+        {
+          ...RECENT_ITEM,
+          createdAt: "2026-08-22T21:10:09.000Z",
+          scheduleCreatedAt: "2026-08-22T20:58:00.000Z", // 22/08 23:58 IDT
+          scheduledFor: "2026-08-22T21:10:00.000Z", // 23/08 00:10 IDT -- the NEXT calendar day
+          sentNowAt: null,
+          firstSuccessfulPushAt: "2026-08-22T21:10:09.000Z", // 23/08 00:10 IDT, +9s
+          deliveryLatencySeconds: 9,
+          deliveryState: "sent",
+        },
+      ],
+    });
+    render(<ManagerRecentBroadcastsSection reloadToken={0} pollWhileActive={false} />);
+
+    await waitFor(() =>
+      expect(screen.getByText("נוצר 22/08 23:58 · תוכנן ל־23/08 00:10 · נשלח 23/08 00:10 · 9 שנ׳")).toBeInTheDocument(),
+    );
   });
 
   it("no successful push yet -- 'ממתין לשליחה' fallback, never a fabricated sent time", async () => {

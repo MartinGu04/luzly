@@ -61,7 +61,15 @@ export function computeDeliveryLatencySeconds(input: DeliveryLatencyInput): numb
 const JERUSALEM_CLOCK_FORMATTER = new Intl.DateTimeFormat("he-IL", {
   hour: "2-digit",
   minute: "2-digit",
-  hour12: false,
+  // `hourCycle: "h23"`, NOT `hour12: false` -- `hour12` only picks a 12- vs.
+  // 24-hour DISPLAY, leaving the choice between the h23 (midnight = "00")
+  // and h24 (midnight = "24") cycles up to locale/Intl-implementation
+  // default, which can genuinely differ across engines. This UI needs a
+  // strict 00-23 hour, especially right around midnight ("00:10", never
+  // "24:10") -- `hourCycle` is the explicit way to pin that. Never combine
+  // this with `hour12`: when both are present, `hour12` silently overrides
+  // `hourCycle`.
+  hourCycle: "h23",
   timeZone: "Asia/Jerusalem",
 });
 
@@ -70,6 +78,36 @@ export function formatJerusalemClockTime(iso: string): string {
   const ms = Date.parse(iso);
   if (Number.isNaN(ms)) return "--:--";
   return JERUSALEM_CLOCK_FORMATTER.format(new Date(ms));
+}
+
+const JERUSALEM_DATE_TIME_FORMATTER = new Intl.DateTimeFormat("he-IL", {
+  day: "2-digit",
+  month: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  // `hourCycle: "h23"`, not `hour12: false` -- see `JERUSALEM_CLOCK_FORMATTER`'s
+  // own comment for why: this pins a strict 00-23 hour (midnight = "00",
+  // never "24"), which `hour12` alone doesn't guarantee across engines.
+  hourCycle: "h23",
+  timeZone: "Asia/Jerusalem",
+});
+
+/**
+ * `DD/MM HH:mm` in Asia/Jerusalem, explicitly -- never the browser/device's
+ * own timezone. No year (the timing row is about recent activity, never
+ * spanning years), no seconds. Built from `formatToParts` and assembled
+ * manually into this EXACT order/punctuation, rather than trusting
+ * `he-IL`'s own default arrangement -- a locale's default date order can
+ * differ from what this compact row needs, and must never silently drift
+ * with an ICU data update. Fails safe (`--/-- --:--`) on a malformed
+ * instant rather than throwing, mirroring `formatJerusalemClockTime`.
+ */
+export function formatJerusalemDateTime(iso: string): string {
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) return "--/-- --:--";
+  const parts = JERUSALEM_DATE_TIME_FORMATTER.formatToParts(new Date(ms));
+  const get = (type: Intl.DateTimeFormatPartTypes): string => parts.find((part) => part.type === type)?.value ?? "--";
+  return `${get("day")}/${get("month")} ${get("hour")}:${get("minute")}`;
 }
 
 /** Compact Hebrew duration -- `"2 שנ׳"` under a minute, `"1 דק׳ 12 שנ׳"` at or above it. Never shows milliseconds; rounds to the nearest whole second first so the minute/second split can never show a stray "60 שנ׳" remainder. */
