@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Panel } from "@/components/ui/Panel";
-import { formatDeliveryDurationSeconds, formatJerusalemClockTime } from "@/lib/notifications/broadcastTiming";
+import { formatDeliveryDurationSeconds, formatJerusalemDateTime } from "@/lib/notifications/broadcastTiming";
 import { getRecentManagerBroadcastsAction, type RecentManagerBroadcastView } from "@/lib/notifications/manualBroadcastActions";
 
 interface ManagerRecentBroadcastsSectionProps {
@@ -136,27 +136,32 @@ function fallbackDeliveryLabel(deliveryState: RecentManagerBroadcastView["delive
 }
 
 /**
- * The compact second row: "נוצר HH:MM · [תוכנן ל־HH:MM ·] נשלח HH:MM · Ns"
- * for a resolved delivery, or the same "נוצר"/"תוכנן ל" prefix plus a
- * truthful fallback label when nothing has successfully delivered yet.
- * `נוצר` displays `scheduleCreatedAt` when this batch came from a
- * scheduled broadcast (the ORIGINAL schedule-creation instant, per the
- * spec's own three worked examples), falling back to the batch's own
- * `createdAt` for an immediate broadcast -- see `RecentManagerBroadcastView.createdAt`'s
- * own docstring for why that field's SORTING/clear-cutoff semantics are
- * never touched by this swap.
+ * The compact second row: "נוצר DD/MM HH:mm · [תוכנן ל־DD/MM HH:mm ·] נשלח
+ * DD/MM HH:mm · Ns" for a resolved delivery, or the same "נוצר"/"תוכנן ל"
+ * prefix plus a truthful fallback label when nothing has successfully
+ * delivered yet. Every timestamp includes the calendar date (never just a
+ * bare clock time) so a broadcast crossing midnight -- created one day,
+ * scheduled/sent the next -- is never misread as same-day. `נוצר` displays
+ * `scheduleCreatedAt` when this batch came from a scheduled broadcast (the
+ * ORIGINAL schedule-creation instant, per the spec's own worked examples),
+ * falling back to the batch's own `createdAt` for an immediate broadcast --
+ * see `RecentManagerBroadcastView.createdAt`'s own docstring for why that
+ * field's SORTING/clear-cutoff semantics are never touched by this swap.
+ * The latency DURATION (`formatDeliveryDurationSeconds`) is a pure elapsed
+ * span, not an instant -- it never carries a date, and is deliberately
+ * untouched by this date/time formatting.
  */
 function buildTimingLine(item: RecentManagerBroadcastView): string {
   const createdDisplayIso = item.scheduleCreatedAt ?? item.createdAt;
-  const parts = [`נוצר ${formatJerusalemClockTime(createdDisplayIso)}`];
-  if (item.scheduledFor) parts.push(`תוכנן ל־${formatJerusalemClockTime(item.scheduledFor)}`);
+  const parts = [`נוצר ${formatJerusalemDateTime(createdDisplayIso)}`];
+  if (item.scheduledFor) parts.push(`תוכנן ל־${formatJerusalemDateTime(item.scheduledFor)}`);
 
   // Loose (`!=`) nullish checks, deliberately: an item shaped by an older
   // caller/fixture that PREDATES these fields has them as `undefined`
   // (missing), not `null` -- must be treated identically to "no data",
   // never mistaken for a truthy `firstSuccessfulPushAt` value.
   if (item.firstSuccessfulPushAt != null && item.deliveryLatencySeconds != null) {
-    parts.push(`נשלח ${formatJerusalemClockTime(item.firstSuccessfulPushAt)}`);
+    parts.push(`נשלח ${formatJerusalemDateTime(item.firstSuccessfulPushAt)}`);
     parts.push(formatDeliveryDurationSeconds(item.deliveryLatencySeconds));
   } else {
     parts.push(fallbackDeliveryLabel(item.deliveryState));

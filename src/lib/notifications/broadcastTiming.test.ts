@@ -4,6 +4,7 @@ import {
   deliveryLatencyReferenceInstant,
   formatDeliveryDurationSeconds,
   formatJerusalemClockTime,
+  formatJerusalemDateTime,
 } from "./broadcastTiming";
 
 describe("deliveryLatencyReferenceInstant / computeDeliveryLatencySeconds", () => {
@@ -85,6 +86,35 @@ describe("8. formatJerusalemClockTime -- Asia/Jerusalem, explicitly, never the h
 
   it("fails safe on a malformed instant rather than throwing", () => {
     expect(formatJerusalemClockTime("not-a-real-date")).toBe("--:--");
+  });
+});
+
+describe("3. formatJerusalemDateTime -- DD/MM HH:mm in Asia/Jerusalem, explicitly, never the host timezone", () => {
+  it("formats a UTC instant into its Asia/Jerusalem (IDT, UTC+3 in August) date+time -- no year, no seconds", () => {
+    // 2026-08-22T18:46:00.000Z -- August, Israel Daylight Time (UTC+3) -> 22/08 21:46.
+    expect(formatJerusalemDateTime("2026-08-22T18:46:00.000Z")).toBe("22/08 21:46");
+  });
+
+  it("formats a UTC instant into its Asia/Jerusalem (IST, UTC+2 in winter) date+time", () => {
+    // 2026-01-15T18:46:00.000Z -- winter, Israel Standard Time (UTC+2) -> 15/01 20:46.
+    expect(formatJerusalemDateTime("2026-01-15T18:46:00.000Z")).toBe("15/01 20:46");
+  });
+
+  it("2. a scheduled notification crossing midnight (Asia/Jerusalem) rolls the DATE forward, not just the clock", () => {
+    // 2026-08-22T20:58:00.000Z = 23:58 IDT on the 22nd.
+    expect(formatJerusalemDateTime("2026-08-22T20:58:00.000Z")).toBe("22/08 23:58");
+    // 2026-08-22T21:10:00.000Z = 00:10 IDT on the 23rd -- the UTC calendar day (22nd) is
+    // NOT the Asia/Jerusalem calendar day (23rd); this must reflect the LOCAL date.
+    expect(formatJerusalemDateTime("2026-08-22T21:10:00.000Z")).toBe("23/08 00:10");
+  });
+
+  it("zero-pads single-digit day/month/hour/minute", () => {
+    // 2026-01-05T05:03:00.000Z = 07:03 IST on the 5th (winter, UTC+2).
+    expect(formatJerusalemDateTime("2026-01-05T05:03:00.000Z")).toBe("05/01 07:03");
+  });
+
+  it("fails safe on a malformed instant rather than throwing", () => {
+    expect(formatJerusalemDateTime("not-a-real-date")).toBe("--/-- --:--");
   });
 });
 

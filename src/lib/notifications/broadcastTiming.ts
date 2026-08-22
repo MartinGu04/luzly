@@ -72,6 +72,33 @@ export function formatJerusalemClockTime(iso: string): string {
   return JERUSALEM_CLOCK_FORMATTER.format(new Date(ms));
 }
 
+const JERUSALEM_DATE_TIME_FORMATTER = new Intl.DateTimeFormat("he-IL", {
+  day: "2-digit",
+  month: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+  timeZone: "Asia/Jerusalem",
+});
+
+/**
+ * `DD/MM HH:mm` in Asia/Jerusalem, explicitly -- never the browser/device's
+ * own timezone. No year (the timing row is about recent activity, never
+ * spanning years), no seconds. Built from `formatToParts` and assembled
+ * manually into this EXACT order/punctuation, rather than trusting
+ * `he-IL`'s own default arrangement -- a locale's default date order can
+ * differ from what this compact row needs, and must never silently drift
+ * with an ICU data update. Fails safe (`--/-- --:--`) on a malformed
+ * instant rather than throwing, mirroring `formatJerusalemClockTime`.
+ */
+export function formatJerusalemDateTime(iso: string): string {
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) return "--/-- --:--";
+  const parts = JERUSALEM_DATE_TIME_FORMATTER.formatToParts(new Date(ms));
+  const get = (type: Intl.DateTimeFormatPartTypes): string => parts.find((part) => part.type === type)?.value ?? "--";
+  return `${get("day")}/${get("month")} ${get("hour")}:${get("minute")}`;
+}
+
 /** Compact Hebrew duration -- `"2 שנ׳"` under a minute, `"1 דק׳ 12 שנ׳"` at or above it. Never shows milliseconds; rounds to the nearest whole second first so the minute/second split can never show a stray "60 שנ׳" remainder. */
 export function formatDeliveryDurationSeconds(totalSeconds: number): string {
   const roundedTotal = Math.max(0, Math.round(totalSeconds));
