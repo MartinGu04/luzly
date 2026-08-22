@@ -101,32 +101,40 @@ export interface DutyFairnessPersonRowView {
    */
   completedAllocationTotal: number | null;
   /**
-   * Justice Table redesign -- this specific person's own TARGET: the total
-   * weighted requirement attributed to them in the published Potential
-   * across the WHOLE selected period (never capped at "today" -- a target
-   * describes the whole plan, not only what's already happened). Computed
-   * via the SAME weighting engine as `completedAllocationTotal`
-   * (`computeCompletedDutyAllocation`), just over the resolved-Potential
-   * event set instead of the real schedule.
+   * Justice Table redesign, corrected -- this specific person's own TARGET:
+   * the selected period's workbook Fairness-table value itself, the
+   * "ניקוד לפוטנציאל הנוכחי" column, parsed unconditionally as
+   * `FairnessPersonRow.currentScore` (`lib/parsers/fairness.ts`) and
+   * carried through here untouched -- literally the SAME number as
+   * `currentScore` above. This IS the authoritative per-person target for
+   * the whole selected period, already computed and published by the
+   * workbook itself; מי-מה-מו never derives it.
+   *
+   * This redesign's FIRST attempt instead reconstructed a total by
+   * replaying the published Potential's own operational allocations
+   * through the duty weighting engine (`computeCompletedDutyAllocation`
+   * over resolved-Potential events). That reconstruction is REMOVED: it
+   * was verified against the real 7-12/2026 and 1-6/2026 workbooks to
+   * produce incomplete/wrong totals for many real people (e.g. a
+   * reconstructed 3.2 where the workbook's own column says 6).
    *
    * Deliberately NEVER `comparisonTarget` (the workbook's role-based X/2X
    * constant, e.g. a flat 4 for every אחמ״ש or 8 for every טכנאי,
    * regardless of what any specific person was actually assigned) -- two
    * people with the SAME `allocationLabel` can have completely different
-   * `personalTargetTotal`s, because the published potential assigns them
-   * different amounts of work. A swap moves who performed a duty (reflected
+   * `personalTargetTotal`s, because the workbook publishes a personal
+   * figure for each of them. A swap moves who performed a duty (reflected
    * in `completedAllocationTotal`, from the real schedule) without moving
-   * who it was published for (reflected here, from the Potential sheet's
-   * own resolved source labels) -- see `dutyFairness.ts`'s
-   * `personalTargetEvents` docs for why the two event sets are kept
-   * separate rather than merged.
+   * who the workbook published the target for (reflected here).
    *
-   * `null` for the SAME two reasons as `completedAllocationTotal` above
-   * (`duty_identity_unresolved`, or `duty_allocation_unsupported_block_shape`
-   * for an unclassifiable guard/reserve block in the PLAN this time, not
-   * the actual schedule) -- both flagged via `dataCompleteness`. A real `0`
-   * (this person genuinely has no published-potential assignment this
-   * period) is a normal, complete, truthful outcome, never a gap.
+   * `null` only when the workbook cell itself is unavailable ("-"/blank --
+   * see `FairnessPersonRow.currentScore`'s own docs). Unlike
+   * `completedAllocationTotal`, this does NOT depend on identity
+   * resolution -- exactly like `comparisonTarget`, it is read straight off
+   * the row (see `duty_identity_unresolved`'s own docs: "score/target/
+   * status all still compute normally" for an unresolved row). A real `0`
+   * (the workbook itself publishes zero for this person this period) is a
+   * normal, complete, truthful outcome, never a gap.
    */
   personalTargetTotal: number | null;
   /**
@@ -134,8 +142,8 @@ export interface DutyFairnessPersonRowView {
    * `completedAllocationTotal / personalTargetTotal` (reusing
    * `computeNormalizedLoad` outright, the exact same "ratio with
    * null-safety" math `normalizedLoad` already uses -- just applied to the
-   * REAL completed-work total and this person's OWN published-potential
-   * total, per the redesign's own "published potential = planned target,
+   * REAL completed-work total and this person's OWN workbook target
+   * instead, per the redesign's own "workbook target = personal target,
    * actual validated schedule = actual completed work" rule). `null`
    * whenever either side is unavailable, exactly like `normalizedLoad`. Can
    * legitimately exceed `1` (over 100% of target) -- never clamped, since

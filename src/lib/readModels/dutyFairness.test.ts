@@ -473,11 +473,11 @@ describe("loadDutyFairnessReadModel — Duty-Fairness-local Potential-derived co
   });
 });
 
-describe("loadDutyFairnessReadModel — Justice Table redesign: personalTargetTotal is each person's OWN published-potential total, never a role-based constant", () => {
+describe("loadDutyFairnessReadModel — Justice Table redesign, corrected: personalTargetTotal is the workbook's own currentScore column (\"ניקוד לפוטנציאל הנוכחי\"), never reconstructed from Potential events and never a role-based constant", () => {
   const DANI = person({ id: "p_dani", name: "דני טכנאי", isTechnician: true });
   const NOA = person({ id: "p_noa", name: "נועה טכנאית", isTechnician: true });
 
-  function contextWithTwoTechnicians(h2OperationalRows: string[][], scheduleRows: string[][] = []) {
+  function contextWithTwoTechnicians(fairnessRows: string[][], scheduleRows: string[][] = []) {
     return {
       status: "ok" as const,
       context: {
@@ -492,20 +492,10 @@ describe("loadDutyFairnessReadModel — Justice Table redesign: personalTargetTo
               name: "משמרות + תורנויות",
               values: [["תאריך", "יום", DANI.name, NOA.name], ...scheduleRows],
             },
-            {
-              name: 'פוטנציאל תקש"אס 1-6/2026',
-              values: [["תאריך", "יום", 'רס"ר 1'], [], FAIRNESS_HEADER],
-            },
+            { name: 'פוטנציאל תקש"אס 1-6/2026', values: [FAIRNESS_HEADER] },
             {
               name: 'פוטנציאל תקש"אס 7-12/2026',
-              values: [
-                ["תאריך", "יום", 'רס"ר 1'],
-                ...h2OperationalRows,
-                [],
-                FAIRNESS_HEADER,
-                [DANI.name, "טכנאי", "5", "6", "0", "-"],
-                [NOA.name, "טכנאי", "5", "6", "0", "-"],
-              ],
+              values: [FAIRNESS_HEADER, ...fairnessRows],
             },
           ],
         },
@@ -513,15 +503,11 @@ describe("loadDutyFairnessReadModel — Justice Table redesign: personalTargetTo
     };
   }
 
-  it("two technicians with the SAME allocationLabel get DIFFERENT personalTargetTotal, from their own resolved Potential assignments", async () => {
-    // Dani: 3 real רס"ר operational days published (0.2 each -> 0.6 total).
-    // Noa: 1 real רס"ר operational day published (0.2 total).
+  it("two technicians with the SAME allocationLabel get DIFFERENT personalTargetTotal, straight from the workbook's own currentScore column -- never reconstructed from Potential operational rows", async () => {
     loadFairnessWorkbookContext.mockResolvedValue(
       contextWithTwoTechnicians([
-        ["01/07/2026", "ד", DANI.name],
-        ["02/07/2026", "ה", DANI.name],
-        ["03/07/2026", "ו", DANI.name],
-        ["10/07/2026", "ו", NOA.name],
+        [DANI.name, "טכנאי", "5", "6", "0", "-"],
+        [NOA.name, "טכנאי", "5", "2", "0", "-"],
       ]),
     );
     const result = await loadDutyFairnessReadModel("h2");
@@ -532,28 +518,22 @@ describe("loadDutyFairnessReadModel — Justice Table redesign: personalTargetTo
     const daniRow = technicianGroup?.rows.find((r) => r.personId === DANI.id);
     const noaRow = technicianGroup?.rows.find((r) => r.personId === NOA.id);
 
-    expect(daniRow?.personalTargetTotal).toBeCloseTo(0.6);
-    expect(noaRow?.personalTargetTotal).toBeCloseTo(0.2);
+    expect(daniRow?.personalTargetTotal).toBe(6);
+    expect(noaRow?.personalTargetTotal).toBe(2);
     // Same role, same workbook comparisonTarget -- but a genuinely different personal target.
     expect(daniRow?.comparisonTarget).toBe(noaRow?.comparisonTarget);
     expect(daniRow?.personalTargetTotal).not.toBe(noaRow?.personalTargetTotal);
   });
 
-  it("progress is computed against each person's OWN personalTargetTotal, so identical completed work yields different progress percentages", async () => {
-    // NOW is mocked to 2026-08-15 (beforeEach). Dani's 2 EXTRA published days
-    // are dated in the FUTURE (after "now") -- they still count toward his
-    // full-period personalTargetTotal (a target describes the whole plan),
-    // but never toward completedAllocationTotal (which stays capped at
-    // "today", same existing rule every other real/potential Event already
-    // follows). Both technicians actually COMPLETE exactly one real רס"ר day
-    // each, dated in the past.
+  it("progress is computed against each person's OWN personalTargetTotal (their own workbook currentScore), so identical completed work yields different progress percentages", async () => {
+    // Both technicians actually COMPLETE exactly one real רס"ר day each, from
+    // the real schedule sheet -- completedAllocationTotal stays entirely
+    // schedule-derived and unaffected by this correction.
     loadFairnessWorkbookContext.mockResolvedValue(
       contextWithTwoTechnicians(
         [
-          ["01/07/2026", "ד", DANI.name], // past -- matches Dani's own real schedule below
-          ["20/08/2026", "ה", DANI.name], // future -- target only
-          ["21/08/2026", "ו", DANI.name], // future -- target only
-          ["10/07/2026", "ו", NOA.name], // past -- matches Noa's own real schedule below
+          [DANI.name, "טכנאי", "5", "6", "0", "-"],
+          [NOA.name, "טכנאי", "5", "2", "0", "-"],
         ],
         [
           ["01/07/2026", "ד", 'רס"ר', ""],
@@ -571,16 +551,21 @@ describe("loadDutyFairnessReadModel — Justice Table redesign: personalTargetTo
 
     expect(daniRow?.completedAllocationTotal).toBeCloseTo(0.2);
     expect(noaRow?.completedAllocationTotal).toBeCloseTo(0.2);
-    expect(daniRow?.personalTargetTotal).toBeCloseTo(0.6);
-    expect(noaRow?.personalTargetTotal).toBeCloseTo(0.2);
-    // Same completed work, but Dani's own target (0.6) is 3x Noa's (0.2) -> very different progress.
-    expect(daniRow?.targetProgressRatio).toBeCloseTo(0.2 / 0.6);
-    expect(noaRow?.targetProgressRatio).toBeCloseTo(1);
+    expect(daniRow?.personalTargetTotal).toBe(6);
+    expect(noaRow?.personalTargetTotal).toBe(2);
+    // Same completed work, but Dani's own target (6) is 3x Noa's (2) -> very different progress.
+    expect(daniRow?.targetProgressRatio).toBeCloseTo(0.2 / 6);
+    expect(noaRow?.targetProgressRatio).toBeCloseTo(0.2 / 2);
     expect(daniRow?.targetProgressRatio).not.toBeCloseTo(noaRow?.targetProgressRatio ?? -1);
   });
 
-  it("a person with zero published-potential assignments this period gets a real personalTargetTotal of 0, never an invented role-based fallback", async () => {
-    loadFairnessWorkbookContext.mockResolvedValue(contextWithTwoTechnicians([["01/07/2026", "ד", DANI.name]]));
+  it("a person with a real zero personalTargetTotal (the workbook's own currentScore is exactly 0) gets a real personalTargetTotal of 0, never an invented role-based fallback", async () => {
+    loadFairnessWorkbookContext.mockResolvedValue(
+      contextWithTwoTechnicians([
+        [DANI.name, "טכנאי", "5", "6", "0", "-"],
+        [NOA.name, "טכנאי", "5", "0", "0", "-"],
+      ]),
+    );
     const result = await loadDutyFairnessReadModel("h2");
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
@@ -588,5 +573,43 @@ describe("loadDutyFairnessReadModel — Justice Table redesign: personalTargetTo
     const noaRow = technicianGroup?.rows.find((r) => r.personId === NOA.id);
     expect(noaRow?.personalTargetTotal).toBe(0);
     expect(noaRow?.targetProgressRatio).toBeNull();
+  });
+
+  it("real-workbook regression, end-to-end: Steven (6.3), Lior (6.2), and Gidon (6) share the technician role but the loader carries each of their own real currentScore straight through to personalTargetTotal", async () => {
+    const STEVEN = person({ id: "p_steven", name: "סטיבן פופנרוב", isTechnician: true });
+    const LIOR = person({ id: "p_lior", name: "ליאור בגון", isTechnician: true });
+    const GIDON = person({ id: "p_gidon", name: "גדעון פולין", isTechnician: true });
+    loadFairnessWorkbookContext.mockResolvedValue({
+      status: "ok" as const,
+      context: {
+        person: STEVEN,
+        people: [STEVEN, LIOR, GIDON],
+        avatarByPersonId: new Map<string, string | null>(),
+        snapshot: {
+          fetchedAt: "2026-08-15T10:00:00.000Z",
+          sheets: [
+            { name: 'כ"א', values: [] },
+            { name: "משמרות + תורנויות", values: [["תאריך", "יום", STEVEN.name, LIOR.name, GIDON.name]] },
+            { name: 'פוטנציאל תקש"אס 1-6/2026', values: [FAIRNESS_HEADER] },
+            {
+              name: 'פוטנציאל תקש"אס 7-12/2026',
+              values: [
+                FAIRNESS_HEADER,
+                [STEVEN.name, "טכנאי", "5", "6.3", "0", "-"],
+                [LIOR.name, "טכנאי", "5", "6.2", "0", "-"],
+                [GIDON.name, "טכנאי", "5", "6", "0", "-"],
+              ],
+            },
+          ],
+        },
+      },
+    });
+    const result = await loadDutyFairnessReadModel("h2");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    const technicianGroup = result.model.groups.find((g) => g.key === "technician");
+    expect(technicianGroup?.rows.find((r) => r.personId === STEVEN.id)?.personalTargetTotal).toBe(6.3);
+    expect(technicianGroup?.rows.find((r) => r.personId === LIOR.id)?.personalTargetTotal).toBe(6.2);
+    expect(technicianGroup?.rows.find((r) => r.personId === GIDON.id)?.personalTargetTotal).toBe(6);
   });
 });
