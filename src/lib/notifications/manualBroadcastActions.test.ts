@@ -4,6 +4,8 @@ const loadManagerWorkbookContext = vi.fn();
 const loadManagerPersonnelContext = vi.fn();
 const sendManagerBroadcastNotification = vi.fn();
 const listRecentManagerNotificationBatches = vi.fn();
+const after = vi.fn();
+const runDelivery = vi.fn();
 
 vi.mock("@/lib/readModels/managerWorkbookContext", () => ({
   loadManagerWorkbookContext: (...args: unknown[]) => loadManagerWorkbookContext(...args),
@@ -15,6 +17,12 @@ vi.mock("./engine/manualBroadcast", () => ({
 vi.mock("./engine/store", () => ({
   listRecentManagerNotificationBatches: (...args: unknown[]) => listRecentManagerNotificationBatches(...args),
   RECENT_MANAGER_BROADCASTS_LIMIT: 10,
+}));
+vi.mock("next/server", () => ({
+  after: (...args: unknown[]) => after(...args),
+}));
+vi.mock("./engine/delivery", () => ({
+  runDelivery: (...args: unknown[]) => runDelivery(...args),
 }));
 
 const { sendManagerBroadcastAction, getRecentManagerBroadcastsAction } = await import("./manualBroadcastActions");
@@ -56,6 +64,18 @@ beforeEach(() => {
     },
   });
   listRecentManagerNotificationBatches.mockReset().mockResolvedValue([]);
+  after.mockReset();
+  runDelivery.mockReset().mockResolvedValue({
+    jobsClaimed: 0,
+    jobsCompleted: 0,
+    jobsFailed: 0,
+    jobsPending: 0,
+    jobsSkipped: 0,
+    deliveriesSucceeded: 0,
+    deliveriesFailedPermanent: 0,
+    deliveriesFailedTransient: 0,
+    subscriptionsRemoved: 0,
+  });
 });
 
 describe("sendManagerBroadcastAction -- authorization", () => {
@@ -133,6 +153,57 @@ describe("sendManagerBroadcastAction -- happy path", () => {
     sendManagerBroadcastNotification.mockResolvedValue({ ok: false, error: "invalid_title" });
     const result = await sendManagerBroadcastAction(validInput());
     expect(result).toEqual({ ok: false, error: "invalid_title" });
+  });
+});
+
+describe("sendManagerBroadcastAction -- immediate delivery kick (true immediate delivery for Send Now)", () => {
+  it("registers EXACTLY ONE background after() callback once the broadcast is durably created", async () => {
+    await sendManagerBroadcastAction(validInput());
+    expect(after).toHaveBeenCalledTimes(1);
+    expect(after).toHaveBeenCalledWith(expect.any(Function));
+  });
+
+  it("invoking the registered callback calls the existing runDelivery() pipeline -- never a second push sender", async () => {
+    await sendManagerBroadcastAction(validInput());
+    const callback = after.mock.calls[0][0] as () => Promise<void>;
+    expect(runDelivery).not.toHaveBeenCalled();
+    await callback();
+    expect(runDelivery).toHaveBeenCalledTimes(1);
+    expect(runDelivery).toHaveBeenCalledWith();
+  });
+
+  it("does NOT register a delivery callback for an invalid request (fails before authorization)", async () => {
+    await sendManagerBroadcastAction(validInput({ audienceKind: "hacked" as never }));
+    expect(after).not.toHaveBeenCalled();
+  });
+
+  it("does NOT register a delivery callback for an unauthorized/non-manager caller", async () => {
+    loadManagerWorkbookContext.mockResolvedValue({ status: "forbidden" });
+    await sendManagerBroadcastAction(validInput());
+    expect(after).not.toHaveBeenCalled();
+  });
+
+  it("does NOT register a delivery callback when the engine itself reports failure (e.g. idempotency_conflict)", async () => {
+    sendManagerBroadcastNotification.mockResolvedValue({ ok: false, error: "idempotency_conflict" });
+    await sendManagerBroadcastAction(validInput());
+    expect(after).not.toHaveBeenCalled();
+  });
+
+  it("contains and logs an immediate-delivery failure (PII-safely sanitized) without altering the already-successful action result", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    runDelivery.mockRejectedValue(new Error("push failed for leaked-person@example.com"));
+
+    const result = await sendManagerBroadcastAction(validInput());
+    expect(result.ok).toBe(true);
+
+    const callback = after.mock.calls[0][0] as () => Promise<void>;
+    await expect(callback()).resolves.toBeUndefined();
+    expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
+    const logged = consoleErrorSpy.mock.calls[0][0] as string;
+    expect(logged).not.toContain("leaked-person@example.com");
+    expect(logged).toContain("[email]");
+
+    consoleErrorSpy.mockRestore();
   });
 });
 

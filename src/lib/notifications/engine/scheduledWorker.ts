@@ -2,7 +2,7 @@ import "server-only";
 import { fetchFreshPersonnelRead } from "./freshRead";
 import { runDueScheduledBroadcastDispatch } from "./scheduledBroadcast";
 import { runDelivery, type DeliverySummary } from "./delivery";
-import { peekAnyManagerScheduledBroadcastWorkDue } from "./store";
+import { peekAnyManagerScheduledBroadcastWorkDue, peekDueJobsCount } from "./store";
 import { runStage } from "./workerErrors";
 
 export interface ScheduledBroadcastWorkerTickSummary {
@@ -17,63 +17,100 @@ export interface ScheduledBroadcastWorkerTickSummary {
 }
 
 /**
- * The dedicated once-a-minute scheduled-broadcast worker's orchestrator,
- * driving `POST /internal/notifications/scheduled` (see that route for the
+ * The dedicated once-a-minute worker's orchestrator, driving
+ * `POST /internal/notifications/scheduled` (see that route for the
  * secret-gated entry point). This is a SEPARATE, narrower pipeline from
  * `runNotificationWorkerTick` (`pipeline.ts`, the main 5-minute worker) --
- * NOT a copy of it and NOT a "run everything every minute" shortcut:
+ * NOT a copy of it and NOT a "run everything every minute" shortcut. It
+ * has TWO jobs, not one: dispatching due scheduled broadcasts, AND acting
+ * as the <=1-minute fallback for any `notification_jobs` row that's
+ * already due but wasn't picked up by a delivery pass yet (e.g. a manual
+ * "Send Now" broadcast whose own best-effort immediate `after()` delivery
+ * kick -- see `manualBroadcastActions.ts` -- never ran or failed).
  *
- * 1. A cheap, read-only Supabase pre-check (`peekAnyManagerScheduledBroadcastWorkDue`,
- *    which mirrors the claim function's own two-way, lease-only
- *    eligibility -- due-scheduled, or claimed with an expired 90-second
- *    lease. `batch_id`'s presence never bypasses the lease -- see
+ * 1. A cheap, read-only Supabase pre-check considering BOTH kinds of work
+ *    in parallel: `peekAnyManagerScheduledBroadcastWorkDue` (mirrors the
+ *    claim function's own two-way, lease-only eligibility -- due-
+ *    scheduled, or claimed with an expired 90-second lease; `batch_id`'s
+ *    presence never bypasses the lease -- see
  *    `20260821100000_speed_up_manager_scheduled_broadcast_claim.sql`'s
- *    own doc comment for why that matters under overlapping invocations.
- *    When it finds nothing, this returns immediately: no Google/workbook
- *    request, no personnel parsing, no dispatch, no delivery. A minute
- *    with nothing to do costs one small Postgres query, never a Sheets
- *    API call.
- * 2. Only when work exists: a PERSONNEL-ONLY fresh read
- *    (`fetchFreshPersonnelRead`, never Schedule/Settings) -- everything
- *    `dispatchScheduledBroadcast` needs to re-resolve recipients fresh.
- * 3. The exact same `runDueScheduledBroadcastDispatch` (audience
- *    resolution, idempotency, crash-recovery) PR #79 already built for
- *    the main tick -- reused unmodified, never re-implemented here.
- * 4. The exact same `runDelivery()` PR #29/#30 already built, invoked in
- *    THIS SAME tick so a freshly-dispatched job doesn't wait for a
- *    separate delivery pass. Safe to call from two places (this worker
- *    AND the main 5-minute tick): `claim_due_notification_jobs` uses
- *    `for update skip locked`, and each device's delivery row has a
- *    terminal state (`sent`/`failed_permanent`) that's always skipped on
- *    a later call -- see `delivery.ts`. The only externally-visible
- *    effect of calling it here too is that an already-due job of ANY
- *    category may now deliver up to ~4 minutes sooner than it otherwise
- *    would have, which is a strict improvement, never a correctness risk.
+ *    own doc comment for why that matters under overlapping invocations)
+ *    and `peekDueJobsCount` (already-due `notification_jobs` rows of ANY
+ *    category, not only scheduled-broadcast ones). When BOTH are zero,
+ *    this returns immediately: no Google/workbook request, no personnel
+ *    parsing, no dispatch, no delivery. A minute with nothing to do costs
+ *    two small Postgres count queries, never a Sheets API call.
+ * 2. When there are no due/recoverable scheduled broadcasts but there ARE
+ *    already-due jobs (the stranded-job recovery path): this skips the
+ *    personnel read and scheduled-broadcast dispatch entirely -- there is
+ *    nothing for them to do -- and calls `runDelivery()` directly.
+ * 3. When due/recoverable scheduled broadcasts exist: a PERSONNEL-ONLY
+ *    fresh read (`fetchFreshPersonnelRead`, never Schedule/Settings) --
+ *    everything `dispatchScheduledBroadcast` needs to re-resolve
+ *    recipients fresh -- then the exact same `runDueScheduledBroadcastDispatch`
+ *    (audience resolution, idempotency, crash-recovery) PR #79 already
+ *    built for the main tick -- reused unmodified, never re-implemented
+ *    here -- then the exact same `runDelivery()` PR #29/#30 already
+ *    built, invoked in THIS SAME tick so a freshly-dispatched job doesn't
+ *    wait for a separate delivery pass.
+ *
+ * `runDelivery()` is safe to call from every one of these paths, and from
+ * the main 5-minute tick, and from a manual broadcast's own `after()`
+ * kick, all overlapping: `claim_due_notification_jobs` uses
+ * `for update skip locked`, and each device's delivery row has a terminal
+ * state (`sent`/`failed_permanent`) that's always skipped on a later call
+ * -- see `delivery.ts`. The only externally-visible effect of calling it
+ * from more places is that an already-due job may deliver sooner than it
+ * otherwise would have, which is a strict improvement, never a
+ * correctness risk.
  *
  * This worker is the PRIMARY, minute-precision owner of scheduled-
- * broadcast dispatch. `pipeline.ts`'s main 5-minute tick ALSO still calls
- * `runDueScheduledBroadcastDispatch` as a deliberate FALLBACK -- this
- * worker's own Cron job is configured manually outside the repository,
- * so if it's ever missing/disabled/broken, scheduled broadcasts still go
- * out (just on the slower 5-minute cadence) rather than stopping
- * entirely. Two independently-scheduled callers of the same claim
- * function are safe by construction: `claim_due_manager_scheduled_broadcasts`'s
- * uniform `claimed_at`-vs-90-second-lease eligibility (see
- * `runDueScheduledBroadcastDispatch`'s own doc comment) means whichever
- * caller claims a row first owns it for the lease; the other can only
- * ever claim a DIFFERENT due row, never the same live one.
+ * broadcast dispatch, and the PRIMARY <=1-minute fallback for stranded due
+ * jobs. `pipeline.ts`'s main 5-minute tick ALSO still calls
+ * `runDueScheduledBroadcastDispatch` and `runDelivery()` as a deliberate
+ * FINAL FALLBACK -- this worker's own Cron job is configured manually
+ * outside the repository, so if it's ever missing/disabled/broken,
+ * scheduled broadcasts and due jobs still go out (just on the slower
+ * 5-minute cadence) rather than stopping entirely. Two independently-
+ * scheduled callers of the same claim functions are safe by construction:
+ * `claim_due_manager_scheduled_broadcasts`'s uniform `claimed_at`-vs-
+ * 90-second-lease eligibility (see `runDueScheduledBroadcastDispatch`'s
+ * own doc comment) means whichever caller claims a row first owns it for
+ * the lease; the other can only ever claim a DIFFERENT due row, never the
+ * same live one. Same story for `claim_due_notification_jobs`'s
+ * `for update skip locked`.
  */
 export async function runScheduledBroadcastWorkerTick(): Promise<ScheduledBroadcastWorkerTickSummary> {
   const startedAt = performance.now();
 
-  const dueCount = await runStage("scheduled_broadcasts_work_check", () => peekAnyManagerScheduledBroadcastWorkDue());
-  if (dueCount === 0) {
+  const [scheduledDueCount, dueJobsCount] = await Promise.all([
+    runStage("scheduled_broadcasts_work_check", () => peekAnyManagerScheduledBroadcastWorkDue()),
+    runStage("jobs_due_lookup", () => peekDueJobsCount()),
+  ]);
+
+  if (scheduledDueCount === 0 && dueJobsCount === 0) {
     return {
       skipped: true,
       scheduledBroadcastsDue: 0,
       scheduledBroadcastsDispatched: 0,
       scheduledBroadcastsFailed: 0,
       jobsClaimed: 0,
+      durationMs: Math.round(performance.now() - startedAt),
+    };
+  }
+
+  if (scheduledDueCount === 0) {
+    // Stranded-job recovery path: no due/recoverable scheduled broadcast,
+    // so there is nothing for a personnel read or dispatch to do -- go
+    // straight to delivery for whatever is already due (e.g. a manual
+    // "Send Now" broadcast whose own immediate `after()` kick never ran).
+    const deliverySummary: DeliverySummary = await runStage("delivery", () => runDelivery());
+    return {
+      skipped: false,
+      scheduledBroadcastsDue: 0,
+      scheduledBroadcastsDispatched: 0,
+      scheduledBroadcastsFailed: 0,
+      jobsClaimed: deliverySummary.jobsClaimed,
       durationMs: Math.round(performance.now() - startedAt),
     };
   }

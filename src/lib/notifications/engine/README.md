@@ -99,29 +99,39 @@ implements; this file is the module map.
 - `scheduledWorker.ts` -- the minute-level-precision follow-up's own
   orchestrator (`runScheduledBroadcastWorkerTick()`), driving
   `POST /internal/notifications/scheduled`, Supabase Cron's once-a-minute
-  job. A cheap Supabase pre-check first (`peekAnyManagerScheduledBroadcastWorkDue`
-  in `store.ts`) -- on a quiet minute this returns immediately with NO
-  Google/workbook read, no dispatch, no delivery at all. Only when work
-  exists: a personnel-ONLY fresh read (`freshRead.ts`'s
+  job. Has TWO jobs: dispatching due scheduled broadcasts, AND acting as
+  the <=1-minute fallback for any already-due `notification_job` that
+  wasn't picked up yet (chiefly a manual "Send Now" broadcast whose own
+  best-effort immediate `after()` delivery kick -- see
+  `manualBroadcastActions.ts` -- never ran or failed). A cheap Supabase
+  pre-check first, considering BOTH kinds of work in parallel
+  (`peekAnyManagerScheduledBroadcastWorkDue` and `peekDueJobsCount`, both
+  in `store.ts`) -- on a genuinely quiet minute (both zero) this returns
+  immediately with NO Google/workbook read, no dispatch, no delivery at
+  all. When there are due jobs but no due/recoverable scheduled
+  broadcast, it skips the personnel read and dispatch entirely and calls
+  `runDelivery()` directly. Only when a due/recoverable scheduled
+  broadcast exists does it do a personnel-ONLY fresh read (`freshRead.ts`'s
   `fetchFreshPersonnelRead`), then the EXACT SAME
   `runDueScheduledBroadcastDispatch`/`dispatchScheduledBroadcast`
   (`scheduledBroadcast.ts`) PR #79 built, then `runDelivery()` in the
   SAME invocation so a freshly-dispatched job doesn't wait for a separate
   delivery pass. This is the PRIMARY, minute-precision owner of
-  scheduled-broadcast dispatch; `pipeline.ts`'s main 5-minute tick ALSO
-  still calls `runDueScheduledBroadcastDispatch`, as a deliberate
-  fallback in case this worker's manually-configured Cron job is ever
-  missing, disabled, or broken -- two independently-scheduled callers of
-  the same claim function are safe by construction (see
+  scheduled-broadcast dispatch AND the primary <=1-minute fallback for
+  stranded due jobs; `pipeline.ts`'s main 5-minute tick ALSO still calls
+  `runDueScheduledBroadcastDispatch`/`runDelivery()`, as a deliberate
+  final fallback in case this worker's manually-configured Cron job is
+  ever missing, disabled, or broken -- two independently-scheduled
+  callers of the same claim functions are safe by construction (see
   `runDueScheduledBroadcastDispatch`'s own doc comment: it claims and
   dispatches ONE row at a time, so `claim_due_manager_scheduled_broadcasts`'s
   uniform `claimed_at`-vs-90-second-lease eligibility is always what a
   row's lease is actually measured against, never a stale bulk-claim
-  timestamp). Calling `runDelivery()` from both this worker and the main
-  tick is likewise safe by construction (`for update skip locked`
-  claiming + per-device terminal delivery states, see `delivery.ts`) --
-  the only effect is an already-due job of any category delivering
-  somewhat sooner.
+  timestamp). Calling `runDelivery()` from this worker, the main tick,
+  AND a manual broadcast's own `after()` kick is likewise safe by
+  construction (`for update skip locked` claiming + per-device terminal
+  delivery states, see `delivery.ts`) -- the only effect is an
+  already-due job of any category delivering somewhat sooner.
 
 ## Concurrency
 
