@@ -45,8 +45,11 @@ export function LoginClockReadout({
 
   if (variant === "stacked") {
     return (
-      <div className={`flex flex-col items-center gap-2.5 text-center ${className}`}>
-        {iconBadge("h-11 w-11")}
+      <div className={`flex flex-col items-center gap-1.5 text-center ${className}`}>
+        {/* No icon badge here (unlike "panel") -- this variant now sits directly
+            under the login clock ring's own icon-scale brand mark, so a second,
+            smaller clock icon right above the digits would be redundant and
+            just add height on the narrow viewports this variant is for. */}
         <LiveClock initialTime={initialClockTime} size="hero" className="text-white" />
         {weekdayLabel ? (
           <div className="flex flex-col gap-0.5 text-sm text-white/60">
