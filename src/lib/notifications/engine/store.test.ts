@@ -1033,3 +1033,284 @@ describe("insertManagerNotificationBatchIfAbsent / getManagerNotificationBatchBy
     expect(rows[0]).toMatchObject({ id: "batch_1", audienceKind: "everyone", resolvedRecipientCount: 2 });
   });
 });
+
+// ---------------------------------------------------------------------------
+// getManagerBroadcastDeliveryTiming -- read-only aggregation for the
+// "נשלחו לאחרונה" compact timing row.
+// ---------------------------------------------------------------------------
+
+interface FakeScheduledTimingRow {
+  batch_id: string | null;
+  created_at: string;
+  scheduled_for: string;
+  sent_now_at: string | null;
+}
+
+interface FakeJobRow {
+  id: string;
+  source_ref: string | null;
+  status: string;
+}
+
+interface FakeDeliveryRow {
+  job_id: string;
+  status: string;
+  last_attempted_at: string | null;
+}
+
+/**
+ * A minimal, faithful fake of the exact THREE-query chain shapes
+ * `getManagerBroadcastDeliveryTiming` uses:
+ * `manager_scheduled_broadcasts.select().in("batch_id", ...)`,
+ * `notification_jobs.select().in("source_ref", ...)`, and
+ * `notification_deliveries.select().eq("status", "sent").in("job_id", ...)`.
+ * Same fake-client style as `makeBatchesFakeSupabase` above -- records every
+ * `.in()` call so tests can assert exactly which ids/refs were queried
+ * (never one query per batch).
+ */
+function makeDeliveryTimingFakeSupabase(opts: {
+  scheduledBroadcasts?: FakeScheduledTimingRow[];
+  jobs?: FakeJobRow[];
+  deliveries?: FakeDeliveryRow[];
+}) {
+  const scheduledBroadcasts = opts.scheduledBroadcasts ?? [];
+  const jobs = opts.jobs ?? [];
+  const deliveries = opts.deliveries ?? [];
+  const calls = { scheduledBroadcastsQueries: 0, jobsQueries: 0, deliveriesQueries: 0 };
+
+  const client = {
+    from: (table: string) => {
+      if (table === "manager_scheduled_broadcasts") {
+        return {
+          select: () => ({
+            in: (_column: string, batchIds: string[]) => {
+              calls.scheduledBroadcastsQueries += 1;
+              return Promise.resolve({
+                data: scheduledBroadcasts.filter((row) => row.batch_id !== null && batchIds.includes(row.batch_id)),
+                error: null,
+              });
+            },
+          }),
+        };
+      }
+      if (table === "notification_jobs") {
+        return {
+          select: () => ({
+            in: (_column: string, sourceRefs: string[]) => {
+              calls.jobsQueries += 1;
+              return Promise.resolve({
+                data: jobs.filter((row) => row.source_ref !== null && sourceRefs.includes(row.source_ref)),
+                error: null,
+              });
+            },
+          }),
+        };
+      }
+      if (table === "notification_deliveries") {
+        return {
+          select: () => ({
+            eq: (_statusColumn: string, statusValue: string) => ({
+              in: (_column: string, jobIds: string[]) => {
+                calls.deliveriesQueries += 1;
+                return Promise.resolve({
+                  data: deliveries.filter((row) => row.status === statusValue && jobIds.includes(row.job_id)),
+                  error: null,
+                });
+              },
+            }),
+          }),
+        };
+      }
+      throw new Error(`unexpected table ${table}`);
+    },
+  };
+
+  return { client, calls };
+}
+
+describe("getManagerBroadcastDeliveryTiming", () => {
+  it("returns an empty map without querying anything when given zero batches", async () => {
+    const { client, calls } = makeDeliveryTimingFakeSupabase({});
+    const { getManagerBroadcastDeliveryTiming } = await loadModule(client);
+
+    const result = await getManagerBroadcastDeliveryTiming([]);
+
+    expect(result.size).toBe(0);
+    expect(calls.scheduledBroadcastsQueries).toBe(0);
+    expect(calls.jobsQueries).toBe(0);
+    expect(calls.deliveriesQueries).toBe(0);
+  });
+
+  it("1. immediate broadcast: batch created timestamp + successful delivery timestamp -> firstSuccessfulPushAt set, deliveryState 'sent', no schedule fields", async () => {
+    const { client } = makeDeliveryTimingFakeSupabase({
+      jobs: [{ id: "job_1", source_ref: "manual:batch_1", status: "completed" }],
+      deliveries: [{ job_id: "job_1", status: "sent", last_attempted_at: "2026-08-22T21:46:02.000Z" }],
+    });
+    const { getManagerBroadcastDeliveryTiming } = await loadModule(client);
+
+    const result = await getManagerBroadcastDeliveryTiming([{ id: "batch_1", pushCapableCount: 1 }]);
+
+    expect(result.get("batch_1")).toEqual({
+      scheduleCreatedAt: null,
+      scheduledFor: null,
+      sentNowAt: null,
+      firstSuccessfulPushAt: "2026-08-22T21:46:02.000Z",
+      deliveryState: "sent",
+    });
+  });
+
+  it("2. multiple jobs/devices: the earliest SUCCESSFUL status='sent' timestamp wins, across every job for the batch", async () => {
+    const { client } = makeDeliveryTimingFakeSupabase({
+      jobs: [
+        { id: "job_1", source_ref: "manual:batch_1", status: "completed" },
+        { id: "job_2", source_ref: "manual:batch_1", status: "completed" },
+      ],
+      deliveries: [
+        { job_id: "job_1", status: "sent", last_attempted_at: "2026-08-22T21:46:05.000Z" },
+        { job_id: "job_1", status: "sent", last_attempted_at: "2026-08-22T21:46:02.000Z" }, // a second device, earlier
+        { job_id: "job_2", status: "sent", last_attempted_at: "2026-08-22T21:46:09.000Z" },
+      ],
+    });
+    const { getManagerBroadcastDeliveryTiming } = await loadModule(client);
+
+    const result = await getManagerBroadcastDeliveryTiming([{ id: "batch_1", pushCapableCount: 2 }]);
+
+    expect(result.get("batch_1")?.firstSuccessfulPushAt).toBe("2026-08-22T21:46:02.000Z");
+    expect(result.get("batch_1")?.deliveryState).toBe("sent");
+  });
+
+  it("3. failed/transient delivery attempts earlier than a successful one must NOT become firstSuccessfulPushAt", async () => {
+    const { client } = makeDeliveryTimingFakeSupabase({
+      jobs: [{ id: "job_1", source_ref: "manual:batch_1", status: "completed" }],
+      deliveries: [
+        // An earlier FAILED attempt -- the fake client's own `.eq("status","sent")`
+        // filter (mirroring the real server-side filter) means this row is never
+        // even returned to the aggregator, so it can never win the "earliest" race.
+        { job_id: "job_1", status: "failed_transient", last_attempted_at: "2026-08-22T21:45:00.000Z" },
+        { job_id: "job_1", status: "sent", last_attempted_at: "2026-08-22T21:46:02.000Z" },
+      ],
+    });
+    const { getManagerBroadcastDeliveryTiming } = await loadModule(client);
+
+    const result = await getManagerBroadcastDeliveryTiming([{ id: "batch_1", pushCapableCount: 1 }]);
+
+    expect(result.get("batch_1")?.firstSuccessfulPushAt).toBe("2026-08-22T21:46:02.000Z");
+  });
+
+  it("4a. no successful push, still-outstanding jobs -> firstSuccessfulPushAt/deliveryLatency stay null, deliveryState 'pending'", async () => {
+    const { client } = makeDeliveryTimingFakeSupabase({
+      jobs: [{ id: "job_1", source_ref: "manual:batch_1", status: "pending" }],
+      deliveries: [],
+    });
+    const { getManagerBroadcastDeliveryTiming } = await loadModule(client);
+
+    const result = await getManagerBroadcastDeliveryTiming([{ id: "batch_1", pushCapableCount: 1 }]);
+
+    expect(result.get("batch_1")).toEqual({
+      scheduleCreatedAt: null,
+      scheduledFor: null,
+      sentNowAt: null,
+      firstSuccessfulPushAt: null,
+      deliveryState: "pending",
+    });
+  });
+
+  it("4b. no successful push, every job reached a terminal state -> deliveryState 'failed', never a false 'sent'", async () => {
+    const { client } = makeDeliveryTimingFakeSupabase({
+      jobs: [{ id: "job_1", source_ref: "manual:batch_1", status: "failed" }],
+      deliveries: [{ job_id: "job_1", status: "failed_permanent", last_attempted_at: "2026-08-22T21:46:02.000Z" }],
+    });
+    const { getManagerBroadcastDeliveryTiming } = await loadModule(client);
+
+    const result = await getManagerBroadcastDeliveryTiming([{ id: "batch_1", pushCapableCount: 1 }]);
+
+    expect(result.get("batch_1")?.firstSuccessfulPushAt).toBeNull();
+    expect(result.get("batch_1")?.deliveryState).toBe("failed");
+  });
+
+  it("4c. zero push-capable recipients -> deliveryState 'no_push_recipients', independent of job state", async () => {
+    const { client } = makeDeliveryTimingFakeSupabase({ jobs: [], deliveries: [] });
+    const { getManagerBroadcastDeliveryTiming } = await loadModule(client);
+
+    const result = await getManagerBroadcastDeliveryTiming([{ id: "batch_1", pushCapableCount: 0 }]);
+
+    expect(result.get("batch_1")).toEqual({
+      scheduleCreatedAt: null,
+      scheduledFor: null,
+      sentNowAt: null,
+      firstSuccessfulPushAt: null,
+      deliveryState: "no_push_recipients",
+    });
+  });
+
+  it("5. scheduled broadcast: matched through batch_id, surfaces the scheduled row's own created_at/scheduled_for", async () => {
+    const { client } = makeDeliveryTimingFakeSupabase({
+      scheduledBroadcasts: [
+        { batch_id: "batch_1", created_at: "2026-08-22T20:10:00.000Z", scheduled_for: "2026-08-22T21:46:00.000Z", sent_now_at: null },
+      ],
+      jobs: [{ id: "job_1", source_ref: "manual:batch_1", status: "completed" }],
+      deliveries: [{ job_id: "job_1", status: "sent", last_attempted_at: "2026-08-22T21:46:04.000Z" }],
+    });
+    const { getManagerBroadcastDeliveryTiming } = await loadModule(client);
+
+    const result = await getManagerBroadcastDeliveryTiming([{ id: "batch_1", pushCapableCount: 1 }]);
+
+    expect(result.get("batch_1")).toEqual({
+      scheduleCreatedAt: "2026-08-22T20:10:00.000Z",
+      scheduledFor: "2026-08-22T21:46:00.000Z",
+      sentNowAt: null,
+      firstSuccessfulPushAt: "2026-08-22T21:46:04.000Z",
+      deliveryState: "sent",
+    });
+  });
+
+  it("6. scheduled 'שלח עכשיו': surfaces sentNowAt distinct from the original scheduled_for", async () => {
+    const { client } = makeDeliveryTimingFakeSupabase({
+      scheduledBroadcasts: [
+        {
+          batch_id: "batch_1",
+          created_at: "2026-08-22T20:10:00.000Z",
+          scheduled_for: "2026-08-22T22:30:00.000Z", // the ORIGINAL, still-future schedule
+          sent_now_at: "2026-08-22T21:45:57.000Z", // forced early
+        },
+      ],
+      jobs: [{ id: "job_1", source_ref: "manual:batch_1", status: "completed" }],
+      deliveries: [{ job_id: "job_1", status: "sent", last_attempted_at: "2026-08-22T21:46:00.000Z" }],
+    });
+    const { getManagerBroadcastDeliveryTiming } = await loadModule(client);
+
+    const result = await getManagerBroadcastDeliveryTiming([{ id: "batch_1", pushCapableCount: 1 }]);
+
+    expect(result.get("batch_1")).toEqual({
+      scheduleCreatedAt: "2026-08-22T20:10:00.000Z",
+      scheduledFor: "2026-08-22T22:30:00.000Z",
+      sentNowAt: "2026-08-22T21:45:57.000Z",
+      firstSuccessfulPushAt: "2026-08-22T21:46:00.000Z",
+      deliveryState: "sent",
+    });
+  });
+
+  it("bulk-fetches in exactly THREE queries total regardless of batch count -- never one query per batch", async () => {
+    const { client, calls } = makeDeliveryTimingFakeSupabase({
+      jobs: [
+        { id: "job_1", source_ref: "manual:batch_1", status: "completed" },
+        { id: "job_2", source_ref: "manual:batch_2", status: "completed" },
+      ],
+      deliveries: [
+        { job_id: "job_1", status: "sent", last_attempted_at: "2026-08-22T21:46:00.000Z" },
+        { job_id: "job_2", status: "sent", last_attempted_at: "2026-08-22T21:47:00.000Z" },
+      ],
+    });
+    const { getManagerBroadcastDeliveryTiming } = await loadModule(client);
+
+    const result = await getManagerBroadcastDeliveryTiming([
+      { id: "batch_1", pushCapableCount: 1 },
+      { id: "batch_2", pushCapableCount: 1 },
+    ]);
+
+    expect(result.size).toBe(2);
+    expect(calls.scheduledBroadcastsQueries).toBe(1);
+    expect(calls.jobsQueries).toBe(1);
+    expect(calls.deliveriesQueries).toBe(1);
+  });
+});
