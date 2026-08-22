@@ -10,6 +10,7 @@ import {
 import type { LocalNow } from "@/lib/domain/localNow";
 import { classifyPersonnelType } from "@/lib/domain/personnelType";
 import { EMPTY_RESERVE_ROLE_PARTICIPATION, type ReserveRoleParticipation } from "@/lib/domain/reserveParticipation";
+import { computeShiftExpectationFactors } from "@/lib/domain/shiftExpectationFactors";
 import type { Person } from "@/lib/domain/types";
 import type { ShiftFairnessGroupView, ShiftFairnessPersonRowView, ShiftFairnessReadModel } from "./shiftFairnessTypes";
 
@@ -70,12 +71,22 @@ export function buildShiftFairnessReadModel(
     periodStartDate: periodDates[0] ?? null,
     periodEndDate: periodDates[periodDates.length - 1] ?? null,
     periodStatus,
-    groups: [toGroupView(supervisorGroup, people), toGroupView(technicianGroup, people)],
+    groups: [toGroupView(supervisorGroup, people, events), toGroupView(technicianGroup, people, events)],
   };
 }
 
-function toGroupView(group: ShiftFairnessGroupResult, people: readonly Person[]): ShiftFairnessGroupView {
+function toGroupView(
+  group: ShiftFairnessGroupResult,
+  people: readonly Person[],
+  events: readonly Event[],
+): ShiftFairnessGroupView {
   const peopleById = new Map(people.map((person) => [person.id, person]));
+
+  // The exact same period this group's own target was computed over --
+  // reused, never re-derived -- so the factor breakdown counts absences/
+  // constraints over the identical window the target itself reflects.
+  const periodStartDate = group.periodDates[0] ?? null;
+  const periodEndDate = group.periodDates[group.periodDates.length - 1] ?? null;
 
   const rows: ShiftFairnessPersonRowView[] = group.people.map((personResult) => ({
     personId: personResult.personId,
@@ -90,6 +101,11 @@ function toGroupView(group: ShiftFairnessGroupResult, people: readonly Person[])
     weekendDeviation: personResult.weekendDeviation,
     weekendStatus: personResult.weekendStatus,
     dataCompleteness: personResult.dataCompleteness,
+    // A null target has no "expected value" to explain -- never computed for those rows.
+    expectationFactors:
+      personResult.target !== null && periodStartDate !== null && periodEndDate !== null
+        ? computeShiftExpectationFactors(events, personResult.personId, periodStartDate, periodEndDate)
+        : null,
   }));
 
   return { role: group.role, rows };

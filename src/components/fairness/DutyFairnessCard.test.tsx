@@ -23,6 +23,16 @@ function view(overrides: Partial<DutyFairnessCardView> = {}): DutyFairnessCardVi
     status: "below",
     weekendLabel: "2",
     exemptionBadges: [],
+    hasTarget: true,
+    progressRatio: 0.3625,
+    progressPercentLabel: "36%",
+    remainingLabel: "5.1",
+    beyondTargetLabel: null,
+    paceLabel: null,
+    paceStatus: null,
+    noTargetNoteLabel: null,
+    liveDutyLabel: null,
+    liveDutySubLabel: null,
     ...overrides,
   };
 }
@@ -72,83 +82,152 @@ describe("DutyFairnessCard — avatar", () => {
     );
     expect(screen.getByText("נועה טכנאית")).toBeInTheDocument();
     expect(screen.getByText("טכנאי")).toBeInTheDocument();
-    expect(screen.getByTestId("metric-duty-current")).toBeInTheDocument();
+    expect(screen.getByTestId("metric-duty-points")).toBeInTheDocument();
   });
 });
 
-describe("DutyFairnessCard — primary metric grid order and content", () => {
-  it("renders the four primary metrics in the required order: הקצאות שבוצעו, ניקוד נוכחי, יעד השוואה, פער מהיעד", () => {
+describe("DutyFairnessCard — Justice Table redesign: completed/target progress, remaining, pace", () => {
+  it("shows completed/target points, the progress percentage, and a progress bar reflecting progressRatio", () => {
     render(
       <ul>
-        <DutyFairnessCard view={view({ completedAllocationLabel: "2.9", currentLabel: "6", targetLabel: "8", gapLabel: "-2.00" })} />
+        <DutyFairnessCard view={view({ completedAllocationLabel: "2.6", targetLabel: "6.2", progressPercentLabel: "42%", progressRatio: 0.42 })} />
       </ul>,
     );
-    const grid = screen.getByTestId("metric-duty-allocation").parentElement;
-    const gridChildIds = Array.from(grid?.children ?? []).map((child) => child.getAttribute("data-testid"));
-    expect(gridChildIds).toEqual(["metric-duty-allocation", "metric-duty-current", "metric-duty-target", "metric-duty-gap"]);
+    expect(screen.getByTestId("metric-duty-points")).toHaveTextContent("2.6");
+    expect(screen.getByTestId("metric-duty-points")).toHaveTextContent("6.2");
+    expect(screen.getByTestId("metric-duty-progress-percent")).toHaveTextContent("42%");
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "42");
   });
 
-  it("shows the weighted completed-allocation total as a plain value, distinct from the workbook current score", () => {
+  it("shows remaining points to the target when under 100%", () => {
     render(
       <ul>
-        <DutyFairnessCard view={view({ completedAllocationLabel: "2.9", currentLabel: "6" })} />
+        <DutyFairnessCard view={view({ remainingLabel: "3.6", beyondTargetLabel: null })} />
       </ul>,
     );
-    expect(screen.getByTestId("metric-duty-allocation")).toHaveTextContent("הקצאות שבוצעו");
-    expect(screen.getByTestId("metric-duty-allocation")).toHaveTextContent("2.9");
-    expect(screen.getByTestId("metric-duty-current")).toHaveTextContent("6");
+    expect(screen.getByTestId("metric-duty-remaining")).toHaveTextContent("3.6");
+    expect(screen.getByTestId("metric-duty-remaining")).toHaveTextContent("נותרו");
   });
 
-  it("still renders a completed-allocation total for a non-comparable person (null target/status/gap)", () => {
+  it("shows a 'beyond potential' note instead of remaining once the target is exceeded -- never framed as an error", () => {
+    render(
+      <ul>
+        <DutyFairnessCard view={view({ progressRatio: 1.16, progressPercentLabel: "116%", remainingLabel: "0", beyondTargetLabel: "1" })} />
+      </ul>,
+    );
+    expect(screen.getByTestId("metric-duty-remaining")).toHaveTextContent("1");
+    expect(screen.getByTestId("metric-duty-remaining")).toHaveTextContent("מעבר לפוטנציאל");
+  });
+
+  it("shows the pace badge when known, secondary to the progress figures", () => {
+    render(
+      <ul>
+        <DutyFairnessCard view={view({ paceLabel: "מתחת לקצב", paceStatus: "below_pace" })} />
+      </ul>,
+    );
+    expect(screen.getByTestId("metric-duty-pace")).toHaveTextContent("מתחת לקצב");
+  });
+
+  it("renders no pace badge when pace is unknown", () => {
+    render(
+      <ul>
+        <DutyFairnessCard view={view({ paceLabel: null, paceStatus: null })} />
+      </ul>,
+    );
+    expect(screen.queryByTestId("metric-duty-pace")).toBeNull();
+  });
+});
+
+describe("DutyFairnessCard — Justice Table redesign: no-target state", () => {
+  it("never shows a progress bar or percentage when there is no target -- shows the real completed total and a calm note instead", () => {
     render(
       <ul>
         <DutyFairnessCard
-          view={view({ completedAllocationLabel: "0.5", targetLabel: null, gapLabel: null, status: null })}
+          view={view({
+            allocationLabel: 'ר"צ',
+            hasTarget: false,
+            progressRatio: null,
+            completedAllocationLabel: "0.5",
+            noTargetNoteLabel: "אין יעד מוגדר לתפקיד/הקצאה זו בתקופה הנוכחית.",
+          })}
         />
       </ul>,
     );
+    expect(screen.queryByRole("progressbar")).toBeNull();
+    expect(screen.queryByTestId("metric-duty-progress-percent")).toBeNull();
     expect(screen.getByTestId("metric-duty-allocation")).toHaveTextContent("0.5");
-    expect(screen.getByTestId("metric-duty-target")).toHaveTextContent("—");
+    expect(screen.getByText("אין יעד מוגדר לתפקיד/הקצאה זו בתקופה הנוכחית.")).toBeInTheDocument();
   });
 
-  it("renders \"—\" for an unresolved identity's (or unsupported block shape's) completed-allocation total, never a fabricated 0", () => {
+  it("a genuine zero completed total with no target still renders '0', never omitted", () => {
     render(
       <ul>
-        <DutyFairnessCard view={view({ completedAllocationLabel: "—" })} />
+        <DutyFairnessCard view={view({ hasTarget: false, progressRatio: null, completedAllocationLabel: "0" })} />
       </ul>,
     );
-    expect(screen.getByTestId("metric-duty-allocation")).toHaveTextContent("—");
+    expect(screen.getByTestId("metric-duty-allocation")).toHaveTextContent("0");
   });
 });
 
-describe("DutyFairnessCard — density and responsive row/2x2 layout", () => {
-  it("the card root establishes a CSS container-query context (@container), so the primary grid responds to the CARD's own width, never the viewport", () => {
+describe("DutyFairnessCard — Justice Table redesign: LIVE duty", () => {
+  it("shows a calm LIVE strip with the companion 'points added on completion' text when a duty is currently active", () => {
     render(
       <ul>
-        <DutyFairnessCard view={view()} />
+        <DutyFairnessCard view={view({ liveDutyLabel: "שמירה 2 פעילה כרגע", liveDutySubLabel: "הנקודות יתווספו עם סיום התורנות" })} />
       </ul>,
     );
-    expect(screen.getByRole("link")).toHaveClass("@container");
+    expect(screen.getByTestId("metric-duty-live")).toHaveTextContent("LIVE");
+    expect(screen.getByTestId("metric-duty-live")).toHaveTextContent("שמירה 2 פעילה כרגע");
+    expect(screen.getByTestId("metric-duty-live")).toHaveTextContent("הנקודות יתווספו עם סיום התורנות");
   });
 
-  it("the primary metric grid is a compact 2-column fallback that expands to one 4-column row once the card itself is wide enough", () => {
+  it("renders no LIVE strip when nothing is currently active", () => {
     render(
       <ul>
-        <DutyFairnessCard view={view()} />
+        <DutyFairnessCard view={view({ liveDutyLabel: null, liveDutySubLabel: null })} />
       </ul>,
     );
-    const grid = screen.getByTestId("metric-duty-allocation").parentElement;
-    expect(grid).toHaveClass("grid-cols-2");
-    expect(grid).toHaveClass("@[380px]:grid-cols-4");
+    expect(screen.queryByTestId("metric-duty-live")).toBeNull();
+  });
+});
+
+describe("DutyFairnessCard — weekend and exemptions still show, secondary row", () => {
+  it("shows the weekend count", () => {
+    render(
+      <ul>
+        <DutyFairnessCard view={view({ weekendLabel: "3" })} />
+      </ul>,
+    );
+    expect(screen.getByTestId("metric-duty-weekend")).toHaveTextContent("3");
   });
 
-  it("never lays the primary grid out as 3 columns", () => {
+  it("shows exemption badges when present", () => {
     render(
       <ul>
-        <DutyFairnessCard view={view()} />
+        <DutyFairnessCard view={view({ exemptionBadges: ["🚫 מטבח"] })} />
       </ul>,
     );
-    const grid = screen.getByTestId("metric-duty-allocation").parentElement;
-    expect(grid?.className).not.toMatch(/grid-cols-3/);
+    expect(screen.getByText("🚫 מטבח")).toBeInTheDocument();
+  });
+});
+
+describe("DutyFairnessCard — href", () => {
+  it("renders as a plain non-clickable card when href is null (unresolved identity)", () => {
+    render(
+      <ul>
+        <DutyFairnessCard view={view({ href: null })} />
+      </ul>,
+    );
+    expect(screen.queryByRole("link")).toBeNull();
+    expect(screen.getByText("נועה טכנאית")).toBeInTheDocument();
+  });
+
+  it("renders as a link when href is present", () => {
+    render(
+      <ul>
+        <DutyFairnessCard view={view({ href: "/fairness?mode=duties&person=p_1" })} />
+      </ul>,
+    );
+    expect(screen.getByRole("link")).toHaveAttribute("href", "/fairness?mode=duties&person=p_1");
   });
 });

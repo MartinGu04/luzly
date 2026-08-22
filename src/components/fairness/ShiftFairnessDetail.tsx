@@ -16,12 +16,15 @@ function Stat({ label, value }: { label: string; value: string }) {
 }
 
 /**
- * Shift Fairness person detail (PR #4 §15) -- the fuller facts a card
- * intentionally leaves out: weekend deviation/status alongside the
- * general ones, and a plain-Hebrew explanation of WHY a target is
- * unavailable when it is (never a raw `dataCompleteness` reason key).
- * `actualShifts`/`weekendActualShifts` (the real confirmed work) always
- * render regardless of target availability.
+ * Shift Fairness person detail (PR #4 §15, redesigned for the Justice Table
+ * UX pass) -- "בוצעו / צפי עד היום / מצב מול הצפי / סופ״שים", the same
+ * human-readable state the card shows (never a raw signed gap number),
+ * plus -- one interaction deeper -- the concrete factor breakdown behind
+ * why this person's expected value differs (`expectationFactorLabel`) and a
+ * plain-Hebrew explanation of WHY a target is unavailable when it is
+ * (never a raw `dataCompleteness` reason key). `actualShifts`/
+ * `weekendActualShifts` (the real confirmed work) always render regardless
+ * of target availability.
  */
 export function ShiftFairnessDetail({ view, groupLabel }: ShiftFairnessDetailProps) {
   return (
@@ -30,12 +33,16 @@ export function ShiftFairnessDetail({ view, groupLabel }: ShiftFairnessDetailPro
 
       <div className="grid grid-cols-2 gap-3">
         <Stat label="בוצעו" value={view.actualLabel} />
-        <Stat label="יעד" value={view.targetLabel ?? "—"} />
-        <Stat label="פער" value={view.deviationLabel ?? "—"} />
-        <Stat label='סופ"ש בוצעו' value={view.weekendActualLabel} />
-        <Stat label='סופ"ש יעד' value={view.weekendTargetLabel ?? "—"} />
-        <Stat label='סופ"ש פער' value={view.weekendDeviationLabel ?? "—"} />
+        <Stat label="צפי" value={view.targetLabel ?? "—"} />
+        <Stat label="מצב מול הצפי" value={view.statusStateLabel} />
+        <Stat label='סופ"שים' value={view.weekendActualLabel} />
       </div>
+
+      {view.expectationFactorLabel ? (
+        <p className="text-xs leading-relaxed text-muted">
+          <span className="text-muted-2">למה הצפי שונה עבור אדם זה:</span> {view.expectationFactorLabel}
+        </p>
+      ) : null}
 
       {view.unavailableNote || view.completenessNote ? (
         <p className="rounded-xl bg-overlay-soft px-3 py-2.5 text-xs leading-relaxed text-muted">

@@ -253,3 +253,24 @@ export function dayOfWeek({ year, month, day }: CalendarDate): number {
     (y + Math.floor(y / 4) - Math.floor(y / 100) + Math.floor(y / 400) + monthOffsets[month - 1] + day) % 7
   );
 }
+
+/** Proleptic-Gregorian ordinal day number (Julian Day Number, integer part) -- pure integer arithmetic, no Date/UTC. Only ever used to DIFF two calendar dates (`daysBetweenCalendarDates`); never presented on its own. */
+function toOrdinalDay({ year, month, day }: CalendarDate): number {
+  const a = Math.floor((14 - month) / 12);
+  const y = year + 4800 - a;
+  const m = month + 12 * a - 3;
+  return day + Math.floor((153 * m + 2) / 5) + 365 * y + Math.floor(y / 4) - Math.floor(y / 100) + Math.floor(y / 400);
+}
+
+/**
+ * `endDate - startDate`, in whole civil days -- negative when `endDate` is
+ * before `startDate`. Pure integer arithmetic (via `toOrdinalDay`), no
+ * Date/UTC, so this is safe across month/year boundaries and leap years.
+ * `null` when either date fails to parse -- never a guessed distance.
+ */
+export function daysBetweenCalendarDates(startDate: string, endDate: string): number | null {
+  const start = parseCalendarDate(startDate);
+  const end = parseCalendarDate(endDate);
+  if (!start || !end) return null;
+  return toOrdinalDay(end) - toOrdinalDay(start);
+}

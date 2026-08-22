@@ -1,6 +1,7 @@
 import type { DutyFairnessPersonRowView } from "@/lib/readModels/dutyFairnessTypes";
 import { formatNormalizedLoad } from "@/lib/presentation/fairness";
 import type { DutyFairnessCardView } from "@/lib/presentation/fairnessCards";
+import { FairnessStatusBadge } from "./FairnessStatusBadge";
 
 interface DutyFairnessDetailProps {
   view: DutyFairnessCardView;
@@ -18,18 +19,45 @@ function Stat({ label, value }: { label: string; value: string }) {
 }
 
 /**
- * Duty Fairness person detail (PR #4 §16) -- the weighted completed-
- * allocation total, previous/current/delta, target, gap, and normalized
- * load as CONTEXTUAL "load relative to the comparison target" only,
- * explicitly labeled as such -- never a 0–100 Fairness grade. Exemptions
- * render as visible badges directly in the panel, never behind hover.
+ * Duty Fairness person detail (PR #4 §16, redesigned for the Justice Table
+ * UX pass) -- the below/balanced/above workbook-score status badge (moved
+ * here from the main card, which now leads with progress/pace instead --
+ * nothing is deleted, only relocated one interaction deeper), the
+ * completed/target progress summary (remaining or beyond-potential, plus
+ * pace), a LIVE strip when relevant, then the fuller previous/current/
+ * delta/target/gap/weekend stat grid and normalized load as CONTEXTUAL
+ * "load relative to the comparison target" only, explicitly labeled as
+ * such -- never a 0–100 Fairness grade. Exemptions render as visible
+ * badges directly in the panel, never behind hover.
  */
 export function DutyFairnessDetail({ view, normalizedLoad, previousLabel }: DutyFairnessDetailProps) {
   const normalizedLoadLabel = normalizedLoad !== null ? formatNormalizedLoad(normalizedLoad) : null;
 
   return (
     <div className="flex flex-col gap-4">
-      <p className="text-sm text-muted">{view.allocationLabel || "—"}</p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm text-muted">{view.allocationLabel || "—"}</p>
+        <FairnessStatusBadge status={view.status} />
+      </div>
+
+      {view.hasTarget ? (
+        <p className="text-sm text-muted">
+          <span className="text-muted-2">התקדמות מול היעד המפורסם:</span> {view.completedAllocationLabel} / {view.targetLabel} נקודות
+          ({view.progressPercentLabel})
+          {view.beyondTargetLabel
+            ? ` · ${view.beyondTargetLabel} נקודות מעבר לפוטנציאל`
+            : ` · ${view.remainingLabel} נקודות נותרו`}
+          {view.paceLabel ? ` · ${view.paceLabel}` : ""}
+        </p>
+      ) : view.noTargetNoteLabel ? (
+        <p className="text-sm text-muted">{view.noTargetNoteLabel}</p>
+      ) : null}
+
+      {view.liveDutyLabel ? (
+        <p className="text-sm text-status-above">
+          ● LIVE · {view.liveDutyLabel} · {view.liveDutySubLabel}
+        </p>
+      ) : null}
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <Stat label="הקצאות שבוצעו" value={view.completedAllocationLabel} />

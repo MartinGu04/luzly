@@ -650,3 +650,222 @@ describe("buildDutyFairnessReadModel — completedAllocationTotal: weighted, ind
     expect(row?.completedAllocationTotal).toBe(0);
   });
 });
+
+describe("buildDutyFairnessReadModel — Justice Table redesign: progress/remaining/pace", () => {
+  const targets: FairnessTargets = { supervisorTarget: 4, technicianTarget: 8 };
+
+  it("targetProgressRatio is completedAllocationTotal / comparisonTarget, an entirely different figure from normalizedLoad (currentScore-based)", () => {
+    const events: Event[] = [
+      dutyEvent({ personId: "p1", date: "2026-02-01" }),
+      dutyEvent({ personId: "p1", date: "2026-02-08" }),
+    ]; // 2 rasar days -> completedAllocationTotal 0.4
+    const model = buildDutyFairnessReadModel({
+      parseResult: parseResult({
+        personRows: [personRow({ resolvedPersonId: "p1", allocationLabel: "טכנאי", currentScore: 6 })],
+        targets,
+      }),
+      periodIdentity: { key: "h1", year: 2026 },
+      fetchedAt: "2026-08-15T10:00:00.000Z",
+      now: NOW,
+      events,
+    });
+    const row = model.groups.find((g) => g.key === "technician")?.rows[0];
+    expect(row?.completedAllocationTotal).toBeCloseTo(0.4);
+    expect(row?.targetProgressRatio).toBeCloseTo(0.05); // 0.4 / 8
+    expect(row?.normalizedLoad).toBeCloseTo(0.75); // 6 / 8 -- currentScore-based, unaffected
+  });
+
+  it("remainingToTarget is signed: positive while under target, negative ('beyond potential') once exceeded", () => {
+    const under: Event[] = [dutyEvent({ personId: "p1", date: "2026-02-01" })]; // 0.2
+    const modelUnder = buildDutyFairnessReadModel({
+      parseResult: parseResult({
+        personRows: [personRow({ resolvedPersonId: "p1", allocationLabel: "טכנאי" })],
+        targets,
+      }),
+      periodIdentity: { key: "h1", year: 2026 },
+      fetchedAt: "2026-08-15T10:00:00.000Z",
+      now: NOW,
+      events: under,
+    });
+    const rowUnder = modelUnder.groups.find((g) => g.key === "technician")?.rows[0];
+    expect(rowUnder?.remainingToTarget).toBeCloseTo(7.8); // 8 - 0.2
+
+    const overEvents: Event[] = [
+      guardEvent("2026-01-01"), // weekend 1.0
+      guardEvent("2026-01-02"),
+      guardEvent("2026-01-03"),
+      guardEvent("2026-01-04"),
+    ];
+    const modelOver = buildDutyFairnessReadModel({
+      parseResult: parseResult({
+        personRows: [personRow({ resolvedPersonId: "p1", allocationLabel: 'אחמ"ש' })],
+        targets,
+      }),
+      periodIdentity: { key: "h1", year: 2026 },
+      fetchedAt: "2026-08-15T10:00:00.000Z",
+      now: NOW,
+      events: overEvents,
+    });
+    const rowOver = modelOver.groups.find((g) => g.key === "supervisor")?.rows[0];
+    expect(rowOver?.completedAllocationTotal).toBe(1);
+    expect(rowOver?.remainingToTarget).toBe(3); // 4 - 1
+  });
+
+  it("remainingToTarget/targetProgressRatio are null with no target, even with real completed work", () => {
+    const events: Event[] = [dutyEvent({ personId: "p_rats", date: "2026-02-01" })];
+    const model = buildDutyFairnessReadModel({
+      parseResult: parseResult({
+        personRows: [personRow({ resolvedPersonId: "p_rats", allocationLabel: 'ר"צ' })],
+        targets,
+      }),
+      periodIdentity: { key: "h1", year: 2026 },
+      fetchedAt: "2026-08-15T10:00:00.000Z",
+      now: NOW,
+      events,
+    });
+    const row = model.groups.find((g) => g.key === "supervisor")?.rows[0];
+    expect(row?.completedAllocationTotal).toBeCloseTo(0.2);
+    expect(row?.targetProgressRatio).toBeNull();
+    expect(row?.remainingToTarget).toBeNull();
+    expect(row?.paceStatus).toBeNull();
+  });
+
+  it("paceStatus compares progress% against the SAME whole-period elapsed% for everyone (no personal participation window)", () => {
+    // H1 2026: Jan 1 - Jun 30 (180 days). NOW = 2026-08-15 is used for a
+    // CLOSED h1 period here so effectiveEndDate is fixed at period end
+    // (Jun 30) regardless of "today" -- elapsed% is therefore 100%.
+    const events: Event[] = [
+      dutyEvent({ personId: "p1", date: "2026-01-05" }),
+      dutyEvent({ personId: "p1", date: "2026-02-05" }),
+      dutyEvent({ personId: "p1", date: "2026-03-05" }),
+      dutyEvent({ personId: "p1", date: "2026-04-05" }),
+    ]; // 4 rasar days -> 0.8 completed
+    const model = buildDutyFairnessReadModel({
+      parseResult: parseResult({
+        personRows: [personRow({ resolvedPersonId: "p1", allocationLabel: "טכנאי" })],
+        targets: { supervisorTarget: 4, technicianTarget: 8 },
+      }),
+      periodIdentity: { key: "h1", year: 2026 },
+      fetchedAt: "2026-08-15T10:00:00.000Z",
+      now: NOW, // period already closed
+      events,
+    });
+    const row = model.groups.find((g) => g.key === "technician")?.rows[0];
+    // 0.8/8 = 10% progress vs. 100% elapsed -> well below pace.
+    expect(row?.targetProgressRatio).toBeCloseTo(0.1);
+    expect(row?.paceStatus).toBe("below_pace");
+  });
+
+  it("paceStatus is on_pace when progress and elapsed% roughly match", () => {
+    // H2 2026: Jul 1 - Dec 31 (183 days). now = 2026-09-29 -> 90 days elapsed, ~49.2%.
+    const now: LocalNow = { date: "2026-09-29", minuteOfDay: 600 };
+    // Two confirmed Thu-Sun weekend guard blocks (2026-07-02 and 2026-08-06
+    // are both real Thursdays) -> 1.0 each, 2.0 total. Target (supervisor) 4
+    // -> 50% progress, matching the ~49% elapsed time within the ±5pp band.
+    const events: Event[] = [
+      guardEvent("2026-07-02"),
+      guardEvent("2026-07-03"),
+      guardEvent("2026-07-04"),
+      guardEvent("2026-07-05"),
+      guardEvent("2026-08-06"),
+      guardEvent("2026-08-07"),
+      guardEvent("2026-08-08"),
+      guardEvent("2026-08-09"),
+    ];
+    const model = buildDutyFairnessReadModel({
+      parseResult: parseResult({
+        personRows: [personRow({ resolvedPersonId: "p1", allocationLabel: 'אחמ"ש' })],
+        targets: { supervisorTarget: 4, technicianTarget: 8 },
+      }),
+      periodIdentity: { key: "h2", year: 2026 },
+      fetchedAt: "2026-09-29T10:00:00.000Z",
+      now,
+      events,
+    });
+    const row = model.groups.find((g) => g.key === "supervisor")?.rows[0];
+    expect(row?.completedAllocationTotal).toBe(2);
+    expect(row?.targetProgressRatio).toBeCloseTo(0.5);
+    expect(row?.paceStatus).toBe("on_pace");
+  });
+});
+
+describe("buildDutyFairnessReadModel — Justice Table redesign: LIVE duty", () => {
+  it("reports liveDuty for a currently in-progress completion-based block, only within the CURRENT period", () => {
+    // h2 2026 is current as of NOW (2026-08-15). A weekend guard block
+    // starting today (Thu 2026-08-13 -> Sun 2026-08-16) is still active.
+    const events: Event[] = [
+      guardEvent("2026-08-13"),
+      guardEvent("2026-08-14"),
+      guardEvent("2026-08-15"),
+      guardEvent("2026-08-16"),
+    ];
+    const model = buildDutyFairnessReadModel({
+      parseResult: parseResult({
+        personRows: [personRow({ resolvedPersonId: "p1", allocationLabel: "טכנאי" })],
+      }),
+      periodIdentity: { key: "h2", year: 2026 },
+      fetchedAt: "2026-08-15T10:00:00.000Z",
+      now: NOW,
+      events,
+    });
+    const row = model.groups.find((g) => g.key === "technician")?.rows[0];
+    expect(row?.liveDuty).toEqual({ dutyFamily: "guard", slot: 1 });
+    // Not yet counted as completed, since it hasn't finished.
+    expect(row?.completedAllocationTotal).toBe(0);
+  });
+
+  it("never reports liveDuty for a CLOSED period, even if a real-world block happens to overlap today", () => {
+    const events: Event[] = [
+      guardEvent("2026-08-13"),
+      guardEvent("2026-08-14"),
+      guardEvent("2026-08-15"),
+      guardEvent("2026-08-16"),
+    ];
+    const model = buildDutyFairnessReadModel({
+      parseResult: parseResult({
+        personRows: [personRow({ resolvedPersonId: "p1", allocationLabel: "טכנאי" })],
+      }),
+      periodIdentity: { key: "h1", year: 2026 }, // already closed as of NOW
+      fetchedAt: "2026-08-15T10:00:00.000Z",
+      now: NOW,
+      events,
+    });
+    const row = model.groups.find((g) => g.key === "technician")?.rows[0];
+    expect(row?.liveDuty).toBeNull();
+  });
+
+  it("never reports liveDuty for an unresolved identity", () => {
+    const events: Event[] = [
+      guardEvent("2026-08-13"),
+      guardEvent("2026-08-14"),
+      guardEvent("2026-08-15"),
+      guardEvent("2026-08-16"),
+    ];
+    const model = buildDutyFairnessReadModel({
+      parseResult: parseResult({
+        personRows: [personRow({ resolvedPersonId: null, allocationLabel: "טכנאי" })],
+      }),
+      periodIdentity: { key: "h2", year: 2026 },
+      fetchedAt: "2026-08-15T10:00:00.000Z",
+      now: NOW,
+      events,
+    });
+    const row = model.groups.find((g) => g.key === "technician")?.rows[0];
+    expect(row?.liveDuty).toBeNull();
+  });
+
+  it("never reports liveDuty for a day-based family (rasar) -- it already accrues per day, nothing withheld", () => {
+    const events: Event[] = [dutyEvent({ personId: "p1", date: "2026-08-15" })];
+    const model = buildDutyFairnessReadModel({
+      parseResult: parseResult({
+        personRows: [personRow({ resolvedPersonId: "p1", allocationLabel: "טכנאי" })],
+      }),
+      periodIdentity: { key: "h2", year: 2026 },
+      fetchedAt: "2026-08-15T10:00:00.000Z",
+      now: NOW,
+      events,
+    });
+    const row = model.groups.find((g) => g.key === "technician")?.rows[0];
+    expect(row?.liveDuty).toBeNull();
+  });
+});

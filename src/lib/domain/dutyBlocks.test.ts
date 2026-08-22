@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DutyFamily, Event } from "./event";
-import { buildDutyBlocks, isNextCalendarDay, parseCalendarDate } from "./dutyBlocks";
+import { buildDutyBlocks, daysBetweenCalendarDates, isNextCalendarDay, parseCalendarDate } from "./dutyBlocks";
 
 let cellCounter = 0;
 function nextCell(): string {
@@ -336,5 +336,36 @@ describe("buildDutyBlocks — non-duty and null-family safety", () => {
     expect(blocksB.map((x) => [x.startDate, x.personId, x.slot])).toEqual(
       blocksA.map((x) => [x.startDate, x.personId, x.slot]),
     );
+  });
+});
+
+describe("daysBetweenCalendarDates", () => {
+  it("counts whole civil days within the same month", () => {
+    expect(daysBetweenCalendarDates("2026-01-01", "2026-01-10")).toBe(9);
+  });
+
+  it("is 0 for the same date", () => {
+    expect(daysBetweenCalendarDates("2026-01-01", "2026-01-01")).toBe(0);
+  });
+
+  it("crosses a month boundary correctly", () => {
+    expect(daysBetweenCalendarDates("2026-01-25", "2026-02-05")).toBe(11);
+  });
+
+  it("crosses a year boundary correctly", () => {
+    expect(daysBetweenCalendarDates("2025-12-20", "2026-01-05")).toBe(16);
+  });
+
+  it("handles a leap-year February", () => {
+    expect(daysBetweenCalendarDates("2028-02-01", "2028-03-01")).toBe(29);
+  });
+
+  it("is negative when endDate is before startDate", () => {
+    expect(daysBetweenCalendarDates("2026-06-30", "2026-01-01")).toBe(-180);
+  });
+
+  it("returns null for an unparseable date on either side", () => {
+    expect(daysBetweenCalendarDates("not-a-date", "2026-01-01")).toBeNull();
+    expect(daysBetweenCalendarDates("2026-01-01", "also-bad")).toBeNull();
   });
 });

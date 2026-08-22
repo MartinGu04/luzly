@@ -125,5 +125,37 @@ describe("buildShiftFairnessReadModel", () => {
     expect(row?.target).toBeNull();
     expect(row?.status).toBeNull();
     expect(row?.dataCompleteness.reasons).toContain("shift_target_unmodelable_historical");
+    // No target -> nothing to explain either.
+    expect(row?.expectationFactors).toBeNull();
+  });
+
+  it("reports a modelable member's expectationFactors from real absence/constraint Events within the same period the target itself covers", () => {
+    const tech = person({ id: "p_tech", isTechnician: true });
+    const now: LocalNow = { date: "2026-08-15", minuteOfDay: 600 };
+
+    const events: Event[] = [
+      shiftEvent({ personId: tech.id, date: "2026-08-05", role: "technician" }),
+      shiftEvent({
+        personId: tech.id,
+        date: "2026-08-06",
+        category: "absence",
+        absenceKind: "vacation",
+        title: "חופש",
+        rawValue: "חופש",
+      }),
+      shiftEvent({
+        personId: tech.id,
+        date: "2026-08-07",
+        category: "constraint",
+        title: "אילוץ",
+        rawValue: "אילוץ",
+      }),
+    ];
+
+    const model = buildShiftFairnessReadModel([tech], events, { year: 2026, month: 8 }, now, "2026-08-15T10:00:00.000Z");
+    const row = model.groups.find((group) => group.role === "technician")?.rows[0];
+
+    expect(row?.target).not.toBeNull();
+    expect(row?.expectationFactors).toEqual({ leaveDays: 1, constraintDays: 1, referralDays: 0 });
   });
 });

@@ -2,6 +2,7 @@ import type { DutyFamily } from "@/lib/domain/event";
 import type { DutyFairnessStatus } from "@/lib/domain/fairnessAnalysis";
 import type { FairnessDataCompleteness, FairnessPeriodStatus } from "@/lib/domain/fairnessFoundation";
 import type { FairnessPeriodKey } from "@/lib/domain/fairnessPeriod";
+import type { DutyPaceStatus } from "@/lib/domain/dutyPace";
 
 /**
  * PR #3 -- the Duty Fairness read model's safe projections. No email, no
@@ -99,6 +100,50 @@ export interface DutyFairnessPersonRowView {
    * factual total, not an analysis result.
    */
   completedAllocationTotal: number | null;
+  /**
+   * Justice Table redesign -- "how much of the published-potential target
+   * is completed", strictly `completedAllocationTotal / comparisonTarget`
+   * (reusing `computeNormalizedLoad` outright, the exact same "ratio with
+   * null-safety" math `normalizedLoad` already uses -- just applied to the
+   * REAL completed-work total instead of the workbook's opaque
+   * `currentScore`, per the redesign's own "published potential = planned
+   * target, actual validated schedule = actual completed work" rule).
+   * `null` whenever either side is unavailable, exactly like
+   * `normalizedLoad`. Can legitimately exceed `1` (over 100% of target) --
+   * never clamped, since that is real, truthful data (see
+   * `remainingToTarget` below for the signed complement).
+   */
+  targetProgressRatio: number | null;
+  /**
+   * `comparisonTarget - completedAllocationTotal` -- signed, so a negative
+   * value means the target was exceeded (see `remainingToTarget < 0` ->
+   * "X points beyond potential" in presentation). `null` whenever either
+   * side is unavailable -- never a guessed remaining amount.
+   */
+  remainingToTarget: number | null;
+  /**
+   * Progress (target completion %) vs. pace (given how much of the period
+   * has elapsed, are they where they should be) are different questions --
+   * see `lib/domain/dutyPace.ts`'s own docs, including its documented
+   * limitation (no reliable per-person participation window exists for
+   * Duty Fairness today, so every person's pace is measured against the
+   * SAME whole-period elapsed fraction). `null` whenever `targetProgressRatio`
+   * is unavailable (no target, or completed work unknown) -- pace is never
+   * computed without a real progress figure to compare.
+   */
+  paceStatus: DutyPaceStatus | null;
+  /**
+   * A real, CONFIRMED, completion-based duty (flat-allocation or
+   * guard/reserve) currently ACTIVE for this person, not yet reflected in
+   * `completedAllocationTotal` because it hasn't finished yet
+   * (`lib/domain/dutyAllocationWeight.ts`'s `resolveActiveDutyBlock`) --
+   * lets the UI show a calm "LIVE, points will be added on completion"
+   * state instead of the duty silently appearing to contribute nothing.
+   * Always `null` for a closed period (only the period containing "today"
+   * can have something live), for an unresolved `personId`, or for a
+   * day-based family (rasar/daily_kitchen), which already accrues per day.
+   */
+  liveDuty: { dutyFamily: DutyFamily; slot: number | null } | null;
   exemptions: readonly DutyFairnessExemptionView[];
   /** Only ever non-empty for a genuinely verified gap (unresolved identity, or a target-bearing role missing its period target note) -- never noise on every row. */
   dataCompleteness: FairnessDataCompleteness;
