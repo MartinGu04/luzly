@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Panel } from "@/components/ui/Panel";
+import { formatDeliveryDurationSeconds, formatJerusalemDateTime } from "@/lib/notifications/broadcastTiming";
 import { getRecentManagerBroadcastsAction, type RecentManagerBroadcastView } from "@/lib/notifications/manualBroadcastActions";
 
 interface ManagerRecentBroadcastsSectionProps {
@@ -20,6 +21,33 @@ interface ManagerRecentBroadcastsSectionProps {
 
 /** Same ~15-20s cadence as `ManagerScheduledBroadcastsSection`'s own poll (spec §7). */
 const POLL_INTERVAL_MS = 17_000;
+
+/**
+ * The eventual-consistency follow-up: after PR #85, a manual "Send Now"
+ * Server Action returns as soon as the batch/jobs are durably created,
+ * kicking `runDelivery()` in the background via `after()` -- so a
+ * `reloadToken` bump from that same send can land HERE a fraction of a
+ * second before `notification_deliveries.status = 'sent'` exists yet. Without
+ * this, the manager would see "ממתין לשליחה" and have to wait for the
+ * next ~17s poll (or manually refresh) to see it flip to "נשלח". Instead,
+ * a `reloadToken` change (never the initial mount, never a bare
+ * `pollWhileActive` flip) arms a SHORT, BOUNDED quick-retry window: as long
+ * as we're still inside it AND at least one push-capable item is still
+ * `deliveryState: "pending"`, the next poll fires at this fast interval
+ * instead of the normal ~17s one. The window self-expires
+ * (`QUICK_FOLLOW_UP_WINDOW_MS`) regardless of outcome -- this can NEVER
+ * become permanent rapid polling; once it ends (resolved or timed out) this
+ * falls straight back to the normal `pollWhileActive`-gated cadence, same
+ * as before this feature existed.
+ */
+const QUICK_FOLLOW_UP_INTERVAL_MS = 1_500;
+/** Hard stop for the quick-retry window -- see `QUICK_FOLLOW_UP_INTERVAL_MS`'s own docstring. */
+const QUICK_FOLLOW_UP_WINDOW_MS = 12_000;
+
+/** Whether `item` is one the quick follow-up window should keep chasing -- a push-capable recipient set whose delivery hasn't resolved (sent, permanently failed, or never had a push-capable recipient to begin with) yet. */
+function isUnresolvedPushCapable(item: RecentManagerBroadcastView): boolean {
+  return item.pushCapableCount > 0 && item.deliveryState === "pending";
+}
 
 /** Cards shown by default before "הצג עוד (N)" is needed -- presentation-only, never affects how much the server returns. */
 const COMPACT_VISIBLE_COUNT = 3;
@@ -92,6 +120,56 @@ function audienceLabel(item: RecentManagerBroadcastView): string {
   return `${item.resolvedRecipientCount} אנשי צוות`;
 }
 
+/** A small, truthful fallback for the timing row's last segment when `firstSuccessfulPushAt` is null -- see `RecentManagerBroadcastView.deliveryState`'s own docstring for exactly what each state proves. Never invents a "sent" time. */
+function fallbackDeliveryLabel(deliveryState: RecentManagerBroadcastView["deliveryState"] | undefined): string {
+  switch (deliveryState) {
+    case "no_push_recipients":
+      return "ללא Push";
+    case "failed":
+      return "שליחת Push נכשלה";
+    default:
+      // Covers "pending" and any unexpected/undefined value -- fails open
+      // toward "still working on it" rather than ever claiming a terminal
+      // outcome (success OR failure) that hasn't actually been proven.
+      return "ממתין לשליחה";
+  }
+}
+
+/**
+ * The compact second row: "נוצר DD/MM HH:mm · [תוכנן ל־DD/MM HH:mm ·] נשלח
+ * DD/MM HH:mm · Ns" for a resolved delivery, or the same "נוצר"/"תוכנן ל"
+ * prefix plus a truthful fallback label when nothing has successfully
+ * delivered yet. Every timestamp includes the calendar date (never just a
+ * bare clock time) so a broadcast crossing midnight -- created one day,
+ * scheduled/sent the next -- is never misread as same-day. `נוצר` displays
+ * `scheduleCreatedAt` when this batch came from a scheduled broadcast (the
+ * ORIGINAL schedule-creation instant, per the spec's own worked examples),
+ * falling back to the batch's own `createdAt` for an immediate broadcast --
+ * see `RecentManagerBroadcastView.createdAt`'s own docstring for why that
+ * field's SORTING/clear-cutoff semantics are never touched by this swap.
+ * The latency DURATION (`formatDeliveryDurationSeconds`) is a pure elapsed
+ * span, not an instant -- it never carries a date, and is deliberately
+ * untouched by this date/time formatting.
+ */
+function buildTimingLine(item: RecentManagerBroadcastView): string {
+  const createdDisplayIso = item.scheduleCreatedAt ?? item.createdAt;
+  const parts = [`נוצר ${formatJerusalemDateTime(createdDisplayIso)}`];
+  if (item.scheduledFor) parts.push(`תוכנן ל־${formatJerusalemDateTime(item.scheduledFor)}`);
+
+  // Loose (`!=`) nullish checks, deliberately: an item shaped by an older
+  // caller/fixture that PREDATES these fields has them as `undefined`
+  // (missing), not `null` -- must be treated identically to "no data",
+  // never mistaken for a truthy `firstSuccessfulPushAt` value.
+  if (item.firstSuccessfulPushAt != null && item.deliveryLatencySeconds != null) {
+    parts.push(`נשלח ${formatJerusalemDateTime(item.firstSuccessfulPushAt)}`);
+    parts.push(formatDeliveryDurationSeconds(item.deliveryLatencySeconds));
+  } else {
+    parts.push(fallbackDeliveryLabel(item.deliveryState));
+  }
+
+  return parts.join(" · ");
+}
+
 /**
  * "נשלחו לאחרונה" -- reuses PR #78's own `getRecentManagerBroadcastsAction`
  * (a small, bounded read of `manager_notification_batches`, already
@@ -115,6 +193,13 @@ function audienceLabel(item: RecentManagerBroadcastView): string {
  */
 export function ManagerRecentBroadcastsSection({ reloadToken, pollWhileActive }: ManagerRecentBroadcastsSectionProps) {
   const [items, setItems] = useState<RecentManagerBroadcastView[] | null>(null);
+  // Mirrors `items` for synchronous reads inside the poll effect below
+  // (never itself read for rendering) -- a `ref`, so reading it inside the
+  // effect body never needs to appear in that effect's own dependency
+  // array (unlike the `items` state variable, which triggers on every
+  // `setItems` call and would defeat the whole point of a chained-timeout
+  // poll if it were a dependency).
+  const itemsRef = useRef<RecentManagerBroadcastView[] | null>(null);
   const [expanded, setExpanded] = useState(false);
   // Lazy initializer -- `typeof window === "undefined"` during any SSR
   // pass (returns null there), the real stored value on the client's
@@ -149,9 +234,54 @@ export function ManagerRecentBroadcastsSection({ reloadToken, pollWhileActive }:
   // Neither `expanded` nor `clearedBeforeIso` is ever touched by this
   // effect -- a poll can only ever change WHICH raw rows `items` holds,
   // never the manager's own view/clear preferences layered on top.
+  //
+  // Tracks the LAST `reloadToken` this effect actually ran for, across
+  // renders -- distinct from React state, since it must never itself
+  // trigger a re-render. `undefined` only on this component's very first
+  // ever effect run (initial mount, not "a manager action").
+  const previousReloadTokenRef = useRef<number | undefined>(undefined);
+
   useEffect(() => {
     let cancelled = false;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+    // Armed (a real deadline, not null) only when THIS effect run was
+    // caused by `reloadToken` actually changing -- never the initial
+    // mount, and never a bare `pollWhileActive` flip with `reloadToken`
+    // unchanged. See `QUICK_FOLLOW_UP_INTERVAL_MS`'s own module-level
+    // docstring for why this exists and how it stays bounded.
+    const isReloadTriggeredByAction =
+      previousReloadTokenRef.current !== undefined && previousReloadTokenRef.current !== reloadToken;
+    previousReloadTokenRef.current = reloadToken;
+    let quickFollowUpDeadlineMs: number | null = isReloadTriggeredByAction ? Date.now() + QUICK_FOLLOW_UP_WINDOW_MS : null;
+    // The most recently loaded items WITHIN this effect's own chain --
+    // seeded from `itemsRef` (never the `items` state variable itself,
+    // which would be a stale closure across chained `setTimeout`/`load()`
+    // calls -- `setItems` doesn't update this effect's captured binding),
+    // so a transient failure on the very FIRST call of a fresh chain still
+    // has last-known data to fall back on.
+    let latestItemsSnapshot: RecentManagerBroadcastView[] | null = itemsRef.current;
+
+    // Chooses the next poll delay after a successful (or failed-but-
+    // recoverable) load: the fast quick-follow-up interval while still
+    // inside an armed window AND something genuinely unresolved remains,
+    // otherwise the normal cadence (or none at all, matching this
+    // section's existing `pollWhileActive` gating exactly). Always a
+    // single chained `setTimeout` -- never a second concurrent timer --
+    // so a quick-follow-up retry and the normal poll can never overlap.
+    function scheduleNextLoad(latestItems: RecentManagerBroadcastView[] | null) {
+      const stillUnresolved = latestItems !== null && latestItems.some(isUnresolvedPushCapable);
+      const inQuickWindow = quickFollowUpDeadlineMs !== null && Date.now() < quickFollowUpDeadlineMs;
+
+      if (inQuickWindow && stillUnresolved) {
+        timeoutId = setTimeout(load, QUICK_FOLLOW_UP_INTERVAL_MS);
+        return;
+      }
+      quickFollowUpDeadlineMs = null;
+      if (pollWhileActive) {
+        timeoutId = setTimeout(load, POLL_INTERVAL_MS);
+      }
+    }
 
     async function load() {
       try {
@@ -159,9 +289,9 @@ export function ManagerRecentBroadcastsSection({ reloadToken, pollWhileActive }:
         if (cancelled) return;
         if (result.ok) {
           setItems(result.items);
-          if (pollWhileActive) {
-            timeoutId = setTimeout(load, POLL_INTERVAL_MS);
-          }
+          itemsRef.current = result.items;
+          latestItemsSnapshot = result.items;
+          scheduleNextLoad(result.items);
         } else {
           // A typed `result.ok === false` is a genuinely PERMANENT
           // manager-auth state (`forbidden`, `unauthenticated`,
@@ -171,18 +301,24 @@ export function ManagerRecentBroadcastsSection({ reloadToken, pollWhileActive }:
           // previously-loaded items are cleared rather than left
           // showing stale data the caller may no longer be authorized to
           // see, and no retry is scheduled -- retrying wouldn't change a
-          // permanent state anyway.
+          // permanent state anyway (this also ends any in-progress quick
+          // follow-up window, same as a genuine resolution would).
           setItems(null);
+          itemsRef.current = null;
         }
       } catch {
         if (!cancelled) {
           // Deliberately no early return / state wipe here -- `items`
           // (if anything was already loaded) is left completely
           // untouched, so a transient failure never makes an already-
-          // visible "נשלחו לאחרונה" list disappear.
-          if (pollWhileActive) {
-            timeoutId = setTimeout(load, POLL_INTERVAL_MS);
-          }
+          // visible "נשלחו לאחרונה" list disappear. Reuses the SAME
+          // `scheduleNextLoad` as a success, from `latestItemsSnapshot`
+          // (this effect's own last-known-good items, never the possibly-
+          // stale `items` React state closure) -- so a transient hiccup
+          // DURING an armed quick-follow-up window still retries at the
+          // fast interval (still bounded by the same deadline) instead of
+          // silently falling back to the slow cadence.
+          scheduleNextLoad(latestItemsSnapshot);
         }
       }
     }
@@ -261,6 +397,7 @@ export function ManagerRecentBroadcastsSection({ reloadToken, pollWhileActive }:
             <p className="mt-0.5 text-xs text-muted">
               {audienceLabel(item)} · נשלח ע״י {item.createdByPersonName}
             </p>
+            <p className="mt-0.5 text-xs text-muted">{buildTimingLine(item)}</p>
           </li>
         ))}
       </ul>

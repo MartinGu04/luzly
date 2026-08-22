@@ -1,0 +1,120 @@
+/**
+ * Manager broadcast delivery timing -- pure, directive-free (no
+ * `"server-only"`/`"use server"`) so BOTH the read-model action
+ * (`manualBroadcastActions.ts`, computing `deliveryLatencySeconds`) and the
+ * client "נשלחו לאחרונה" timing row (`ManagerRecentBroadcastsSection.tsx`,
+ * formatting clock times/durations for display) import ONE shared source of
+ * truth instead of two implementations that could drift -- same reasoning
+ * as `manualBroadcastLimits.ts`.
+ *
+ * This module never reads/writes anything itself; it only turns already-
+ * fetched timestamps (see `engine/store.ts`'s `getManagerBroadcastDeliveryTiming`)
+ * into the "how long did delivery actually take" number, and that number
+ * (plus a raw instant) into Hebrew display text.
+ */
+
+export interface DeliveryLatencyInput {
+  /** `manager_notification_batches.created_at` -- the immediate-broadcast reference instant. */
+  batchCreatedAt: string;
+  /** `manager_scheduled_broadcasts.scheduled_for` for a scheduled broadcast; null for an immediate one. */
+  scheduledFor: string | null;
+  /** `manager_scheduled_broadcasts.sent_now_at` -- non-null only when "שלח עכשיו" triggered dispatch early. */
+  sentNowAt: string | null;
+  /** Earliest successful Web Push delivery instant, or null when nothing has succeeded yet, or ever. */
+  firstSuccessfulPushAt: string | null;
+}
+
+/**
+ * The correct "how long did the system take to actually start sending
+ * after it was supposed/requested to send" reference instant:
+ * - immediate manual broadcast (`scheduledFor === null`) -> the batch's own
+ *   `created_at`.
+ * - a scheduled broadcast manually triggered via "שלח עכשיו" (`sentNowAt`
+ *   non-null) -> `sentNowAt`, NEVER the original (possibly still-future)
+ *   `scheduledFor` -- otherwise a manager forcing an early send would show a
+ *   nonsensical/negative latency measured against a time that hasn't
+ *   happened yet.
+ * - a normal scheduled dispatch -> `scheduledFor` itself.
+ */
+export function deliveryLatencyReferenceInstant(
+  input: Pick<DeliveryLatencyInput, "batchCreatedAt" | "scheduledFor" | "sentNowAt">,
+): string {
+  if (input.scheduledFor === null) return input.batchCreatedAt;
+  return input.sentNowAt ?? input.scheduledFor;
+}
+
+/**
+ * `firstSuccessfulPushAt` minus the correct reference instant above, in
+ * seconds -- null whenever `firstSuccessfulPushAt` itself is null (no false
+ * data: this function never invents a duration for a broadcast that hasn't
+ * successfully delivered). Clamped to a non-negative value defensively
+ * (clock skew across services should never render as a negative duration).
+ */
+export function computeDeliveryLatencySeconds(input: DeliveryLatencyInput): number | null {
+  if (input.firstSuccessfulPushAt === null) return null;
+  const referenceMs = Date.parse(deliveryLatencyReferenceInstant(input));
+  const sentMs = Date.parse(input.firstSuccessfulPushAt);
+  if (Number.isNaN(referenceMs) || Number.isNaN(sentMs)) return null;
+  return Math.max(0, (sentMs - referenceMs) / 1000);
+}
+
+const JERUSALEM_CLOCK_FORMATTER = new Intl.DateTimeFormat("he-IL", {
+  hour: "2-digit",
+  minute: "2-digit",
+  // `hourCycle: "h23"`, NOT `hour12: false` -- `hour12` only picks a 12- vs.
+  // 24-hour DISPLAY, leaving the choice between the h23 (midnight = "00")
+  // and h24 (midnight = "24") cycles up to locale/Intl-implementation
+  // default, which can genuinely differ across engines. This UI needs a
+  // strict 00-23 hour, especially right around midnight ("00:10", never
+  // "24:10") -- `hourCycle` is the explicit way to pin that. Never combine
+  // this with `hour12`: when both are present, `hour12` silently overrides
+  // `hourCycle`.
+  hourCycle: "h23",
+  timeZone: "Asia/Jerusalem",
+});
+
+/** `HH:MM` in Asia/Jerusalem, explicitly -- never the browser/device's own timezone. Fails safe (`--:--`) on a malformed instant rather than throwing. */
+export function formatJerusalemClockTime(iso: string): string {
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) return "--:--";
+  return JERUSALEM_CLOCK_FORMATTER.format(new Date(ms));
+}
+
+const JERUSALEM_DATE_TIME_FORMATTER = new Intl.DateTimeFormat("he-IL", {
+  day: "2-digit",
+  month: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  // `hourCycle: "h23"`, not `hour12: false` -- see `JERUSALEM_CLOCK_FORMATTER`'s
+  // own comment for why: this pins a strict 00-23 hour (midnight = "00",
+  // never "24"), which `hour12` alone doesn't guarantee across engines.
+  hourCycle: "h23",
+  timeZone: "Asia/Jerusalem",
+});
+
+/**
+ * `DD/MM HH:mm` in Asia/Jerusalem, explicitly -- never the browser/device's
+ * own timezone. No year (the timing row is about recent activity, never
+ * spanning years), no seconds. Built from `formatToParts` and assembled
+ * manually into this EXACT order/punctuation, rather than trusting
+ * `he-IL`'s own default arrangement -- a locale's default date order can
+ * differ from what this compact row needs, and must never silently drift
+ * with an ICU data update. Fails safe (`--/-- --:--`) on a malformed
+ * instant rather than throwing, mirroring `formatJerusalemClockTime`.
+ */
+export function formatJerusalemDateTime(iso: string): string {
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) return "--/-- --:--";
+  const parts = JERUSALEM_DATE_TIME_FORMATTER.formatToParts(new Date(ms));
+  const get = (type: Intl.DateTimeFormatPartTypes): string => parts.find((part) => part.type === type)?.value ?? "--";
+  return `${get("day")}/${get("month")} ${get("hour")}:${get("minute")}`;
+}
+
+/** Compact Hebrew duration -- `"2 שנ׳"` under a minute, `"1 דק׳ 12 שנ׳"` at or above it. Never shows milliseconds; rounds to the nearest whole second first so the minute/second split can never show a stray "60 שנ׳" remainder. */
+export function formatDeliveryDurationSeconds(totalSeconds: number): string {
+  const roundedTotal = Math.max(0, Math.round(totalSeconds));
+  if (roundedTotal < 60) return `${roundedTotal} שנ׳`;
+  const minutes = Math.floor(roundedTotal / 60);
+  const seconds = roundedTotal % 60;
+  return `${minutes} דק׳ ${seconds} שנ׳`;
+}

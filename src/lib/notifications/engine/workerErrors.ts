@@ -30,7 +30,8 @@ export type WorkerStage =
   | "jobs_due_lookup"
   | "delivery"
   | "scheduled_broadcasts_work_check"
-  | "fresh_personnel_read";
+  | "fresh_personnel_read"
+  | "manual_broadcast_immediate_delivery";
 
 export class WorkerStageError extends Error {
   readonly stage: WorkerStage;

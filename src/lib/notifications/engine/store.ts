@@ -954,6 +954,197 @@ export async function listRecentManagerNotificationBatches(
 }
 
 // ---------------------------------------------------------------------------
+// Manager manual broadcast DELIVERY TIMING -- read-only aggregation for the
+// "נשלחו לאחרונה" compact timing row. Deliberately NOT a second delivery/audit
+// mechanism: every timestamp below is read straight from
+// `manager_scheduled_broadcasts`/`notification_jobs`/`notification_deliveries`,
+// the SAME tables the engine's own delivery pipeline already owns (see those
+// tables' own migration doc comments). This section only AGGREGATES what
+// already exists -- it never writes to any of them, and never adds a
+// `sent_at` column or a second history table.
+// ---------------------------------------------------------------------------
+
+interface ScheduledBroadcastTimingRow {
+  batchId: string;
+  createdAt: string;
+  scheduledFor: string;
+  sentNowAt: string | null;
+}
+
+/** One bulk `.in("batch_id", ...)` query -- never one query per batch. Rows with no `batch_id` match (not yet dispatched) are structurally impossible here since every input id came from an already-existing `manager_notification_batches` row. */
+async function listManagerScheduledBroadcastTimingByBatchIds(
+  batchIds: readonly string[],
+): Promise<ScheduledBroadcastTimingRow[]> {
+  if (batchIds.length === 0) return [];
+  const supabase = getNotificationServiceClient();
+  const { data, error } = await supabase
+    .from("manager_scheduled_broadcasts")
+    .select("batch_id, created_at, scheduled_for, sent_now_at")
+    .in("batch_id", batchIds);
+  if (error) throw error;
+  return ((data ?? []) as Record<string, unknown>[])
+    .filter((row) => row.batch_id !== null)
+    .map((row) => ({
+      batchId: row.batch_id as string,
+      createdAt: row.created_at as string,
+      scheduledFor: row.scheduled_for as string,
+      sentNowAt: (row.sent_now_at as string | null) ?? null,
+    }));
+}
+
+interface ManagerBroadcastJobRow {
+  id: string;
+  batchId: string;
+  status: string;
+}
+
+/** One bulk `.in("source_ref", ...)` query against the SAME `manual:<batchId>` convention `manualBroadcast.ts`/`scheduledBroadcast.ts` already write at job-creation time -- never a new column. */
+async function listManagerBroadcastJobsBySourceRefs(sourceRefs: readonly string[]): Promise<ManagerBroadcastJobRow[]> {
+  if (sourceRefs.length === 0) return [];
+  const supabase = getNotificationServiceClient();
+  const { data, error } = await supabase.from("notification_jobs").select("id, source_ref, status").in("source_ref", sourceRefs);
+  if (error) throw error;
+  const rows: ManagerBroadcastJobRow[] = [];
+  for (const row of (data ?? []) as Record<string, unknown>[]) {
+    const sourceRef = row.source_ref as string | null;
+    if (!sourceRef || !sourceRef.startsWith("manual:")) continue;
+    rows.push({ id: row.id as string, batchId: sourceRef.slice("manual:".length), status: row.status as string });
+  }
+  return rows;
+}
+
+interface SuccessfulDeliveryRow {
+  jobId: string;
+  lastAttemptedAt: string;
+}
+
+/** One bulk `.in("job_id", ...)` query, filtered server-side to `status = 'sent'` -- a failed/transient attempt can never reach this list, so it can never be mistaken for a successful send (see `getManagerBroadcastDeliveryTiming`'s own "earliest wins" aggregation below). */
+async function listSuccessfulDeliveriesForJobIds(jobIds: readonly string[]): Promise<SuccessfulDeliveryRow[]> {
+  if (jobIds.length === 0) return [];
+  const supabase = getNotificationServiceClient();
+  const { data, error } = await supabase
+    .from("notification_deliveries")
+    .select("job_id, last_attempted_at")
+    .eq("status", "sent")
+    .in("job_id", jobIds);
+  if (error) throw error;
+  return ((data ?? []) as Record<string, unknown>[])
+    .filter((row) => row.last_attempted_at !== null)
+    .map((row) => ({ jobId: row.job_id as string, lastAttemptedAt: row.last_attempted_at as string }));
+}
+
+export interface ManagerBroadcastDeliveryTiming {
+  /** The matched `manager_scheduled_broadcasts` row's own `created_at` -- when the manager originally created/last edited the SCHEDULE itself. Null for an immediate ("Send Now") broadcast, which has no scheduled row at all. Deliberately never conflated with `ManagerNotificationBatchRow.createdAt` (the batch's own creation/dispatch instant), which stays the list's own sort/clear-cutoff anchor. */
+  scheduleCreatedAt: string | null;
+  /** The scheduled row's own `scheduled_for` -- null for an immediate broadcast. */
+  scheduledFor: string | null;
+  /** Non-null only when the scheduled broadcast was triggered early via "שלח עכשיו" (`claim_manager_scheduled_broadcast_now`'s own `sent_now_at`). */
+  sentNowAt: string | null;
+  /** Earliest `notification_deliveries.last_attempted_at` among `status = 'sent'` rows, across every `notification_jobs` row this batch's `source_ref = manual:<batchId>` matches -- a successful WEB PUSH REQUEST, never proof the operating system displayed anything. Null when nothing has succeeded yet, or ever. */
+  firstSuccessfulPushAt: string | null;
+  /**
+   * A small, truthful fallback classification for when `firstSuccessfulPushAt`
+   * is null -- "sent" never appears without `firstSuccessfulPushAt` also being
+   * set. "no_push_recipients" is derived from the batch's OWN `pushCapableCount`
+   * (zero push-capable recipients at resolution time), independent of
+   * job/delivery state. "pending" means at least one of this batch's jobs is
+   * still `pending`/`claimed` (still processing/retrying -- including the
+   * short window right after a manual send, before its `after()` immediate-
+   * delivery kick has run -- see `manualBroadcastActions.ts`). "failed" means
+   * every job reached a terminal state (`completed`/`failed`/`skipped`) with
+   * no successful delivery -- a genuine, terminal outcome, never a
+   * still-in-flight send.
+   */
+  deliveryState: "sent" | "pending" | "no_push_recipients" | "failed";
+}
+
+const NON_TERMINAL_JOB_STATUSES = new Set(["pending", "claimed"]);
+
+/**
+ * Bulk-aggregates delivery timing for up to `RECENT_MANAGER_BROADCASTS_LIMIT`
+ * batches in exactly THREE queries total, regardless of how many
+ * batches/jobs/deliveries exist -- never one query per batch (see the three
+ * helpers above, and `manualBroadcastActions.ts`'s `getRecentManagerBroadcastsAction`,
+ * the one caller). Read-only: never claims, mutates, or writes to any of
+ * the three tables it reads.
+ */
+export async function getManagerBroadcastDeliveryTiming(
+  batches: readonly Pick<ManagerNotificationBatchRow, "id" | "pushCapableCount">[],
+): Promise<Map<string, ManagerBroadcastDeliveryTiming>> {
+  const result = new Map<string, ManagerBroadcastDeliveryTiming>();
+  if (batches.length === 0) return result;
+
+  const batchIds = batches.map((batch) => batch.id);
+  const sourceRefs = batchIds.map((id) => `manual:${id}`);
+
+  // Independent reads -- fetched CONCURRENTLY, same reasoning as
+  // `computeNotificationReadiness`'s own `Promise.all` (readiness.ts).
+  const [scheduledRows, jobRows] = await Promise.all([
+    listManagerScheduledBroadcastTimingByBatchIds(batchIds),
+    listManagerBroadcastJobsBySourceRefs(sourceRefs),
+  ]);
+
+  // Depends on `jobRows` (its own job ids), so this stays sequential.
+  const sentDeliveries = await listSuccessfulDeliveriesForJobIds(jobRows.map((job) => job.id));
+
+  const scheduledByBatchId = new Map(scheduledRows.map((row) => [row.batchId, row]));
+  const batchIdByJobId = new Map(jobRows.map((job) => [job.id, job.batchId]));
+  const statusesByBatchId = new Map<string, string[]>();
+  for (const job of jobRows) {
+    const statuses = statusesByBatchId.get(job.batchId) ?? [];
+    statuses.push(job.status);
+    statusesByBatchId.set(job.batchId, statuses);
+  }
+
+  // "Earliest successful push wins" -- a later successful device delivery,
+  // or ANY failed/transient attempt (never even in `sentDeliveries` to begin
+  // with -- see `listSuccessfulDeliveriesForJobIds`'s own server-side
+  // `status = 'sent'` filter), can never overwrite an earlier real success.
+  const firstSuccessfulPushMsByBatchId = new Map<string, number>();
+  for (const delivery of sentDeliveries) {
+    const batchId = batchIdByJobId.get(delivery.jobId);
+    if (!batchId) continue;
+    const ms = Date.parse(delivery.lastAttemptedAt);
+    if (Number.isNaN(ms)) continue;
+    const existing = firstSuccessfulPushMsByBatchId.get(batchId);
+    if (existing === undefined || ms < existing) firstSuccessfulPushMsByBatchId.set(batchId, ms);
+  }
+
+  for (const batch of batches) {
+    const scheduled = scheduledByBatchId.get(batch.id) ?? null;
+    const firstSuccessfulPushMs = firstSuccessfulPushMsByBatchId.get(batch.id);
+    const firstSuccessfulPushAt = firstSuccessfulPushMs !== undefined ? new Date(firstSuccessfulPushMs).toISOString() : null;
+
+    let deliveryState: ManagerBroadcastDeliveryTiming["deliveryState"];
+    if (firstSuccessfulPushAt !== null) {
+      deliveryState = "sent";
+    } else if (batch.pushCapableCount === 0) {
+      deliveryState = "no_push_recipients";
+    } else {
+      const statuses = statusesByBatchId.get(batch.id) ?? [];
+      // Fails open toward "pending" (never a false "failed" claim) when no
+      // job row is found at all -- structurally shouldn't happen (every
+      // resolved recipient's job is created synchronously before the send
+      // action ever returns `ok: true`), but this is a read-only view, so a
+      // transient inconsistency must never assert a terminal outcome that
+      // hasn't actually been proven.
+      const stillOutstanding = statuses.length === 0 || statuses.some((status) => NON_TERMINAL_JOB_STATUSES.has(status));
+      deliveryState = stillOutstanding ? "pending" : "failed";
+    }
+
+    result.set(batch.id, {
+      scheduleCreatedAt: scheduled?.createdAt ?? null,
+      scheduledFor: scheduled?.scheduledFor ?? null,
+      sentNowAt: scheduled?.sentNowAt ?? null,
+      firstSuccessfulPushAt,
+      deliveryState,
+    });
+  }
+
+  return result;
+}
+
+// ---------------------------------------------------------------------------
 // Manager scheduled broadcasts -- a manager-scheduled "שליחת התראה" that has
 // not yet dispatched. Deliberately separate from `manager_notification_batches`
 // (which is immutable once created): this table's whole reason to exist is

@@ -4,6 +4,9 @@ const loadManagerWorkbookContext = vi.fn();
 const loadManagerPersonnelContext = vi.fn();
 const sendManagerBroadcastNotification = vi.fn();
 const listRecentManagerNotificationBatches = vi.fn();
+const getManagerBroadcastDeliveryTiming = vi.fn();
+const after = vi.fn();
+const runDelivery = vi.fn();
 
 vi.mock("@/lib/readModels/managerWorkbookContext", () => ({
   loadManagerWorkbookContext: (...args: unknown[]) => loadManagerWorkbookContext(...args),
@@ -14,7 +17,14 @@ vi.mock("./engine/manualBroadcast", () => ({
 }));
 vi.mock("./engine/store", () => ({
   listRecentManagerNotificationBatches: (...args: unknown[]) => listRecentManagerNotificationBatches(...args),
+  getManagerBroadcastDeliveryTiming: (...args: unknown[]) => getManagerBroadcastDeliveryTiming(...args),
   RECENT_MANAGER_BROADCASTS_LIMIT: 10,
+}));
+vi.mock("next/server", () => ({
+  after: (...args: unknown[]) => after(...args),
+}));
+vi.mock("./engine/delivery", () => ({
+  runDelivery: (...args: unknown[]) => runDelivery(...args),
 }));
 
 const { sendManagerBroadcastAction, getRecentManagerBroadcastsAction } = await import("./manualBroadcastActions");
@@ -56,6 +66,19 @@ beforeEach(() => {
     },
   });
   listRecentManagerNotificationBatches.mockReset().mockResolvedValue([]);
+  getManagerBroadcastDeliveryTiming.mockReset().mockResolvedValue(new Map());
+  after.mockReset();
+  runDelivery.mockReset().mockResolvedValue({
+    jobsClaimed: 0,
+    jobsCompleted: 0,
+    jobsFailed: 0,
+    jobsPending: 0,
+    jobsSkipped: 0,
+    deliveriesSucceeded: 0,
+    deliveriesFailedPermanent: 0,
+    deliveriesFailedTransient: 0,
+    subscriptionsRemoved: 0,
+  });
 });
 
 describe("sendManagerBroadcastAction -- authorization", () => {
@@ -136,6 +159,57 @@ describe("sendManagerBroadcastAction -- happy path", () => {
   });
 });
 
+describe("sendManagerBroadcastAction -- immediate delivery kick (true immediate delivery for Send Now)", () => {
+  it("registers EXACTLY ONE background after() callback once the broadcast is durably created", async () => {
+    await sendManagerBroadcastAction(validInput());
+    expect(after).toHaveBeenCalledTimes(1);
+    expect(after).toHaveBeenCalledWith(expect.any(Function));
+  });
+
+  it("invoking the registered callback calls the existing runDelivery() pipeline -- never a second push sender", async () => {
+    await sendManagerBroadcastAction(validInput());
+    const callback = after.mock.calls[0][0] as () => Promise<void>;
+    expect(runDelivery).not.toHaveBeenCalled();
+    await callback();
+    expect(runDelivery).toHaveBeenCalledTimes(1);
+    expect(runDelivery).toHaveBeenCalledWith();
+  });
+
+  it("does NOT register a delivery callback for an invalid request (fails before authorization)", async () => {
+    await sendManagerBroadcastAction(validInput({ audienceKind: "hacked" as never }));
+    expect(after).not.toHaveBeenCalled();
+  });
+
+  it("does NOT register a delivery callback for an unauthorized/non-manager caller", async () => {
+    loadManagerWorkbookContext.mockResolvedValue({ status: "forbidden" });
+    await sendManagerBroadcastAction(validInput());
+    expect(after).not.toHaveBeenCalled();
+  });
+
+  it("does NOT register a delivery callback when the engine itself reports failure (e.g. idempotency_conflict)", async () => {
+    sendManagerBroadcastNotification.mockResolvedValue({ ok: false, error: "idempotency_conflict" });
+    await sendManagerBroadcastAction(validInput());
+    expect(after).not.toHaveBeenCalled();
+  });
+
+  it("contains and logs an immediate-delivery failure (PII-safely sanitized) without altering the already-successful action result", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    runDelivery.mockRejectedValue(new Error("push failed for leaked-person@example.com"));
+
+    const result = await sendManagerBroadcastAction(validInput());
+    expect(result.ok).toBe(true);
+
+    const callback = after.mock.calls[0][0] as () => Promise<void>;
+    await expect(callback()).resolves.toBeUndefined();
+    expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
+    const logged = consoleErrorSpy.mock.calls[0][0] as string;
+    expect(logged).not.toContain("leaked-person@example.com");
+    expect(logged).toContain("[email]");
+
+    consoleErrorSpy.mockRestore();
+  });
+});
+
 describe("getRecentManagerBroadcastsAction", () => {
   it("is manager-gated exactly like the send action", async () => {
     loadManagerPersonnelContext.mockResolvedValue({ status: "forbidden" });
@@ -184,8 +258,87 @@ describe("getRecentManagerBroadcastsAction", () => {
           pushCapableCount: 1,
           inboxOnlyCount: 1,
           unresolvedCount: 0,
+          scheduleCreatedAt: null,
+          scheduledFor: null,
+          sentNowAt: null,
+          firstSuccessfulPushAt: null,
+          deliveryLatencySeconds: null,
+          deliveryState: "pending",
         },
       ],
+    });
+  });
+
+  it("passes the bounded batch list straight through to getManagerBroadcastDeliveryTiming -- one bulk aggregation call, never one per batch", async () => {
+    const rows = [
+      { id: "b1", pushCapableCount: 1, createdAt: "2026-08-21T08:00:00.000Z" },
+      { id: "b2", pushCapableCount: 0, createdAt: "2026-08-21T08:01:00.000Z" },
+    ];
+    listRecentManagerNotificationBatches.mockResolvedValue(
+      rows.map((row) => ({
+        idempotencyKey: "k",
+        createdByPersonId: "p_manager",
+        createdByPersonName: "דני מנהל",
+        audienceKind: "everyone",
+        targetPersonIds: [],
+        title: "כותרת",
+        body: "תוכן",
+        resolvedRecipientCount: 1,
+        inboxOnlyCount: 0,
+        unresolvedCount: 0,
+        ...row,
+      })),
+    );
+    await getRecentManagerBroadcastsAction();
+
+    expect(getManagerBroadcastDeliveryTiming).toHaveBeenCalledTimes(1);
+    expect(getManagerBroadcastDeliveryTiming.mock.calls[0][0]).toMatchObject([
+      { id: "b1", pushCapableCount: 1 },
+      { id: "b2", pushCapableCount: 0 },
+    ]);
+  });
+
+  it("merges the store's aggregated timing into each item, and computes deliveryLatencySeconds via the SAME pure formula used elsewhere", async () => {
+    listRecentManagerNotificationBatches.mockResolvedValue([
+      {
+        id: "b1",
+        idempotencyKey: "k1",
+        createdByPersonId: "p_manager",
+        createdByPersonName: "דני מנהל",
+        audienceKind: "everyone",
+        targetPersonIds: [],
+        title: "כותרת",
+        body: "תוכן",
+        resolvedRecipientCount: 1,
+        pushCapableCount: 1,
+        inboxOnlyCount: 0,
+        unresolvedCount: 0,
+        createdAt: "2026-08-22T21:46:00.000Z",
+      },
+    ]);
+    getManagerBroadcastDeliveryTiming.mockResolvedValue(
+      new Map([
+        [
+          "b1",
+          {
+            scheduleCreatedAt: null,
+            scheduledFor: null,
+            sentNowAt: null,
+            firstSuccessfulPushAt: "2026-08-22T21:46:02.000Z",
+            deliveryState: "sent",
+          },
+        ],
+      ]),
+    );
+
+    const result = await getRecentManagerBroadcastsAction();
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("unreachable");
+    expect(result.items[0]).toMatchObject({
+      firstSuccessfulPushAt: "2026-08-22T21:46:02.000Z",
+      deliveryLatencySeconds: 2, // immediate broadcast -- measured from the batch's own createdAt
+      deliveryState: "sent",
     });
   });
 });
