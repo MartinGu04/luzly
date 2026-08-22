@@ -61,7 +61,15 @@ export function computeDeliveryLatencySeconds(input: DeliveryLatencyInput): numb
 const JERUSALEM_CLOCK_FORMATTER = new Intl.DateTimeFormat("he-IL", {
   hour: "2-digit",
   minute: "2-digit",
-  hour12: false,
+  // `hourCycle: "h23"`, NOT `hour12: false` -- `hour12` only picks a 12- vs.
+  // 24-hour DISPLAY, leaving the choice between the h23 (midnight = "00")
+  // and h24 (midnight = "24") cycles up to locale/Intl-implementation
+  // default, which can genuinely differ across engines. This UI needs a
+  // strict 00-23 hour, especially right around midnight ("00:10", never
+  // "24:10") -- `hourCycle` is the explicit way to pin that. Never combine
+  // this with `hour12`: when both are present, `hour12` silently overrides
+  // `hourCycle`.
+  hourCycle: "h23",
   timeZone: "Asia/Jerusalem",
 });
 
@@ -77,7 +85,10 @@ const JERUSALEM_DATE_TIME_FORMATTER = new Intl.DateTimeFormat("he-IL", {
   month: "2-digit",
   hour: "2-digit",
   minute: "2-digit",
-  hour12: false,
+  // `hourCycle: "h23"`, not `hour12: false` -- see `JERUSALEM_CLOCK_FORMATTER`'s
+  // own comment for why: this pins a strict 00-23 hour (midnight = "00",
+  // never "24"), which `hour12` alone doesn't guarantee across engines.
+  hourCycle: "h23",
   timeZone: "Asia/Jerusalem",
 });
 

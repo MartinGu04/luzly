@@ -87,6 +87,11 @@ describe("8. formatJerusalemClockTime -- Asia/Jerusalem, explicitly, never the h
   it("fails safe on a malformed instant rather than throwing", () => {
     expect(formatJerusalemClockTime("not-a-real-date")).toBe("--:--");
   });
+
+  it("formats exact Asia/Jerusalem midnight as '00:00', never '24:00' -- hourCycle: 'h23', not hour12: false", () => {
+    // 2026-08-22T21:00:00.000Z = exactly 00:00 IDT on the 23rd.
+    expect(formatJerusalemClockTime("2026-08-22T21:00:00.000Z")).toBe("00:00");
+  });
 });
 
 describe("3. formatJerusalemDateTime -- DD/MM HH:mm in Asia/Jerusalem, explicitly, never the host timezone", () => {
@@ -111,6 +116,13 @@ describe("3. formatJerusalemDateTime -- DD/MM HH:mm in Asia/Jerusalem, explicitl
   it("zero-pads single-digit day/month/hour/minute", () => {
     // 2026-01-05T05:03:00.000Z = 07:03 IST on the 5th (winter, UTC+2).
     expect(formatJerusalemDateTime("2026-01-05T05:03:00.000Z")).toBe("05/01 07:03");
+  });
+
+  it("formats exact Asia/Jerusalem midnight as '00:10', never '24:10' -- hourCycle: 'h23', not hour12: false", () => {
+    // 2026-08-22T21:10:00.000Z = 00:10 IDT on the 23rd -- the exact scenario
+    // the spec calls out: a strict 00-23 hour, never a "24" rollover.
+    expect(formatJerusalemDateTime("2026-08-22T21:10:00.000Z")).toBe("23/08 00:10");
+    expect(formatJerusalemDateTime("2026-08-22T21:10:00.000Z")).not.toContain("24:10");
   });
 
   it("fails safe on a malformed instant rather than throwing", () => {
