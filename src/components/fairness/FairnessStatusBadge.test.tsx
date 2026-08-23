@@ -55,4 +55,16 @@ describe("FairnessStatusBadge", () => {
     const badge = screen.getByText("מעל היעד");
     expect(badge.textContent).toContain("מעל היעד");
   });
+
+  it("an explicit `label` overrides the default fairnessStatusLabel text, e.g. Shift Fairness's own 'expected' vocabulary", () => {
+    render(<FairnessStatusBadge status="above" label="מעל הצפוי" />);
+    expect(screen.getByText("מעל הצפוי")).toBeInTheDocument();
+    expect(screen.queryByText("מעל היעד")).toBeNull();
+  });
+
+  it("an overridden label keeps the status-driven icon/tint unchanged", () => {
+    const { container } = render(<FairnessStatusBadge status="above" label="מעל הצפוי" />);
+    const span = container.querySelector("span");
+    expect(span?.className).toContain("status-above");
+  });
 });

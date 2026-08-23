@@ -15,19 +15,37 @@ import {
   type DutyStatusState,
 } from "@/lib/presentation/fairness";
 import { dutyFamilyLabel } from "@/lib/presentation/labels";
+import {
+  formatFairShiftRange,
+  resolveShiftFairRangeStatus,
+  shiftFairRangeStatusBadgeTone,
+  shiftFairRangeStatusDescriptiveLabel,
+  shiftFairRangeStatusLabel,
+  type ShiftFairRangeStatus,
+} from "@/lib/presentation/shiftFairRange";
 import type { DutyFairnessPersonRowView } from "@/lib/readModels/dutyFairnessTypes";
 import type { ShiftFairnessPersonRowView } from "@/lib/readModels/shiftFairnessTypes";
 
 /**
  * Presentation-ready view of one `ShiftFairnessPersonRowView`, pre-
  * formatted for both the card and the detail overlay (same convention as
- * `ManagerFairnessRowCardView`) -- `target`/`deviation`/`weekendTarget`/
- * `weekendDeviation` reuse the EXISTING `number | null` formatters from
+ * `ManagerFairnessRowCardView`) -- `weekendTarget`/`weekendDeviation`
+ * reuse the EXISTING `number | null` formatters from
  * `lib/presentation/fairness.ts` (they already handle "unavailable, never
  * a fabricated 0" honestly; nothing shift-specific needed re-deriving).
  * `unavailableNote` is set ONLY when `target` is `null` -- the one case
  * where the card must actively explain itself rather than silently show
  * "—", since a null target/status pair could otherwise read as a data bug.
+ *
+ * `targetLabel`/`status`/`statusLabel`/`statusStateLabel`/
+ * `statusExplanationLabel` all reason about the WHOLE-SHIFT FAIR RANGE
+ * (`lib/presentation/shiftFairRange.ts`), never the raw fractional
+ * `row.target`/`row.deviation`/`row.status` directly -- a person cannot
+ * work half a shift, so this card never shows "5.5" or "+2.5 shifts" as a
+ * primary figure. `row.target`/`row.deviation`/`row.status` themselves are
+ * NEVER rounded, replaced, or otherwise touched anywhere in this file --
+ * `deviationLabel` below still carries the exact signed figure, kept only
+ * as a secondary/diagnostic value, never rendered as the primary message.
  */
 export interface ShiftFairnessCardView {
   key: string;
@@ -39,16 +57,61 @@ export interface ShiftFairnessCardView {
   serviceCategory: PersonnelServiceCategory;
   href: string;
   actualLabel: string;
+  /**
+   * The whole-shift FAIR RANGE ("5–6"), `formatFairShiftRange(row.target)`
+   * -- NEVER the raw fractional value rounded to a single number. `null`
+   * exactly when `row.target` is `null` (no modelable target).
+   */
   targetLabel: string | null;
+  /** "צפי הוגן עד היום" (current month) / "צפי הוגן לתקופה זו" (closed/future) -- the LABEL above `targetLabel`, period-aware via the SAME `isCurrentMonth` signal `statusExplanationLabel` already uses. */
+  targetPeriodLabel: string;
+  /** The raw signed fractional gap ("+2.5"/"-0.5") -- kept ONLY as a secondary/diagnostic value. Never rendered as this card's primary message; `statusStateLabel`/`statusExplanationLabel` below are what the card actually shows for "how is this person doing". */
   deviationLabel: string | null;
+  /**
+   * The 3-tint badge tone (`shiftFairRangeStatusBadgeTone`) driving
+   * `FairnessStatusBadge`'s existing below/balanced/above icon+color --
+   * NOT `row.status` (the raw ±0.5-tolerance engine status). Both
+   * `"slightly_above"` and `"above"` (see `rangeStatus` below) share this
+   * SAME `"above"` tone; the nuance between them lives in the label text,
+   * never a new color.
+   */
   status: FairnessStatus | null;
   /**
-   * Justice Table redesign -- a human-readable state ("בהתאם לצפוי" / "1
-   * מתחת לצפוי" / "0.5 מעל הצפוי") instead of a raw signed gap number. This
-   * is what the card/detail render for "Status" -- `deviationLabel` above
-   * is kept only for callers that still need the raw signed figure.
+   * The full 4-state whole-shift-range status
+   * (`lib/presentation/shiftFairRange.ts`) this card's wording is actually
+   * built from -- kept as its own field (rather than only exposing the
+   * derived labels) so a caller/test can assert the underlying state
+   * directly, independent of the exact Hebrew wording.
+   */
+  rangeStatus: ShiftFairRangeStatus | null;
+  /**
+   * The short badge word ("מעל הצפי" / "מעט מעל הצפי" / "בטווח הצפי" /
+   * "מתחת לצפי" / "לא ניתן להשוות") -- `shiftFairRangeStatusLabel`'s own
+   * range-aware vocabulary.
+   */
+  statusLabel: string;
+  /**
+   * What the card/detail's "מצב" row shows -- a longer, DESCRIPTIVE
+   * wording (`shiftFairRangeStatusDescriptiveLabel`, e.g. "מעל הטווח
+   * ההוגן") deliberately DIFFERENT from `statusLabel` above so the badge
+   * and this row don't repeat the exact same text right next to each
+   * other -- both still derive from the SAME `rangeStatus`, this is wording
+   * only. No magnitude number here either (`deviationLabel` above is the
+   * ONLY place the raw signed gap still lives, and it is never rendered
+   * as primary).
    */
   statusStateLabel: string;
+  /**
+   * One short, calm sentence explaining what the range status means (e.g.
+   * "you completed more shifts than your fair expected range, relative to
+   * your availability up to today") -- deliberately never phrased in terms
+   * of effort ("worked harder"), since this measures shift ALLOCATION
+   * relative to genuine opportunity, not difficulty, and never states a
+   * fractional shift count. `null` exactly when `rangeStatus` is `null`
+   * (nothing to explain -- the comparison itself isn't available).
+   */
+  statusExplanationLabel: string | null;
+  /** Distinct weekends worked (`row.weekendsWorked`), NOT a weekend shift-slot count -- see that field's own docs. */
   weekendActualLabel: string;
   weekendTargetLabel: string | null;
   weekendDeviationLabel: string | null;
@@ -105,7 +168,64 @@ function buildExpectationFactorLabel(factors: ShiftExpectationFactors | null): s
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
-export function buildShiftFairnessCardView(row: ShiftFairnessPersonRowView, href: string): ShiftFairnessCardView {
+/**
+ * "צפי הוגן עד היום" (current month) / "צפי הוגן לתקופה זו" (closed or
+ * future month) -- the LABEL above the whole-shift fair-range figure.
+ * `isCurrentMonth` mirrors `shiftFairnessPeriodLabel`'s own "עד היום"
+ * convention EXACTLY (same page-level `isOnCurrentMonth` signal, never
+ * `periodStatus` -- a wholly future month is also `periodStatus: "current"`,
+ * which is NOT "today"): only the actual current calendar month's target is
+ * genuinely an "up to today" figure, so only that case names "today".
+ */
+function buildTargetPeriodLabel(isCurrentMonth: boolean): string {
+  return isCurrentMonth ? "צפי הוגן עד היום" : "צפי הוגן לתקופה זו";
+}
+
+/**
+ * "You completed more/fewer shifts than your fair expected RANGE, relative
+ * to your availability up to today" -- one calm, concrete sentence
+ * answering "what does this status actually mean", reasoning about the
+ * realizable whole-shift range (`rangeStatus`) rather than a fractional
+ * deviation a person could never actually work. Deliberately never "worked
+ * harder"/"worked less" -- this measures shift ALLOCATION against genuine
+ * recorded opportunity, not effort or difficulty, and never states a
+ * fractional shift count (e.g. "+2.5 shifts"). `null` exactly when
+ * `rangeStatus` is `null` (the comparison itself isn't available, so there
+ * is nothing to explain).
+ *
+ * `isCurrentMonth` mirrors `buildTargetPeriodLabel`'s own "עד היום"
+ * convention EXACTLY -- a closed historical month or a future month's
+ * target covers the WHOLE period instead, so the sentence names "this
+ * period" rather than making a false "as of today" claim about a month
+ * that already ended or hasn't started.
+ */
+function buildShiftStatusExplanationLabel(rangeStatus: ShiftFairRangeStatus | null, isCurrentMonth: boolean): string | null {
+  const timeframe = isCurrentMonth ? "עד היום" : "בתקופה זו";
+  switch (rangeStatus) {
+    case "above":
+      return `ביצעת יותר משמרות מטווח הצפי ההוגן שלך ${timeframe}.`;
+    case "slightly_above":
+      return `ביצעת מעט יותר משמרות מטווח הצפי ההוגן שלך ${timeframe}.`;
+    case "within":
+      return `ביצעת משמרות בתוך טווח הצפי ההוגן שלך ${timeframe}.`;
+    case "below":
+      return `ביצעת פחות משמרות מטווח הצפי ההוגן שלך ${timeframe}.`;
+    default:
+      return null;
+  }
+}
+
+export function buildShiftFairnessCardView(
+  row: ShiftFairnessPersonRowView,
+  href: string,
+  isCurrentMonth: boolean = true,
+): ShiftFairnessCardView {
+  // The whole-shift-range status EVERYTHING else in this view (badge tone,
+  // status labels, explanation sentence) derives from -- computed once,
+  // from `row.actualShifts`/`row.target` (the engine's exact, untouched
+  // values), never re-derived from an already-rounded/formatted label.
+  const rangeStatus = resolveShiftFairRangeStatus(row.actualShifts, row.target);
+
   return {
     key: row.personId,
     personId: row.personId,
@@ -114,11 +234,20 @@ export function buildShiftFairnessCardView(row: ShiftFairnessPersonRowView, href
     serviceCategory: row.serviceCategory,
     href,
     actualLabel: String(row.actualShifts),
-    targetLabel: row.target !== null ? formatFairnessExpectedValue(row.target) : null,
+    // The whole-shift fair RANGE -- `row.target` itself is NEVER rounded or
+    // otherwise touched; only this display string derives from it. `null`
+    // (never a fabricated range) exactly when `row.target` is `null`, same
+    // convention as before -- `unavailableNote` below is what the card
+    // actually shows in that case, never a raw "—" range.
+    targetLabel: row.target !== null ? formatFairShiftRange(row.target) : null,
+    targetPeriodLabel: buildTargetPeriodLabel(isCurrentMonth),
     deviationLabel: row.deviation !== null ? formatFairnessGap(row.deviation) : null,
-    status: row.status,
-    statusStateLabel: formatFairnessDeviationState(row.deviation, row.status),
-    weekendActualLabel: String(row.weekendActualShifts),
+    status: shiftFairRangeStatusBadgeTone(rangeStatus),
+    rangeStatus,
+    statusLabel: shiftFairRangeStatusLabel(rangeStatus),
+    statusStateLabel: shiftFairRangeStatusDescriptiveLabel(rangeStatus),
+    statusExplanationLabel: buildShiftStatusExplanationLabel(rangeStatus, isCurrentMonth),
+    weekendActualLabel: String(row.weekendsWorked),
     weekendTargetLabel: row.weekendTarget !== null ? formatFairnessExpectedValue(row.weekendTarget) : null,
     weekendDeviationLabel: row.weekendDeviation !== null ? formatFairnessGap(row.weekendDeviation) : null,
     weekendStatus: row.weekendStatus,

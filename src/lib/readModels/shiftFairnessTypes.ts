@@ -39,6 +39,16 @@ export interface ShiftFairnessPersonRowView {
   weekendTarget: number | null;
   weekendDeviation: number | null;
   weekendStatus: FairnessShiftStatus | null;
+  /**
+   * How many DISTINCT Thu-Sat weekend blocks this person actually worked at
+   * least one confirmed shift in, this period -- see
+   * `fairnessShiftEngine.ts`'s `ShiftFairnessPersonResult.weekendsWorked`
+   * for the full rationale. This is what the card's "סופ״שים" figure shows
+   * -- `weekendActualShifts` above is a DIFFERENT fact (a shift-slot count)
+   * kept only for the weekend target/deviation/status calculation, which
+   * this field never feeds.
+   */
+  weekendsWorked: number;
   dataCompleteness: FairnessDataCompleteness;
   /**
    * Justice Table redesign -- a small, honest breakdown of real reasons this

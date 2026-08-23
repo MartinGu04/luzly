@@ -16,10 +16,14 @@ function view(overrides: Partial<ShiftFairnessCardView> = {}): ShiftFairnessCard
     serviceCategory: "regular",
     href: "/fairness?person=p_1",
     actualLabel: "4",
-    targetLabel: "4.3",
+    targetLabel: "4–5",
+    targetPeriodLabel: "צפי הוגן עד היום",
     deviationLabel: "-0.3",
     status: "balanced",
-    statusStateLabel: "בהתאם לצפוי",
+    rangeStatus: "within",
+    statusLabel: "בטווח הצפי",
+    statusStateLabel: "בתוך הטווח ההוגן",
+    statusExplanationLabel: "ביצעת משמרות בתוך טווח הצפי ההוגן שלך עד היום.",
     weekendActualLabel: "1",
     weekendTargetLabel: "1.2",
     weekendDeviationLabel: "-0.2",
@@ -90,5 +94,54 @@ describe("ShiftFairnessCard — avatar", () => {
     fireEvent.error(img);
     expect(screen.queryByTestId("avatar-photo")).toBeNull();
     expect(screen.getByText("דט")).toBeInTheDocument();
+  });
+});
+
+describe("ShiftFairnessCard — status badge/explanation clarity", () => {
+  it("the badge shows 'above EXPECTED', never 'above target', for an above-expectation person", () => {
+    render(
+      <ul>
+        <ShiftFairnessCard
+          view={view({
+            status: "above",
+            rangeStatus: "above",
+            statusLabel: "מעל הצפי",
+            statusStateLabel: "מעל הטווח ההוגן",
+            statusExplanationLabel: "ביצעת יותר משמרות מטווח הצפי ההוגן שלך עד היום.",
+          })}
+        />
+      </ul>,
+    );
+    // The badge (short word) and the "מצב" row (descriptive wording) each
+    // appear exactly ONCE now -- no duplicated text on the card.
+    expect(screen.getByText("מעל הצפי")).toBeInTheDocument();
+    expect(screen.getByText("מעל הטווח ההוגן")).toBeInTheDocument();
+    expect(screen.queryByText("מעל היעד")).toBeNull();
+  });
+
+  it("renders the human-readable explanation sentence under the status row", () => {
+    render(
+      <ul>
+        <ShiftFairnessCard
+          view={view({
+            status: "above",
+            rangeStatus: "above",
+            statusExplanationLabel: "ביצעת יותר משמרות מטווח הצפי ההוגן שלך עד היום.",
+          })}
+        />
+      </ul>,
+    );
+    expect(screen.getByTestId("metric-shift-status-explanation")).toHaveTextContent(
+      "ביצעת יותר משמרות מטווח הצפי ההוגן שלך עד היום.",
+    );
+  });
+
+  it("omits the explanation row entirely when statusExplanationLabel is null", () => {
+    render(
+      <ul>
+        <ShiftFairnessCard view={view({ statusExplanationLabel: null })} />
+      </ul>,
+    );
+    expect(screen.queryByTestId("metric-shift-status-explanation")).toBeNull();
   });
 });
