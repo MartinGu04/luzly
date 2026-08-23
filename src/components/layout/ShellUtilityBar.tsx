@@ -17,6 +17,14 @@ interface ShellUtilityBarProps {
    * client-side.
    */
   dateLabel: string | null;
+  /**
+   * Authenticated Supabase user id, threaded through only to
+   * `NotificationBell`'s `usePushSubscription` -- see `AppShell`'s own
+   * docstring. `undefined` on the (never actually reached in real usage)
+   * no-`person` render path -- `usePushSubscription` degrades gracefully
+   * with no persisted preference in that case.
+   */
+  userId?: string;
 }
 
 /**
@@ -85,7 +93,7 @@ function OrgLogoImage({ logo, heightClassName }: { logo: OrgLogo; heightClassNam
  * left, replacing its old spot in `Sidebar`'s top row -- same component,
  * same push-notification behavior, purely relocated.
  */
-export function ShellUtilityBar({ initialClockTime, dateLabel }: ShellUtilityBarProps) {
+export function ShellUtilityBar({ initialClockTime, dateLabel, userId }: ShellUtilityBarProps) {
   return (
     <div className="hidden shrink-0 border-b border-border lg:block">
       <div className="mx-auto grid w-full max-w-[1440px] grid-cols-[1fr_auto_1fr] items-center gap-4 px-10 py-1.5">
@@ -112,7 +120,8 @@ export function ShellUtilityBar({ initialClockTime, dateLabel }: ShellUtilityBar
         </div>
 
         <div className="flex items-center justify-self-end">
-          <NotificationBell variant="shell" />
+          {/* `key={userId}` -- see `MobileIdentityBar`'s identical comment: forces a fresh instance (and `usePushSubscription`) on every account switch. */}
+          <NotificationBell key={userId} variant="shell" userId={userId} />
         </div>
       </div>
     </div>

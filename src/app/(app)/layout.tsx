@@ -85,6 +85,10 @@ export default async function ProtectedLayout({ children }: { children: ReactNod
   // (see PersonalScheduleLoadResult) -- presentation-only, sourced from the
   // Supabase auth identity, never כ"א/Person, never affecting who this is.
   const avatarUrl = result.avatarUrl;
+  // Same auth-only sibling as `avatarUrl` -- threaded down only as far as
+  // `usePushSubscription` needs it (per-user/per-device Push preference
+  // key), never folded into personnel/domain identity.
+  const userId = result.userId;
 
   // The app shell's ONE live clock (`ShellUtilityBar`) needs a server-
   // computed "HH:mm:ss" for its first paint, same as the old dashboard-only
@@ -109,7 +113,7 @@ export default async function ProtectedLayout({ children }: { children: ReactNod
       <AppRevalidator />
       <SearchPaletteProvider searchReadModel={searchReadModel}>
         <AppShell
-          person={{ name: person.name, isManager: person.isManager, avatarUrl }}
+          person={{ name: person.name, isManager: person.isManager, avatarUrl, userId }}
           initialClockTime={initialClockTime}
           dateLabel={dateLabel}
         >

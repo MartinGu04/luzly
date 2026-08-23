@@ -8,6 +8,8 @@ interface MobileIdentityBarProps {
   isManager: boolean;
   /** Presentation-only Google account photo -- see `lib/auth/currentUser.ts`. `null` falls back to initials. */
   avatarUrl: string | null;
+  /** Authenticated Supabase user id, threaded through only to `NotificationBell`'s `usePushSubscription` -- see `AppShell`'s own docstring. */
+  userId: string;
 }
 
 /**
@@ -33,14 +35,22 @@ interface MobileIdentityBarProps {
  * shell (the same identity the request-scoped read model already
  * resolved) -- no email, no extra Google/auth fetch.
  */
-export function MobileIdentityBar({ name, isManager, avatarUrl }: MobileIdentityBarProps) {
+export function MobileIdentityBar({ name, isManager, avatarUrl, userId }: MobileIdentityBarProps) {
   return (
     <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3 lg:hidden">
       <BrandMark size="sm" className="text-foreground" />
 
       <div className="flex shrink-0 items-center gap-1.5">
         <SearchTriggerButton variant="mobile" />
-        <NotificationBell variant="mobile" />
+        {/* `key={userId}` forces a fresh `NotificationBell` (and its
+            `usePushSubscription`) instance whenever the authenticated user
+            changes -- this codebase's established idiom for "reset all
+            internal state when an identity prop changes" (see
+            `ManagerBroadcastArea`'s `key={editingItem?.id ?? "new"}`) --
+            so an account switch on a shared device can never let the
+            previous user's Push UI state linger, even for a single
+            frame. */}
+        <NotificationBell key={userId} variant="mobile" userId={userId} />
         <MobileProfileMenu name={name} isManager={isManager} avatarUrl={avatarUrl} />
       </div>
     </div>
