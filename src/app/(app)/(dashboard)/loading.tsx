@@ -1,6 +1,7 @@
 /**
  * Skeleton shaped like the real dashboard layout -- header, hero, secondary
- * column, timeline -- never fake text/data. Uses the shared `.skeleton`
+ * column, timeline, and the full-width weekly strip below it -- never fake
+ * text/data. Uses the shared `.skeleton`
  * shimmer utility (globals.css), which is itself disabled under
  * `prefers-reduced-motion`.
  *
@@ -35,6 +36,16 @@ export default function DashboardLoading() {
         <div className="flex flex-col gap-6">
           <div className="skeleton h-16 rounded-xl" />
           <div className="skeleton h-72 rounded-xl" />
+        </div>
+      </div>
+
+      {/* "השבוע הקרוב" placeholder -- a full-width strip matching WeekOverviewSection's own shape, so the page doesn't visibly jump once real data replaces it. */}
+      <div className="flex flex-col gap-4">
+        <div className="skeleton h-5 w-32 rounded-lg" />
+        <div className="flex gap-3 overflow-hidden">
+          {Array.from({ length: 7 }, (_, i) => (
+            <div key={i} className="skeleton h-48 min-w-[78%] shrink-0 rounded-xl sm:min-w-[280px] lg:min-w-0 lg:flex-1" />
+          ))}
         </div>
       </div>
     </div>

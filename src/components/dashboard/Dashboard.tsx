@@ -1,5 +1,6 @@
 import { BLOCKING_ABSENCE_KINDS } from "@/lib/domain/operationalIssues";
 import { DataFreshnessStatus } from "@/components/ui/DataFreshnessStatus";
+import { buildPersonalWeekOverview } from "@/lib/presentation/personalWeekOverview";
 import type { PersonalEventView, PersonalScheduleReadModel } from "@/lib/readModels/types";
 import type { RecentDashboardChange } from "@/lib/readModels/recentDashboardChangesTypes";
 import { Header } from "./Header";
@@ -8,6 +9,7 @@ import { IssuesPanel } from "./IssuesPanel";
 import { RecentChangesPanel } from "./RecentChangesPanel";
 import { TodayTimeline } from "./TodayTimeline";
 import { UpcomingSection } from "./UpcomingSection";
+import { WeekOverviewSection } from "./WeekOverviewSection";
 
 interface DashboardProps {
   model: PersonalScheduleReadModel;
@@ -38,6 +40,16 @@ function findVacationEvent(todayEvents: readonly PersonalEventView[]): PersonalE
  * unnecessary page scroll at normal desktop viewport heights, alongside
  * `AppShell`'s own top padding. The two-column grid's OWN internal `gap-6`
  * (between Hero/Timeline/etc.) is unchanged.
+ *
+ * "השבוע הקרוב" (`WeekOverviewSection`) sits BELOW that whole two-column
+ * grid as its own full-width section -- deliberately not squeezed inside
+ * the narrower main column (which shares its width with the 360px
+ * sidebar), since a full seven-day week needs the page's whole width to
+ * stay readable on desktop. This never touches Hero/Today's own
+ * prominence (both still lead the page) or the sidebar's existing
+ * issues/upcoming meaning -- it's a distinct, complete weekly view build
+ * purely from `calendarEvents` (never `upcomingEvents`, which excludes
+ * finished history) via `buildPersonalWeekOverview`.
  */
 export function Dashboard({ model, recentChanges = [] }: DashboardProps) {
   const hasCurrentAssignment = model.currentAssignments.length > 0;
@@ -62,6 +74,8 @@ export function Dashboard({ model, recentChanges = [] }: DashboardProps) {
       : [];
 
   const todayDutyActions = model.dutyActions.filter((action) => action.date === model.localNow.date);
+
+  const weekOverview = buildPersonalWeekOverview(model.calendarEvents, model.localNow);
 
   return (
     <div className="flex flex-col gap-4">
@@ -110,6 +124,10 @@ export function Dashboard({ model, recentChanges = [] }: DashboardProps) {
             />
           </div>
         </div>
+      </div>
+
+      <div className="animate-fade-up" style={{ animationDelay: "240ms" }}>
+        <WeekOverviewSection overview={weekOverview} />
       </div>
     </div>
   );

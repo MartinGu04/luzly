@@ -268,3 +268,61 @@ describe("Dashboard — PR #36 'מה השתנה' recap wiring", () => {
     expect(screen.getByText("השיבוץ שלך ליום חמישי השתנה: יום → לילה")).toBeInTheDocument();
   });
 });
+
+describe("Dashboard — 'השבוע הקרוב' weekly overview", () => {
+  it("renders alongside every other existing section, none of them removed", () => {
+    const currentShift = assignment({ title: "טכנאי יום" });
+    render(
+      <Dashboard
+        model={model({
+          currentAssignments: [currentShift],
+          todayEvents: [currentShift],
+          calendarEvents: [currentShift],
+        })}
+        recentChanges={[
+          {
+            key: "change:job_1",
+            category: "shift",
+            title: "⚠️ שינוי בשיבוץ",
+            body: "השיבוץ שלך השתנה",
+            happenedAt: "2026-08-12T07:42:00.000Z",
+            href: "/schedule?date=2026-08-19",
+            date: "2026-08-19",
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("פעיל עכשיו")).toBeInTheDocument(); // Hero
+    expect(screen.getByText("היום שלי")).toBeInTheDocument(); // TodayTimeline
+    expect(screen.getByText("מה השתנה")).toBeInTheDocument(); // RecentChangesPanel
+    expect(screen.getByText("הסידור שלך נראה תקין")).toBeInTheDocument(); // IssuesPanel (no issues)
+    expect(screen.getByText("הקרובים שלי")).toBeInTheDocument(); // UpcomingSection
+    expect(screen.getByText("השבוע הקרוב")).toBeInTheDocument(); // new weekly overview
+    // The current shift appears both in the Hero and in the complete week
+    // overview -- deliberate contextual repetition, not a bug.
+    expect(screen.getAllByText("טכנאי יום").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("builds the week strictly from calendarEvents, not upcomingEvents -- an earlier-this-week event still shows", () => {
+    const mondayShift = baseEvent({ date: "2026-08-17", title: "משמרת שני" }); // earlier in the same operational week as 2026-08-19
+    render(
+      <Dashboard
+        model={model({
+          localNow: { date: "2026-08-19", minuteOfDay: 600 },
+          calendarEvents: [mondayShift],
+          upcomingEvents: [], // deliberately empty -- proves the week section didn't source from here
+        })}
+      />,
+    );
+
+    expect(screen.getByText("משמרת שני")).toBeInTheDocument();
+  });
+
+  it("renders the mobile snap-scroll rail structure, not a squeezed desktop 7-column grid, by default", () => {
+    render(<Dashboard model={model()} />);
+    const rail = screen.getByRole("list", { name: "סקירת השבוע, ראשון עד שבת" });
+    expect(rail.className).toContain("overflow-x-auto");
+    expect(rail.className).toContain("snap-x");
+  });
+});
