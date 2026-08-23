@@ -233,6 +233,99 @@ describe("computeShiftFairnessForGroup — unequal availability", () => {
   });
 });
 
+describe("computeShiftFairnessForGroup — future scheduled shifts are never counted as completed work", () => {
+  // Reproduces the exact reported scenario: "today" is 2026-08-23 (a
+  // Sunday), the current-month card is being computed, and a person already
+  // has CONFIRMED (non-tentative) shifts entered on the sheet for 08-24 and
+  // 08-25 -- days that have not happened yet. `certainty: "confirmed"` only
+  // ever means "the roster isn't tentative" (no trailing "?" in the cell),
+  // never "this already occurred" -- the ONLY thing standing between a
+  // future confirmed shift and "actual, completed work" is the date cutoff
+  // baked into `periodDates` (`resolveShiftFairnessPeriodDates`, capped at
+  // `now.date`). This proves that cutoff actually holds at the
+  // `computeShiftFairnessForGroup` integration point, not just at
+  // `resolveShiftFairnessPeriodDates` in isolation -- the two were never
+  // directly proven together before this test.
+  const now: LocalNow = { date: "2026-08-23", minuteOfDay: 600 };
+  const periodDates = resolveShiftFairnessPeriodDates({ year: 2026, month: 8 }, now);
+
+  it("a person's own future-dated confirmed shifts (already entered on the sheet) are excluded from actualShifts and opportunityCount", () => {
+    const leia = person({ id: "p_leia", isTechnician: true });
+
+    const pastShiftDates = ["2026-08-03", "2026-08-05", "2026-08-08", "2026-08-10", "2026-08-12", "2026-08-15"];
+    const events: Event[] = [
+      ...pastShiftDates.map((date) => shiftEvent({ personId: leia.id, date, period: "day" })),
+      // Already on the schedule for Tuesday 08-25 and Monday 08-24 -- real,
+      // CONFIRMED rows, but two days that have not happened yet as of
+      // 08-23.
+      shiftEvent({ personId: leia.id, date: "2026-08-24", period: "day" }),
+      shiftEvent({ personId: leia.id, date: "2026-08-25", period: "day" }),
+    ];
+
+    const result = computeShiftFairnessForGroup("technician", [leia], events, periodDates);
+    const row = findPerson(result, leia.id);
+
+    // 6 real past shifts, NEVER 8 -- the two future-dated ones must not be
+    // counted as "completed" no matter how confidently they're scheduled.
+    expect(row.actualShifts).toBe(6);
+    // Opportunities are date-capped the same way -- 08-24/08-25 must not
+    // contribute day/night opportunity slots either.
+    expect(row.opportunityCount).toBeLessThanOrEqual(periodDates.length * 2);
+  });
+
+  it("a future-dated shift belonging to ANOTHER group member never inflates the group total actual/opportunity totals that every member's own target is computed from", () => {
+    const leia = person({ id: "p_leia", isTechnician: true });
+    const noa = person({ id: "p_noa", isTechnician: true });
+
+    const events: Event[] = [
+      shiftEvent({ personId: leia.id, date: "2026-08-03", period: "day" }),
+      shiftEvent({ personId: leia.id, date: "2026-08-05", period: "day" }),
+      shiftEvent({ personId: noa.id, date: "2026-08-04", period: "day" }),
+      // Noa's future-dated confirmed shift -- must not inflate the GROUP's
+      // totalActual, which would otherwise silently distort Leia's own
+      // target through the shared opportunity-share formula.
+      shiftEvent({ personId: noa.id, date: "2026-08-25", period: "night" }),
+    ];
+
+    const withFuture = computeShiftFairnessForGroup("technician", [leia, noa], events, periodDates);
+    const withoutFutureEvent = events.filter((event) => event.date <= "2026-08-23");
+    const withoutFuture = computeShiftFairnessForGroup("technician", [leia, noa], withoutFutureEvent, periodDates);
+
+    const leiaWithFuture = findPerson(withFuture, leia.id);
+    const leiaWithoutFuture = findPerson(withoutFuture, leia.id);
+
+    // Leia's own target must be IDENTICAL whether or not Noa's future shift
+    // is present in the raw event feed -- proving the future event has zero
+    // effect anywhere in the group-level totals the target formula uses.
+    expect(leiaWithFuture.target).toBe(leiaWithoutFuture.target);
+    expect(findPerson(withFuture, noa.id).actualShifts).toBe(1);
+  });
+
+  it("spot-check across several people in the same group: nobody's actualShifts ever exceeds their real past-dated confirmed shift count", () => {
+    const roster = ["p_a", "p_b", "p_c", "p_d"].map((id) => person({ id, isTechnician: true }));
+    const [a, b, c, d] = roster;
+
+    const events: Event[] = [
+      shiftEvent({ personId: a.id, date: "2026-08-01", period: "day" }),
+      shiftEvent({ personId: a.id, date: "2026-08-24", period: "night" }), // future
+      shiftEvent({ personId: b.id, date: "2026-08-10", period: "day" }),
+      shiftEvent({ personId: b.id, date: "2026-08-12", period: "night" }),
+      shiftEvent({ personId: b.id, date: "2026-08-30", period: "day" }), // future
+      shiftEvent({ personId: c.id, date: "2026-08-23", period: "day" }), // today -- must count
+      shiftEvent({ personId: c.id, date: "2026-08-25", period: "day" }), // future -- tomorrow
+      // d has only future shifts scheduled -- zero real completed work yet.
+      shiftEvent({ personId: d.id, date: "2026-08-31", period: "day" }),
+    ];
+
+    const result = computeShiftFairnessForGroup("technician", roster, events, periodDates);
+
+    expect(findPerson(result, a.id).actualShifts).toBe(1);
+    expect(findPerson(result, b.id).actualShifts).toBe(2);
+    expect(findPerson(result, c.id).actualShifts).toBe(1); // today counts, tomorrow doesn't
+    expect(findPerson(result, d.id).actualShifts).toBe(0);
+  });
+});
+
 describe("computeShiftFairnessForGroup — day/night/full-day constraints", () => {
   const SOLO = person({ id: "p_solo", isTechnician: true });
   const date = "2026-08-10";
