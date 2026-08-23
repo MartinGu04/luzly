@@ -11,6 +11,13 @@ import { useNotificationInbox } from "./useNotificationInbox";
 interface NotificationBellProps {
   /** Only affects the trigger button's own visual treatment -- the popover panel's CONTENT looks identical in every context; only its anchor side (see `PANEL_POSITION_CLASSES`) varies by variant. */
   variant: "sidebar" | "mobile" | "shell";
+  /**
+   * Authenticated Supabase user id, passed straight through to
+   * `usePushSubscription` to key the per-user/per-device Push preference
+   * -- see that hook's own docstring. `undefined` only on the (never
+   * actually reached in real usage) no-`person` shell render path.
+   */
+  userId?: string;
 }
 
 type BellView = "inbox" | "settings";
@@ -85,14 +92,14 @@ function formatBadgeCount(count: number): string {
  * Same click-outside/Escape-to-dismiss pattern `MobileProfileMenu`
  * already uses.
  */
-export function NotificationBell({ variant }: NotificationBellProps) {
+export function NotificationBell({ variant, userId }: NotificationBellProps) {
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<BellView>("inbox");
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelId = useId();
 
-  const { state, errorMessage, testStatus, enable, disable, sendTest } = usePushSubscription();
+  const { state, errorMessage, testStatus, enable, disable, sendTest } = usePushSubscription(userId);
   const { status: inboxStatus, items, unreadCount, refresh, markRead, markAllRead, clear } = useNotificationInbox();
 
   function closePopover() {

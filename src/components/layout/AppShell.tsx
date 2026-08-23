@@ -12,7 +12,14 @@ interface AppShellProps {
    * `lib/auth/currentUser.ts`) -- it never affects identity matching or
    * authorization, only which `Avatar` renders a photo vs. initials.
    */
-  person?: { name: string; isManager: boolean; avatarUrl: string | null };
+  /**
+   * `userId` is the authenticated Supabase user id -- an auth-only sibling
+   * of `name`/`isManager`/`avatarUrl`, never a personnel/domain identity
+   * field (see `PersonalScheduleLoadResult`). It only ever reaches
+   * `NotificationBell`'s `usePushSubscription`, which uses it to key the
+   * per-user/per-device Push notification preference.
+   */
+  person?: { name: string; isManager: boolean; avatarUrl: string | null; userId: string };
   /**
    * Same "HH:mm:ss" (or `null`) contract as `LiveClock.initialTime`, passed
    * straight through to `ShellUtilityBar` -- `null` whenever the caller has
@@ -64,9 +71,14 @@ export function AppShell({ children, person, initialClockTime = null, dateLabel 
       <Sidebar person={person} />
       <div className="flex min-h-dvh w-full flex-1 flex-col">
         {person ? (
-          <MobileIdentityBar name={person.name} isManager={person.isManager} avatarUrl={person.avatarUrl} />
+          <MobileIdentityBar
+            name={person.name}
+            isManager={person.isManager}
+            avatarUrl={person.avatarUrl}
+            userId={person.userId}
+          />
         ) : null}
-        <ShellUtilityBar initialClockTime={initialClockTime} dateLabel={dateLabel} />
+        <ShellUtilityBar initialClockTime={initialClockTime} dateLabel={dateLabel} userId={person?.userId} />
         <main className="flex-1 px-4 pt-6 pb-28 sm:px-6 lg:px-10 lg:pb-10">
           <div className="mx-auto w-full max-w-[1440px]">{children}</div>
         </main>

@@ -22,7 +22,7 @@ function renderWithTheme(ui: ReactElement) {
 describe("AppShell — mobile identity/sign-out", () => {
   it("the desktop Sidebar's sign-out is immediately visible; the mobile one is reachable behind the profile menu", () => {
     renderWithTheme(
-      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null }}>
+      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null, userId: "user-test-1" }}>
         <div>DASHBOARD_CONTENT</div>
       </AppShell>,
     );
@@ -39,7 +39,7 @@ describe("AppShell — mobile identity/sign-out", () => {
 
   it("the safe person name is reachable via the mobile profile menu, not permanently in the header", () => {
     renderWithTheme(
-      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null }}>
+      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null, userId: "user-test-1" }}>
         <div>content</div>
       </AppShell>,
     );
@@ -49,7 +49,7 @@ describe("AppShell — mobile identity/sign-out", () => {
 
   it("shows the manager indication when isManager is true", () => {
     renderWithTheme(
-      <AppShell person={{ name: "נועה דוגמה", isManager: true, avatarUrl: null }}>
+      <AppShell person={{ name: "נועה דוגמה", isManager: true, avatarUrl: null, userId: "user-test-1" }}>
         <div>content</div>
       </AppShell>,
     );
@@ -58,7 +58,7 @@ describe("AppShell — mobile identity/sign-out", () => {
 
   it("never renders an email anywhere in the shell", () => {
     const { container } = renderWithTheme(
-      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null }}>
+      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null, userId: "user-test-1" }}>
         <div>content</div>
       </AppShell>,
     );
@@ -67,7 +67,7 @@ describe("AppShell — mobile identity/sign-out", () => {
 
   it("remains available around configuration_error content (any children), not just the real dashboard", () => {
     renderWithTheme(
-      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null }}>
+      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null, userId: "user-test-1" }}>
         <div>לא ניתן לחשב כרגע את שעות המשמרות</div>
       </AppShell>,
     );
@@ -82,7 +82,7 @@ describe("AppShell — mobile identity/sign-out", () => {
 
   it("keeps the bottom navigation -- no hamburger drawer reappears", () => {
     renderWithTheme(
-      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null }}>
+      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null, userId: "user-test-1" }}>
         <div>content</div>
       </AppShell>,
     );
@@ -94,7 +94,7 @@ describe("AppShell — mobile identity/sign-out", () => {
 describe("AppShell — sign-out looks destructive", () => {
   it("gives every sign-out affordance a red/critical treatment in both themes", () => {
     renderWithTheme(
-      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null }}>
+      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null, userId: "user-test-1" }}>
         <div>content</div>
       </AppShell>,
     );
@@ -124,7 +124,7 @@ describe("AppShell — shell utility bar / live clock (Design Pass PR #19)", () 
     vi.setSystemTime(new Date("2026-08-12T07:00:00.000Z")); // 10:00:00 in Asia/Jerusalem (UTC+3, DST)
 
     renderWithTheme(
-      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null }} initialClockTime="00:00:00">
+      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null, userId: "user-test-1" }} initialClockTime="00:00:00">
         <div>content</div>
       </AppShell>,
     );
@@ -136,7 +136,7 @@ describe("AppShell — shell utility bar / live clock (Design Pass PR #19)", () 
   it("never crashes with no server-derived clock time (configuration_error shell render)", () => {
     expect(() =>
       renderWithTheme(
-        <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null }} initialClockTime={null}>
+        <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null, userId: "user-test-1" }} initialClockTime={null}>
           <div>content</div>
         </AppShell>,
       ),
@@ -146,7 +146,7 @@ describe("AppShell — shell utility bar / live clock (Design Pass PR #19)", () 
   it("omitting initialClockTime entirely behaves the same as null -- no crash", () => {
     expect(() =>
       renderWithTheme(
-        <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null }}>
+        <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null, userId: "user-test-1" }}>
           <div>content</div>
         </AppShell>,
       ),
@@ -156,7 +156,7 @@ describe("AppShell — shell utility bar / live clock (Design Pass PR #19)", () 
   it("passes dateLabel through to the shell utility bar's clock pill", () => {
     renderWithTheme(
       <AppShell
-        person={{ name: "דני בדיקה", isManager: false, avatarUrl: null }}
+        person={{ name: "דני בדיקה", isManager: false, avatarUrl: null, userId: "user-test-1" }}
         initialClockTime="10:00:00"
         dateLabel="יום רביעי · 12 באוגוסט"
       >
@@ -169,7 +169,7 @@ describe("AppShell — shell utility bar / live clock (Design Pass PR #19)", () 
   it("omitting dateLabel entirely behaves the same as null -- no crash, no date line", () => {
     expect(() =>
       renderWithTheme(
-        <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null }} initialClockTime="10:00:00">
+        <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null, userId: "user-test-1" }} initialClockTime="10:00:00">
           <div>content</div>
         </AppShell>,
       ),
@@ -180,7 +180,7 @@ describe("AppShell — shell utility bar / live clock (Design Pass PR #19)", () 
 describe("AppShell — header polish (organizational logos + relocated bell)", () => {
   it("renders both organizational logos in the shell utility bar", () => {
     renderWithTheme(
-      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null }}>
+      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null, userId: "user-test-1" }}>
         <div>content</div>
       </AppShell>,
     );
@@ -190,7 +190,7 @@ describe("AppShell — header polish (organizational logos + relocated bell)", (
 
   it("exactly two notification bell instances exist -- desktop shell + mobile -- never a third left behind in the sidebar", () => {
     renderWithTheme(
-      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null }}>
+      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null, userId: "user-test-1" }}>
         <div>content</div>
       </AppShell>,
     );
@@ -198,10 +198,37 @@ describe("AppShell — header polish (organizational logos + relocated bell)", (
   });
 });
 
+describe("AppShell — notification bells are keyed by userId (account-switch safety)", () => {
+  it("a userId change remounts both bells, closing any popover the previous user had left open", () => {
+    const { rerender } = renderWithTheme(
+      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null, userId: "user-a" }}>
+        <div>content</div>
+      </AppShell>,
+    );
+
+    fireEvent.click(screen.getAllByRole("button", { name: /התראות/ })[0]);
+    expect(screen.getAllByRole("dialog", { name: "התראות" }).length).toBeGreaterThan(0);
+
+    // A different authenticated user now renders in this same shell instance
+    // (e.g. after a logout/login on a shared device) -- `key={userId}` on
+    // each `NotificationBell` must force a fresh instance, never carrying
+    // over the previous user's open popover or `usePushSubscription` state.
+    rerender(
+      <ThemeProvider>
+        <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null, userId: "user-b" }}>
+          <div>content</div>
+        </AppShell>
+      </ThemeProvider>,
+    );
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
 describe("AppShell — theme control", () => {
   it("never renders the 3-option ThemeToggle anywhere in the shell -- neither desktop sidebar nor mobile header", () => {
     renderWithTheme(
-      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null }}>
+      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null, userId: "user-test-1" }}>
         <div>content</div>
       </AppShell>,
     );
@@ -213,7 +240,7 @@ describe("AppShell — theme control", () => {
 
   it("the desktop IdentityFooter offers a single binary light/dark action", () => {
     renderWithTheme(
-      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null }}>
+      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null, userId: "user-test-1" }}>
         <div>content</div>
       </AppShell>,
     );
@@ -223,7 +250,7 @@ describe("AppShell — theme control", () => {
 
   it("the mobile profile menu offers a single binary light/dark action instead", () => {
     renderWithTheme(
-      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null }}>
+      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null, userId: "user-test-1" }}>
         <div>content</div>
       </AppShell>,
     );
@@ -236,7 +263,7 @@ describe("AppShell — theme control", () => {
 describe("AppShell — avatarUrl (presentation-only Google account photo)", () => {
   it("passes the same avatarUrl to both the desktop IdentityFooter and the mobile profile menu's Avatar", () => {
     const { container } = renderWithTheme(
-      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: "https://lh3.googleusercontent.com/a/photo.jpg" }}>
+      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: "https://lh3.googleusercontent.com/a/photo.jpg", userId: "user-test-1" }}>
         <div>content</div>
       </AppShell>,
     );
@@ -253,7 +280,7 @@ describe("AppShell — avatarUrl (presentation-only Google account photo)", () =
 
   it("falls back to initials everywhere when avatarUrl is null -- no broken-image icon", () => {
     const { container } = renderWithTheme(
-      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null }}>
+      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null, userId: "user-test-1" }}>
         <div>content</div>
       </AppShell>,
     );

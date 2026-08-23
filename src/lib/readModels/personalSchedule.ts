@@ -34,9 +34,17 @@ export type PersonalScheduleLoadResult =
    * auth identity, not כ"א/`Person`, and must stay presentation-only,
    * never something the domain/personnel layer could read back and treat
    * as identity data.
+   *
+   * `userId` (both here and on "ok" below) is the same kind of auth-only
+   * sibling as `avatarUrl` -- the authenticated Supabase user id, used
+   * ONLY to key the client-side per-user/per-device Push notification
+   * preference (`lib/notifications/pushPreference.ts`). Never folded into
+   * `PersonalProfile`/`PersonalScheduleReadModel`: personnel/domain
+   * identity stays email-keyed, and this auth id must never become a
+   * second identity concept the domain layer could read back.
    */
-  | { status: "configuration_error"; message: string; person: PersonalProfile; avatarUrl: string | null }
-  | { status: "ok"; model: PersonalScheduleReadModel; avatarUrl: string | null };
+  | { status: "configuration_error"; message: string; person: PersonalProfile; avatarUrl: string | null; userId: string }
+  | { status: "ok"; model: PersonalScheduleReadModel; avatarUrl: string | null; userId: string };
 
 /**
  * Everything this read model needs from the workbook. `potentialH1`/
@@ -119,6 +127,7 @@ async function loadPersonalScheduleReadModelInner(): Promise<PersonalScheduleLoa
         message: error.message,
         person: toPersonalProfile(identityResult.person),
         avatarUrl: identity.avatarUrl,
+        userId: identity.userId,
       };
     }
     throw error;
@@ -146,5 +155,5 @@ async function loadPersonalScheduleReadModelInner(): Promise<PersonalScheduleLoa
     }),
   );
 
-  return { status: "ok", model, avatarUrl: identity.avatarUrl };
+  return { status: "ok", model, avatarUrl: identity.avatarUrl, userId: identity.userId };
 }
