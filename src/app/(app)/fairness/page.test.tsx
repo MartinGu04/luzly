@@ -210,10 +210,11 @@ describe("/fairness — F. Shift cards", () => {
     expect(screen.getByTestId("metric-shift-target").textContent).toContain("4–5");
     expect(screen.getByTestId("metric-shift-target").textContent).not.toContain("4.5");
     expect(screen.getByTestId("metric-shift-status-state").textContent).toContain("מצב");
-    expect(screen.getByTestId("metric-shift-status-state").textContent).toContain("בטווח הצפי");
-    // Appears twice by design -- the badge word and the "מצב" row show the
-    // same range-aware text.
-    expect(screen.getAllByText("בטווח הצפי")).toHaveLength(2);
+    // Badge (short word) and the "מצב" row (descriptive wording) are
+    // deliberately DIFFERENT text -- no duplicated status on the card.
+    expect(screen.getByTestId("metric-shift-status-state").textContent).toContain("בתוך הטווח ההוגן");
+    expect(screen.getByText("בטווח הצפי")).toBeInTheDocument();
+    expect(screen.getByText("בתוך הטווח ההוגן")).toBeInTheDocument();
   });
 
   it("weekends render as a plain factual count on the main card, never a comparative figure", async () => {
@@ -576,8 +577,9 @@ describe("/fairness — Shift service-type subgrouping (PR #4 follow-up, Shift F
     await renderFairnessPage();
     expect(screen.getByTestId("metric-shift-actual").textContent).toContain("4");
     expect(screen.getByTestId("metric-shift-target").textContent).toContain("4–5");
-    expect(screen.getByTestId("metric-shift-status-state").textContent).toContain("בטווח הצפי");
-    expect(screen.getAllByText("בטווח הצפי")).toHaveLength(2);
+    expect(screen.getByTestId("metric-shift-status-state").textContent).toContain("בתוך הטווח ההוגן");
+    expect(screen.getByText("בטווח הצפי")).toBeInTheDocument();
+    expect(screen.getByText("בתוך הטווח ההוגן")).toBeInTheDocument();
   });
 });
 

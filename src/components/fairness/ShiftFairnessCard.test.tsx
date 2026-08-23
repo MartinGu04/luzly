@@ -22,7 +22,7 @@ function view(overrides: Partial<ShiftFairnessCardView> = {}): ShiftFairnessCard
     status: "balanced",
     rangeStatus: "within",
     statusLabel: "בטווח הצפי",
-    statusStateLabel: "בטווח הצפי",
+    statusStateLabel: "בתוך הטווח ההוגן",
     statusExplanationLabel: "ביצעת משמרות בתוך טווח הצפי ההוגן שלך עד היום.",
     weekendActualLabel: "1",
     weekendTargetLabel: "1.2",
@@ -106,15 +106,16 @@ describe("ShiftFairnessCard — status badge/explanation clarity", () => {
             status: "above",
             rangeStatus: "above",
             statusLabel: "מעל הצפי",
-            statusStateLabel: "מעל הצפי",
+            statusStateLabel: "מעל הטווח ההוגן",
             statusExplanationLabel: "ביצעת יותר משמרות מטווח הצפי ההוגן שלך עד היום.",
           })}
         />
       </ul>,
     );
-    // Appears TWICE by design -- the badge word and the "מצב" row now
-    // render the same range-aware qualitative text (no magnitude number).
-    expect(screen.getAllByText("מעל הצפי")).toHaveLength(2);
+    // The badge (short word) and the "מצב" row (descriptive wording) each
+    // appear exactly ONCE now -- no duplicated text on the card.
+    expect(screen.getByText("מעל הצפי")).toBeInTheDocument();
+    expect(screen.getByText("מעל הטווח ההוגן")).toBeInTheDocument();
     expect(screen.queryByText("מעל היעד")).toBeNull();
   });
 

@@ -4,6 +4,7 @@ import {
   formatFairShiftRange,
   resolveShiftFairRangeStatus,
   shiftFairRangeStatusBadgeTone,
+  shiftFairRangeStatusDescriptiveLabel,
   shiftFairRangeStatusLabel,
 } from "./shiftFairRange";
 
@@ -116,6 +117,27 @@ describe("shiftFairRangeStatusLabel", () => {
 
   it("null -> the generic unavailable phrase, same as every other Fairness status", () => {
     expect(shiftFairRangeStatusLabel(null)).toBe("לא ניתן להשוות");
+  });
+});
+
+describe("shiftFairRangeStatusDescriptiveLabel — the card's \"מצב\" row wording, deliberately different from the badge's shiftFairRangeStatusLabel", () => {
+  it.each([
+    ["below", "פחות מהטווח ההוגן"],
+    ["within", "בתוך הטווח ההוגן"],
+    ["slightly_above", "מעט מעל הטווח ההוגן"],
+    ["above", "מעל הטווח ההוגן"],
+  ] as const)("%s -> %s", (status, label) => {
+    expect(shiftFairRangeStatusDescriptiveLabel(status)).toBe(label);
+  });
+
+  it("null -> the same generic unavailable phrase as shiftFairRangeStatusLabel", () => {
+    expect(shiftFairRangeStatusDescriptiveLabel(null)).toBe("לא ניתן להשוות");
+  });
+
+  it("never matches shiftFairRangeStatusLabel's own text for any real status -- the badge and the מצב row must not repeat the same wording", () => {
+    for (const status of ["below", "within", "slightly_above", "above"] as const) {
+      expect(shiftFairRangeStatusDescriptiveLabel(status)).not.toBe(shiftFairRangeStatusLabel(status));
+    }
   });
 });
 

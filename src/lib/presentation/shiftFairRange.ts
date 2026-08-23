@@ -100,6 +100,31 @@ export function shiftFairRangeStatusLabel(status: ShiftFairRangeStatus | null): 
 }
 
 /**
+ * The longer, DESCRIPTIVE wording for the card's own "מצב" section --
+ * deliberately a SEPARATE label from `shiftFairRangeStatusLabel` above
+ * (the badge's short word), so the badge and the "מצב" row no longer show
+ * the exact same text right next to each other on the same card. Both
+ * still derive from the SAME already-resolved `ShiftFairRangeStatus` --
+ * this is wording only, never a second status calculation. The fuller
+ * explanatory sentence (`statusExplanationLabel`, `fairnessCards.ts`)
+ * stays as-is beneath this, unaffected.
+ */
+export function shiftFairRangeStatusDescriptiveLabel(status: ShiftFairRangeStatus | null): string {
+  switch (status) {
+    case "below":
+      return "פחות מהטווח ההוגן";
+    case "within":
+      return "בתוך הטווח ההוגן";
+    case "slightly_above":
+      return "מעט מעל הטווח ההוגן";
+    case "above":
+      return "מעל הטווח ההוגן";
+    default:
+      return "לא ניתן להשוות";
+  }
+}
+
+/**
  * Maps the 4-state range status onto the shared 3-tint `FairnessStatus`
  * vocabulary (`fairnessFoundation.ts`) -- ONLY for driving
  * `FairnessStatusBadge`'s existing below/balanced/above tint+icon, which

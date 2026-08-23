@@ -19,6 +19,7 @@ import {
   formatFairShiftRange,
   resolveShiftFairRangeStatus,
   shiftFairRangeStatusBadgeTone,
+  shiftFairRangeStatusDescriptiveLabel,
   shiftFairRangeStatusLabel,
   type ShiftFairRangeStatus,
 } from "@/lib/presentation/shiftFairRange";
@@ -86,17 +87,18 @@ export interface ShiftFairnessCardView {
   /**
    * The short badge word ("מעל הצפי" / "מעט מעל הצפי" / "בטווח הצפי" /
    * "מתחת לצפי" / "לא ניתן להשוות") -- `shiftFairRangeStatusLabel`'s own
-   * range-aware vocabulary. Kept as its OWN field, separate from
-   * `statusStateLabel` below, purely so the badge and the "מצב" row remain
-   * independently overridable even though they currently render the exact
-   * same text.
+   * range-aware vocabulary.
    */
   statusLabel: string;
   /**
-   * What the card/detail's "מצב" row shows -- the SAME range-aware label
-   * as `statusLabel` above (no magnitude number, per the whole-shift-range
-   * redesign; `deviationLabel` above is the ONLY place the raw signed gap
-   * still lives, and it is never rendered as primary).
+   * What the card/detail's "מצב" row shows -- a longer, DESCRIPTIVE
+   * wording (`shiftFairRangeStatusDescriptiveLabel`, e.g. "מעל הטווח
+   * ההוגן") deliberately DIFFERENT from `statusLabel` above so the badge
+   * and this row don't repeat the exact same text right next to each
+   * other -- both still derive from the SAME `rangeStatus`, this is wording
+   * only. No magnitude number here either (`deviationLabel` above is the
+   * ONLY place the raw signed gap still lives, and it is never rendered
+   * as primary).
    */
   statusStateLabel: string;
   /**
@@ -243,7 +245,7 @@ export function buildShiftFairnessCardView(
     status: shiftFairRangeStatusBadgeTone(rangeStatus),
     rangeStatus,
     statusLabel: shiftFairRangeStatusLabel(rangeStatus),
-    statusStateLabel: shiftFairRangeStatusLabel(rangeStatus),
+    statusStateLabel: shiftFairRangeStatusDescriptiveLabel(rangeStatus),
     statusExplanationLabel: buildShiftStatusExplanationLabel(rangeStatus, isCurrentMonth),
     weekendActualLabel: String(row.weekendsWorked),
     weekendTargetLabel: row.weekendTarget !== null ? formatFairnessExpectedValue(row.weekendTarget) : null,

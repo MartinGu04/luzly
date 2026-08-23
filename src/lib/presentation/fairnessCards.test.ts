@@ -85,35 +85,42 @@ describe("buildShiftFairnessCardView -- whole-shift fair range: targetLabel, ran
     expect(nonHalfFractional.targetLabel).toBe("5–6");
   });
 
-  it("statusStateLabel and statusLabel both render the SAME range-aware qualitative text, never a fractional gap number", () => {
+  it("statusLabel (badge) and statusStateLabel (\"מצב\" row) are DELIBERATELY DIFFERENT wording for the same rangeStatus -- no duplicated text on the card", () => {
     // The real reported scenario: 8 actual, 5.5 exact expected -> range 5–6, actual is 2 over the upper bound -> "above".
     const view = buildShiftFairnessCardView(shiftRow({ actualShifts: 8, target: 5.5 }), "/fairness?person=p_1");
     expect(view.rangeStatus).toBe("above");
-    expect(view.statusStateLabel).toBe("מעל הצפי");
-    expect(view.statusLabel).toBe("מעל הצפי");
+    expect(view.statusLabel).toBe("מעל הצפי"); // short badge word
+    expect(view.statusStateLabel).toBe("מעל הטווח ההוגן"); // longer, descriptive "מצב" row wording
+    expect(view.statusLabel).not.toBe(view.statusStateLabel);
     expect(view.statusStateLabel).not.toMatch(/\d/); // never a raw number as the primary message
   });
 
-  it("one shift past the fair range's upper bound reads as 'מעט מעל הצפי' (slightly above), distinct from further above", () => {
+  it("one shift past the fair range's upper bound reads as 'slightly above' in BOTH vocabularies, distinct from further above", () => {
     const slightlyAbove = buildShiftFairnessCardView(shiftRow({ actualShifts: 7, target: 5.5 }), "/fairness?person=p_1");
     expect(slightlyAbove.rangeStatus).toBe("slightly_above");
-    expect(slightlyAbove.statusStateLabel).toBe("מעט מעל הצפי");
+    expect(slightlyAbove.statusLabel).toBe("מעט מעל הצפי");
+    expect(slightlyAbove.statusStateLabel).toBe("מעט מעל הטווח ההוגן");
 
     const above = buildShiftFairnessCardView(shiftRow({ actualShifts: 8, target: 5.5 }), "/fairness?person=p_1");
-    expect(above.statusStateLabel).toBe("מעל הצפי");
+    expect(above.statusLabel).toBe("מעל הצפי");
+    expect(above.statusStateLabel).toBe("מעל הטווח ההוגן");
   });
 
-  it("both endpoints of the fair range read as 'בטווח הצפי' (within), never 'above'/'below' just for landing on a boundary", () => {
+  it("both endpoints of the fair range read as within (badge 'בטווח הצפי' / מצב 'בתוך הטווח ההוגן'), never 'above'/'below' just for landing on a boundary", () => {
     const lowerBound = buildShiftFairnessCardView(shiftRow({ actualShifts: 5, target: 5.5 }), "/fairness?person=p_1");
     expect(lowerBound.rangeStatus).toBe("within");
+    expect(lowerBound.statusLabel).toBe("בטווח הצפי");
+    expect(lowerBound.statusStateLabel).toBe("בתוך הטווח ההוגן");
+
     const upperBound = buildShiftFairnessCardView(shiftRow({ actualShifts: 6, target: 5.5 }), "/fairness?person=p_1");
     expect(upperBound.rangeStatus).toBe("within");
   });
 
-  it("below the range reads as 'מתחת לצפי', with no further magnitude-based nuance", () => {
+  it("below the range reads as badge 'מתחת לצפי' / מצב 'פחות מהטווח ההוגן', with no further magnitude-based nuance", () => {
     const view = buildShiftFairnessCardView(shiftRow({ actualShifts: 4, target: 5.5 }), "/fairness?person=p_1");
     expect(view.rangeStatus).toBe("below");
-    expect(view.statusStateLabel).toBe("מתחת לצפי");
+    expect(view.statusLabel).toBe("מתחת לצפי");
+    expect(view.statusStateLabel).toBe("פחות מהטווח ההוגן");
   });
 
   it("a whole-number exact target reuses the pre-existing severity model with no 'slightly above' tier", () => {
@@ -152,7 +159,8 @@ describe("buildShiftFairnessCardView -- whole-shift fair range: targetLabel, ran
     expect(view.actualLabel).toBe("8");
     expect(view.targetLabel).toBe("5–6");
     expect(view.rangeStatus).toBe("above");
-    expect(view.statusStateLabel).toBe("מעל הצפי");
+    expect(view.statusLabel).toBe("מעל הצפי");
+    expect(view.statusStateLabel).toBe("מעל הטווח ההוגן");
     expect(view.statusExplanationLabel).toBe("ביצעת יותר משמרות מטווח הצפי ההוגן שלך עד היום.");
     // The weekend fix and the range fix are independent -- weekendsWorked
     // renders correctly regardless of the range/status computation above.

@@ -17,7 +17,7 @@ function card(overrides: Partial<ShiftFairnessCardView> = {}): ShiftFairnessCard
     status: "balanced",
     rangeStatus: "within",
     statusLabel: "בטווח הצפי",
-    statusStateLabel: "בטווח הצפי",
+    statusStateLabel: "בתוך הטווח ההוגן",
     statusExplanationLabel: "ביצעת משמרות בתוך טווח הצפי ההוגן שלך עד היום.",
     weekendActualLabel: "1",
     weekendTargetLabel: "1",
