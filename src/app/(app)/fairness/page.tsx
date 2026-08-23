@@ -135,7 +135,7 @@ function renderShiftFairnessView(model: ShiftFairnessReadModel, rawPersonId: str
     // sees this filter (it already ran, above, over the full `group.rows`).
     const visibleRows = group.rows.filter(isShiftFairnessRowVisible);
     const cards = visibleRows.map((row) =>
-      buildShiftFairnessCardView(row, fairnessShiftsHref({ monthKey: displayMonthKey, personId: row.personId })),
+      buildShiftFairnessCardView(row, fairnessShiftsHref({ monthKey: displayMonthKey, personId: row.personId }), isOnCurrentMonth),
     );
     return {
       role: group.role,
@@ -184,7 +184,11 @@ function renderShiftFairnessView(model: ShiftFairnessReadModel, rawPersonId: str
           title={selectedRow.personName}
         >
           <ShiftFairnessDetail
-            view={buildShiftFairnessCardView(selectedRow, fairnessShiftsHref({ monthKey: displayMonthKey, personId: selectedRow.personId }))}
+            view={buildShiftFairnessCardView(
+              selectedRow,
+              fairnessShiftsHref({ monthKey: displayMonthKey, personId: selectedRow.personId }),
+              isOnCurrentMonth,
+            )}
             groupLabel={selectedGroupRole ? SHIFT_GROUP_LABEL[selectedGroupRole] : ""}
           />
         </FairnessDetailOverlay>

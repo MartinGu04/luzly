@@ -19,7 +19,9 @@ function view(overrides: Partial<ShiftFairnessCardView> = {}): ShiftFairnessCard
     targetLabel: "4.3",
     deviationLabel: "-0.3",
     status: "balanced",
+    statusLabel: "מאוזן",
     statusStateLabel: "בהתאם לצפוי",
+    statusExplanationLabel: "ביצעת משמרות בהתאם לצפוי, ביחס לזמינות שהייתה לך עד היום.",
     weekendActualLabel: "1",
     weekendTargetLabel: "1.2",
     weekendDeviationLabel: "-0.2",
@@ -90,5 +92,49 @@ describe("ShiftFairnessCard — avatar", () => {
     fireEvent.error(img);
     expect(screen.queryByTestId("avatar-photo")).toBeNull();
     expect(screen.getByText("דט")).toBeInTheDocument();
+  });
+});
+
+describe("ShiftFairnessCard — status badge/explanation clarity", () => {
+  it("the badge shows 'above EXPECTED', never 'above target', for an above-expectation person", () => {
+    render(
+      <ul>
+        <ShiftFairnessCard
+          view={view({
+            status: "above",
+            statusLabel: "מעל הצפוי",
+            statusStateLabel: "2.5 מעל הצפוי",
+            statusExplanationLabel: "ביצעת יותר משמרות מהצפוי, ביחס לזמינות שהייתה לך עד היום.",
+          })}
+        />
+      </ul>,
+    );
+    expect(screen.getByText("מעל הצפוי")).toBeInTheDocument();
+    expect(screen.queryByText("מעל היעד")).toBeNull();
+  });
+
+  it("renders the human-readable explanation sentence under the status row", () => {
+    render(
+      <ul>
+        <ShiftFairnessCard
+          view={view({
+            status: "above",
+            statusExplanationLabel: "ביצעת יותר משמרות מהצפוי, ביחס לזמינות שהייתה לך עד היום.",
+          })}
+        />
+      </ul>,
+    );
+    expect(screen.getByTestId("metric-shift-status-explanation")).toHaveTextContent(
+      "ביצעת יותר משמרות מהצפוי, ביחס לזמינות שהייתה לך עד היום.",
+    );
+  });
+
+  it("omits the explanation row entirely when statusExplanationLabel is null", () => {
+    render(
+      <ul>
+        <ShiftFairnessCard view={view({ statusExplanationLabel: null })} />
+      </ul>,
+    );
+    expect(screen.queryByTestId("metric-shift-status-explanation")).toBeNull();
   });
 });

@@ -38,6 +38,8 @@ export function ShiftFairnessDetail({ view, groupLabel }: ShiftFairnessDetailPro
         <Stat label='סופ"שים' value={view.weekendActualLabel} />
       </div>
 
+      {view.statusExplanationLabel ? <p className="text-sm text-muted">{view.statusExplanationLabel}</p> : null}
+
       {view.expectationFactorLabel ? (
         <p className="text-xs leading-relaxed text-muted">
           <span className="text-muted-2">למה הצפי שונה עבור אדם זה:</span> {view.expectationFactorLabel}

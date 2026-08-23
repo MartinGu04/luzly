@@ -5,6 +5,8 @@ import { fairnessStatusLabel } from "@/lib/presentation/fairnessStatus";
 interface FairnessStatusBadgeProps {
   status: FairnessStatus | null;
   className?: string;
+  /** Overrides the badge's own default `fairnessStatusLabel` text -- e.g. Shift Fairness passes `fairnessShiftStatusLabel` (`lib/presentation/fairnessStatus.ts`) so the badge says "above/below EXPECTED" rather than "above/below TARGET", since Shift's comparison value is an adjusted expectation up to today, not a fixed target. Icon/tint stay driven by `status` either way. */
+  label?: string;
 }
 
 /**
@@ -52,7 +54,7 @@ export function fairnessStatusTintTextClass(status: FairnessStatus | null): stri
  * own docs); a caller that knows the specific reason renders that
  * separately.
  */
-export function FairnessStatusBadge({ status, className = "" }: FairnessStatusBadgeProps) {
+export function FairnessStatusBadge({ status, className = "", label }: FairnessStatusBadgeProps) {
   const Icon = status === "below" ? ArrowDown : status === "above" ? ArrowUp : status === "balanced" ? Minus : HelpCircle;
   const tintClasses = status !== null ? STATUS_TINT_CLASSES[status] : NEUTRAL_TINT_CLASSES;
 
@@ -61,7 +63,7 @@ export function FairnessStatusBadge({ status, className = "" }: FairnessStatusBa
       className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ${tintClasses} ${className}`}
     >
       <Icon className="h-3 w-3" aria-hidden="true" strokeWidth={2} />
-      {fairnessStatusLabel(status)}
+      {label ?? fairnessStatusLabel(status)}
     </span>
   );
 }

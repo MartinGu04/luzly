@@ -3,6 +3,7 @@ import { COMPLETE_FAIRNESS_DATA, fairnessDataCompleteness } from "@/lib/domain/f
 import type { DutyFairnessPersonRowView } from "@/lib/readModels/dutyFairnessTypes";
 import type { ShiftFairnessPersonRowView } from "@/lib/readModels/shiftFairnessTypes";
 import { buildDutyFairnessCardView, buildShiftFairnessCardView, shiftFairnessCompletenessNote } from "./fairnessCards";
+import { fairnessShiftStatusLabel } from "./fairnessStatus";
 
 function shiftRow(overrides: Partial<ShiftFairnessPersonRowView> = {}): ShiftFairnessPersonRowView {
   return {
@@ -99,6 +100,53 @@ describe("buildShiftFairnessCardView -- Justice Table redesign: statusStateLabel
       "/fairness?person=p_1",
     );
     expect(view.expectationFactorLabel).toBeNull();
+  });
+});
+
+describe("buildShiftFairnessCardView -- shift fairness clarity: statusLabel never says 'target', statusExplanationLabel", () => {
+  it("statusLabel uses fairnessShiftStatusLabel's 'expected' vocabulary, matching the status", () => {
+    const above = buildShiftFairnessCardView(shiftRow({ status: "above" }), "/fairness?person=p_1");
+    expect(above.statusLabel).toBe(fairnessShiftStatusLabel("above"));
+    expect(above.statusLabel).toBe("מעל הצפוי");
+    expect(above.statusLabel).not.toContain("יעד");
+
+    const below = buildShiftFairnessCardView(shiftRow({ status: "below" }), "/fairness?person=p_1");
+    expect(below.statusLabel).toBe("מתחת לצפוי");
+
+    const balanced = buildShiftFairnessCardView(shiftRow({ status: "balanced" }), "/fairness?person=p_1");
+    expect(balanced.statusLabel).toBe("מאוזן");
+
+    const unavailable = buildShiftFairnessCardView(shiftRow({ status: null, target: null, deviation: null }), "/fairness?person=p_1");
+    expect(unavailable.statusLabel).toBe("לא ניתן להשוות");
+  });
+
+  it("statusExplanationLabel gives a concrete, availability-framed sentence for each real status, never 'worked harder'", () => {
+    const above = buildShiftFairnessCardView(shiftRow({ status: "above" }), "/fairness?person=p_1");
+    expect(above.statusExplanationLabel).toContain("זמינות");
+    expect(above.statusExplanationLabel).not.toMatch(/עבד(ת)? קשה|worked harder/);
+
+    const below = buildShiftFairnessCardView(shiftRow({ status: "below" }), "/fairness?person=p_1");
+    expect(below.statusExplanationLabel).toContain("זמינות");
+
+    const balanced = buildShiftFairnessCardView(shiftRow({ status: "balanced" }), "/fairness?person=p_1");
+    expect(balanced.statusExplanationLabel).toContain("זמינות");
+  });
+
+  it("statusExplanationLabel is null exactly when status is null -- nothing to explain when the comparison itself is unavailable", () => {
+    const view = buildShiftFairnessCardView(
+      shiftRow({ status: null, target: null, deviation: null }),
+      "/fairness?person=p_1",
+    );
+    expect(view.statusExplanationLabel).toBeNull();
+  });
+
+  it("names 'today' only for the actual current month -- a closed historical or future month's target covers the whole period, not 'as of today'", () => {
+    const current = buildShiftFairnessCardView(shiftRow({ status: "above" }), "/fairness?person=p_1", true);
+    expect(current.statusExplanationLabel).toContain("עד היום");
+
+    const closed = buildShiftFairnessCardView(shiftRow({ status: "above" }), "/fairness?person=p_1", false);
+    expect(closed.statusExplanationLabel).not.toContain("עד היום");
+    expect(closed.statusExplanationLabel).toContain("בתקופה זו");
   });
 });
 

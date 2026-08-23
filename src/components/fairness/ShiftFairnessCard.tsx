@@ -6,16 +6,26 @@ import { FairnessStatusBadge, fairnessStatusTintTextClass } from "./FairnessStat
 import { ShiftFairnessCardInfo } from "./ShiftFairnessCardInfo";
 
 /**
- * One Shift Fairness person card (PR #4 §11, redesigned PR #51 follow-up)
- * -- name + status + ONE card-level info control, then a compact self-
- * explanatory metric grid (משמרות שבוצעו / יעד אישי / פער מהיעד, the gap
- * tinted with the same restrained status color as the badge), then a
- * smaller secondary weekend-context row, in that hierarchy. A `null`
- * target/status never renders as "0"/"מאוזן" -- `unavailableNote` replaces
- * the whole metric grid with a calm, honest sentence instead, while
- * `actualLabel` (always a real, confirmed number) stays visible
- * regardless. No generic "partial data" badge -- the note IS the only
- * incompleteness signal, shown only when it materially matters.
+ * One Shift Fairness person card (PR #4 §11, redesigned PR #51 follow-up,
+ * badge/explanation clarity pass) -- name + status + ONE card-level info
+ * control, then a compact self-explanatory metric grid (משמרות שבוצעו / צפי
+ * / מצב מול הצפי, the gap tinted with the same restrained status color as
+ * the badge), then a smaller secondary weekend-context row, in that
+ * hierarchy. A `null` target/status never renders as "0"/"מאוזן" --
+ * `unavailableNote` replaces the whole metric grid with a calm, honest
+ * sentence instead, while `actualLabel` (always a real, confirmed number)
+ * stays visible regardless. No generic "partial data" badge -- the note IS
+ * the only incompleteness signal, shown only when it materially matters.
+ *
+ * `צפי` ("expected") is a deliberate word choice, everywhere on this card
+ * INCLUDING the top badge (`view.statusLabel`, from
+ * `fairnessShiftStatusLabel`) -- it is this person's ADJUSTED EXPECTATION
+ * UP TO TODAY (opportunity-share of the group's real work, shaped by their
+ * own recorded availability/absences), never a fixed monthly "יעד"/target.
+ * A real user misread an earlier "above target" badge as implying a quota;
+ * `statusExplanationLabel` adds one further plain sentence under the status
+ * row spelling out what the deviation means in terms of availability, never
+ * effort ("worked harder").
  *
  * `ShiftFairnessCardInfo` is the single explanatory affordance for every
  * metric on this card -- deliberately not one info icon per metric.
@@ -41,7 +51,7 @@ export function ShiftFairnessCard({ view }: { view: ShiftFairnessCardView }) {
             <p className="min-w-0 truncate text-sm font-semibold text-foreground">{view.personName}</p>
             <ShiftFairnessCardInfo />
           </div>
-          <FairnessStatusBadge status={view.status} />
+          <FairnessStatusBadge status={view.status} label={view.statusLabel} />
         </div>
 
         {view.unavailableNote ? (
@@ -64,6 +74,11 @@ export function ShiftFairnessCard({ view }: { view: ShiftFairnessCardView }) {
             <div className="flex min-w-0 flex-col gap-0.5 border-t border-border pt-1.5" data-testid="metric-shift-status-state">
               <span className="text-xs leading-tight text-muted-2">מצב מול הצפי</span>
               <span className={`text-sm font-semibold ${fairnessStatusTintTextClass(view.status)}`}>{view.statusStateLabel}</span>
+              {view.statusExplanationLabel ? (
+                <span className="text-[11px] leading-relaxed text-muted-2" data-testid="metric-shift-status-explanation">
+                  {view.statusExplanationLabel}
+                </span>
+              ) : null}
             </div>
           </div>
         )}

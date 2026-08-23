@@ -15,6 +15,7 @@ import {
   type DutyStatusState,
 } from "@/lib/presentation/fairness";
 import { dutyFamilyLabel } from "@/lib/presentation/labels";
+import { fairnessShiftStatusLabel } from "@/lib/presentation/fairnessStatus";
 import type { DutyFairnessPersonRowView } from "@/lib/readModels/dutyFairnessTypes";
 import type { ShiftFairnessPersonRowView } from "@/lib/readModels/shiftFairnessTypes";
 
@@ -43,12 +44,30 @@ export interface ShiftFairnessCardView {
   deviationLabel: string | null;
   status: FairnessStatus | null;
   /**
+   * The short badge word ("מעל הצפוי" / "מתחת לצפוי" / "מאוזן" / "לא ניתן
+   * להשוות") -- `fairnessShiftStatusLabel`'s own "EXPECTED", never "TARGET",
+   * vocabulary, since `target` here is an adjusted expectation up to today,
+   * not a fixed monthly quota. Kept as its OWN field, separate from
+   * `statusStateLabel` below, because the badge is a quick-glance word with
+   * no magnitude while `statusStateLabel` also carries the rounded gap size.
+   */
+  statusLabel: string;
+  /**
    * Justice Table redesign -- a human-readable state ("בהתאם לצפוי" / "1
    * מתחת לצפוי" / "0.5 מעל הצפוי") instead of a raw signed gap number. This
    * is what the card/detail render for "Status" -- `deviationLabel` above
    * is kept only for callers that still need the raw signed figure.
    */
   statusStateLabel: string;
+  /**
+   * One short, calm sentence explaining what the deviation means (e.g. "you
+   * completed more shifts than expected relative to your availability up to
+   * today") -- deliberately never phrased in terms of effort ("worked
+   * harder"), since this measures shift ALLOCATION relative to genuine
+   * opportunity, not difficulty. `null` exactly when `status` is `null`
+   * (nothing to explain -- the comparison itself isn't available).
+   */
+  statusExplanationLabel: string | null;
   weekendActualLabel: string;
   weekendTargetLabel: string | null;
   weekendDeviationLabel: string | null;
@@ -105,7 +124,38 @@ function buildExpectationFactorLabel(factors: ShiftExpectationFactors | null): s
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
-export function buildShiftFairnessCardView(row: ShiftFairnessPersonRowView, href: string): ShiftFairnessCardView {
+/**
+ * "You completed more/fewer shifts than expected relative to your
+ * availability up to today" -- one calm, concrete sentence answering "what
+ * does this deviation actually mean", so the gap number is never left to
+ * speak for itself. Deliberately never "worked harder"/"worked less" --
+ * this measures shift ALLOCATION against genuine recorded opportunity, not
+ * effort or difficulty. `null` exactly when `status` is `null` (the
+ * comparison itself isn't available, so there is nothing to explain).
+ *
+ * `isCurrentMonth` mirrors `shiftFairnessPeriodLabel`'s own "עד היום"
+ * convention EXACTLY (same page-level `isOnCurrentMonth` signal, never
+ * `periodStatus` -- a wholly future month is also `periodStatus: "current"`,
+ * which is NOT "today"): only the actual current calendar month's target is
+ * genuinely an "up to today" figure, so only that case names "today". A
+ * closed historical month or a future month's target covers the WHOLE
+ * period instead, so the sentence names "this period" rather than making a
+ * false "as of today" claim about a month that already ended or hasn't
+ * started.
+ */
+function buildShiftStatusExplanationLabel(status: FairnessStatus | null, isCurrentMonth: boolean): string | null {
+  const timeframe = isCurrentMonth ? "עד היום" : "בתקופה זו";
+  if (status === "above") return `ביצעת יותר משמרות מהצפוי, ביחס לזמינות שהייתה לך ${timeframe}.`;
+  if (status === "below") return `ביצעת פחות משמרות מהצפוי, ביחס לזמינות שהייתה לך ${timeframe}.`;
+  if (status === "balanced") return `ביצעת משמרות בהתאם לצפוי, ביחס לזמינות שהייתה לך ${timeframe}.`;
+  return null;
+}
+
+export function buildShiftFairnessCardView(
+  row: ShiftFairnessPersonRowView,
+  href: string,
+  isCurrentMonth: boolean = true,
+): ShiftFairnessCardView {
   return {
     key: row.personId,
     personId: row.personId,
@@ -117,7 +167,9 @@ export function buildShiftFairnessCardView(row: ShiftFairnessPersonRowView, href
     targetLabel: row.target !== null ? formatFairnessExpectedValue(row.target) : null,
     deviationLabel: row.deviation !== null ? formatFairnessGap(row.deviation) : null,
     status: row.status,
+    statusLabel: fairnessShiftStatusLabel(row.status),
     statusStateLabel: formatFairnessDeviationState(row.deviation, row.status),
+    statusExplanationLabel: buildShiftStatusExplanationLabel(row.status, isCurrentMonth),
     weekendActualLabel: String(row.weekendActualShifts),
     weekendTargetLabel: row.weekendTarget !== null ? formatFairnessExpectedValue(row.weekendTarget) : null,
     weekendDeviationLabel: row.weekendDeviation !== null ? formatFairnessGap(row.weekendDeviation) : null,

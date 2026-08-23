@@ -25,3 +25,24 @@ export function fairnessStatusLabel(status: FairnessStatus | null): string {
   if (status === "above") return "מעל היעד";
   return "לא ניתן להשוות";
 }
+
+/**
+ * Shift Fairness's OWN short badge vocabulary -- deliberately a separate
+ * function from `fairnessStatusLabel` above, never a shared rename of it.
+ * Shift Fairness's comparison value is the person's ADJUSTED EXPECTATION UP
+ * TO TODAY (`fairnessShiftEngine.ts`'s opportunity-share `target`), not a
+ * fixed monthly quota -- so its badge must say "above/below EXPECTED"
+ * (matching the exact wording `formatFairnessDeviationState` already uses
+ * for the card's own "מצב מול הצפי" row), never "above/below TARGET" (a real
+ * user was confused reading "above target" next to a number that isn't a
+ * target at all). `fairnessStatusLabel` keeps its own "יעד" vocabulary
+ * unchanged for Duty Fairness, where `comparisonTarget` genuinely IS a
+ * fixed published target -- this split is what keeps both surfaces honest
+ * about which of the two concepts they're actually showing.
+ */
+export function fairnessShiftStatusLabel(status: FairnessStatus | null): string {
+  if (status === "below") return "מתחת לצפוי";
+  if (status === "balanced") return "מאוזן";
+  if (status === "above") return "מעל הצפוי";
+  return "לא ניתן להשוות";
+}
