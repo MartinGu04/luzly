@@ -159,3 +159,67 @@ describe("buildShiftFairnessReadModel", () => {
     expect(row?.expectationFactors).toEqual({ leaveDays: 1, constraintDays: 1, referralDays: 0 });
   });
 });
+
+describe("buildShiftFairnessReadModel — integration: future scheduled shifts never reach the final read model as completed work", () => {
+  // End-to-end proof through the SAME public entry point `loadShiftFairnessReadModel`
+  // (src/lib/readModels/shiftFairness.ts) calls in production -- not just the
+  // internal engine function. "Today" is fixed to 2026-08-23; two shifts are
+  // already entered on the sheet (CONFIRMED, no "?") for 08-24 and 08-25 --
+  // days that have not happened yet.
+  const now: LocalNow = { date: "2026-08-23", minuteOfDay: 600 };
+  const month = { year: 2026, month: 8 };
+
+  it("a person's own actualShifts on the final ShiftFairnessReadModel excludes their already-entered future-dated confirmed shifts", () => {
+    const leia = person({ id: "p_leia", name: "לאה טכנאית", isTechnician: true });
+
+    const pastShiftDates = ["2026-08-03", "2026-08-05", "2026-08-08", "2026-08-10", "2026-08-12", "2026-08-15"];
+    const events: Event[] = [
+      ...pastShiftDates.map((date) => shiftEvent({ personId: leia.id, date, role: "technician" })),
+      shiftEvent({ personId: leia.id, date: "2026-08-24", role: "technician" }), // tomorrow
+      shiftEvent({ personId: leia.id, date: "2026-08-25", role: "technician" }), // day after
+    ];
+
+    const model = buildShiftFairnessReadModel([leia], events, month, now, "2026-08-23T10:00:00.000Z");
+    const row = model.groups.find((group) => group.role === "technician")?.rows[0];
+
+    expect(model.periodEndDate).toBe("2026-08-23");
+    // 6 real past shifts -- NEVER 8, even though 8 confirmed rows exist for
+    // her in the raw event feed.
+    expect(row?.actualShifts).toBe(6);
+  });
+
+  it("a future-dated shift belonging to one group member never inflates the group totals another member's own expected share is computed from", () => {
+    const leia = person({ id: "p_leia", name: "לאה טכנאית", isTechnician: true });
+    const noa = person({ id: "p_noa", name: "נועה טכנאית", isTechnician: true });
+
+    const baseEvents: Event[] = [
+      shiftEvent({ personId: leia.id, date: "2026-08-03", role: "technician" }),
+      shiftEvent({ personId: leia.id, date: "2026-08-05", role: "technician" }),
+      shiftEvent({ personId: noa.id, date: "2026-08-04", role: "technician" }),
+    ];
+    const leiaFutureShift = shiftEvent({ personId: leia.id, date: "2026-08-25", role: "technician" });
+
+    const modelWithFuture = buildShiftFairnessReadModel(
+      [leia, noa],
+      [...baseEvents, leiaFutureShift],
+      month,
+      now,
+      "2026-08-23T10:00:00.000Z",
+    );
+    const modelWithoutFuture = buildShiftFairnessReadModel([leia, noa], baseEvents, month, now, "2026-08-23T10:00:00.000Z");
+
+    const noaTargetWithFuture = modelWithFuture.groups.find((g) => g.role === "technician")?.rows.find((r) => r.personId === noa.id)
+      ?.target;
+    const noaTargetWithoutFuture = modelWithoutFuture.groups
+      .find((g) => g.role === "technician")
+      ?.rows.find((r) => r.personId === noa.id)?.target;
+
+    // Noa's expected share must be IDENTICAL whether or not Leia's
+    // future-dated shift exists in the raw feed -- proving it never reaches
+    // the group totals the final read model's `target` field is built from.
+    expect(noaTargetWithFuture).toBe(noaTargetWithoutFuture);
+    expect(
+      modelWithFuture.groups.find((g) => g.role === "technician")?.rows.find((r) => r.personId === leia.id)?.actualShifts,
+    ).toBe(2);
+  });
+});

@@ -1,6 +1,6 @@
 import { calendarMonthOfLocalNow, daysInCalendarMonth, parseMonthParam, type CalendarMonthKey } from "./calendarMonth";
 import { formatCalendarDate } from "./dateRange";
-import type { Event } from "./event";
+import type { Event, EventPeriod } from "./event";
 import {
   combineFairnessDataCompleteness,
   COMPLETE_FAIRNESS_DATA,
@@ -576,4 +576,60 @@ export function computeShiftFairnessForGroup(
   });
 
   return { role, periodDates: sortedDates, people: personResults };
+}
+
+// ---------------------------------------------------------------------------
+// Diagnostics
+// ---------------------------------------------------------------------------
+
+/** One real, settled shift Event counted toward a person's `actualShifts` -- carries the exact fields needed to find the literal source row in the real spreadsheet. */
+export interface ContributingShiftEvent {
+  date: string;
+  period: EventPeriod;
+  /** The workbook tab this Event was parsed from (e.g. "משמרות + תורנויות"). */
+  sourceSheet: string;
+  /** A1 notation of the exact cell this Event came from -- open this cell directly to verify/dispute what the engine believes it means. */
+  sourceCell: string;
+  /** The untouched raw cell text, exactly as typed into the sheet. */
+  rawValue: string;
+}
+
+/**
+ * Diagnostic-only, never called by the app itself -- the literal list of
+ * real, settled shift Events that make up ONE person's `actualShifts` count
+ * for `role` over `periodDates`, for auditing a specific displayed number
+ * back to its exact source cells. Deliberately reuses the EXACT SAME two
+ * filters `computeShiftFairnessForGroup` itself applies to compute
+ * `actualShifts` -- `isConfirmedNonShadowRoleShift` or the date being
+ * present in `periodDates` -- so this list's length is ALWAYS identical to
+ * that function's own `actualShifts` for the same `events`/`personId`/
+ * `role`/`periodDates` (proven by
+ * "listContributingShiftEvents matches computeShiftFairnessForGroup's
+ * actualShifts exactly" in `fairnessShiftEngine.test.ts`). There is
+ * deliberately no second, hand-rolled filtering rule here that could ever
+ * drift from the real one.
+ *
+ * `periodDates` is looked up via a `Set` rather than string comparison --
+ * unlike `computeShiftFairnessForGroup`'s own date range check, this never
+ * assumes `periodDates` is contiguous, since a caller auditing a specific
+ * report might reasonably pass an arbitrary subset.
+ */
+export function listContributingShiftEvents(
+  events: readonly Event[],
+  personId: string,
+  role: FairnessComparisonGroupKey,
+  periodDates: readonly string[],
+): ContributingShiftEvent[] {
+  const periodDateSet = new Set(periodDates);
+
+  return events
+    .filter((event) => event.personId === personId && periodDateSet.has(event.date) && isConfirmedNonShadowRoleShift(event, role))
+    .map((event) => ({
+      date: event.date,
+      period: event.period,
+      sourceSheet: event.sourceSheet,
+      sourceCell: event.sourceCell,
+      rawValue: event.rawValue,
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date) || a.period.localeCompare(b.period));
 }

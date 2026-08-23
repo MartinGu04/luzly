@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Event } from "./event";
 import {
   computeShiftFairnessForGroup,
+  listContributingShiftEvents,
   resolveFairnessShiftStatus,
   resolveShiftFairnessPeriodDates,
   resolveShiftFairnessPeriodStatus,
@@ -323,6 +324,68 @@ describe("computeShiftFairnessForGroup — future scheduled shifts are never cou
     expect(findPerson(result, b.id).actualShifts).toBe(2);
     expect(findPerson(result, c.id).actualShifts).toBe(1); // today counts, tomorrow doesn't
     expect(findPerson(result, d.id).actualShifts).toBe(0);
+  });
+});
+
+describe("listContributingShiftEvents — auditing a displayed actualShifts number back to its exact source cells", () => {
+  const now: LocalNow = { date: "2026-08-23", minuteOfDay: 600 };
+  const periodDates = resolveShiftFairnessPeriodDates({ year: 2026, month: 8 }, now);
+
+  it("its result count is ALWAYS identical to computeShiftFairnessForGroup's own actualShifts for the same inputs -- the two can never drift apart", () => {
+    const leia = person({ id: "p_leia", isTechnician: true });
+
+    const events: Event[] = [
+      shiftEvent({ personId: leia.id, date: "2026-08-03", period: "day" }),
+      shiftEvent({ personId: leia.id, date: "2026-08-05", period: "night" }),
+      shiftEvent({ personId: leia.id, date: "2026-08-08", period: "day" }),
+      // Not confirmed -- must not be counted by either function.
+      { ...shiftEvent({ personId: leia.id, date: "2026-08-09", period: "day" }), certainty: "tentative" },
+      // Shadow -- must not be counted by either function.
+      { ...shiftEvent({ personId: leia.id, date: "2026-08-10", period: "day" }), shadow: true },
+      // Future -- must not be counted by either function.
+      shiftEvent({ personId: leia.id, date: "2026-08-25", period: "day" }),
+    ];
+
+    const engineResult = findPerson(computeShiftFairnessForGroup("technician", [leia], events, periodDates), leia.id);
+    const contributing = listContributingShiftEvents(events, leia.id, "technician", periodDates);
+
+    expect(contributing).toHaveLength(engineResult.actualShifts);
+    expect(contributing.map((entry) => entry.date)).toEqual(["2026-08-03", "2026-08-05", "2026-08-08"]);
+  });
+
+  it("returns the literal sourceSheet/sourceCell/rawValue of each contributing entry, so a specific real-world number can be traced back to the exact spreadsheet row", () => {
+    const leia = person({ id: "p_leia", isTechnician: true });
+    const events: Event[] = [
+      shiftEvent({
+        personId: leia.id,
+        date: "2026-08-12",
+        period: "night",
+        sourceSheet: "משמרות + תורנויות",
+        sourceCell: "F30",
+        rawValue: 'טכנאית לילה',
+      }),
+    ];
+
+    const [entry] = listContributingShiftEvents(events, leia.id, "technician", periodDates);
+    expect(entry).toEqual({
+      date: "2026-08-12",
+      period: "night",
+      sourceSheet: "משמרות + תורנויות",
+      sourceCell: "F30",
+      rawValue: "טכנאית לילה",
+    });
+  });
+
+  it("never includes a future-dated confirmed shift, even one already entered for the day right after today", () => {
+    const leia = person({ id: "p_leia", isTechnician: true });
+    const events: Event[] = [
+      shiftEvent({ personId: leia.id, date: "2026-08-23", period: "day" }), // today
+      shiftEvent({ personId: leia.id, date: "2026-08-24", period: "day" }), // tomorrow
+      shiftEvent({ personId: leia.id, date: "2026-08-25", period: "day" }), // day after
+    ];
+
+    const contributing = listContributingShiftEvents(events, leia.id, "technician", periodDates);
+    expect(contributing.map((entry) => entry.date)).toEqual(["2026-08-23"]);
   });
 });
 
