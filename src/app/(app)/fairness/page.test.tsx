@@ -790,6 +790,115 @@ describe("/fairness — G. Duty cards", () => {
     expect(isolatedRatioInDialog?.textContent?.trim()).toBe("0 / 4.7");
   });
 
+  it("ZERO STATE REGRESSION: 0 completed points with a valid target shows 'טרם בוצעו תורנויות' -- never 'מתחת לצפי' -- on both the main card and the detail overlay", async () => {
+    const model = dutyModel({
+      groups: [
+        {
+          key: "technician",
+          rows: [
+            dutyRow({
+              completedAllocationTotal: 0,
+              personalTargetTotal: 6,
+              targetProgressRatio: 0,
+              remainingToTarget: 6,
+              paceStatus: "below_pace", // the raw pace math would say "below" -- must never surface as such here
+            }),
+          ],
+        },
+      ],
+    });
+
+    getRequestDutyFairness.mockResolvedValue({ status: "ok", model });
+    await renderFairnessPage({ mode: "duties" });
+    expect(screen.getByTestId("metric-duty-pace")).toHaveTextContent("טרם בוצעו תורנויות");
+    expect(screen.queryByText("מתחת לצפי")).toBeNull();
+
+    cleanup();
+    getRequestDutyFairness.mockResolvedValue({ status: "ok", model });
+    await renderFairnessPage({ mode: "duties", person: "p_tech" });
+    const dialogText = screen.getByRole("dialog").textContent ?? "";
+    expect(dialogText).toContain("טרם בוצעו תורנויות");
+    expect(dialogText).not.toContain("מתחת לצפי");
+  });
+
+  it("STATUS PRECEDENCE REGRESSION: reaching the target exactly shows 'היעד הושלם', exceeding it shows 'מעבר ליעד' -- both take priority over the underlying pace comparison, on the main card and one interaction deeper", async () => {
+    const reachedModel = dutyModel({
+      groups: [
+        {
+          key: "technician",
+          rows: [
+            dutyRow({
+              personId: "p_reached",
+              sourceName: "הגיע ליעד",
+              completedAllocationTotal: 6,
+              personalTargetTotal: 6,
+              targetProgressRatio: 1,
+              remainingToTarget: 0,
+              paceStatus: "below_pace",
+            }),
+          ],
+        },
+      ],
+    });
+    getRequestDutyFairness.mockResolvedValue({ status: "ok", model: reachedModel });
+    await renderFairnessPage({ mode: "duties" });
+    expect(screen.getByTestId("metric-duty-pace")).toHaveTextContent("היעד הושלם");
+
+    cleanup();
+    getRequestDutyFairness.mockResolvedValue({ status: "ok", model: reachedModel });
+    await renderFairnessPage({ mode: "duties", person: "p_reached" });
+    expect(screen.getByRole("dialog").textContent).toContain("היעד הושלם");
+
+    cleanup();
+    const exceededModel = dutyModel({
+      groups: [
+        {
+          key: "technician",
+          rows: [
+            dutyRow({
+              personId: "p_exceeded",
+              sourceName: "מעבר ליעד",
+              completedAllocationTotal: 7.2,
+              personalTargetTotal: 6.2,
+              targetProgressRatio: 7.2 / 6.2,
+              remainingToTarget: 6.2 - 7.2,
+              paceStatus: "on_pace",
+            }),
+          ],
+        },
+      ],
+    });
+    getRequestDutyFairness.mockResolvedValue({ status: "ok", model: exceededModel });
+    await renderFairnessPage({ mode: "duties" });
+    expect(screen.getByTestId("metric-duty-pace")).toHaveTextContent("מעבר ליעד");
+
+    cleanup();
+    getRequestDutyFairness.mockResolvedValue({ status: "ok", model: exceededModel });
+    await renderFairnessPage({ mode: "duties", person: "p_exceeded" });
+    expect(screen.getByRole("dialog").textContent).toContain("מעבר ליעד");
+  });
+
+  it("the no-target state remains unchanged by this refinement -- no status badge renders when there is no valid target", async () => {
+    const model = dutyModel({
+      groups: [
+        {
+          key: "technician",
+          rows: [
+            dutyRow({
+              personalTargetTotal: null,
+              targetProgressRatio: null,
+              remainingToTarget: null,
+              paceStatus: null,
+            }),
+          ],
+        },
+      ],
+    });
+    getRequestDutyFairness.mockResolvedValue({ status: "ok", model });
+    await renderFairnessPage({ mode: "duties" });
+    expect(screen.queryByTestId("metric-duty-pace")).toBeNull();
+  });
+
   it('a ר"צ row appears in the supervisor section with a null target -- real completed-allocation total visible, no progress bar, and a null-comparison badge one interaction deeper', async () => {
     function ratzModel() {
       return dutyModel({
