@@ -199,18 +199,21 @@ describe("/fairness — Shift calculation-period label", () => {
 });
 
 describe("/fairness — F. Shift cards", () => {
-  it("a fully modelable row renders real, clearly-labeled actual/expected numbers, rounded to the nearest 0.5, and a human-readable status state (never a raw signed gap)", async () => {
+  it("a fully modelable row renders real, clearly-labeled actual/expected numbers as a whole-shift fair RANGE, and a human-readable status (never a raw fractional target or signed gap)", async () => {
     getRequestShiftFairness.mockResolvedValue({ status: "ok", model: shiftModel() });
     await renderFairnessPage();
     expect(screen.getByText("טל טכנאי")).toBeInTheDocument();
-    expect(screen.getByTestId("metric-shift-actual").textContent).toContain("משמרות שבוצעו");
+    expect(screen.getByTestId("metric-shift-actual").textContent).toContain("משמרות שביצעת");
     expect(screen.getByTestId("metric-shift-actual").textContent).toContain("4");
-    expect(screen.getByTestId("metric-shift-target").textContent).toContain("צפי");
-    // Justice Table redesign: displayed rounded to the nearest 0.5 (raw target is 4.3) -- never a raw signed gap number.
-    expect(screen.getByTestId("metric-shift-target").textContent).toContain("4.5");
-    expect(screen.getByTestId("metric-shift-status-state").textContent).toContain("מצב מול הצפי");
-    expect(screen.getByTestId("metric-shift-status-state").textContent).toContain("בהתאם לצפוי");
-    expect(screen.getByText("מאוזן")).toBeInTheDocument();
+    expect(screen.getByTestId("metric-shift-target").textContent).toContain("צפי הוגן");
+    // Whole-shift fair range: raw target is 4.3 -> floor 4, ceil 5 -> "4–5", never a rounded single number like "4.5".
+    expect(screen.getByTestId("metric-shift-target").textContent).toContain("4–5");
+    expect(screen.getByTestId("metric-shift-target").textContent).not.toContain("4.5");
+    expect(screen.getByTestId("metric-shift-status-state").textContent).toContain("מצב");
+    expect(screen.getByTestId("metric-shift-status-state").textContent).toContain("בטווח הצפי");
+    // Appears twice by design -- the badge word and the "מצב" row show the
+    // same range-aware text.
+    expect(screen.getAllByText("בטווח הצפי")).toHaveLength(2);
   });
 
   it("weekends render as a plain factual count on the main card, never a comparative figure", async () => {
@@ -245,10 +248,10 @@ describe("/fairness — F. Shift cards", () => {
       }),
     });
     await renderFairnessPage();
-    expect(screen.getByText(/משמרות שבוצעו/).textContent).toContain("4");
+    expect(screen.getByText(/משמרות שביצעת/).textContent).toContain("4");
     expect(screen.getByText("לא ניתן לחשב יעד מלא לתקופה זו", { exact: false })).toBeInTheDocument();
     expect(screen.getByText("לא ניתן להשוות")).toBeInTheDocument();
-    expect(screen.queryByText("מאוזן")).toBeNull();
+    expect(screen.queryByText("בטווח הצפי")).toBeNull();
     expect(screen.queryByTestId("metric-shift-target")).toBeNull();
   });
 
@@ -572,9 +575,9 @@ describe("/fairness — Shift service-type subgrouping (PR #4 follow-up, Shift F
     getRequestShiftFairness.mockResolvedValue({ status: "ok", model: shiftModel() });
     await renderFairnessPage();
     expect(screen.getByTestId("metric-shift-actual").textContent).toContain("4");
-    expect(screen.getByTestId("metric-shift-target").textContent).toContain("4.5");
-    expect(screen.getByTestId("metric-shift-status-state").textContent).toContain("בהתאם לצפוי");
-    expect(screen.getByText("מאוזן")).toBeInTheDocument();
+    expect(screen.getByTestId("metric-shift-target").textContent).toContain("4–5");
+    expect(screen.getByTestId("metric-shift-status-state").textContent).toContain("בטווח הצפי");
+    expect(screen.getAllByText("בטווח הצפי")).toHaveLength(2);
   });
 });
 

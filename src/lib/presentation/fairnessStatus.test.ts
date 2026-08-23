@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fairnessShiftStatusLabel, fairnessStatusLabel } from "./fairnessStatus";
+import { fairnessStatusLabel } from "./fairnessStatus";
 
 describe("fairnessStatusLabel", () => {
   it("below -> מתחת ליעד", () => {
@@ -23,26 +23,9 @@ describe("fairnessStatusLabel", () => {
   });
 });
 
-describe("fairnessShiftStatusLabel — Shift Fairness's own 'expected', never 'target', badge vocabulary", () => {
-  it("below -> מתחת לצפוי", () => {
-    expect(fairnessShiftStatusLabel("below")).toBe("מתחת לצפוי");
-  });
-
-  it("balanced -> מאוזן", () => {
-    expect(fairnessShiftStatusLabel("balanced")).toBe("מאוזן");
-  });
-
-  it("above -> מעל הצפוי (never 'מעל היעד' -- Shift's comparison value is an adjusted expectation up to today, not a fixed target)", () => {
-    expect(fairnessShiftStatusLabel("above")).toBe("מעל הצפוי");
-  });
-
-  it("null -> the same generic 'comparison unavailable' phrase as fairnessStatusLabel", () => {
-    expect(fairnessShiftStatusLabel(null)).toBe("לא ניתן להשוות");
-  });
-
-  it("never says 'יעד' (target) for any real status", () => {
-    expect(fairnessShiftStatusLabel("below")).not.toContain("יעד");
-    expect(fairnessShiftStatusLabel("above")).not.toContain("יעד");
-    expect(fairnessShiftStatusLabel("balanced")).not.toContain("יעד");
-  });
-});
+// Shift Fairness's own badge/status vocabulary now lives entirely in
+// `shiftFairRange.ts` (`shiftFairRangeStatusLabel`) -- it reasons about the
+// realizable whole-shift RANGE, not the raw below/balanced/above status
+// this file's `fairnessStatusLabel` still serves (Duty Fairness, and this
+// module's own generic null-comparison phrase). See
+// `shiftFairRange.test.ts` for that vocabulary's own coverage.

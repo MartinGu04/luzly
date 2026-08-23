@@ -3,7 +3,7 @@ import { COMPLETE_FAIRNESS_DATA, fairnessDataCompleteness } from "@/lib/domain/f
 import type { DutyFairnessPersonRowView } from "@/lib/readModels/dutyFairnessTypes";
 import type { ShiftFairnessPersonRowView } from "@/lib/readModels/shiftFairnessTypes";
 import { buildDutyFairnessCardView, buildShiftFairnessCardView, shiftFairnessCompletenessNote } from "./fairnessCards";
-import { fairnessShiftStatusLabel } from "./fairnessStatus";
+import { shiftFairRangeStatusLabel } from "./shiftFairRange";
 
 function shiftRow(overrides: Partial<ShiftFairnessPersonRowView> = {}): ShiftFairnessPersonRowView {
   return {
@@ -26,7 +26,7 @@ function shiftRow(overrides: Partial<ShiftFairnessPersonRowView> = {}): ShiftFai
 }
 
 describe("buildShiftFairnessCardView", () => {
-  it("formats a fully modelable row -- real numbers, no unavailable note", () => {
+  it("formats a fully modelable row -- a whole-shift fair RANGE, never the raw fractional target", () => {
     const view = buildShiftFairnessCardView(shiftRow(), "/fairness?person=p_1");
     expect(view).toMatchObject({
       key: "p_1",
@@ -35,18 +35,22 @@ describe("buildShiftFairnessCardView", () => {
       serviceCategory: "regular",
       href: "/fairness?person=p_1",
       actualLabel: "4",
-      // Justice Table redesign: the expected value is rounded to the
-      // nearest 0.5 for display only -- the raw target stays 4.3.
-      targetLabel: "4.5",
+      // target=4.3 -> floor 4, ceil 5 -> "4–5", NEVER a rounded single
+      // number like "4.5".
+      targetLabel: "4–5",
+      targetPeriodLabel: "צפי הוגן עד היום",
+      // The raw signed gap is kept only as a secondary/diagnostic value.
       deviationLabel: "-0.3",
+      // actualShifts=4 is within [4,5] -> "within", tone "balanced".
       status: "balanced",
+      rangeStatus: "within",
       weekendActualLabel: "1",
       weekendTargetLabel: "1",
       unavailableNote: null,
     });
   });
 
-  it("an unmodelable target -> unavailableNote set, never a fake 0/balanced -- actual work stays visible", () => {
+  it("an unmodelable target -> unavailableNote set, never a fake 0/within -- actual work stays visible", () => {
     const view = buildShiftFairnessCardView(
       shiftRow({
         target: null,
@@ -62,24 +66,97 @@ describe("buildShiftFairnessCardView", () => {
     expect(view.targetLabel).toBeNull();
     expect(view.deviationLabel).toBeNull();
     expect(view.status).toBeNull();
+    expect(view.rangeStatus).toBeNull();
     expect(view.actualLabel).toBe("4");
     expect(view.unavailableNote).toBe("לא ניתן לחשב יעד מלא לתקופה זו");
     expect(view.completenessNote).not.toBeNull();
   });
 });
 
-describe("buildShiftFairnessCardView -- Justice Table redesign: statusStateLabel and expectationFactorLabel", () => {
-  it("renders a human-readable state instead of the raw signed gap, and rounds the target to the nearest 0.5", () => {
-    const view = buildShiftFairnessCardView(shiftRow({ target: 4.3, deviation: -0.3, status: "balanced" }), "/fairness?person=p_1");
-    expect(view.targetLabel).toBe("4.5");
-    expect(view.statusStateLabel).toBe("בהתאם לצפוי");
+describe("buildShiftFairnessCardView -- whole-shift fair range: targetLabel, rangeStatus, statusStateLabel", () => {
+  it("targetLabel is derived via floor/ceil of the EXACT target, never a rounded single number", () => {
+    const wholeNumber = buildShiftFairnessCardView(shiftRow({ actualShifts: 6, target: 6 }), "/fairness?person=p_1");
+    expect(wholeNumber.targetLabel).toBe("6");
+
+    const halfFractional = buildShiftFairnessCardView(shiftRow({ actualShifts: 6, target: 5.5 }), "/fairness?person=p_1");
+    expect(halfFractional.targetLabel).toBe("5–6");
+
+    const nonHalfFractional = buildShiftFairnessCardView(shiftRow({ actualShifts: 6, target: 5.2 }), "/fairness?person=p_1");
+    expect(nonHalfFractional.targetLabel).toBe("5–6");
   });
 
-  it("below/above states show the rounded magnitude with a direction phrase", () => {
-    const below = buildShiftFairnessCardView(shiftRow({ deviation: -1.2, status: "below" }), "/fairness?person=p_1");
-    expect(below.statusStateLabel).toBe("1 מתחת לצפוי");
-    const above = buildShiftFairnessCardView(shiftRow({ deviation: 0.9, status: "above" }), "/fairness?person=p_1");
-    expect(above.statusStateLabel).toBe("1 מעל הצפוי");
+  it("statusStateLabel and statusLabel both render the SAME range-aware qualitative text, never a fractional gap number", () => {
+    // The real reported scenario: 8 actual, 5.5 exact expected -> range 5–6, actual is 2 over the upper bound -> "above".
+    const view = buildShiftFairnessCardView(shiftRow({ actualShifts: 8, target: 5.5 }), "/fairness?person=p_1");
+    expect(view.rangeStatus).toBe("above");
+    expect(view.statusStateLabel).toBe("מעל הצפי");
+    expect(view.statusLabel).toBe("מעל הצפי");
+    expect(view.statusStateLabel).not.toMatch(/\d/); // never a raw number as the primary message
+  });
+
+  it("one shift past the fair range's upper bound reads as 'מעט מעל הצפי' (slightly above), distinct from further above", () => {
+    const slightlyAbove = buildShiftFairnessCardView(shiftRow({ actualShifts: 7, target: 5.5 }), "/fairness?person=p_1");
+    expect(slightlyAbove.rangeStatus).toBe("slightly_above");
+    expect(slightlyAbove.statusStateLabel).toBe("מעט מעל הצפי");
+
+    const above = buildShiftFairnessCardView(shiftRow({ actualShifts: 8, target: 5.5 }), "/fairness?person=p_1");
+    expect(above.statusStateLabel).toBe("מעל הצפי");
+  });
+
+  it("both endpoints of the fair range read as 'בטווח הצפי' (within), never 'above'/'below' just for landing on a boundary", () => {
+    const lowerBound = buildShiftFairnessCardView(shiftRow({ actualShifts: 5, target: 5.5 }), "/fairness?person=p_1");
+    expect(lowerBound.rangeStatus).toBe("within");
+    const upperBound = buildShiftFairnessCardView(shiftRow({ actualShifts: 6, target: 5.5 }), "/fairness?person=p_1");
+    expect(upperBound.rangeStatus).toBe("within");
+  });
+
+  it("below the range reads as 'מתחת לצפי', with no further magnitude-based nuance", () => {
+    const view = buildShiftFairnessCardView(shiftRow({ actualShifts: 4, target: 5.5 }), "/fairness?person=p_1");
+    expect(view.rangeStatus).toBe("below");
+    expect(view.statusStateLabel).toBe("מתחת לצפי");
+  });
+
+  it("a whole-number exact target reuses the pre-existing severity model with no 'slightly above' tier", () => {
+    const exact = buildShiftFairnessCardView(shiftRow({ actualShifts: 5, target: 5 }), "/fairness?person=p_1");
+    expect(exact.rangeStatus).toBe("within");
+    const overshoot = buildShiftFairnessCardView(shiftRow({ actualShifts: 6, target: 5 }), "/fairness?person=p_1");
+    expect(overshoot.rangeStatus).toBe("above"); // never "slightly_above" -- a whole-number target has no fractional range to be adjacent to.
+  });
+
+  it("spot-check across several people with different exact expectations -- integer, .5, non-.5 decimal, and a very low expectation", () => {
+    const wholeNumber = buildShiftFairnessCardView(shiftRow({ personId: "p_a", actualShifts: 6, target: 6 }), "/fairness?person=p_a");
+    const halfFractional = buildShiftFairnessCardView(shiftRow({ personId: "p_b", actualShifts: 8, target: 5.5 }), "/fairness?person=p_b");
+    const nonHalfFractional = buildShiftFairnessCardView(shiftRow({ personId: "p_c", actualShifts: 4, target: 3.2 }), "/fairness?person=p_c");
+    const veryLow = buildShiftFairnessCardView(shiftRow({ personId: "p_d", actualShifts: 1, target: 0.5 }), "/fairness?person=p_d");
+
+    expect(wholeNumber.targetLabel).toBe("6");
+    expect(wholeNumber.rangeStatus).toBe("within");
+
+    // The exact reported Leia scenario.
+    expect(halfFractional.targetLabel).toBe("5–6");
+    expect(halfFractional.rangeStatus).toBe("above");
+
+    expect(nonHalfFractional.targetLabel).toBe("3–4");
+    expect(nonHalfFractional.rangeStatus).toBe("within"); // 4 is the range's own upper bound.
+
+    expect(veryLow.targetLabel).toBe("0–1");
+    expect(veryLow.rangeStatus).toBe("within");
+  });
+
+  it("the exact live-reported Leia scenario: actual=8, exact target=5.5 -> displayed range '5–6', weekendsWorked=2 unaffected by the range fix", () => {
+    const view = buildShiftFairnessCardView(
+      shiftRow({ personId: "p_leia", actualShifts: 8, target: 5.5, weekendActualShifts: 6, weekendsWorked: 2 }),
+      "/fairness?person=p_leia",
+    );
+
+    expect(view.actualLabel).toBe("8");
+    expect(view.targetLabel).toBe("5–6");
+    expect(view.rangeStatus).toBe("above");
+    expect(view.statusStateLabel).toBe("מעל הצפי");
+    expect(view.statusExplanationLabel).toBe("ביצעת יותר משמרות מטווח הצפי ההוגן שלך עד היום.");
+    // The weekend fix and the range fix are independent -- weekendsWorked
+    // renders correctly regardless of the range/status computation above.
+    expect(view.weekendActualLabel).toBe("2");
   });
 
   it("expectationFactorLabel is null when there is nothing to explain", () => {
@@ -118,49 +195,55 @@ describe("buildShiftFairnessCardView -- weekendActualLabel sources from weekends
 });
 
 describe("buildShiftFairnessCardView -- shift fairness clarity: statusLabel never says 'target', statusExplanationLabel", () => {
-  it("statusLabel uses fairnessShiftStatusLabel's 'expected' vocabulary, matching the status", () => {
-    const above = buildShiftFairnessCardView(shiftRow({ status: "above" }), "/fairness?person=p_1");
-    expect(above.statusLabel).toBe(fairnessShiftStatusLabel("above"));
-    expect(above.statusLabel).toBe("מעל הצפוי");
+  it("statusLabel uses shiftFairRangeStatusLabel's range-aware 'expected' vocabulary, matching rangeStatus", () => {
+    const above = buildShiftFairnessCardView(shiftRow({ actualShifts: 8, target: 5.5 }), "/fairness?person=p_1");
+    expect(above.statusLabel).toBe(shiftFairRangeStatusLabel("above"));
+    expect(above.statusLabel).toBe("מעל הצפי");
     expect(above.statusLabel).not.toContain("יעד");
 
-    const below = buildShiftFairnessCardView(shiftRow({ status: "below" }), "/fairness?person=p_1");
-    expect(below.statusLabel).toBe("מתחת לצפוי");
+    const below = buildShiftFairnessCardView(shiftRow({ actualShifts: 4, target: 5.5 }), "/fairness?person=p_1");
+    expect(below.statusLabel).toBe("מתחת לצפי");
 
-    const balanced = buildShiftFairnessCardView(shiftRow({ status: "balanced" }), "/fairness?person=p_1");
-    expect(balanced.statusLabel).toBe("מאוזן");
+    const within = buildShiftFairnessCardView(shiftRow({ actualShifts: 5, target: 5.5 }), "/fairness?person=p_1");
+    expect(within.statusLabel).toBe("בטווח הצפי");
 
     const unavailable = buildShiftFairnessCardView(shiftRow({ status: null, target: null, deviation: null }), "/fairness?person=p_1");
     expect(unavailable.statusLabel).toBe("לא ניתן להשוות");
   });
 
-  it("statusExplanationLabel gives a concrete, availability-framed sentence for each real status, never 'worked harder'", () => {
-    const above = buildShiftFairnessCardView(shiftRow({ status: "above" }), "/fairness?person=p_1");
-    expect(above.statusExplanationLabel).toContain("זמינות");
-    expect(above.statusExplanationLabel).not.toMatch(/עבד(ת)? קשה|worked harder/);
+  it("statusExplanationLabel gives a concrete, range-framed sentence for each real rangeStatus, never a fractional shift count or 'worked harder'", () => {
+    const above = buildShiftFairnessCardView(shiftRow({ actualShifts: 8, target: 5.5 }), "/fairness?person=p_1");
+    expect(above.statusExplanationLabel).toBe("ביצעת יותר משמרות מטווח הצפי ההוגן שלך עד היום.");
+    expect(above.statusExplanationLabel).not.toMatch(/עבד(ת)? קשה|worked harder|\d\.\d/);
 
-    const below = buildShiftFairnessCardView(shiftRow({ status: "below" }), "/fairness?person=p_1");
-    expect(below.statusExplanationLabel).toContain("זמינות");
+    const slightlyAbove = buildShiftFairnessCardView(shiftRow({ actualShifts: 7, target: 5.5 }), "/fairness?person=p_1");
+    expect(slightlyAbove.statusExplanationLabel).toBe("ביצעת מעט יותר משמרות מטווח הצפי ההוגן שלך עד היום.");
 
-    const balanced = buildShiftFairnessCardView(shiftRow({ status: "balanced" }), "/fairness?person=p_1");
-    expect(balanced.statusExplanationLabel).toContain("זמינות");
+    const below = buildShiftFairnessCardView(shiftRow({ actualShifts: 4, target: 5.5 }), "/fairness?person=p_1");
+    expect(below.statusExplanationLabel).toBe("ביצעת פחות משמרות מטווח הצפי ההוגן שלך עד היום.");
+
+    const within = buildShiftFairnessCardView(shiftRow({ actualShifts: 5, target: 5.5 }), "/fairness?person=p_1");
+    expect(within.statusExplanationLabel).toBe("ביצעת משמרות בתוך טווח הצפי ההוגן שלך עד היום.");
   });
 
-  it("statusExplanationLabel is null exactly when status is null -- nothing to explain when the comparison itself is unavailable", () => {
+  it("statusExplanationLabel is null exactly when rangeStatus is null -- nothing to explain when the comparison itself is unavailable", () => {
     const view = buildShiftFairnessCardView(
       shiftRow({ status: null, target: null, deviation: null }),
       "/fairness?person=p_1",
     );
+    expect(view.rangeStatus).toBeNull();
     expect(view.statusExplanationLabel).toBeNull();
   });
 
   it("names 'today' only for the actual current month -- a closed historical or future month's target covers the whole period, not 'as of today'", () => {
-    const current = buildShiftFairnessCardView(shiftRow({ status: "above" }), "/fairness?person=p_1", true);
+    const current = buildShiftFairnessCardView(shiftRow({ actualShifts: 8, target: 5.5 }), "/fairness?person=p_1", true);
     expect(current.statusExplanationLabel).toContain("עד היום");
+    expect(current.targetPeriodLabel).toBe("צפי הוגן עד היום");
 
-    const closed = buildShiftFairnessCardView(shiftRow({ status: "above" }), "/fairness?person=p_1", false);
+    const closed = buildShiftFairnessCardView(shiftRow({ actualShifts: 8, target: 5.5 }), "/fairness?person=p_1", false);
     expect(closed.statusExplanationLabel).not.toContain("עד היום");
     expect(closed.statusExplanationLabel).toContain("בתקופה זו");
+    expect(closed.targetPeriodLabel).toBe("צפי הוגן לתקופה זו");
   });
 });
 

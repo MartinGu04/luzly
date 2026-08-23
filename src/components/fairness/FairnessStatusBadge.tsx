@@ -5,7 +5,7 @@ import { fairnessStatusLabel } from "@/lib/presentation/fairnessStatus";
 interface FairnessStatusBadgeProps {
   status: FairnessStatus | null;
   className?: string;
-  /** Overrides the badge's own default `fairnessStatusLabel` text -- e.g. Shift Fairness passes `fairnessShiftStatusLabel` (`lib/presentation/fairnessStatus.ts`) so the badge says "above/below EXPECTED" rather than "above/below TARGET", since Shift's comparison value is an adjusted expectation up to today, not a fixed target. Icon/tint stay driven by `status` either way. */
+  /** Overrides the badge's own default `fairnessStatusLabel` text -- e.g. Shift Fairness passes `shiftFairRangeStatusLabel` (`lib/presentation/shiftFairRange.ts`) so the badge reasons about the realizable whole-shift range ("מעל הצפי"/"מעט מעל הצפי"/...) rather than "above/below TARGET", since Shift's comparison value is an adjusted expectation up to today, not a fixed target. Icon/tint stay driven by `status` either way. */
   label?: string;
 }
 

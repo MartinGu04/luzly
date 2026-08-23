@@ -16,12 +16,14 @@ function view(overrides: Partial<ShiftFairnessCardView> = {}): ShiftFairnessCard
     serviceCategory: "regular",
     href: "/fairness?person=p_1",
     actualLabel: "4",
-    targetLabel: "4.3",
+    targetLabel: "4–5",
+    targetPeriodLabel: "צפי הוגן עד היום",
     deviationLabel: "-0.3",
     status: "balanced",
-    statusLabel: "מאוזן",
-    statusStateLabel: "בהתאם לצפוי",
-    statusExplanationLabel: "ביצעת משמרות בהתאם לצפוי, ביחס לזמינות שהייתה לך עד היום.",
+    rangeStatus: "within",
+    statusLabel: "בטווח הצפי",
+    statusStateLabel: "בטווח הצפי",
+    statusExplanationLabel: "ביצעת משמרות בתוך טווח הצפי ההוגן שלך עד היום.",
     weekendActualLabel: "1",
     weekendTargetLabel: "1.2",
     weekendDeviationLabel: "-0.2",
@@ -102,14 +104,17 @@ describe("ShiftFairnessCard — status badge/explanation clarity", () => {
         <ShiftFairnessCard
           view={view({
             status: "above",
-            statusLabel: "מעל הצפוי",
-            statusStateLabel: "2.5 מעל הצפוי",
-            statusExplanationLabel: "ביצעת יותר משמרות מהצפוי, ביחס לזמינות שהייתה לך עד היום.",
+            rangeStatus: "above",
+            statusLabel: "מעל הצפי",
+            statusStateLabel: "מעל הצפי",
+            statusExplanationLabel: "ביצעת יותר משמרות מטווח הצפי ההוגן שלך עד היום.",
           })}
         />
       </ul>,
     );
-    expect(screen.getByText("מעל הצפוי")).toBeInTheDocument();
+    // Appears TWICE by design -- the badge word and the "מצב" row now
+    // render the same range-aware qualitative text (no magnitude number).
+    expect(screen.getAllByText("מעל הצפי")).toHaveLength(2);
     expect(screen.queryByText("מעל היעד")).toBeNull();
   });
 
@@ -119,13 +124,14 @@ describe("ShiftFairnessCard — status badge/explanation clarity", () => {
         <ShiftFairnessCard
           view={view({
             status: "above",
-            statusExplanationLabel: "ביצעת יותר משמרות מהצפוי, ביחס לזמינות שהייתה לך עד היום.",
+            rangeStatus: "above",
+            statusExplanationLabel: "ביצעת יותר משמרות מטווח הצפי ההוגן שלך עד היום.",
           })}
         />
       </ul>,
     );
     expect(screen.getByTestId("metric-shift-status-explanation")).toHaveTextContent(
-      "ביצעת יותר משמרות מהצפוי, ביחס לזמינות שהייתה לך עד היום.",
+      "ביצעת יותר משמרות מטווח הצפי ההוגן שלך עד היום.",
     );
   });
 

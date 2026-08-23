@@ -20,15 +20,15 @@ describe("ShiftFairnessCardInfo", () => {
     expect(trigger).toHaveAttribute("type", "button");
   });
 
-  it("clicking the trigger opens a panel explaining completed shifts / expectation / status-vs-expected / weekend, matching the card's own labels", () => {
+  it("clicking the trigger opens a panel explaining completed shifts / fair expectation / status / weekend, matching the card's own labels", () => {
     render(<ShiftFairnessCardInfo />);
     fireEvent.click(screen.getByRole("button", { name: "הסבר על מדדי הכרטיס" }));
 
     const dialog = screen.getByRole("dialog", { name: "הסבר על מדדי הכרטיס" });
     expect(dialog).toBeInTheDocument();
-    expect(dialog.textContent).toContain("משמרות שבוצעו");
-    expect(dialog.textContent).toContain("צפי");
-    expect(dialog.textContent).toContain("מצב מול הצפי");
+    expect(dialog.textContent).toContain("משמרות שביצעת");
+    expect(dialog.textContent).toContain("צפי הוגן");
+    expect(dialog.textContent).toContain("מצב");
     expect(dialog.textContent).toContain('סופ"שים');
     // Explanatory only -- no raw formulas/opportunity-count implementation details.
     expect(dialog.textContent).not.toMatch(/הזדמנות תואמת|opportunit/i);
@@ -43,6 +43,16 @@ describe("ShiftFairnessCardInfo", () => {
     expect(dialog.textContent).toContain("היעדרויות");
     // Explicitly reassures this is not a fixed monthly quota.
     expect(dialog.textContent).toContain("לא יעד חודשי קבוע");
+  });
+
+  it("explains WHY the internal expectation can be fractional, and that a whole-shift range is shown instead", () => {
+    render(<ShiftFairnessCardInfo />);
+    fireEvent.click(screen.getByRole("button", { name: "הסבר על מדדי הכרטיס" }));
+
+    const dialog = screen.getByRole("dialog", { name: "הסבר על מדדי הכרטיס" });
+    expect(dialog.textContent).toContain("מספר חלקי");
+    expect(dialog.textContent).toContain("טווח המשמרות");
+    expect(dialog.textContent).toContain("חצי משמרת");
   });
 
   it("never calls the expectation a personal target ('יעד אישי') -- it's an adjusted expectation, not a quota", () => {
