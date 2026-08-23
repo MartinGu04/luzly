@@ -1,3 +1,4 @@
+import { addCalendarDays, formatCalendarDate } from "./dateRange";
 import { dayOfWeek, parseCalendarDate } from "./dutyBlocks";
 import type { LocalNow } from "./localNow";
 
@@ -222,4 +223,33 @@ export function isFairnessWeekendDate(dateStr: string): boolean {
 /** How many of `dates` fall on the Thu-Fri-Sat weekend -- duplicates in `dates` are counted as given, never deduplicated (that's the caller's own concern). */
 export function countFairnessWeekendDates(dates: readonly string[]): number {
   return dates.filter(isFairnessWeekendDate).length;
+}
+
+/**
+ * The stable weekend-BLOCK key for `dateStr` -- Thursday, Friday, and
+ * Saturday of the SAME Thu-Sat block all resolve to this identical string
+ * (that block's own Saturday date), so collecting distinct keys into a
+ * `Set` counts distinct WEEKENDS worked, never weekend DAYS or shift-slots
+ * (a real user was confused by a Shift Fairness weekend metric that
+ * actually counted the latter -- 3 shifts across one real Thu-Fri-Sat
+ * weekend read as "3", not "1"). `null` for a date that isn't itself a
+ * weekend date at all (see `isFairnessWeekendDate`) -- callers should only
+ * call this once `isFairnessWeekendDate(dateStr)` is already known true,
+ * same convention as this file's other weekend helpers.
+ *
+ * Saturday is chosen as the canonical anchor (rather than Thursday) purely
+ * because `addCalendarDays` only ever adds forward -- Thu is 2 days before
+ * its own Saturday, Fri is 1 day before, Sat is 0 days before, so every
+ * case is a non-negative offset with no separate "days before" arithmetic
+ * needed. The anchor choice itself carries no other meaning.
+ */
+export function fairnessWeekendBucketKey(dateStr: string): string | null {
+  const parsed = parseCalendarDate(dateStr);
+  if (!parsed) return null;
+
+  const weekday = dayOfWeek(parsed);
+  if (weekday < WEEKEND_START_DAY_OF_WEEK) return null;
+
+  const SATURDAY = 6;
+  return formatCalendarDate(addCalendarDays(parsed, SATURDAY - weekday));
 }

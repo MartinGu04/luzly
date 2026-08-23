@@ -5,6 +5,7 @@ import {
   combineFairnessDataCompleteness,
   COMPLETE_FAIRNESS_DATA,
   fairnessDataCompleteness,
+  fairnessWeekendBucketKey,
   isFairnessWeekendDate,
   resolveFairnessPeriodStatus,
   type FairnessDataCompleteness,
@@ -166,6 +167,14 @@ export interface ShiftFairnessPersonResult {
   target: number | null;
   deviation: number | null;
   status: FairnessShiftStatus | null;
+  /**
+   * Weekend SHIFT count -- how many individual (date, day/night) confirmed
+   * shift-slots this person worked on a Thu/Fri/Sat date this period. Feeds
+   * `weekendTarget`/`weekendDeviation`/`weekendStatus` below (and the
+   * group's own `totalWeekendActual`) EXACTLY as it always has -- this PR
+   * only adds `weekendsWorked` alongside it (see that field's own docs for
+   * why), it never changes what this one means or how it's used.
+   */
   weekendActualShifts: number;
   weekendTarget: number | null;
   weekendDeviation: number | null;
@@ -173,6 +182,20 @@ export interface ShiftFairnessPersonResult {
   /** How many genuine (date, day/night) opportunities this person had this period -- context for the target, not a metric of its own. */
   opportunityCount: number;
   weekendOpportunityCount: number;
+  /**
+   * How many DISTINCT Thu-Sat weekend blocks this person worked at least
+   * one confirmed non-shadow shift in, this period -- e.g. a day+night
+   * shift on Thursday plus a day shift on the following Saturday of the
+   * SAME block is still `1`, never `3`. A real user was confused reading
+   * "6" here when they had genuinely worked exactly 2 real weekends (a
+   * shift or two on each of two separate Thu-Sat blocks) -- this is the
+   * fix: a person-worked-weekend COUNT, never a weekend-shift count.
+   * Purely a presentation-facing fact, deliberately NOT fed into
+   * `weekendTarget`/`weekendDeviation`/`weekendStatus`/any group total --
+   * see `weekendActualShifts`'s own docs for why those keep their existing,
+   * unrelated meaning untouched.
+   */
+  weekendsWorked: number;
   dataCompleteness: FairnessDataCompleteness;
 }
 
@@ -194,6 +217,7 @@ interface PersonShiftFacts {
   weekendActualShifts: number;
   opportunityCount: number;
   weekendOpportunityCount: number;
+  weekendsWorked: number;
   dataCompleteness: FairnessDataCompleteness;
 }
 
@@ -335,17 +359,42 @@ function computePersonShiftFacts(
 
   let actualShifts = 0;
   let weekendActualShifts = 0;
+  // Distinct Thu-Sat weekend BLOCKS this person actually worked -- a Set of
+  // `fairnessWeekendBucketKey` values, so a Thursday shift and a Saturday
+  // shift from the SAME block collapse to one entry, never two. Only a date
+  // with real counted work (`countForDate > 0`) contributes a key -- same
+  // "actually worked", not merely "eligible", standard `weekendActualShifts`
+  // already applies. `sortedDates` is already capped to `periodDates`
+  // (today-inclusive for the current month), so a future Thu/Fri/Sat can
+  // never contribute a key here, same as it already can't contribute to
+  // `actualShifts` itself.
+  const weekendKeysWorked = new Set<string>();
   for (const date of sortedDates) {
     const countForDate = countActualShiftsForDate(personEvents, date, role);
     actualShifts += countForDate;
-    if (isFairnessWeekendDate(date)) weekendActualShifts += countForDate;
+    if (isFairnessWeekendDate(date)) {
+      weekendActualShifts += countForDate;
+      if (countForDate > 0) {
+        const bucketKey = fairnessWeekendBucketKey(date);
+        if (bucketKey) weekendKeysWorked.add(bucketKey);
+      }
+    }
   }
+  const weekendsWorked = weekendKeysWorked.size;
 
   // No evaluable period dates at all (a wholly future month) -- nothing to
   // resolve participation/eligibility against; actual stays whatever it is
   // (always 0 in practice, since there are no dates to have Events on).
   if (periodStartDate === null || periodEndDate === null) {
-    return { person, actualShifts, weekendActualShifts, opportunityCount: 0, weekendOpportunityCount: 0, dataCompleteness: COMPLETE_FAIRNESS_DATA };
+    return {
+      person,
+      actualShifts,
+      weekendActualShifts,
+      opportunityCount: 0,
+      weekendOpportunityCount: 0,
+      weekendsWorked,
+      dataCompleteness: COMPLETE_FAIRNESS_DATA,
+    };
   }
 
   // Reused outright, never re-derived: the SAME participation window +
@@ -404,6 +453,7 @@ function computePersonShiftFacts(
     weekendActualShifts,
     opportunityCount,
     weekendOpportunityCount,
+    weekendsWorked,
     dataCompleteness: combineFairnessDataCompleteness(completenessParts),
   };
 }
@@ -566,6 +616,10 @@ export function computeShiftFairnessForGroup(
       weekendStatus: weekendDeviation === null ? null : resolveFairnessShiftStatus(weekendDeviation),
       opportunityCount: fact.opportunityCount,
       weekendOpportunityCount: fact.weekendOpportunityCount,
+      // A real, always-visible fact of confirmed work -- unconditional,
+      // same as `actualShifts`/`weekendActualShifts` above, never gated by
+      // `isModelable` (only target/deviation/status are).
+      weekendsWorked: fact.weekendsWorked,
       dataCompleteness: combineFairnessDataCompleteness([
         fact.dataCompleteness,
         groupOpportunityGap,

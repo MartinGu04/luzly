@@ -584,6 +584,170 @@ describe("computeShiftFairnessForGroup — weekend imbalance despite balanced to
   });
 });
 
+describe("computeShiftFairnessForGroup — weekendsWorked: distinct Thu-Sat blocks, never a weekend shift-slot count", () => {
+  // A real user was confused reading "6" for a person who had genuinely
+  // worked exactly 2 real weekends -- the old field summed shift-slot
+  // counts (day+night, per Thu/Fri/Sat date) instead of counting distinct
+  // Thu-Sat BLOCKS. `weekendsWorked` fixes that; `weekendActualShifts` (and
+  // everything it feeds -- weekendTarget/weekendDeviation/weekendStatus)
+  // keeps its EXACT existing meaning and values, proven explicitly below.
+
+  it("Thursday + Friday + Saturday of the SAME weekend -> 1, not 3", () => {
+    const p = person({ id: "p_x", isTechnician: true });
+    const dates = ["2026-08-06", "2026-08-07", "2026-08-08"]; // Thu, Fri, Sat
+    const events: Event[] = [
+      shiftEvent({ personId: p.id, date: "2026-08-06", period: "day" }),
+      shiftEvent({ personId: p.id, date: "2026-08-07", period: "day" }),
+      shiftEvent({ personId: p.id, date: "2026-08-08", period: "day" }),
+    ];
+
+    const row = findPerson(computeShiftFairnessForGroup("technician", [p], events, dates), p.id);
+    expect(row.weekendsWorked).toBe(1);
+  });
+
+  it("two SEPARATE weekend blocks -> 2", () => {
+    const p = person({ id: "p_x", isTechnician: true });
+    const dates = ["2026-08-06", "2026-08-07", "2026-08-08", "2026-08-20", "2026-08-21", "2026-08-22"];
+    const events: Event[] = [
+      shiftEvent({ personId: p.id, date: "2026-08-06", period: "day" }),
+      shiftEvent({ personId: p.id, date: "2026-08-20", period: "day" }),
+    ];
+
+    const row = findPerson(computeShiftFairnessForGroup("technician", [p], events, dates), p.id);
+    expect(row.weekendsWorked).toBe(2);
+  });
+
+  it("multiple day/night shifts inside the SAME weekend block -> still 1", () => {
+    const p = person({ id: "p_x", isTechnician: true });
+    const dates = ["2026-08-06", "2026-08-07", "2026-08-08"];
+    const events: Event[] = [
+      shiftEvent({ personId: p.id, date: "2026-08-06", period: "day" }),
+      shiftEvent({ personId: p.id, date: "2026-08-06", period: "night" }),
+      shiftEvent({ personId: p.id, date: "2026-08-07", period: "day" }),
+      shiftEvent({ personId: p.id, date: "2026-08-08", period: "day" }),
+      shiftEvent({ personId: p.id, date: "2026-08-08", period: "night" }),
+    ];
+
+    const row = findPerson(computeShiftFairnessForGroup("technician", [p], events, dates), p.id);
+    // 5 real shift-slots across the one weekend -- weekendActualShifts (the
+    // OLD, still-in-use field) correctly stays 5; weekendsWorked is 1.
+    expect(row.weekendActualShifts).toBe(5);
+    expect(row.weekendsWorked).toBe(1);
+  });
+
+  it("a Sunday shift -> 0 -- Sunday is never part of the Thu-Sat weekend", () => {
+    const p = person({ id: "p_x", isTechnician: true });
+    const dates = ["2026-08-09"]; // Sunday
+    const events: Event[] = [shiftEvent({ personId: p.id, date: "2026-08-09", period: "day" })];
+
+    const row = findPerson(computeShiftFairnessForGroup("technician", [p], events, dates), p.id);
+    expect(row.weekendsWorked).toBe(0);
+  });
+
+  it("a future-dated Thu/Fri/Sat shift is excluded -- weekendsWorked respects the SAME today-cutoff actualShifts already does", () => {
+    const p = person({ id: "p_x", isTechnician: true });
+    const now: LocalNow = { date: "2026-08-06", minuteOfDay: 600 }; // Thursday itself
+    const periodDates = resolveShiftFairnessPeriodDates({ year: 2026, month: 8 }, now); // 08-01..08-06
+    const events: Event[] = [
+      shiftEvent({ personId: p.id, date: "2026-08-06", period: "day" }), // today, counts
+      shiftEvent({ personId: p.id, date: "2026-08-07", period: "day" }), // tomorrow (Friday) -- future
+      shiftEvent({ personId: p.id, date: "2026-08-08", period: "day" }), // day after (Saturday) -- future
+    ];
+
+    const row = findPerson(computeShiftFairnessForGroup("technician", [p], events, periodDates), p.id);
+    // Only today's Thursday shift is real, confirmed work as of "now" --
+    // the future Fri/Sat shifts (same weekend block) must not count, and
+    // must not silently still produce "1 weekend" via the block key alone.
+    expect(row.weekendsWorked).toBe(1);
+    expect(row.actualShifts).toBe(1);
+  });
+
+  it("month-boundary: a Thursday near month-end whose Saturday falls in the next month still counts as ONE weekend when both dates are in the active period", () => {
+    const p = person({ id: "p_x", isTechnician: true });
+    // 2026-07-30 = Thursday, 2026-08-01 = Saturday of the SAME block.
+    const dates = ["2026-07-30", "2026-07-31", "2026-08-01"];
+    const events: Event[] = [
+      shiftEvent({ personId: p.id, date: "2026-07-30", period: "day" }),
+      shiftEvent({ personId: p.id, date: "2026-08-01", period: "day" }),
+    ];
+
+    const row = findPerson(computeShiftFairnessForGroup("technician", [p], events, dates), p.id);
+    expect(row.weekendsWorked).toBe(1);
+  });
+
+  it("real-world regression: Aug 6-8 + Aug 20-22, 'today' = Aug 23 2026 -> weekendsWorked = 2 (the exact reported case)", () => {
+    const leia = person({ id: "p_leia", isTechnician: true });
+    const now: LocalNow = { date: "2026-08-23", minuteOfDay: 600 };
+    const periodDates = resolveShiftFairnessPeriodDates({ year: 2026, month: 8 }, now);
+
+    const events: Event[] = [
+      shiftEvent({ personId: leia.id, date: "2026-08-06", period: "day" }),
+      shiftEvent({ personId: leia.id, date: "2026-08-07", period: "day" }),
+      shiftEvent({ personId: leia.id, date: "2026-08-08", period: "day" }),
+      shiftEvent({ personId: leia.id, date: "2026-08-20", period: "day" }),
+      shiftEvent({ personId: leia.id, date: "2026-08-21", period: "day" }),
+      shiftEvent({ personId: leia.id, date: "2026-08-22", period: "day" }),
+    ];
+
+    const row = findPerson(computeShiftFairnessForGroup("technician", [leia], events, periodDates), leia.id);
+    expect(row.weekendsWorked).toBe(2);
+    // The OLD field is a genuinely different fact -- 6 real weekend
+    // shift-slots -- and correctly stays 6, since it still feeds
+    // weekendTarget/weekendDeviation/weekendStatus unchanged.
+    expect(row.weekendActualShifts).toBe(6);
+  });
+
+  it("spot-check across several people with different real patterns -- only one day, a full weekend, multiple weekends, and none at all", () => {
+    const onlyOneDay = person({ id: "p_one_day", isTechnician: true });
+    const fullWeekend = person({ id: "p_full", isTechnician: true });
+    const multipleWeekends = person({ id: "p_multi", isTechnician: true });
+    const noWeekendShifts = person({ id: "p_none", isTechnician: true });
+    const roster = [onlyOneDay, fullWeekend, multipleWeekends, noWeekendShifts];
+
+    const dates = [
+      "2026-08-03",
+      "2026-08-04",
+      "2026-08-05",
+      "2026-08-06",
+      "2026-08-07",
+      "2026-08-08", // week 1: Mon..Sat
+      "2026-08-20",
+      "2026-08-21",
+      "2026-08-22", // week 3 weekend
+    ];
+
+    const events: Event[] = [
+      // Only Saturday of one weekend.
+      shiftEvent({ personId: onlyOneDay.id, date: "2026-08-08", period: "day" }),
+      // The full Thu-Fri-Sat block.
+      shiftEvent({ personId: fullWeekend.id, date: "2026-08-06", period: "day" }),
+      shiftEvent({ personId: fullWeekend.id, date: "2026-08-07", period: "day" }),
+      shiftEvent({ personId: fullWeekend.id, date: "2026-08-08", period: "day" }),
+      // Two separate weekends, one day each.
+      shiftEvent({ personId: multipleWeekends.id, date: "2026-08-06", period: "night" }),
+      shiftEvent({ personId: multipleWeekends.id, date: "2026-08-20", period: "night" }),
+      // Only weekday shifts -- no weekend work at all.
+      shiftEvent({ personId: noWeekendShifts.id, date: "2026-08-03", period: "day" }),
+      shiftEvent({ personId: noWeekendShifts.id, date: "2026-08-04", period: "day" }),
+    ];
+
+    const result = computeShiftFairnessForGroup("technician", roster, events, dates);
+
+    expect(findPerson(result, onlyOneDay.id).weekendsWorked).toBe(1);
+    expect(findPerson(result, fullWeekend.id).weekendsWorked).toBe(1);
+    expect(findPerson(result, multipleWeekends.id).weekendsWorked).toBe(2);
+    expect(findPerson(result, noWeekendShifts.id).weekendsWorked).toBe(0);
+
+    // Audit requirement: actualShifts / target / weekendActualShifts /
+    // weekendTarget / weekendStatus are all untouched by this fix -- still
+    // exactly what the pre-existing opportunity-share formula produces.
+    expect(findPerson(result, fullWeekend.id).actualShifts).toBe(3);
+    expect(findPerson(result, fullWeekend.id).weekendActualShifts).toBe(3);
+    expect(findPerson(result, noWeekendShifts.id).actualShifts).toBe(2);
+    expect(findPerson(result, noWeekendShifts.id).weekendActualShifts).toBe(0);
+  });
+});
+
 describe("computeShiftFairnessForGroup — partial/incomplete data propagation", () => {
   it("regular/permanent participation is always flagged as assumed, never presented as verified", () => {
     const REGULAR = person({ id: "p_reg", isTechnician: true });

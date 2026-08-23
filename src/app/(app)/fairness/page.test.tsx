@@ -53,6 +53,7 @@ function shiftRow(overrides: Partial<ShiftFairnessPersonRowView> = {}): ShiftFai
     weekendTarget: 1.2,
     weekendDeviation: -0.2,
     weekendStatus: "balanced",
+    weekendsWorked: 1,
     dataCompleteness: COMPLETE_FAIRNESS_DATA,
     expectationFactors: null,
     ...overrides,

@@ -18,6 +18,7 @@ function shiftRow(overrides: Partial<ShiftFairnessPersonRowView> = {}): ShiftFai
     weekendTarget: 1.2,
     weekendDeviation: -0.2,
     weekendStatus: "balanced",
+    weekendsWorked: 1,
     dataCompleteness: COMPLETE_FAIRNESS_DATA,
     expectationFactors: null,
     ...overrides,
@@ -100,6 +101,19 @@ describe("buildShiftFairnessCardView -- Justice Table redesign: statusStateLabel
       "/fairness?person=p_1",
     );
     expect(view.expectationFactorLabel).toBeNull();
+  });
+});
+
+describe("buildShiftFairnessCardView -- weekendActualLabel sources from weekendsWorked (distinct weekends), never weekendActualShifts (weekend shift-slots)", () => {
+  it("shows weekendsWorked's value even when it genuinely differs from weekendActualShifts -- the exact reported bug shape", () => {
+    // 6 real weekend shift-slots (weekendActualShifts) across only 2
+    // distinct Thu-Sat blocks (weekendsWorked) -- the card must show "2".
+    const view = buildShiftFairnessCardView(
+      shiftRow({ weekendActualShifts: 6, weekendsWorked: 2 }),
+      "/fairness?person=p_1",
+    );
+    expect(view.weekendActualLabel).toBe("2");
+    expect(view.weekendActualLabel).not.toBe("6");
   });
 });
 

@@ -100,6 +100,7 @@ function toGroupView(
     weekendTarget: personResult.weekendTarget,
     weekendDeviation: personResult.weekendDeviation,
     weekendStatus: personResult.weekendStatus,
+    weekendsWorked: personResult.weekendsWorked,
     dataCompleteness: personResult.dataCompleteness,
     // A null target has no "expected value" to explain -- never computed for those rows.
     expectationFactors:

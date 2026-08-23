@@ -223,3 +223,29 @@ describe("buildShiftFairnessReadModel — integration: future scheduled shifts n
     ).toBe(2);
   });
 });
+
+describe("buildShiftFairnessReadModel — integration: weekendsWorked counts distinct Thu-Sat blocks, not weekend shift-slots", () => {
+  it("real-world regression: Aug 6-8 + Aug 20-22, 'today' = Aug 23 2026 -> weekendsWorked = 2 on the final read model row", () => {
+    const leia = person({ id: "p_leia", name: "לאה טכנאית", isTechnician: true });
+    const now: LocalNow = { date: "2026-08-23", minuteOfDay: 600 };
+    const month = { year: 2026, month: 8 };
+
+    const events: Event[] = [
+      shiftEvent({ personId: leia.id, date: "2026-08-06", role: "technician" }),
+      shiftEvent({ personId: leia.id, date: "2026-08-07", role: "technician" }),
+      shiftEvent({ personId: leia.id, date: "2026-08-08", role: "technician" }),
+      shiftEvent({ personId: leia.id, date: "2026-08-20", role: "technician" }),
+      shiftEvent({ personId: leia.id, date: "2026-08-21", role: "technician" }),
+      shiftEvent({ personId: leia.id, date: "2026-08-22", role: "technician" }),
+    ];
+
+    const model = buildShiftFairnessReadModel([leia], events, month, now, "2026-08-23T10:00:00.000Z");
+    const row = model.groups.find((group) => group.role === "technician")?.rows[0];
+
+    expect(row?.weekendsWorked).toBe(2);
+    // A DIFFERENT, still-correct fact -- 6 real weekend shift-slots -- kept
+    // exactly as before, since weekendTarget/weekendDeviation/weekendStatus
+    // still derive from it, unchanged by this fix.
+    expect(row?.weekendActualShifts).toBe(6);
+  });
+});

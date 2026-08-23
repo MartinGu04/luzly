@@ -4,6 +4,7 @@ import {
   COMPLETE_FAIRNESS_DATA,
   countFairnessWeekendDates,
   fairnessDataCompleteness,
+  fairnessWeekendBucketKey,
   FAIRNESS_MODEL_VERSION,
   isFairnessWeekendDate,
   resolveFairnessPeriodStatus,
@@ -97,5 +98,38 @@ describe("countFairnessWeekendDates", () => {
 
   it("empty list -> 0", () => {
     expect(countFairnessWeekendDates([])).toBe(0);
+  });
+});
+
+describe("fairnessWeekendBucketKey — collapses one Thu-Sat block to one key", () => {
+  it("Thursday, Friday, and Saturday of the SAME block all resolve to that block's own Saturday", () => {
+    const thursday = fairnessWeekendBucketKey("2026-08-06");
+    const friday = fairnessWeekendBucketKey("2026-08-07");
+    const saturday = fairnessWeekendBucketKey("2026-08-08");
+
+    expect(thursday).toBe("2026-08-08");
+    expect(friday).toBe("2026-08-08");
+    expect(saturday).toBe("2026-08-08");
+    expect(new Set([thursday, friday, saturday]).size).toBe(1);
+  });
+
+  it("two SEPARATE Thu-Sat blocks resolve to two DIFFERENT keys", () => {
+    const firstBlock = fairnessWeekendBucketKey("2026-08-06"); // Thursday
+    const secondBlock = fairnessWeekendBucketKey("2026-08-20"); // Thursday, a different week
+    expect(firstBlock).not.toBe(secondBlock);
+  });
+
+  it("a non-weekend date (Sunday..Wednesday) returns null, never a fabricated key", () => {
+    expect(fairnessWeekendBucketKey("2026-08-09")).toBeNull(); // Sunday
+    expect(fairnessWeekendBucketKey("2026-08-12")).toBeNull(); // Wednesday
+  });
+
+  it("an unparseable date returns null", () => {
+    expect(fairnessWeekendBucketKey("not-a-date")).toBeNull();
+  });
+
+  it("correctly rolls a month boundary (a Thursday near month-end whose Saturday falls in the next month)", () => {
+    // 2026-07-30 is a Thursday; its Saturday is 2026-08-01.
+    expect(fairnessWeekendBucketKey("2026-07-30")).toBe("2026-08-01");
   });
 });

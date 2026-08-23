@@ -68,6 +68,7 @@ export interface ShiftFairnessCardView {
    * (nothing to explain -- the comparison itself isn't available).
    */
   statusExplanationLabel: string | null;
+  /** Distinct weekends worked (`row.weekendsWorked`), NOT a weekend shift-slot count -- see that field's own docs. */
   weekendActualLabel: string;
   weekendTargetLabel: string | null;
   weekendDeviationLabel: string | null;
@@ -170,7 +171,7 @@ export function buildShiftFairnessCardView(
     statusLabel: fairnessShiftStatusLabel(row.status),
     statusStateLabel: formatFairnessDeviationState(row.deviation, row.status),
     statusExplanationLabel: buildShiftStatusExplanationLabel(row.status, isCurrentMonth),
-    weekendActualLabel: String(row.weekendActualShifts),
+    weekendActualLabel: String(row.weekendsWorked),
     weekendTargetLabel: row.weekendTarget !== null ? formatFairnessExpectedValue(row.weekendTarget) : null,
     weekendDeviationLabel: row.weekendDeviation !== null ? formatFairnessGap(row.weekendDeviation) : null,
     weekendStatus: row.weekendStatus,
