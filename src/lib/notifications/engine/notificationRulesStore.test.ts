@@ -13,6 +13,10 @@ interface FakeRow {
   body: string | null;
   audience_kind: string | null;
   target_person_ids: string[];
+  system_title_override: string | null;
+  system_body_override: string | null;
+  system_audience_mode: "all_eligible" | "selected";
+  system_target_person_ids: string[];
   archived_at: string | null;
   created_by_person_id: string | null;
   created_by_person_name: string | null;
@@ -36,6 +40,10 @@ function systemRow(overrides: Partial<FakeRow> = {}): FakeRow {
     body: null,
     audience_kind: null,
     target_person_ids: [],
+    system_title_override: null,
+    system_body_override: null,
+    system_audience_mode: "all_eligible",
+    system_target_person_ids: [],
     archived_at: null,
     created_by_person_id: null,
     created_by_person_name: null,
@@ -61,6 +69,10 @@ function customRow(overrides: Partial<FakeRow> = {}): FakeRow {
     body: "גוף",
     audience_kind: "everyone",
     target_person_ids: [],
+    system_title_override: null,
+    system_body_override: null,
+    system_audience_mode: "all_eligible",
+    system_target_person_ids: [],
     archived_at: null,
     created_by_person_id: "p_manager",
     created_by_person_name: "מנהל",
@@ -137,6 +149,10 @@ function makeFakeNotificationRulesClient(initialRows: FakeRow[] = []) {
                 body: null,
                 audience_kind: null,
                 target_person_ids: [],
+                system_title_override: null,
+                system_body_override: null,
+                system_audience_mode: "all_eligible",
+                system_target_person_ids: [],
                 archived_at: null,
                 created_by_person_id: null,
                 created_by_person_name: null,
@@ -186,7 +202,7 @@ describe("listActiveNotificationRules", () => {
 
 describe("updateSystemRule -- atomic rule update + pending-job invalidation via RPC", () => {
   /**
-   * A stateful fake for `update_system_rule_and_invalidate_pending_jobs`
+   * A stateful fake for `update_system_rule_configuration_and_invalidate_pending_jobs`
    * that mirrors the real RPC's transactional behavior: update the row
    * only when it's a genuine `kind = 'system'` match, INCREMENT `revision`,
    * then delete every `pendingJobCategories` entry equal to that row's
@@ -196,13 +212,17 @@ describe("updateSystemRule -- atomic rule update + pending-job invalidation via 
   function makeFakeSystemRuleUpdateClient(rows: FakeRow[], pendingJobCategories: string[] = []) {
     const pendingJobs = [...pendingJobCategories];
     const rpc = vi.fn(async (fnName: string, params: Record<string, unknown>) => {
-      if (fnName !== "update_system_rule_and_invalidate_pending_jobs") throw new Error(`unexpected rpc ${fnName}`);
+      if (fnName !== "update_system_rule_configuration_and_invalidate_pending_jobs") throw new Error(`unexpected rpc ${fnName}`);
       const row = rows.find((candidate) => candidate.id === params.p_rule_id && candidate.kind === "system");
       if (!row) return { data: [], error: null };
 
       row.enabled = params.p_enabled as boolean;
       row.local_hour = params.p_local_hour as number;
       row.local_minute = params.p_local_minute as number;
+      row.system_title_override = (params.p_title_override as string | null) ?? null;
+      row.system_body_override = (params.p_body_override as string | null) ?? null;
+      row.system_audience_mode = (params.p_audience_mode as "all_eligible" | "selected") ?? "all_eligible";
+      row.system_target_person_ids = (params.p_target_person_ids as string[] | null) ?? [];
       row.revision += 1;
       row.updated_by_person_id = params.p_updated_by_person_id as string;
       row.updated_by_person_name = params.p_updated_by_person_name as string;
@@ -224,35 +244,135 @@ describe("updateSystemRule -- atomic rule update + pending-job invalidation via 
       enabled: false,
       localHour: 19,
       localMinute: 30,
-      updatedByPersonId: "p_manager",
+      titleOverride: null, bodyOverride: null, audienceMode: "all_eligible" as const, targetPersonIds: [], updatedByPersonId: "p_manager",
       updatedByPersonName: "מנהל",
     });
 
     expect(updated).toMatchObject({ id: "rule-1", enabled: false, localHour: 19, localMinute: 30 });
   });
 
+  it("persists title/body overrides and the audience mode/targets", async () => {
+    const { client } = makeFakeSystemRuleUpdateClient([systemRow()]);
+    const { updateSystemRule } = await loadModule(client);
+
+    const updated = await updateSystemRule("rule-1", {
+      enabled: true,
+      localHour: 20,
+      localMinute: 0,
+      titleOverride: "כותרת מותאמת",
+      bodyOverride: "תוכן מותאם {details}",
+      audienceMode: "selected",
+      targetPersonIds: ["p_a", "p_b"],
+      updatedByPersonId: "p",
+      updatedByPersonName: "n",
+    });
+
+    expect(updated?.systemTitleOverride).toBe("כותרת מותאמת");
+    expect(updated?.systemBodyOverride).toBe("תוכן מותאם {details}");
+    expect(updated?.systemAudienceMode).toBe("selected");
+    expect(updated?.systemTargetPersonIds).toEqual(["p_a", "p_b"]);
+  });
+
+  it("resetting title/body to null clears the override, leaving audience untouched", async () => {
+    const { client } = makeFakeSystemRuleUpdateClient([
+      systemRow({ system_title_override: "ישן", system_body_override: "ישן גם", system_audience_mode: "selected", system_target_person_ids: ["p_a"] }),
+    ]);
+    const { updateSystemRule } = await loadModule(client);
+
+    const updated = await updateSystemRule("rule-1", {
+      enabled: true,
+      localHour: 20,
+      localMinute: 0,
+      titleOverride: null,
+      bodyOverride: null,
+      audienceMode: "selected",
+      targetPersonIds: ["p_a"],
+      updatedByPersonId: "p",
+      updatedByPersonName: "n",
+    });
+
+    expect(updated?.systemTitleOverride).toBeNull();
+    expect(updated?.systemBodyOverride).toBeNull();
+    expect(updated?.systemAudienceMode).toBe("selected");
+    expect(updated?.systemTargetPersonIds).toEqual(["p_a"]);
+  });
+
   it("increments revision on every edit -- the stale-worker-config guard `upsertPendingSystemReminderJob` checks", async () => {
     const { client } = makeFakeSystemRuleUpdateClient([systemRow({ revision: 1 })]);
     const { updateSystemRule } = await loadModule(client);
 
-    const first = await updateSystemRule("rule-1", { enabled: false, localHour: 19, localMinute: 30, updatedByPersonId: "p", updatedByPersonName: "n" });
+    const first = await updateSystemRule("rule-1", { enabled: false, localHour: 19, localMinute: 30, titleOverride: null, bodyOverride: null, audienceMode: "all_eligible" as const, targetPersonIds: [], updatedByPersonId: "p", updatedByPersonName: "n" });
     expect(first?.revision).toBe(2);
 
-    const second = await updateSystemRule("rule-1", { enabled: true, localHour: 19, localMinute: 30, updatedByPersonId: "p", updatedByPersonName: "n" });
+    const second = await updateSystemRule("rule-1", { enabled: true, localHour: 19, localMinute: 30, titleOverride: null, bodyOverride: null, audienceMode: "all_eligible" as const, targetPersonIds: [], updatedByPersonId: "p", updatedByPersonName: "n" });
     expect(second?.revision).toBe(3);
+  });
+
+  it("increments revision for a COPY-ONLY or AUDIENCE-ONLY edit exactly the same as an enabled/time edit -- the stale-worker guard is content-agnostic, not just enabled/time-agnostic", async () => {
+    const { client } = makeFakeSystemRuleUpdateClient([systemRow({ revision: 1, enabled: true, local_hour: 20, local_minute: 0 })]);
+    const { updateSystemRule } = await loadModule(client);
+
+    // Enabled/time are UNCHANGED here -- only title/body/audience move.
+    const updated = await updateSystemRule("rule-1", {
+      enabled: true,
+      localHour: 20,
+      localMinute: 0,
+      titleOverride: "כותרת חדשה",
+      bodyOverride: "תוכן חדש",
+      audienceMode: "selected",
+      targetPersonIds: ["p_a"],
+      updatedByPersonId: "p",
+      updatedByPersonName: "n",
+    });
+
+    expect(updated?.revision).toBe(2); // a stale worker holding revision 1 is refused exactly as if enabled/time had changed
   });
 
   it("calls the RPC with the exact param names the SQL function expects", async () => {
     const { client, rpc } = makeFakeSystemRuleUpdateClient([systemRow()]);
     const { updateSystemRule } = await loadModule(client);
 
-    await updateSystemRule("rule-1", { enabled: false, localHour: 19, localMinute: 30, updatedByPersonId: "p_manager", updatedByPersonName: "מנהל" });
+    await updateSystemRule("rule-1", { enabled: false, localHour: 19, localMinute: 30, titleOverride: null, bodyOverride: null, audienceMode: "all_eligible" as const, targetPersonIds: [], updatedByPersonId: "p_manager", updatedByPersonName: "מנהל" });
 
-    expect(rpc).toHaveBeenCalledWith("update_system_rule_and_invalidate_pending_jobs", {
+    expect(rpc).toHaveBeenCalledWith("update_system_rule_configuration_and_invalidate_pending_jobs", {
       p_rule_id: "rule-1",
       p_enabled: false,
       p_local_hour: 19,
       p_local_minute: 30,
+      p_title_override: null,
+      p_body_override: null,
+      p_audience_mode: "all_eligible",
+      p_target_person_ids: [],
+      p_updated_by_person_id: "p_manager",
+      p_updated_by_person_name: "מנהל",
+    });
+  });
+
+  it("calls the RPC with non-default copy/audience params exactly as given", async () => {
+    const { client, rpc } = makeFakeSystemRuleUpdateClient([systemRow()]);
+    const { updateSystemRule } = await loadModule(client);
+
+    await updateSystemRule("rule-1", {
+      enabled: true,
+      localHour: 19,
+      localMinute: 30,
+      titleOverride: "כותרת מותאמת",
+      bodyOverride: "תוכן מותאם {details}",
+      audienceMode: "selected",
+      targetPersonIds: ["p_a", "p_b"],
+      updatedByPersonId: "p_manager",
+      updatedByPersonName: "מנהל",
+    });
+
+    expect(rpc).toHaveBeenCalledWith("update_system_rule_configuration_and_invalidate_pending_jobs", {
+      p_rule_id: "rule-1",
+      p_enabled: true,
+      p_local_hour: 19,
+      p_local_minute: 30,
+      p_title_override: "כותרת מותאמת",
+      p_body_override: "תוכן מותאם {details}",
+      p_audience_mode: "selected",
+      p_target_person_ids: ["p_a", "p_b"],
       p_updated_by_person_id: "p_manager",
       p_updated_by_person_name: "מנהל",
     });
@@ -265,7 +385,7 @@ describe("updateSystemRule -- atomic rule update + pending-job invalidation via 
     );
     const { updateSystemRule } = await loadModule(client);
 
-    await updateSystemRule("rule-1", { enabled: false, localHour: 20, localMinute: 0, updatedByPersonId: "p", updatedByPersonName: "n" });
+    await updateSystemRule("rule-1", { enabled: false, localHour: 20, localMinute: 0, titleOverride: null, bodyOverride: null, audienceMode: "all_eligible" as const, targetPersonIds: [], updatedByPersonId: "p", updatedByPersonName: "n" });
 
     expect(pendingJobs).toEqual(["tomorrow_duty"]); // both tomorrow_shift jobs invalidated, the unrelated one untouched
   });
@@ -278,7 +398,7 @@ describe("updateSystemRule -- atomic rule update + pending-job invalidation via 
       enabled: false,
       localHour: 19,
       localMinute: 30,
-      updatedByPersonId: "p_manager",
+      titleOverride: null, bodyOverride: null, audienceMode: "all_eligible" as const, targetPersonIds: [], updatedByPersonId: "p_manager",
       updatedByPersonName: "מנהל",
     });
 
@@ -290,7 +410,7 @@ describe("updateSystemRule -- atomic rule update + pending-job invalidation via 
     const { client } = makeFakeSystemRuleUpdateClient([]);
     const { updateSystemRule } = await loadModule(client);
 
-    const updated = await updateSystemRule("nope", { enabled: true, localHour: 0, localMinute: 0, updatedByPersonId: "p", updatedByPersonName: "n" });
+    const updated = await updateSystemRule("nope", { enabled: true, localHour: 0, localMinute: 0, titleOverride: null, bodyOverride: null, audienceMode: "all_eligible" as const, targetPersonIds: [], updatedByPersonId: "p", updatedByPersonName: "n" });
 
     expect(updated).toBeNull();
   });
@@ -306,7 +426,7 @@ interface RaceRuleState {
 
 /**
  * A single stateful fake spanning ALL THREE RPCs
- * (`update_system_rule_and_invalidate_pending_jobs`,
+ * (`update_system_rule_configuration_and_invalidate_pending_jobs`,
  * `upsert_pending_system_reminder_job`, and
  * `cancel_pending_system_reminder_job`), sharing ONE underlying rule/
  * pending-jobs state -- exactly like the real migration's three
@@ -336,7 +456,7 @@ interface RaceRuleState {
 function makeFakeRaceClient(rule: RaceRuleState) {
   const pendingJobs = new Map<string, { category: string; scheduledFor: string }>();
   const rpc = vi.fn(async (fnName: string, params: Record<string, unknown>) => {
-    if (fnName === "update_system_rule_and_invalidate_pending_jobs") {
+    if (fnName === "update_system_rule_configuration_and_invalidate_pending_jobs") {
       if (rule.id !== params.p_rule_id || rule.kind !== "system") return { data: [], error: null };
       rule.enabled = params.p_enabled as boolean;
       rule.revision += 1;
@@ -420,7 +540,7 @@ describe("upsertPendingSystemReminderJob + updateSystemRule -- the stale-revisio
 
     // Manager disables -- commits FIRST, revision becomes 2, and (per its
     // own atomic invalidation) there is nothing pending to delete yet.
-    await updateSystemRule("rule-1", { enabled: false, localHour: 20, localMinute: 0, updatedByPersonId: "p", updatedByPersonName: "n" });
+    await updateSystemRule("rule-1", { enabled: false, localHour: 20, localMinute: 0, titleOverride: null, bodyOverride: null, audienceMode: "all_eligible" as const, targetPersonIds: [], updatedByPersonId: "p", updatedByPersonName: "n" });
 
     // The stale worker only NOW attempts its revision-1 upsert.
     const wrote = await upsertPendingSystemReminderJob(raceJob(), { ruleId: "rule-1", expectedRevision: 1 });
@@ -434,7 +554,7 @@ describe("upsertPendingSystemReminderJob + updateSystemRule -- the stale-revisio
     const { updateSystemRule, upsertPendingSystemReminderJob } = await loadModule(client);
     const dedupeKey = "tomorrow_shift:2026-08-24:user-a:day";
 
-    await updateSystemRule("rule-1", { enabled: true, localHour: 21, localMinute: 0, updatedByPersonId: "p", updatedByPersonName: "n" });
+    await updateSystemRule("rule-1", { enabled: true, localHour: 21, localMinute: 0, titleOverride: null, bodyOverride: null, audienceMode: "all_eligible" as const, targetPersonIds: [], updatedByPersonId: "p", updatedByPersonName: "n" });
 
     // Stale rev-1 worker still tries to upsert the OLD (20:00) schedule.
     const staleWrite = await upsertPendingSystemReminderJob(
@@ -464,8 +584,35 @@ describe("upsertPendingSystemReminderJob + updateSystemRule -- the stale-revisio
     expect(pendingJobs.has(dedupeKey)).toBe(true);
 
     // Manager's update commits AFTER -- its own invalidation removes the job the worker just wrote.
-    await updateSystemRule("rule-1", { enabled: false, localHour: 20, localMinute: 0, updatedByPersonId: "p", updatedByPersonName: "n" });
+    await updateSystemRule("rule-1", { enabled: false, localHour: 20, localMinute: 0, titleOverride: null, bodyOverride: null, audienceMode: "all_eligible" as const, targetPersonIds: [], updatedByPersonId: "p", updatedByPersonName: "n" });
 
+    expect(pendingJobs.has(dedupeKey)).toBe(false);
+  });
+
+  it("3b. STALE WORKER AFTER A COPY-ONLY EDIT (enabled/time unchanged) -- a rev-1 worker's re-materialization attempt is refused exactly like a time/enabled edit would refuse it", async () => {
+    const { client, pendingJobs } = makeFakeRaceClient({ id: "rule-1", kind: "system", systemKey: "tomorrow_shift", enabled: true, revision: 1 });
+    const { updateSystemRule, upsertPendingSystemReminderJob } = await loadModule(client);
+    const dedupeKey = "tomorrow_shift:2026-08-24:user-a:day";
+
+    // Manager edits ONLY the title/body/audience -- enabled/time stay identical.
+    await updateSystemRule("rule-1", {
+      enabled: true,
+      localHour: 20,
+      localMinute: 0,
+      titleOverride: "כותרת חדשה אחרי עריכה",
+      bodyOverride: "תוכן חדש אחרי עריכה",
+      audienceMode: "selected",
+      targetPersonIds: ["p_a"],
+      updatedByPersonId: "p",
+      updatedByPersonName: "n",
+    });
+
+    // A worker that loaded revision 1 (the OLD copy) attempts to
+    // materialize a job for the SAME dedupe key afterward -- it must never
+    // be able to "restore" the old copy under a stale revision.
+    const wrote = await upsertPendingSystemReminderJob(raceJob({ dedupeKey }), { ruleId: "rule-1", expectedRevision: 1 });
+
+    expect(wrote).toBe(false);
     expect(pendingJobs.has(dedupeKey)).toBe(false);
   });
 
@@ -510,7 +657,7 @@ describe("cancelPendingSystemReminderJob -- the MIRROR-IMAGE stale-revision race
     // (nothing to upsert; modeled by simply never calling upsert for A).
 
     // Manager RE-ENABLES -- commits, revision becomes 2.
-    await updateSystemRule("rule-1", { enabled: true, localHour: 20, localMinute: 0, updatedByPersonId: "p", updatedByPersonName: "n" });
+    await updateSystemRule("rule-1", { enabled: true, localHour: 20, localMinute: 0, titleOverride: null, bodyOverride: null, audienceMode: "all_eligible" as const, targetPersonIds: [], updatedByPersonId: "p", updatedByPersonName: "n" });
 
     // Fresh Worker B, loaded with revision 2, correctly creates the now-valid pending job.
     const created = await upsertPendingSystemReminderJob(raceJob({ dedupeKey }), { ruleId: "rule-1", expectedRevision: 2 });
@@ -532,7 +679,7 @@ describe("cancelPendingSystemReminderJob -- the MIRROR-IMAGE stale-revision race
     const dedupeKeyB = "tomorrow_shift:2026-08-24:user-b:day";
 
     // Manager edit commits -- revision becomes 2 (content/time change, audience itself is domain-derived and unaffected).
-    await updateSystemRule("rule-1", { enabled: true, localHour: 21, localMinute: 0, updatedByPersonId: "p", updatedByPersonName: "n" });
+    await updateSystemRule("rule-1", { enabled: true, localHour: 21, localMinute: 0, titleOverride: null, bodyOverride: null, audienceMode: "all_eligible" as const, targetPersonIds: [], updatedByPersonId: "p", updatedByPersonName: "n" });
 
     // Fresh rev-2 worker creates/keeps recipient B's job.
     await upsertPendingSystemReminderJob(raceJob({ dedupeKey: dedupeKeyB, recipientUserId: "user-b" }), { ruleId: "rule-1", expectedRevision: 2 });
@@ -579,7 +726,7 @@ describe("cancelPendingSystemReminderJob -- the MIRROR-IMAGE stale-revision race
     const { updateSystemRule, upsertPendingSystemReminderJob, cancelPendingSystemReminderJob } = await loadModule(client);
     const dedupeKey = "tomorrow_shift:2026-08-24:user-a:day";
 
-    await updateSystemRule("rule-1", { enabled: true, localHour: 20, localMinute: 0, updatedByPersonId: "p", updatedByPersonName: "n" }); // revision -> 2
+    await updateSystemRule("rule-1", { enabled: true, localHour: 20, localMinute: 0, titleOverride: null, bodyOverride: null, audienceMode: "all_eligible" as const, targetPersonIds: [], updatedByPersonId: "p", updatedByPersonName: "n" }); // revision -> 2
     await upsertPendingSystemReminderJob(raceJob({ dedupeKey }), { ruleId: "rule-1", expectedRevision: 2 }); // the CURRENT, newer job
     expect(pendingJobs.has(dedupeKey)).toBe(true);
 
@@ -600,7 +747,7 @@ describe("cancelPendingSystemReminderJob -- the MIRROR-IMAGE stale-revision race
     expect(pendingJobs.has(dedupeKey)).toBe(false);
 
     // The manager's own (unrelated) edit commits afterward, normally -- its own hard-delete finds nothing left to remove.
-    await updateSystemRule("rule-1", { enabled: false, localHour: 20, localMinute: 0, updatedByPersonId: "p", updatedByPersonName: "n" });
+    await updateSystemRule("rule-1", { enabled: false, localHour: 20, localMinute: 0, titleOverride: null, bodyOverride: null, audienceMode: "all_eligible" as const, targetPersonIds: [], updatedByPersonId: "p", updatedByPersonName: "n" });
 
     expect(rule.revision).toBe(2);
     expect(pendingJobs.size).toBe(0);

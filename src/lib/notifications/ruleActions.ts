@@ -1,12 +1,19 @@
 "use server";
 
 import { getJerusalemLocalNow } from "@/lib/time/jerusalemClock";
-import { describeSystemRule, formatNextWeeklyOccurrence, formatWeeklyRecurringSchedule } from "@/lib/presentation/notificationRules";
+import {
+  describeSystemRule,
+  formatNextWeeklyOccurrence,
+  formatWeeklyRecurringSchedule,
+  SYSTEM_RULE_DETAILS_PLACEHOLDER,
+  type SystemRuleBodyKind,
+} from "@/lib/presentation/notificationRules";
 import { loadManagerPersonnelContext, loadManagerWorkbookContext } from "@/lib/readModels/managerWorkbookContext";
 import { validateAudienceCardinality, validateText, resolveAudience, type BroadcastAudienceKind } from "./engine/manualBroadcast";
 import { BROADCAST_BODY_MAX_LENGTH, BROADCAST_TITLE_MAX_LENGTH } from "./manualBroadcastLimits";
 import {
   archiveCustomWeeklyRule,
+  getNotificationRuleById,
   insertCustomWeeklyRule,
   listActiveNotificationRules,
   setCustomWeeklyRuleEnabled,
@@ -33,6 +40,19 @@ export interface SystemRuleView {
   trigger: string;
   audience: string;
   copyNote: string;
+  revision: number;
+  /** `null` = the built-in title is currently in effect. */
+  titleOverride: string | null;
+  /** `null` = the built-in body is currently in effect. For a `dynamic_details_required` category, a non-null value is the manager's own `{details}` template. */
+  bodyOverride: string | null;
+  audienceMode: "all_eligible" | "selected";
+  targetPersonIds: string[];
+  /** Whether `bodyOverride` (when set) must contain `{details}` -- from the one authoritative catalog (`describeSystemRule`), never re-derived. */
+  bodyKind: SystemRuleBodyKind;
+  defaultTitle: string;
+  /** Only meaningful when `bodyKind === "static_editable"`. */
+  defaultBody: string | null;
+  audienceFilterNote: string;
 }
 
 export interface CustomWeeklyRuleView {
@@ -67,6 +87,15 @@ function toSystemRuleView(row: NotificationRuleRow): SystemRuleView | null {
     trigger: description.trigger,
     audience: description.audience,
     copyNote: description.copyNote,
+    revision: row.revision,
+    titleOverride: row.systemTitleOverride,
+    bodyOverride: row.systemBodyOverride,
+    audienceMode: row.systemAudienceMode,
+    targetPersonIds: row.systemTargetPersonIds,
+    bodyKind: description.bodyKind,
+    defaultTitle: description.defaultTitle,
+    defaultBody: description.defaultBody,
+    audienceFilterNote: description.audienceFilterNote,
   };
 }
 
@@ -129,32 +158,116 @@ function isValidClockTime(hour: unknown, minute: unknown): hour is number {
   return Number.isInteger(hour) && (hour as number) >= 0 && (hour as number) <= 23 && Number.isInteger(minute) && (minute as number) >= 0 && (minute as number) <= 59;
 }
 
+/** `null` in, `null` out (reset to built-in). A blank/whitespace-only string is ALSO treated as a reset -- the same "reset to default" action the UI's own explicit button performs, just reachable by clearing the field. Too-long text is rejected. */
+function normalizeSystemCopyOverride(value: unknown, maxLength: number): { ok: true; value: string | null } | { ok: false } {
+  if (value === null) return { ok: true, value: null };
+  if (typeof value !== "string") return { ok: false };
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return { ok: true, value: null };
+  if (trimmed.length > maxLength) return { ok: false };
+  return { ok: true, value: trimmed };
+}
+
+function countOccurrences(haystack: string, needle: string): number {
+  let count = 0;
+  for (let index = haystack.indexOf(needle); index !== -1; index = haystack.indexOf(needle, index + needle.length)) {
+    count++;
+  }
+  return count;
+}
+
+export interface UpdateSystemRuleActionInput {
+  enabled: boolean;
+  localHour: number;
+  localMinute: number;
+  /** `null`, or a blank string, resets to the built-in title. */
+  titleOverride: string | null;
+  /** `null`, or a blank string, resets to the built-in body. For a `dynamic_details_required` category (`describeSystemRule`), a non-null value MUST contain exactly one `{details}` -- validated here server-side against the rule's OWN current classification, never trusted from the client. */
+  bodyOverride: string | null;
+  audienceMode: "all_eligible" | "selected";
+  /** Untrusted candidate roster ids -- re-validated against the freshly-fetched roster before anything is saved (never Supabase auth ids). Ignored (forced to `[]`) when `audienceMode` is `"all_eligible"`. */
+  targetPersonIds: string[];
+}
+
 /**
- * The ONLY fields a manager may ever change on a system rule --
- * enabled/disabled and its local send time. Never `title`/`body`/
- * `audienceKind`/`weekday`/`system_key`/`kind` -- those aren't even
- * accepted as input here, and the store layer's own `updateSystemRule`
- * only ever writes these two fields plus audit metadata (see that
- * function's own docstring; the migration's identity-protection trigger
- * is the final backstop underneath that).
+ * Every field a manager may change on a system rule: enabled/disabled,
+ * local send time, an optional title/body override, and an audience
+ * FILTER (mode + selected roster person ids) over the rule's own
+ * domain-derived eligible recipients. Never `weekday`/`system_key`/`kind`
+ * -- those aren't even accepted as input here, and the store layer's own
+ * `updateSystemRule` only ever writes the fields listed above plus audit
+ * metadata (the migration's identity-protection trigger is the final
+ * backstop underneath that). The rule's own trigger/domain-eligibility
+ * logic itself is never configurable here -- an audience selection can
+ * only narrow who a category's own existing eligibility computation
+ * already includes, never replace or expand it (see `reminders.ts`'s
+ * `isSystemRulePersonAllowed` call sites).
+ *
+ * Uses `loadManagerWorkbookContext(["personnel"])` (not the lighter
+ * `loadManagerPersonnelContext` this action used before audience
+ * filtering existed) -- a `"selected"` audience must be re-validated
+ * against a FRESH roster, exactly like `createCustomWeeklyRuleAction`/
+ * `updateCustomWeeklyRuleAction` already do for the same reason: a
+ * client-supplied person id that isn't a genuine current roster member
+ * fails the WHOLE request, never silently dropped.
  */
-export async function updateSystemRuleAction(
-  id: string,
-  input: { enabled: boolean; localHour: number; localMinute: number },
-): Promise<UpdateSystemRuleActionResult> {
+export async function updateSystemRuleAction(id: string, input: UpdateSystemRuleActionInput): Promise<UpdateSystemRuleActionResult> {
   if (typeof id !== "string" || id.length === 0) return { ok: false, error: "invalid_request" };
   if (typeof input.enabled !== "boolean") return { ok: false, error: "invalid_request" };
   if (!isValidClockTime(input.localHour, input.localMinute)) return { ok: false, error: "invalid_schedule" };
 
-  const contextResult = await loadManagerPersonnelContext();
+  const titleResult = normalizeSystemCopyOverride(input.titleOverride, BROADCAST_TITLE_MAX_LENGTH);
+  if (!titleResult.ok) return { ok: false, error: "invalid_title" };
+  const bodyResult = normalizeSystemCopyOverride(input.bodyOverride, BROADCAST_BODY_MAX_LENGTH);
+  if (!bodyResult.ok) return { ok: false, error: "invalid_body" };
+
+  if (input.audienceMode !== "all_eligible" && input.audienceMode !== "selected") {
+    return { ok: false, error: "invalid_audience" };
+  }
+  if (!Array.isArray(input.targetPersonIds) || !input.targetPersonIds.every((personId) => typeof personId === "string")) {
+    return { ok: false, error: "invalid_targets" };
+  }
+  if (input.audienceMode === "selected" && input.targetPersonIds.length === 0) {
+    return { ok: false, error: "no_targets" };
+  }
+
+  const contextResult = await loadManagerWorkbookContext(["personnel"]);
   if (contextResult.status !== "ok") return { ok: false, error: contextResult.status };
+  const { manager, people } = contextResult.context;
+
+  const existingRow = await getNotificationRuleById(id);
+  if (!existingRow || existingRow.kind !== "system" || existingRow.systemKey === null) {
+    return { ok: false, error: "not_found" };
+  }
+
+  // The `{details}` requirement is checked against THIS rule's OWN
+  // classification (the one authoritative catalog, `describeSystemRule`)
+  // -- never trusted from the client, and never re-derived anywhere else.
+  if (bodyResult.value !== null && describeSystemRule(existingRow.systemKey).bodyKind === "dynamic_details_required") {
+    if (countOccurrences(bodyResult.value, SYSTEM_RULE_DETAILS_PLACEHOLDER) !== 1) {
+      return { ok: false, error: "invalid_body_details_placeholder" };
+    }
+  }
+
+  let canonicalTargetPersonIds: string[] = [];
+  if (input.audienceMode === "selected") {
+    const rosterPersonIds = new Set(people.map((person) => person.id));
+    canonicalTargetPersonIds = [...new Set(input.targetPersonIds)];
+    if (!canonicalTargetPersonIds.every((personId) => rosterPersonIds.has(personId))) {
+      return { ok: false, error: "invalid_targets" };
+    }
+  }
 
   const updated = await updateSystemRule(id, {
     enabled: input.enabled,
     localHour: input.localHour,
     localMinute: input.localMinute,
-    updatedByPersonId: contextResult.context.manager.id,
-    updatedByPersonName: contextResult.context.manager.name,
+    titleOverride: titleResult.value,
+    bodyOverride: bodyResult.value,
+    audienceMode: input.audienceMode,
+    targetPersonIds: canonicalTargetPersonIds,
+    updatedByPersonId: manager.id,
+    updatedByPersonName: manager.name,
   });
   if (!updated) return { ok: false, error: "not_found" };
 
