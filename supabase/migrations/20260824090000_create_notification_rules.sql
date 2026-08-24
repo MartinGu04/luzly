@@ -220,7 +220,13 @@ on conflict (system_key) where kind = 'system' do nothing;
 -- already uses for one-time scheduled broadcasts, just keyed by
 -- (rule_id, occurrence_date) instead of a pre-existing row id, since a
 -- recurring occurrence has no row at all until the moment it's first
--- claimed.
+-- claimed. Recovery is discoverable INDEPENDENTLY of the rule's current
+-- config (see `frozen_*` below) -- a stale 'claimed' row is found by
+-- `claimed_at`/`status` alone, never by re-matching the rule's current
+-- weekday/time/enabled state, so a claimed-but-crashed occurrence stays
+-- resumable even after midnight, a disable, an archive, or a schedule
+-- edit (see this table's own `frozen_*` columns and the claim
+-- function's own doc comment for exactly why).
 --
 -- `batch_id` is this row's own dispatch checkpoint, exactly like
 -- `manager_scheduled_broadcasts.batch_id`: null means "no batch created
@@ -231,6 +237,20 @@ on conflict (system_key) where kind = 'system' do nothing;
 -- `insertManagerNotificationBatchIfAbsent`'s own idempotent insert
 -- (`manager_notification_batches.idempotency_key`), which transparently
 -- finds the already-created batch rather than creating a second one.
+--
+-- `frozen_title`/`frozen_body`/`frozen_audience_kind`/
+-- `frozen_target_person_ids`/`frozen_created_by_person_id`/
+-- `frozen_created_by_person_name` are captured ONCE, at the FRESH claim
+-- instant, from the (locked) `notification_rules` row -- and NEVER
+-- updated again for that occurrence. A resume reads ONLY these columns,
+-- never `notification_rules` again -- so a manager editing the rule's
+-- title/body/audience AFTER an occurrence was already claimed can never
+-- retroactively change what that already-in-flight occurrence sends;
+-- the edit only ever affects the NEXT occurrence. This is the actual
+-- "frozen at claim" guarantee -- see the claim function's own doc
+-- comment for the bug this closes (a stale resume that re-read mutable
+-- `notification_rules` columns could silently change an already-claimed
+-- occurrence's meaning).
 -- ---------------------------------------------------------------------
 create table if not exists public.notification_rule_occurrences (
   id uuid primary key default gen_random_uuid(),
@@ -239,13 +259,28 @@ create table if not exists public.notification_rule_occurrences (
   occurrence_date date not null,
   status text not null default 'claimed',
   batch_id uuid references public.manager_notification_batches (id),
+  frozen_title text not null,
+  frozen_body text not null,
+  frozen_audience_kind text not null,
+  frozen_target_person_ids text[] not null default '{}',
+  frozen_created_by_person_id text,
+  frozen_created_by_person_name text,
   claimed_at timestamptz not null default now(),
   completed_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint notification_rule_occurrences_unique unique (rule_id, occurrence_date),
-  constraint notification_rule_occurrences_status_check check (status in ('claimed', 'completed'))
+  constraint notification_rule_occurrences_status_check check (status in ('claimed', 'completed')),
+  constraint notification_rule_occurrences_audience_kind_check
+    check (frozen_audience_kind in ('person', 'people', 'everyone'))
 );
+
+-- The recovery-discovery query's own access path: every stale-or-fresh
+-- 'claimed' row, cheaply, without touching `notification_rules` at all
+-- -- see `listRecoverableNotificationRuleOccurrences` (store.ts).
+create index if not exists notification_rule_occurrences_claimed_idx
+  on public.notification_rule_occurrences (claimed_at)
+  where status = 'claimed';
 
 alter table public.notification_rule_occurrences enable row level security;
 
@@ -254,7 +289,8 @@ alter table public.notification_rule_occurrences enable row level security;
 
 -- -----------------------------------------------------------------------
 -- claim_notification_rule_occurrence -- the ONE atomic claim boundary for
--- a custom weekly rule's occurrence, closing two distinct races at once:
+-- a custom weekly rule's occurrence, closing three distinct races at
+-- once:
 --
 -- 1. AT-MOST-ONCE DISPATCH under overlapping workers / retried ticks.
 --    A FRESH claim (no existing row yet) is a plain
@@ -270,27 +306,44 @@ alter table public.notification_rule_occurrences enable row level security;
 --    same live occurrence. A `'completed'` row always returns zero rows
 --    -- the occurrence is genuinely done, forever.
 --
--- 2. THE DISABLE/EDIT-BEFORE-CLAIM RACE. A FRESH claim additionally
---    `select ... for update`s the rule's OWN row before ever inserting
---    the occurrence claim, and refuses to claim at all if the rule is,
---    RIGHT NOW, disabled/archived/gone -- never the possibly-stale
---    in-memory rule snapshot `findDueCustomWeeklyOccurrences` computed
---    earlier in the same tick (a manager's disable/edit/archive commits
---    either strictly before this lock is acquired, in which case it's
---    correctly honored below, or it blocks on this SAME row lock until
---    this transaction commits the claim -- at which point the occurrence
---    is already legitimately claimed and the disable only ever prevents
---    the NEXT occurrence). A RESUME of an already-claimed row is
---    deliberately NOT re-gated on the rule's current enabled state --
---    that occurrence was legitimately claimed while the rule WAS enabled
---    at the time, and a later disable must never leave a genuinely
---    in-flight send stuck half-dispatched forever; it finishes
---    idempotently instead, exactly per this feature's own spec.
+-- 2. THE DISABLE/EDIT/ARCHIVE-BEFORE-CLAIM RACE. A FRESH claim
+--    additionally `select ... for update`s the rule's OWN row before
+--    ever inserting the occurrence claim, and refuses to claim at all
+--    unless, RIGHT NOW: the rule exists, is `kind = 'custom_weekly'`,
+--    `enabled`, not archived, `p_occurrence_date`'s Asia/Jerusalem
+--    weekday matches the rule's CURRENT `weekday`, AND the current
+--    instant has actually reached the rule's CURRENT configured local
+--    time for that date (computed via a real `AT TIME ZONE
+--    'Asia/Jerusalem'` conversion -- never the database/server's
+--    implicit timezone). This closes BOTH the disable-before-claim race
+--    AND the schedule-edit-before-claim race in one boundary: a stale
+--    in-memory candidate computed from an EARLIER tick's rule snapshot
+--    (before an edit moved the time later, or to a different weekday)
+--    can never slip through here, because this check is against the
+--    LOCKED, CURRENT row, never the caller's own possibly-stale
+--    `p_occurrence_date`-implies-due assumption. A manager's disable/
+--    edit/archive commits either strictly before this lock is acquired
+--    (correctly honored below), or blocks on this SAME row lock until
+--    this transaction commits the claim (at which point the occurrence
+--    is already legitimately claimed, and the edit only ever affects
+--    the NEXT occurrence).
 --
--- Returns the frozen-at-claim rule content (title/body/audience) rather
--- than making the caller re-read `notification_rules` separately, so a
--- concurrent edit that lands AFTER this claim commits can never leak
--- into an in-flight dispatch's content either.
+--    A RESUME of an already-claimed row is deliberately NOT re-gated on
+--    ANY of the above (current enabled state, archive state, or
+--    schedule) -- that occurrence was legitimately claimed while the
+--    rule's config validated at THAT moment, and a later disable/edit/
+--    archive must never leave a genuinely in-flight send stuck
+--    half-dispatched forever; it finishes idempotently instead, using
+--    its own FROZEN content (see below), exactly per this feature's own
+--    spec.
+--
+-- 3. STALE-CONTENT LEAKAGE ON RESUME. A resume returns the occurrence
+--    row's OWN `frozen_*` columns (captured once, at the fresh-claim
+--    instant) -- it NEVER re-reads `notification_rules` for title/body/
+--    audience/target ids. A manager editing the rule's content AFTER
+--    this occurrence was already claimed (but before it completed) can
+--    therefore never retroactively change what an in-flight occurrence
+--    sends.
 -- -----------------------------------------------------------------------
 create or replace function public.claim_notification_rule_occurrence(
   p_rule_id uuid,
@@ -304,7 +357,9 @@ returns table (
   rule_title text,
   rule_body text,
   rule_audience_kind text,
-  rule_target_person_ids text[]
+  rule_target_person_ids text[],
+  created_by_person_id text,
+  created_by_person_name text
 )
 language plpgsql
 as $$
@@ -312,6 +367,7 @@ declare
   existing_row public.notification_rule_occurrences;
   rule_row public.notification_rules;
   inserted_row public.notification_rule_occurrences;
+  due_instant timestamptz;
 begin
   select * into existing_row from public.notification_rule_occurrences
     where rule_id = p_rule_id and occurrence_date = p_occurrence_date
@@ -326,18 +382,19 @@ begin
       return; -- actively leased by another worker right now -- zero rows
     end if;
 
-    -- Stale claim -- resume UNCONDITIONALLY (see this function's own doc
-    -- comment above for why the rule's current enabled state is
+    -- Stale claim -- resume UNCONDITIONALLY, using the occurrence's OWN
+    -- frozen snapshot (see this function's own doc comment above for
+    -- why both the rule's current state AND its current content are
     -- deliberately irrelevant here).
     update public.notification_rule_occurrences
       set claimed_at = now(), updated_at = now()
       where id = existing_row.id;
 
-    select * into rule_row from public.notification_rules where id = p_rule_id;
-
     return query
       select existing_row.id, existing_row.batch_id, true,
-             rule_row.title, rule_row.body, rule_row.audience_kind, rule_row.target_person_ids;
+             existing_row.frozen_title, existing_row.frozen_body,
+             existing_row.frozen_audience_kind, existing_row.frozen_target_person_ids,
+             existing_row.frozen_created_by_person_id, existing_row.frozen_created_by_person_name;
     return;
   end if;
 
@@ -354,8 +411,31 @@ begin
     return; -- disabled/archived/missing RIGHT NOW -- never claim, zero rows
   end if;
 
-  insert into public.notification_rule_occurrences (rule_id, occurrence_date, status, claimed_at)
-  values (p_rule_id, p_occurrence_date, 'claimed', now())
+  -- Re-validate the CURRENT schedule against the locked row -- a stale
+  -- in-memory candidate (computed before a weekday/time edit landed)
+  -- must never claim under the OLD schedule. `extract(dow from date)`
+  -- is 0=Sunday..6=Saturday, the same convention `rule_row.weekday`
+  -- already uses.
+  if extract(dow from p_occurrence_date)::smallint is distinct from rule_row.weekday then
+    return; -- this date is no longer this rule's configured weekday -- zero rows
+  end if;
+
+  due_instant := (p_occurrence_date::timestamp + make_interval(hours => rule_row.local_hour, mins => rule_row.local_minute))
+    at time zone 'Asia/Jerusalem';
+  if now() < due_instant then
+    return; -- the CURRENT configured time hasn't been reached yet -- zero rows
+  end if;
+
+  insert into public.notification_rule_occurrences (
+    rule_id, occurrence_date, status, claimed_at,
+    frozen_title, frozen_body, frozen_audience_kind, frozen_target_person_ids,
+    frozen_created_by_person_id, frozen_created_by_person_name
+  )
+  values (
+    p_rule_id, p_occurrence_date, 'claimed', now(),
+    rule_row.title, rule_row.body, rule_row.audience_kind, rule_row.target_person_ids,
+    rule_row.created_by_person_id, rule_row.created_by_person_name
+  )
   on conflict (rule_id, occurrence_date) do nothing
   returning * into inserted_row;
 
@@ -365,9 +445,109 @@ begin
 
   return query
     select inserted_row.id, inserted_row.batch_id, false,
-           rule_row.title, rule_row.body, rule_row.audience_kind, rule_row.target_person_ids;
+           inserted_row.frozen_title, inserted_row.frozen_body,
+           inserted_row.frozen_audience_kind, inserted_row.frozen_target_person_ids,
+           inserted_row.frozen_created_by_person_id, inserted_row.frozen_created_by_person_name;
 end;
 $$;
 
 revoke all on function public.claim_notification_rule_occurrence(uuid, date, integer) from public, anon, authenticated;
 grant execute on function public.claim_notification_rule_occurrence(uuid, date, integer) to service_role;
+
+-- -----------------------------------------------------------------------
+-- update_system_rule_and_invalidate_pending_jobs -- the ONE write
+-- boundary for a manager's system-rule edit (enable/disable, send-time
+-- change). Closes the race where an already-materialized pending
+-- `notification_jobs` row (system reminders are upserted ahead of their
+-- own send time -- see `reminders.ts`'s `applyReminderJobs`) could still
+-- be claimed and delivered by the once-a-minute delivery worker AFTER a
+-- manager's disable/time-edit commits but BEFORE the next 5-minute
+-- `runReminders()` tick gets a chance to reconcile it (spec: "already-
+-- pending UNSENT jobs belonging to that rule must be cancelled/
+-- reconciled").
+--
+-- Atomically, in ONE transaction:
+--  1. Updates `notification_rules` (guarded to `kind = 'system'`).
+--  2. DELETES every still-`'pending'` `notification_jobs` row whose
+--     `category` equals that rule's `system_key` -- deliberately a hard
+--     delete, never a soft `status = 'cancelled'`, and deliberately
+--     unconditional on date/recipient. A soft cancel was considered and
+--     rejected: `upsert_pending_reminder_job`'s own `on conflict ...
+--     where status = 'pending'` guard (see
+--     `20260819090000_fix_reminder_job_revival.sql`) means a job already
+--     marked 'cancelled' can NEVER be revived back to 'pending' by a
+--     later tick's normal upsert for the SAME dedupe_key -- so a soft
+--     cancel on a TIME EDIT (rule stays enabled, only the time moves)
+--     would permanently and silently lose that reminder for the
+--     currently-valid recipient(s), which is worse than the original
+--     bug. A hard delete has no such trap: the next `runReminders()`
+--     tick's normal upsert for that dedupe_key finds no existing row at
+--     all and inserts fresh, at the NEW configured time -- a genuine
+--     "reconcile", not just a "cancel". For a genuine DISABLE, deleting
+--     is equally correct: `runReminders()` will compute zero valid jobs
+--     for a disabled category on its next tick, so nothing re-inserts.
+--     This never touches `'claimed'`/`'completed'`/`'failed'`/
+--     `'skipped'`/`'cancelled'` rows -- a job the delivery worker has
+--     already legitimately claimed (or fully resolved) is left alone;
+--     ordinary Postgres row-level locking on the `where status =
+--     'pending'` DELETE makes this safe against a concurrently-running
+--     `claim_due_notification_jobs` without any extra locking here.
+--     Deleting an unsent, never-claimed, not-yet-due job also destroys
+--     no audit trail: no `notification_deliveries` row can exist for a
+--     job that was never claimed, and a still-future `scheduled_for`
+--     row was never visible in anyone's inbox yet either (see
+--     `getInboxJobsForRecipient`'s own `scheduled_for <= now()` filter).
+--  3. Returns the updated rule row.
+--
+-- Deliberately does NOT recompute/insert the NEW pending job itself --
+-- that stays entirely owned by `reminders.ts`'s existing domain-aware
+-- upsert logic (this function has no idea which recipients are
+-- currently valid for a shift/duty/logistics/almash/constraints
+-- category, and must never re-derive that in SQL -- see especially
+-- `almash_check_in`, whose Saturday send time is the real astronomical
+-- מוצ״ש instant, never a naive static clock time this function could
+-- compute). The safety property this function guarantees is IMMEDIATE
+-- (the stale pending job can no longer be delivered); rematerialization
+-- at the new time/config happens on the next reminder-worker tick, up
+-- to that worker's normal cadence later -- a documented, bounded delay,
+-- never a correctness gap.
+-- -----------------------------------------------------------------------
+create or replace function public.update_system_rule_and_invalidate_pending_jobs(
+  p_rule_id uuid,
+  p_enabled boolean,
+  p_local_hour smallint,
+  p_local_minute smallint,
+  p_updated_by_person_id text,
+  p_updated_by_person_name text
+)
+returns setof public.notification_rules
+language plpgsql
+as $$
+declare
+  updated_row public.notification_rules;
+begin
+  update public.notification_rules
+    set enabled = p_enabled,
+        local_hour = p_local_hour,
+        local_minute = p_local_minute,
+        updated_by_person_id = p_updated_by_person_id,
+        updated_by_person_name = p_updated_by_person_name,
+        updated_at = now()
+    where id = p_rule_id and kind = 'system'
+    returning * into updated_row;
+
+  if updated_row.id is null then
+    return; -- not found / not a system row -- zero rows, nothing else touched
+  end if;
+
+  delete from public.notification_jobs
+    where category = updated_row.system_key and status = 'pending';
+
+  return next updated_row;
+end;
+$$;
+
+revoke all on function public.update_system_rule_and_invalidate_pending_jobs(uuid, boolean, smallint, smallint, text, text)
+  from public, anon, authenticated;
+grant execute on function public.update_system_rule_and_invalidate_pending_jobs(uuid, boolean, smallint, smallint, text, text)
+  to service_role;

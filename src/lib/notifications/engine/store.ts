@@ -953,21 +953,33 @@ export interface NotificationRuleOccurrenceClaim {
   batchId: string | null;
   /** `true` when this call resumed an existing (previously claimed, now stale-leased) occurrence rather than creating a fresh one. */
   isResume: boolean;
-  /** The rule's content AS OF THE CLAIM INSTANT -- never the caller's own possibly-stale earlier snapshot. */
+  /**
+   * The occurrence's own FROZEN content -- captured once, at the FRESH
+   * claim instant, from `notification_rules`, and never re-read from
+   * there again. A resume returns this SAME frozen snapshot, never the
+   * rule's current (possibly since-edited) content -- see the RPC's own
+   * migration doc comment for exactly why re-reading mutable columns on
+   * resume would be a bug (a manager's post-claim edit silently changing
+   * an already-in-flight occurrence's meaning).
+   */
   ruleTitle: string;
   ruleBody: string;
   ruleAudienceKind: BroadcastAudienceKind;
   ruleTargetPersonIds: string[];
+  createdByPersonId: string | null;
+  createdByPersonName: string | null;
 }
 
 /**
  * Atomically claims (or safely resumes) one custom weekly rule's one
  * local occurrence -- the ONE call site of `claim_notification_rule_occurrence`.
  * `null` means: already `'completed'`, actively leased by another
- * worker right now, or the rule is disabled/archived/gone as of this
- * instant -- in every case, the caller does nothing further for this
- * occurrence this tick. See the RPC's own migration doc comment for the
- * full at-most-once + disable-before-claim race analysis.
+ * worker right now, or (FRESH claim only) the rule is disabled/archived/
+ * gone, or its CURRENT weekday/local time no longer matches
+ * `occurrenceDate`/the caller's assumption of due-ness -- in every case,
+ * the caller does nothing further for this occurrence this tick. See the
+ * RPC's own migration doc comment for the full at-most-once +
+ * disable/edit/archive-before-claim + frozen-content race analysis.
  */
 export async function claimNotificationRuleOccurrence(
   ruleId: string,
@@ -990,6 +1002,8 @@ export async function claimNotificationRuleOccurrence(
     ruleBody: row.rule_body as string,
     ruleAudienceKind: row.rule_audience_kind as BroadcastAudienceKind,
     ruleTargetPersonIds: (row.rule_target_person_ids as string[] | null) ?? [],
+    createdByPersonId: (row.created_by_person_id as string | null) ?? null,
+    createdByPersonName: (row.created_by_person_name as string | null) ?? null,
   };
 }
 
@@ -1050,6 +1064,40 @@ export async function listCompletedNotificationRuleOccurrenceKeys(
     if (candidateKeys.has(key)) completed.add(key);
   }
   return completed;
+}
+
+/**
+ * Every occurrence whose claim lease has gone stale -- `status =
+ * 'claimed'` and `claimed_at` older than `leaseSeconds` -- discovered
+ * INDEPENDENTLY of any rule's current enabled/schedule/archived state
+ * (never joins `notification_rules` at all). This is what makes a
+ * claimed-but-crashed occurrence recoverable even after its rule's
+ * weekday no longer matches today (e.g. claimed Saturday 23:59, crashed,
+ * discovered Sunday), even after the rule was disabled or archived, and
+ * even after its schedule was edited -- see `recurringRuleDispatch.ts`'s
+ * `findDueCustomWeeklyOccurrences`, the one caller, which merges this
+ * with the current-schedule-driven "freshly due" candidate list before
+ * every claim attempt. Every returned candidate still has to actually
+ * WIN `claim_notification_rule_occurrence` (this is a discovery query
+ * only, never a claim itself) -- so a small staleness window here (e.g.
+ * two ticks both seeing the same recoverable row) is harmless, exactly
+ * like `listCompletedNotificationRuleOccurrenceKeys`'s own docstring.
+ */
+export async function listRecoverableNotificationRuleOccurrences(
+  leaseSeconds = 90,
+): Promise<{ ruleId: string; occurrenceDate: string }[]> {
+  const supabase = getNotificationServiceClient();
+  const staleBefore = new Date(Date.now() - leaseSeconds * 1000).toISOString();
+  const { data, error } = await supabase
+    .from("notification_rule_occurrences")
+    .select("rule_id, occurrence_date")
+    .eq("status", "claimed")
+    .lt("claimed_at", staleBefore);
+  if (error) throw error;
+  return ((data ?? []) as { rule_id: string; occurrence_date: string }[]).map((row) => ({
+    ruleId: row.rule_id,
+    occurrenceDate: row.occurrence_date,
+  }));
 }
 
 /** A bounded recent-history read for the composer's own small audit list -- never a full archive. */
@@ -1652,25 +1700,39 @@ export interface SystemRuleEdit {
   updatedByPersonName: string;
 }
 
-/** The ONLY write path for a system rule -- guarded to `kind = 'system'` at the query level (defense in depth on top of the migration's own identity-protection trigger, which additionally forbids `kind`/`system_key` from ever appearing in the SET list here in the first place). `null` means the id doesn't exist or isn't a system rule. */
+/**
+ * The ONLY write path for a system rule -- via the
+ * `update_system_rule_and_invalidate_pending_jobs` RPC, guarded to
+ * `kind = 'system'` at the SQL level (defense in depth on top of the
+ * migration's own identity-protection trigger, which additionally
+ * forbids `kind`/`system_key` from ever appearing in the SET list here
+ * in the first place). `null` means the id doesn't exist or isn't a
+ * system rule -- nothing else was touched.
+ *
+ * Deliberately an RPC, not a plain `.update()`: the rule update and
+ * invalidating that category's still-`pending` (never-claimed)
+ * `notification_jobs` rows must happen in ONE atomic transaction --
+ * otherwise a disable/time-edit could commit while an already-
+ * materialized pending job (system reminders are upserted ahead of
+ * their own send time) is still deliverable for up to the next
+ * reminder-worker tick. See the RPC's own migration doc comment for why
+ * this is a hard delete rather than a soft cancel, and for the
+ * documented (bounded, safe) rematerialization delay this leaves for
+ * `reminders.ts`'s next tick.
+ */
 export async function updateSystemRule(id: string, edit: SystemRuleEdit): Promise<NotificationRuleRow | null> {
   const supabase = getNotificationServiceClient();
-  const { data, error } = await supabase
-    .from("notification_rules")
-    .update({
-      enabled: edit.enabled,
-      local_hour: edit.localHour,
-      local_minute: edit.localMinute,
-      updated_by_person_id: edit.updatedByPersonId,
-      updated_by_person_name: edit.updatedByPersonName,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", id)
-    .eq("kind", "system")
-    .select(NOTIFICATION_RULE_COLUMNS)
-    .maybeSingle();
+  const { data, error } = await supabase.rpc("update_system_rule_and_invalidate_pending_jobs", {
+    p_rule_id: id,
+    p_enabled: edit.enabled,
+    p_local_hour: edit.localHour,
+    p_local_minute: edit.localMinute,
+    p_updated_by_person_id: edit.updatedByPersonId,
+    p_updated_by_person_name: edit.updatedByPersonName,
+  });
   if (error) throw error;
-  return data ? toNotificationRuleRow(data as Record<string, unknown>) : null;
+  const rows = (data ?? []) as Record<string, unknown>[];
+  return rows.length > 0 ? toNotificationRuleRow(rows[0]) : null;
 }
 
 export interface NewCustomWeeklyRule {

@@ -180,9 +180,39 @@ describe("listActiveNotificationRules", () => {
   });
 });
 
-describe("updateSystemRule -- guarded to kind = 'system'", () => {
+describe("updateSystemRule -- atomic rule update + pending-job invalidation via RPC", () => {
+  /**
+   * A stateful fake for `update_system_rule_and_invalidate_pending_jobs`
+   * that mirrors the real RPC's transactional behavior: update the row
+   * only when it's a genuine `kind = 'system'` match, then delete every
+   * `pendingJobCategories` entry equal to that row's `system_key` --
+   * letting these tests actually prove the atomic invalidation, not just
+   * the row mapping.
+   */
+  function makeFakeSystemRuleUpdateClient(rows: FakeRow[], pendingJobCategories: string[] = []) {
+    const pendingJobs = [...pendingJobCategories];
+    const rpc = vi.fn(async (fnName: string, params: Record<string, unknown>) => {
+      if (fnName !== "update_system_rule_and_invalidate_pending_jobs") throw new Error(`unexpected rpc ${fnName}`);
+      const row = rows.find((candidate) => candidate.id === params.p_rule_id && candidate.kind === "system");
+      if (!row) return { data: [], error: null };
+
+      row.enabled = params.p_enabled as boolean;
+      row.local_hour = params.p_local_hour as number;
+      row.local_minute = params.p_local_minute as number;
+      row.updated_by_person_id = params.p_updated_by_person_id as string;
+      row.updated_by_person_name = params.p_updated_by_person_name as string;
+
+      const remaining = pendingJobs.filter((category) => category !== row.system_key);
+      pendingJobs.length = 0;
+      pendingJobs.push(...remaining);
+
+      return { data: [row], error: null };
+    });
+    return { client: { rpc }, rpc, pendingJobs };
+  }
+
   it("updates enabled/localHour/localMinute of a genuine system row", async () => {
-    const { client } = makeFakeNotificationRulesClient([systemRow()]);
+    const { client } = makeFakeSystemRuleUpdateClient([systemRow()]);
     const { updateSystemRule } = await loadModule(client);
 
     const updated = await updateSystemRule("rule-1", {
@@ -196,8 +226,36 @@ describe("updateSystemRule -- guarded to kind = 'system'", () => {
     expect(updated).toMatchObject({ id: "rule-1", enabled: false, localHour: 19, localMinute: 30 });
   });
 
-  it("never updates a custom_weekly row via this path -- returns null (kind guard)", async () => {
-    const { client } = makeFakeNotificationRulesClient([customRow()]);
+  it("calls the RPC with the exact param names the SQL function expects", async () => {
+    const { client, rpc } = makeFakeSystemRuleUpdateClient([systemRow()]);
+    const { updateSystemRule } = await loadModule(client);
+
+    await updateSystemRule("rule-1", { enabled: false, localHour: 19, localMinute: 30, updatedByPersonId: "p_manager", updatedByPersonName: "מנהל" });
+
+    expect(rpc).toHaveBeenCalledWith("update_system_rule_and_invalidate_pending_jobs", {
+      p_rule_id: "rule-1",
+      p_enabled: false,
+      p_local_hour: 19,
+      p_local_minute: 30,
+      p_updated_by_person_id: "p_manager",
+      p_updated_by_person_name: "מנהל",
+    });
+  });
+
+  it("atomically invalidates every still-pending job for that exact category", async () => {
+    const { client, pendingJobs } = makeFakeSystemRuleUpdateClient(
+      [systemRow({ system_key: "tomorrow_shift" })],
+      ["tomorrow_shift", "tomorrow_shift", "tomorrow_duty"], // two pending tomorrow_shift jobs, one unrelated
+    );
+    const { updateSystemRule } = await loadModule(client);
+
+    await updateSystemRule("rule-1", { enabled: false, localHour: 20, localMinute: 0, updatedByPersonId: "p", updatedByPersonName: "n" });
+
+    expect(pendingJobs).toEqual(["tomorrow_duty"]); // both tomorrow_shift jobs invalidated, the unrelated one untouched
+  });
+
+  it("never updates a custom_weekly row via this path -- returns null (kind guard), and touches no pending jobs", async () => {
+    const { client, pendingJobs } = makeFakeSystemRuleUpdateClient([customRow()], ["some_category"]);
     const { updateSystemRule } = await loadModule(client);
 
     const updated = await updateSystemRule("rule-custom-1", {
@@ -209,10 +267,11 @@ describe("updateSystemRule -- guarded to kind = 'system'", () => {
     });
 
     expect(updated).toBeNull();
+    expect(pendingJobs).toEqual(["some_category"]);
   });
 
   it("a not-found id returns null", async () => {
-    const { client } = makeFakeNotificationRulesClient([]);
+    const { client } = makeFakeSystemRuleUpdateClient([]);
     const { updateSystemRule } = await loadModule(client);
 
     const updated = await updateSystemRule("nope", { enabled: true, localHour: 0, localMinute: 0, updatedByPersonId: "p", updatedByPersonName: "n" });
@@ -343,14 +402,19 @@ describe("setCustomWeeklyRuleEnabled / archiveCustomWeeklyRule", () => {
   });
 });
 
-describe("claimNotificationRuleOccurrence / setNotificationRuleOccurrenceBatchId / completeNotificationRuleOccurrence / listCompletedNotificationRuleOccurrenceKeys", () => {
+describe("claimNotificationRuleOccurrence / setNotificationRuleOccurrenceBatchId / completeNotificationRuleOccurrence / listCompletedNotificationRuleOccurrenceKeys / listRecoverableNotificationRuleOccurrences", () => {
   function makeFakeOccurrenceClient(rpcResult: { data: unknown; error: unknown } = { data: [], error: null }) {
     const rpc = vi.fn(async () => rpcResult);
     const updateCalls: { table: string; patch: Record<string, unknown>; filters: [string, unknown][] }[] = [];
     let completedRows: { rule_id: string; occurrence_date: string }[] = [];
+    let recoverableRows: { rule_id: string; occurrence_date: string }[] = [];
+    const selectCalls: { statusFilter: string | null; ltCalls: [string, unknown][] }[] = [];
 
     function setCompletedRows(rows: { rule_id: string; occurrence_date: string }[]) {
       completedRows = rows;
+    }
+    function setRecoverableRows(rows: { rule_id: string; occurrence_date: string }[]) {
+      recoverableRows = rows;
     }
 
     const client = {
@@ -376,23 +440,36 @@ describe("claimNotificationRuleOccurrence / setNotificationRuleOccurrenceBatchId
               };
               return builder;
             },
-            select: () => ({
-              in: () => ({
-                in: () => ({
-                  eq: async () => ({ data: completedRows, error: null }),
-                }),
-              }),
-            }),
+            select: () => {
+              const call: { statusFilter: string | null; ltCalls: [string, unknown][] } = { statusFilter: null, ltCalls: [] };
+              selectCalls.push(call);
+              const builder = {
+                in: () => builder,
+                eq: (column: string, value: unknown) => {
+                  if (column === "status") call.statusFilter = value as string;
+                  return builder;
+                },
+                lt: (column: string, value: unknown) => {
+                  call.ltCalls.push([column, value]);
+                  return builder;
+                },
+                then: (resolve: (result: { data: unknown; error: null }) => void) => {
+                  const data = call.statusFilter === "completed" ? completedRows : call.statusFilter === "claimed" ? recoverableRows : [];
+                  resolve({ data, error: null });
+                },
+              };
+              return builder;
+            },
           };
         }
         throw new Error(`unexpected table ${table}`);
       },
     };
 
-    return { client, rpc, updateCalls, setCompletedRows };
+    return { client, rpc, updateCalls, setCompletedRows, setRecoverableRows, selectCalls };
   }
 
-  it("claimNotificationRuleOccurrence maps a fresh claim's RPC row", async () => {
+  it("claimNotificationRuleOccurrence maps a fresh claim's RPC row, including the frozen createdBy attribution", async () => {
     const { client, rpc } = makeFakeOccurrenceClient({
       data: [
         {
@@ -403,6 +480,8 @@ describe("claimNotificationRuleOccurrence / setNotificationRuleOccurrenceBatchId
           rule_body: "גוף",
           rule_audience_kind: "everyone",
           rule_target_person_ids: [],
+          created_by_person_id: "p_manager",
+          created_by_person_name: "מנהל",
         },
       ],
       error: null,
@@ -419,6 +498,8 @@ describe("claimNotificationRuleOccurrence / setNotificationRuleOccurrenceBatchId
       ruleBody: "גוף",
       ruleAudienceKind: "everyone",
       ruleTargetPersonIds: [],
+      createdByPersonId: "p_manager",
+      createdByPersonName: "מנהל",
     });
     expect(rpc).toHaveBeenCalledWith("claim_notification_rule_occurrence", { p_rule_id: "rule-1", p_occurrence_date: "2026-08-22" });
   });
@@ -500,5 +581,46 @@ describe("claimNotificationRuleOccurrence / setNotificationRuleOccurrenceBatchId
     ]);
 
     expect(result).toEqual(new Set(["rule-1:2026-08-22"]));
+  });
+
+  it("listRecoverableNotificationRuleOccurrences returns every still-'claimed' row whose lease is stale, independent of current rule state", async () => {
+    const { client, setRecoverableRows } = makeFakeOccurrenceClient();
+    setRecoverableRows([
+      { rule_id: "rule-1", occurrence_date: "2026-08-22" },
+      { rule_id: "rule-2", occurrence_date: "2026-08-15" },
+    ]);
+    const { listRecoverableNotificationRuleOccurrences } = await loadModule(client);
+
+    const result = await listRecoverableNotificationRuleOccurrences();
+
+    expect(result).toEqual([
+      { ruleId: "rule-1", occurrenceDate: "2026-08-22" },
+      { ruleId: "rule-2", occurrenceDate: "2026-08-15" },
+    ]);
+  });
+
+  it("listRecoverableNotificationRuleOccurrences queries status = 'claimed' filtered by claimed_at < (now - leaseSeconds), never joining notification_rules", async () => {
+    const { client, selectCalls } = makeFakeOccurrenceClient();
+    const { listRecoverableNotificationRuleOccurrences } = await loadModule(client);
+
+    const before = Date.now();
+    await listRecoverableNotificationRuleOccurrences(90);
+    const after = Date.now();
+
+    expect(selectCalls).toHaveLength(1);
+    expect(selectCalls[0].statusFilter).toBe("claimed");
+    expect(selectCalls[0].ltCalls).toHaveLength(1);
+    const [[column, value]] = selectCalls[0].ltCalls;
+    expect(column).toBe("claimed_at");
+    const staleBeforeMs = new Date(value as string).getTime();
+    expect(staleBeforeMs).toBeGreaterThanOrEqual(before - 90_000 - 1000);
+    expect(staleBeforeMs).toBeLessThanOrEqual(after - 90_000 + 1000);
+  });
+
+  it("listRecoverableNotificationRuleOccurrences returns an empty array when nothing is stale", async () => {
+    const { client } = makeFakeOccurrenceClient();
+    const { listRecoverableNotificationRuleOccurrences } = await loadModule(client);
+
+    expect(await listRecoverableNotificationRuleOccurrences()).toEqual([]);
   });
 });

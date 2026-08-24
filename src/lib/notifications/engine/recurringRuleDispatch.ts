@@ -11,6 +11,7 @@ import {
   insertManagerNotificationBatchIfAbsent,
   insertNotificationJobIfAbsent,
   listCompletedNotificationRuleOccurrenceKeys,
+  listRecoverableNotificationRuleOccurrences,
   setNotificationRuleOccurrenceBatchId,
   type BroadcastAudienceKind,
 } from "./store";
@@ -57,21 +58,37 @@ function recurringOccurrenceIdempotencyKey(ruleId: string, occurrenceDate: strin
 }
 
 export interface DueCustomWeeklyOccurrence {
-  rule: CustomWeeklyRuleConfig;
-  /** Asia/Jerusalem local calendar date this occurrence belongs to -- always `now.date` (an occurrence is only ever considered on its own weekday). */
+  ruleId: string;
+  /** Asia/Jerusalem local calendar date this occurrence belongs to -- for a freshly-due candidate always `now.date` (an occurrence is only ever freshly considered on its own weekday); for a RECOVERED candidate, whatever date its stale claim was made under. */
   occurrenceDate: string;
 }
 
+function occurrenceKey(occurrence: DueCustomWeeklyOccurrence): string {
+  return `${occurrence.ruleId}:${occurrence.occurrenceDate}`;
+}
+
 /**
- * Which of `rules` have a POSSIBLY due occurrence as of `now` -- enabled,
- * today's Asia/Jerusalem weekday matches the rule's configured weekday,
- * and the configured local time has passed. Pure in-memory computation
- * (uses only the already-loaded `rules`/`now`, no I/O) EXCEPT for one
- * cheap bulk pre-filter: candidates already known `'completed'` are
- * dropped so a quiet rest-of-day (the occurrence already dispatched
- * hours ago, but its weekday/time still structurally match) doesn't keep
- * forcing a personnel read every tick. This is a PRE-FILTER ONLY, never
- * the actual completion/claim authority -- the real at-most-once
+ * Which occurrences are worth attempting a claim for on this tick --
+ * the union of two independent sources, deliberately merged rather than
+ * either one alone:
+ *
+ *  - FRESH candidates: `rules` whose CURRENT enabled/weekday/local-time
+ *    configuration is due as of `now`. Pure in-memory computation over the
+ *    already-loaded `rules`/`now`, no I/O.
+ *  - RECOVERABLE candidates: any occurrence still sitting `'claimed'`
+ *    with a stale lease (`listRecoverableNotificationRuleOccurrences`),
+ *    regardless of what its rule's CURRENT weekday/enabled/archived state
+ *    is. A worker can crash between claiming an occurrence and completing
+ *    it; if that occurrence's rule was disabled, archived, or had its
+ *    schedule moved off today's weekday in the meantime, it would never
+ *    again appear as a fresh candidate -- the recoverable-claims scan is
+ *    what still finds it and lets the claim RPC's own resume path finish
+ *    the already-committed dispatch from its frozen snapshot.
+ *
+ * Both sources are then bulk-filtered by the ONE cheap pre-filter: keys
+ * already known `'completed'` are dropped so a quiet rest-of-day doesn't
+ * keep forcing a personnel read every tick. This is a PRE-FILTER ONLY,
+ * never the actual completion/claim authority -- the real at-most-once
  * guarantee is `claim_notification_rule_occurrence`'s own atomic claim,
  * which every returned candidate still has to win before anything is
  * dispatched (see `runDueCustomWeeklyRuleDispatch`).
@@ -81,23 +98,29 @@ export async function findDueCustomWeeklyOccurrences(
   now: LocalNow,
 ): Promise<DueCustomWeeklyOccurrence[]> {
   const today = parseCalendarDate(now.date);
-  if (!today) return [];
-  const todayWeekday = dayOfWeek(today);
+  const todayWeekday = today ? dayOfWeek(today) : null;
 
-  const candidates: DueCustomWeeklyOccurrence[] = [];
-  for (const rule of rules) {
-    if (!rule.enabled) continue;
-    if (rule.weekday !== todayWeekday) continue;
-    const dueMinuteOfDay = rule.localHour * 60 + rule.localMinute;
-    if (now.minuteOfDay < dueMinuteOfDay) continue;
-    candidates.push({ rule, occurrenceDate: now.date });
+  const freshCandidates: DueCustomWeeklyOccurrence[] = [];
+  if (todayWeekday !== null) {
+    for (const rule of rules) {
+      if (!rule.enabled) continue;
+      if (rule.weekday !== todayWeekday) continue;
+      const dueMinuteOfDay = rule.localHour * 60 + rule.localMinute;
+      if (now.minuteOfDay < dueMinuteOfDay) continue;
+      freshCandidates.push({ ruleId: rule.id, occurrenceDate: now.date });
+    }
   }
-  if (candidates.length === 0) return [];
 
-  const completed = await listCompletedNotificationRuleOccurrenceKeys(
-    candidates.map((candidate) => ({ ruleId: candidate.rule.id, occurrenceDate: candidate.occurrenceDate })),
-  );
-  return candidates.filter((candidate) => !completed.has(`${candidate.rule.id}:${candidate.occurrenceDate}`));
+  const recoverableCandidates = await listRecoverableNotificationRuleOccurrences();
+
+  const merged = new Map<string, DueCustomWeeklyOccurrence>();
+  for (const candidate of freshCandidates) merged.set(occurrenceKey(candidate), candidate);
+  for (const candidate of recoverableCandidates) merged.set(occurrenceKey(candidate), candidate);
+  const allCandidates = [...merged.values()];
+  if (allCandidates.length === 0) return [];
+
+  const completed = await listCompletedNotificationRuleOccurrenceKeys(allCandidates);
+  return allCandidates.filter((candidate) => !completed.has(occurrenceKey(candidate)));
 }
 
 interface RecurringDispatchResolution {
@@ -186,7 +209,7 @@ async function dispatchOneOccurrence(
   emailToAccount: ReadonlyMap<string, AuthAccountLookup>,
   subscribed: ReadonlySet<string>,
 ): Promise<"dispatched" | "skipped"> {
-  const claim = await claimNotificationRuleOccurrence(occurrence.rule.id, occurrence.occurrenceDate);
+  const claim = await claimNotificationRuleOccurrence(occurrence.ruleId, occurrence.occurrenceDate);
   if (!claim) return "skipped";
 
   let batchId = claim.batchId;
@@ -215,9 +238,9 @@ async function dispatchOneOccurrence(
     ].sort();
 
     const { row: batch } = await insertManagerNotificationBatchIfAbsent({
-      idempotencyKey: recurringOccurrenceIdempotencyKey(occurrence.rule.id, occurrence.occurrenceDate),
-      createdByPersonId: occurrence.rule.createdByPersonId ?? "system",
-      createdByPersonName: occurrence.rule.createdByPersonName ?? "התראה מחזורית",
+      idempotencyKey: recurringOccurrenceIdempotencyKey(occurrence.ruleId, occurrence.occurrenceDate),
+      createdByPersonId: claim.createdByPersonId ?? "system",
+      createdByPersonName: claim.createdByPersonName ?? "התראה מחזורית",
       audienceKind: claim.ruleAudienceKind,
       targetPersonIds: claim.ruleTargetPersonIds,
       resolvedRecipientUserIds: freshRecipientUserIds,
@@ -291,7 +314,7 @@ export async function runDueCustomWeeklyRuleDispatch(
     } catch (error) {
       failed++;
       console.error(
-        `[notifications] recurring rule dispatch failed rule=${occurrence.rule.id} date=${occurrence.occurrenceDate}`,
+        `[notifications] recurring rule dispatch failed rule=${occurrence.ruleId} date=${occurrence.occurrenceDate}`,
         error instanceof Error ? error.message : "unknown_error",
       );
     }

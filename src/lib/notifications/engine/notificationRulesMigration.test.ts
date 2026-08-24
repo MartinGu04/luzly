@@ -142,4 +142,86 @@ describe("notification_rule_occurrences -- the recurring-rule at-most-once claim
   it("a fresh claim is a plain on-conflict-do-nothing insert -- concurrent callers can never both win it", () => {
     expect(sql).toMatch(/on conflict \(rule_id, occurrence_date\) do nothing/);
   });
+
+  it("stores a frozen content snapshot on the occurrence row itself -- not null, so it must be captured at fresh-claim time", () => {
+    expect(sql).toMatch(/frozen_title text not null/);
+    expect(sql).toMatch(/frozen_body text not null/);
+    expect(sql).toMatch(/frozen_audience_kind text not null/);
+    expect(sql).toMatch(/frozen_target_person_ids text\[\] not null default '\{\}'/);
+  });
+
+  it("a fresh claim inserts the frozen snapshot FROM the locked rule row", () => {
+    expect(sql).toMatch(
+      /frozen_title, frozen_body, frozen_audience_kind, frozen_target_person_ids,[\s\S]{0,80}frozen_created_by_person_id, frozen_created_by_person_name[\s\S]{0,20}\)\s*\n\s*values\s*\(\s*\n\s*p_rule_id, p_occurrence_date, 'claimed', now\(\),\s*\n\s*rule_row\.title, rule_row\.body, rule_row\.audience_kind, rule_row\.target_person_ids/,
+    );
+  });
+
+  it("a resume returns the occurrence's OWN frozen_* columns -- never re-selects notification_rules for content", () => {
+    const resumeBlock = sql.match(/-- Stale claim -- resume UNCONDITIONALLY[\s\S]*?return;\s*\n\s*end if;/);
+    expect(resumeBlock).not.toBeNull();
+    expect(resumeBlock![0]).toMatch(/existing_row\.frozen_title, existing_row\.frozen_body/);
+    expect(resumeBlock![0]).not.toMatch(/select \* into rule_row from public\.notification_rules/);
+  });
+
+  it("a fresh claim re-validates the CURRENT weekday against the locked rule row -- a stale candidate for the OLD weekday is refused", () => {
+    expect(sql).toMatch(/extract\(dow from p_occurrence_date\)::smallint is distinct from rule_row\.weekday/);
+  });
+
+  it("a fresh claim re-validates the CURRENT local time using a real Asia/Jerusalem conversion -- never implicit server/DB timezone", () => {
+    expect(sql).toMatch(/at time zone 'Asia\/Jerusalem'/);
+    expect(sql).toMatch(/now\(\) < due_instant/);
+  });
+
+  it("resume is never gated on the rule's current schedule/enabled/archived state -- only the fresh-claim branch checks any of that", () => {
+    const freshClaimStart = sql.indexOf("-- Fresh claim -- lock the rule row FIRST");
+    const resumeBlock = sql.slice(0, freshClaimStart);
+    expect(resumeBlock).not.toMatch(/rule_row\.enabled/);
+    expect(resumeBlock).not.toMatch(/extract\(dow/);
+  });
+});
+
+describe("recovery-discoverability -- a claimed occurrence must be findable independent of current rule due-matching", () => {
+  const sql = readNotificationRulesMigration();
+
+  it("indexes claimed occurrences by claimed_at alone -- discoverable without joining/matching against notification_rules at all", () => {
+    expect(sql).toMatch(
+      /create index if not exists notification_rule_occurrences_claimed_idx\s*\n\s*on public\.notification_rule_occurrences \(claimed_at\)\s*\n\s*where status = 'claimed'/,
+    );
+  });
+});
+
+describe("update_system_rule_and_invalidate_pending_jobs -- atomic system-rule edit + pending-job invalidation", () => {
+  const sql = readNotificationRulesMigration();
+
+  it("is revoked from public/anon/authenticated and granted only to service_role", () => {
+    expect(sql).toMatch(
+      /revoke all on function public\.update_system_rule_and_invalidate_pending_jobs\(uuid, boolean, smallint, smallint, text, text\)[\s\S]*?from public, anon, authenticated/i,
+    );
+    expect(sql).toMatch(
+      /grant execute on function public\.update_system_rule_and_invalidate_pending_jobs\(uuid, boolean, smallint, smallint, text, text\)[\s\S]*?to service_role/i,
+    );
+  });
+
+  it("guards the rule update to kind = 'system' -- can never touch a custom_weekly row", () => {
+    expect(sql).toMatch(/where id = p_rule_id and kind = 'system'/);
+  });
+
+  it("deletes (never soft-cancels) still-pending jobs for that exact category in the SAME function", () => {
+    expect(sql).toMatch(/delete from public\.notification_jobs\s*\n\s*where category = updated_row\.system_key and status = 'pending';/);
+  });
+
+  it("documents why a hard delete is used instead of a soft cancel -- the revival trap in upsert_pending_reminder_job's own WHERE guard", () => {
+    expect(sql).toMatch(/can NEVER be revived back to 'pending'/);
+  });
+
+  it("never touches notification_deliveries or any terminal job status -- only status = 'pending' rows are affected", () => {
+    const fnBlock = sql.match(/create or replace function public\.update_system_rule_and_invalidate_pending_jobs[\s\S]*?\$\$;/);
+    expect(fnBlock).not.toBeNull();
+    expect(fnBlock![0]).not.toMatch(/notification_deliveries/);
+    expect(fnBlock![0]).toMatch(/status = 'pending'/);
+  });
+
+  it("returns zero rows for a not-found/non-system id, never touching notification_jobs in that case", () => {
+    expect(sql).toMatch(/if updated_row\.id is null then\s*\n\s*return; -- not found \/ not a system row/);
+  });
 });
