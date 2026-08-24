@@ -4,11 +4,13 @@ import { getJerusalemLocalNow } from "@/lib/time/jerusalemClock";
 import { fetchFreshWorkbookRead } from "./freshRead";
 import { resolveNotificationRecipients } from "./recipients";
 import { runChangeDetection } from "./changeDetection";
-import { runReminders } from "./reminders";
+import { findDueCustomWeeklyOccurrences, runDueCustomWeeklyRuleDispatch } from "./recurringRuleDispatch";
+import { runReminders, type RemindersSummary } from "./reminders";
+import { loadNotificationRuleConfig, type NotificationRuleConfig } from "./ruleConfig";
 import { runDueScheduledBroadcastDispatch } from "./scheduledBroadcast";
 import { runDelivery, type DeliverySummary } from "./delivery";
 import { peekDueJobsCount, peekDueManagerScheduledBroadcastsCount } from "./store";
-import { runStage } from "./workerErrors";
+import { formatWorkerErrorLog, runStage, sanitizeWorkerError, WorkerStageError } from "./workerErrors";
 
 export type WorkerMode = "dry_run" | "send";
 
@@ -24,6 +26,9 @@ export interface WorkerTickSummary {
   scheduledBroadcastsDue: number;
   scheduledBroadcastsDispatched: number;
   scheduledBroadcastsFailed: number;
+  /** Custom weekly recurring rules dispatched by THIS tick, as a fallback in case the dedicated once-a-minute worker's Cron job is ever missing/disabled/broken -- see this function's own docstring and `recurringRuleDispatch.ts`. */
+  recurringRulesDispatched: number;
+  recurringRulesFailed: number;
   recipientCount: number;
   recipientsUnmapped: number;
   recipientsAmbiguous: number;
@@ -34,6 +39,28 @@ export interface WorkerTickSummary {
 export type WorkerTickResult =
   | { status: "ok"; summary: WorkerTickSummary }
   | { status: "configuration_error"; message: string };
+
+/** Fail-safe fallback when rule config loading/reminders itself fails this tick -- see `runNotificationWorkerTick`'s own isolation comment. */
+const EMPTY_REMINDERS_SUMMARY: RemindersSummary = {
+  tomorrowShiftJobs: 0,
+  tomorrowDutyJobs: 0,
+  tomorrowLogisticsWithdrawalJobs: 0,
+  tomorrowLogisticsWithdrawalSupervisorJobs: 0,
+  logisticsWithdrawalNoonAssignedJobs: 0,
+  logisticsWithdrawalNoonSupervisorJobs: 0,
+  logisticsWithdrawalNoonTeamJobs: 0,
+  almashCheckInJobs: 0,
+  tomorrowShiftCancelled: 0,
+  tomorrowDutyCancelled: 0,
+  tomorrowLogisticsWithdrawalCancelled: 0,
+  tomorrowLogisticsWithdrawalSupervisorCancelled: 0,
+  logisticsWithdrawalNoonAssignedCancelled: 0,
+  logisticsWithdrawalNoonSupervisorCancelled: 0,
+  logisticsWithdrawalNoonTeamCancelled: 0,
+  almashCheckInCancelled: 0,
+  constraintsJobs: 0,
+  constraintsCancelled: 0,
+};
 
 /**
  * The top-level orchestrator for `POST /internal/notifications/tick`
@@ -93,21 +120,49 @@ export async function runNotificationWorkerTick(mode: WorkerMode): Promise<Worke
     }),
   );
 
-  const remindersSummary = await runStage("reminders", () =>
-    runReminders({
-      events,
-      people,
-      shiftSchedule,
-      week,
-      now,
-      persist,
-      recipientResolution,
-    }),
-  );
+  // Loaded ONCE per tick and passed into `runReminders` -- never queried
+  // per reminder/person (see `ruleConfig.ts`'s own docstring). A failure
+  // here (or in `runReminders` itself) must NEVER silently fall back to
+  // `notificationTiming.ts`'s old hardcoded constants -- a manager's
+  // disable/time-change must never be silently overridden by a
+  // configuration-load failure. It also must NOT take down scheduled-
+  // broadcast dispatch / due-job delivery below, which are entirely
+  // independent features -- so this is deliberately isolated in its own
+  // try/catch rather than left to `runStage`'s normal propagate-and-crash-
+  // the-whole-tick behavior: on failure, this tick sends zero rule-driven
+  // reminders (fail safe -- logged, never guessed), but scheduled
+  // broadcasts / due jobs / recurring-rule dispatch still run normally.
+  // This does NOT affect the dedicated once-a-minute worker
+  // (`scheduledWorker.ts`) either way -- it has the exact same isolation
+  // for its own rule-config-dependent phase, see that module's own
+  // docstring.
+  let ruleConfig: NotificationRuleConfig = { systemRules: new Map(), customWeeklyRules: [] };
+  let remindersSummary: RemindersSummary = EMPTY_REMINDERS_SUMMARY;
+  try {
+    ruleConfig = await runStage("rule_config", () => loadNotificationRuleConfig());
+    remindersSummary = await runStage("reminders", () =>
+      runReminders({
+        events,
+        people,
+        shiftSchedule,
+        week,
+        now,
+        persist,
+        recipientResolution,
+        ruleConfig,
+      }),
+    );
+  } catch (error) {
+    const stage = error instanceof WorkerStageError ? error.stage : "rule_config";
+    const cause = error instanceof WorkerStageError ? error.cause : error;
+    console.error(formatWorkerErrorLog(stage, sanitizeWorkerError(cause)));
+  }
 
   let scheduledBroadcastsDue: number;
   let scheduledBroadcastsDispatched = 0;
   let scheduledBroadcastsFailed = 0;
+  let recurringRulesDispatched = 0;
+  let recurringRulesFailed = 0;
   if (persist) {
     // Runs BEFORE delivery so a scheduled broadcast's freshly-created
     // `notification_jobs` rows are eligible for `runDelivery()`'s own
@@ -120,6 +175,22 @@ export async function runNotificationWorkerTick(mode: WorkerMode): Promise<Worke
     scheduledBroadcastsDue = scheduledResult.claimed;
     scheduledBroadcastsDispatched = scheduledResult.dispatched;
     scheduledBroadcastsFailed = scheduledResult.failed;
+
+    // Same deliberate FALLBACK reasoning as scheduled-broadcast dispatch
+    // above: `scheduledWorker.ts`'s once-a-minute worker is the PRIMARY
+    // owner of custom weekly recurring rule dispatch, but if its Cron job
+    // is ever missing/disabled/broken, this 5-minute tick still dispatches
+    // due occurrences rather than a recurring rule silently never firing.
+    // Reuses THIS tick's own already-fetched `people` and `ruleConfig` --
+    // never a second read of either. Isolated in its OWN stage so a
+    // failure here is diagnosable without being confused for a reminder-
+    // engine failure.
+    const recurringDue = await runStage("recurring_rules_due_lookup", () =>
+      findDueCustomWeeklyOccurrences(ruleConfig.customWeeklyRules, now),
+    );
+    const recurringResult = await runStage("recurring_rules", () => runDueCustomWeeklyRuleDispatch(recurringDue, people));
+    recurringRulesDispatched = recurringResult.dispatched;
+    recurringRulesFailed = recurringResult.failed;
   } else {
     scheduledBroadcastsDue = await runStage("scheduled_broadcasts_due_lookup", () =>
       peekDueManagerScheduledBroadcastsCount(),
@@ -159,6 +230,8 @@ export async function runNotificationWorkerTick(mode: WorkerMode): Promise<Worke
     scheduledBroadcastsDue,
     scheduledBroadcastsDispatched,
     scheduledBroadcastsFailed,
+    recurringRulesDispatched,
+    recurringRulesFailed,
     recipientCount: recipientResolution.resolved.size,
     recipientsUnmapped: recipientResolution.unmappedCount,
     recipientsAmbiguous: recipientResolution.ambiguousEmailCount,
@@ -182,6 +255,7 @@ function logWorkerTick(summary: WorkerTickSummary, delivery: DeliverySummary | n
       `changes=${summary.semanticChangesDetected} pending=${summary.pendingChanges} jobsCreated=${summary.jobsCreated} ` +
       `jobsDue=${summary.jobsDue} scheduledBroadcastsDue=${summary.scheduledBroadcastsDue} ` +
       `scheduledBroadcastsDispatched=${summary.scheduledBroadcastsDispatched} scheduledBroadcastsFailed=${summary.scheduledBroadcastsFailed} ` +
+      `recurringRulesDispatched=${summary.recurringRulesDispatched} recurringRulesFailed=${summary.recurringRulesFailed} ` +
       `recipients=${summary.recipientCount} unmapped=${summary.recipientsUnmapped} ` +
       `ambiguous=${summary.recipientsAmbiguous} noEmail=${summary.recipientsNoEmail} duration=${summary.durationMs}ms`,
   );

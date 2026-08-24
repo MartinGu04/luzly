@@ -24,12 +24,15 @@ export type WorkerStage =
   | "fresh_workbook_read"
   | "recipient_resolution"
   | "change_detection"
+  | "rule_config"
   | "reminders"
   | "scheduled_broadcasts"
   | "scheduled_broadcasts_due_lookup"
   | "jobs_due_lookup"
   | "delivery"
   | "scheduled_broadcasts_work_check"
+  | "recurring_rules_due_lookup"
+  | "recurring_rules"
   | "fresh_personnel_read"
   | "manual_broadcast_immediate_delivery";
 

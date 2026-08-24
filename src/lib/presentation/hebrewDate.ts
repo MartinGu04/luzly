@@ -58,6 +58,11 @@ export function formatHebrewWeekday(dateStr: string): string | null {
   return WEEKDAY_LABELS[dayOfWeek(parsed)];
 }
 
+/** "יום שבת" from a bare weekday index (0=Sunday..6=Saturday, matching `dayOfWeek`) -- no calendar date needed. Used by the Fixed Notifications Center's own weekly-schedule summary (`lib/presentation/notificationRules.ts`), where a custom recurring rule stores a weekday alone, never a specific date. `null` for an out-of-range index. */
+export function hebrewWeekdayName(weekdayIndex: number): string | null {
+  return WEEKDAY_LABELS[weekdayIndex] ?? null;
+}
+
 /** Just the day-of-month and month label, e.g. "14 באוגוסט" -- no weekday, for a UI that already shows the weekday as its own separate element. */
 export function formatHebrewDayAndMonth(dateStr: string): string | null {
   const parsed = parseCalendarDate(dateStr);

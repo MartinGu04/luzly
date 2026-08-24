@@ -6,6 +6,7 @@ import type { ScheduledBroadcastView } from "@/lib/notifications/scheduledBroadc
 const composerProps = vi.fn();
 const scheduledProps = vi.fn();
 const recentProps = vi.fn();
+const fixedNotificationsProps = vi.fn();
 
 vi.mock("./ManagerBroadcastComposer", () => ({
   ManagerBroadcastComposer: (props: Record<string, unknown>) => {
@@ -43,6 +44,13 @@ vi.mock("./ManagerRecentBroadcastsSection", () => ({
   },
 }));
 
+vi.mock("./ManagerFixedNotificationsSection", () => ({
+  ManagerFixedNotificationsSection: (props: Record<string, unknown>) => {
+    fixedNotificationsProps(props);
+    return <div data-testid="fixed-notifications" />;
+  },
+}));
+
 const { ManagerBroadcastArea } = await import("./ManagerBroadcastArea");
 
 const FAKE_ITEM: ScheduledBroadcastView = {
@@ -67,6 +75,7 @@ afterEach(() => {
   composerProps.mockReset();
   scheduledProps.mockReset();
   recentProps.mockReset();
+  fixedNotificationsProps.mockReset();
 });
 
 describe("ManagerBroadcastArea -- wiring between the composer and its two list sections", () => {
@@ -131,5 +140,11 @@ describe("ManagerBroadcastArea -- wiring between the composer and its two list s
       (scheduledProps.mock.calls.at(-1)?.[0].onActiveChange as (active: boolean) => void)(false);
     });
     expect(recentProps.mock.calls.at(-1)?.[0].pollWhileActive).toBe(false);
+  });
+
+  it("renders the Fixed Notifications Center section with the same roster/adoptionPeople props", () => {
+    render(<ManagerBroadcastArea roster={ROSTER} adoptionPeople={ADOPTION} />);
+    expect(screen.getByTestId("fixed-notifications")).toBeTruthy();
+    expect(fixedNotificationsProps.mock.calls.at(-1)?.[0]).toEqual({ roster: ROSTER, adoptionPeople: ADOPTION });
   });
 });

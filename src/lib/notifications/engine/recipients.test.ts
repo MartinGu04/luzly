@@ -74,6 +74,118 @@ describe("resolveNotificationRecipients", () => {
   });
 });
 
+describe("resolveNonPermanentConstraintsRecipients -- mandatory constraints audience exclusion", () => {
+  it("resolves a non-permanent (חובה) mapped person to their Supabase user id", async () => {
+    vi.resetModules();
+    const fakeSupabase = makeFakeSupabase([{ id: "user-reg", email: "reg@example.com" }]);
+    vi.doMock("./serviceClient", () => ({ getNotificationServiceClient: () => fakeSupabase }));
+
+    const { resolveNonPermanentConstraintsRecipients } = await import("./recipients");
+    const people = [person({ id: "p_reg", name: "Regular", email: "reg@example.com", personnelType: "חובה" })];
+    const userIds = await resolveNonPermanentConstraintsRecipients(people);
+
+    expect(userIds).toEqual(["user-reg"]);
+  });
+
+  it("NEVER includes a permanent (קבע) person, even when mapped -- the mandatory audience-exclusion fix", async () => {
+    vi.resetModules();
+    const fakeSupabase = makeFakeSupabase([
+      { id: "user-reg", email: "reg@example.com" },
+      { id: "user-perm", email: "perm@example.com" },
+    ]);
+    vi.doMock("./serviceClient", () => ({ getNotificationServiceClient: () => fakeSupabase }));
+
+    const { resolveNonPermanentConstraintsRecipients } = await import("./recipients");
+    const people = [
+      person({ id: "p_reg", name: "Regular", email: "reg@example.com", personnelType: "חובה" }),
+      person({ id: "p_perm", name: "Permanent", email: "perm@example.com", personnelType: "קבע" }),
+    ];
+    const userIds = await resolveNonPermanentConstraintsRecipients(people);
+
+    expect(userIds).toEqual(["user-reg"]);
+  });
+
+  it("a reserve (מילואים) mapped person is included, same as חובה", async () => {
+    vi.resetModules();
+    const fakeSupabase = makeFakeSupabase([{ id: "user-res", email: "res@example.com" }]);
+    vi.doMock("./serviceClient", () => ({ getNotificationServiceClient: () => fakeSupabase }));
+
+    const { resolveNonPermanentConstraintsRecipients } = await import("./recipients");
+    const people = [person({ id: "p_res", name: "Reserve", email: "res@example.com", personnelType: "מילואים" })];
+    const userIds = await resolveNonPermanentConstraintsRecipients(people);
+
+    expect(userIds).toEqual(["user-res"]);
+  });
+
+  it("an unclassified/null personnelType is still included -- only 'permanent' is ever excluded", async () => {
+    vi.resetModules();
+    const fakeSupabase = makeFakeSupabase([{ id: "user-u", email: "u@example.com" }]);
+    vi.doMock("./serviceClient", () => ({ getNotificationServiceClient: () => fakeSupabase }));
+
+    const { resolveNonPermanentConstraintsRecipients } = await import("./recipients");
+    const people = [person({ id: "p_u", name: "Unclassified", email: "u@example.com", personnelType: null })];
+    const userIds = await resolveNonPermanentConstraintsRecipients(people);
+
+    expect(userIds).toEqual(["user-u"]);
+  });
+
+  it("classifies via classifyPersonnelType's own normalization (trims internal/surrounding whitespace), never a raw string comparison", async () => {
+    vi.resetModules();
+    const fakeSupabase = makeFakeSupabase([{ id: "user-perm", email: "perm@example.com" }]);
+    vi.doMock("./serviceClient", () => ({ getNotificationServiceClient: () => fakeSupabase }));
+
+    const { resolveNonPermanentConstraintsRecipients } = await import("./recipients");
+    // A naive `personnelType === "קבע"` check would NOT recognize this as
+    // permanent -- classifyPersonnelType's own whitespace normalization
+    // still does.
+    const people = [person({ id: "p_perm", name: "Permanent", email: "perm@example.com", personnelType: " קבע  " })];
+    const userIds = await resolveNonPermanentConstraintsRecipients(people);
+
+    expect(userIds).toEqual([]);
+  });
+
+  it("an auth account that cannot be proven non-permanent (no כ״א/roster mapping at all) is excluded -- fails CONSERVATIVE, never accidentally included", async () => {
+    vi.resetModules();
+    // No auth users resolve to any of this roster's emails at all.
+    const fakeSupabase = makeFakeSupabase([]);
+    vi.doMock("./serviceClient", () => ({ getNotificationServiceClient: () => fakeSupabase }));
+
+    const { resolveNonPermanentConstraintsRecipients } = await import("./recipients");
+    const people = [person({ id: "p_reg", name: "Regular", email: "reg@example.com", personnelType: "חובה" })];
+    const userIds = await resolveNonPermanentConstraintsRecipients(people);
+
+    expect(userIds).toEqual([]);
+  });
+
+  it("a person with no email at all is excluded, never guessed", async () => {
+    vi.resetModules();
+    const fakeSupabase = makeFakeSupabase([]);
+    vi.doMock("./serviceClient", () => ({ getNotificationServiceClient: () => fakeSupabase }));
+
+    const { resolveNonPermanentConstraintsRecipients } = await import("./recipients");
+    const people = [person({ id: "p_noemail", name: "No Email", personnelType: "חובה" })];
+    const userIds = await resolveNonPermanentConstraintsRecipients(people);
+
+    expect(userIds).toEqual([]);
+  });
+
+  it("deduplicates by resolved userId when two roster rows share one auth account", async () => {
+    vi.resetModules();
+    const fakeSupabase = makeFakeSupabase([{ id: "user-shared", email: "shared@example.com" }]);
+    vi.doMock("./serviceClient", () => ({ getNotificationServiceClient: () => fakeSupabase }));
+
+    const { resolveNonPermanentConstraintsRecipients } = await import("./recipients");
+    // Two DIFFERENT people rows sharing one email would actually resolve
+    // "ambiguous" via findPersonByEmail -- this test instead exercises the
+    // dedupe-by-userId path directly via a single person, confirming the
+    // returned array never contains a duplicate userId.
+    const people = [person({ id: "p_shared", name: "Shared", email: "shared@example.com", personnelType: "חובה" })];
+    const userIds = await resolveNonPermanentConstraintsRecipients(people);
+
+    expect(userIds).toEqual(["user-shared"]);
+  });
+});
+
 describe("filterManagerRecipients", () => {
   it("only includes people whose Person.isManager is true and who resolved to a Supabase user", async () => {
     vi.resetModules();
@@ -207,46 +319,3 @@ describe("fetchAllSubscribedUserIds", () => {
   });
 });
 
-describe("fetchAllAuthUserIds", () => {
-  it("returns every real auth account id regardless of push-subscription state -- an account with ZERO push_subscriptions rows still appears", async () => {
-    vi.resetModules();
-    const fakeSupabase = makeFakeSupabase(
-      [
-        { id: "user-1", email: "dana@example.com" },
-        { id: "user-2", email: "no-push@example.com" },
-      ],
-      [], // no push_subscriptions rows at all -- neither account has Push enabled
-    );
-    vi.doMock("./serviceClient", () => ({ getNotificationServiceClient: () => fakeSupabase }));
-
-    const { fetchAllAuthUserIds } = await import("./recipients");
-    const userIds = await fetchAllAuthUserIds();
-
-    expect(new Set(userIds)).toEqual(new Set(["user-1", "user-2"]));
-  });
-
-  it("never queries push_subscriptions -- job/recipient targeting is fully independent of Push delivery state", async () => {
-    vi.resetModules();
-    const fakeSupabase = makeFakeSupabase([{ id: "user-1", email: "dana@example.com" }]);
-    vi.doMock("./serviceClient", () => ({ getNotificationServiceClient: () => fakeSupabase }));
-
-    const { fetchAllAuthUserIds } = await import("./recipients");
-    await fetchAllAuthUserIds();
-
-    expect(fakeSupabase.from).not.toHaveBeenCalled();
-  });
-
-  it("one account with multiple push subscriptions (multiple devices) still yields exactly one id -- never a duplicate job source", async () => {
-    vi.resetModules();
-    // Multiple devices/subscriptions live in push_subscriptions, which this
-    // function never even queries -- the account itself (from listUsers())
-    // is the sole identity unit, so "multiple devices" can't double it.
-    const fakeSupabase = makeFakeSupabase([{ id: "user-1", email: "dana@example.com" }], ["user-1", "user-1"]);
-    vi.doMock("./serviceClient", () => ({ getNotificationServiceClient: () => fakeSupabase }));
-
-    const { fetchAllAuthUserIds } = await import("./recipients");
-    const userIds = await fetchAllAuthUserIds();
-
-    expect(userIds).toEqual(["user-1"]);
-  });
-});

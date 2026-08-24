@@ -1,9 +1,12 @@
 import "server-only";
 import { fetchFreshPersonnelRead } from "./freshRead";
+import { findDueCustomWeeklyOccurrences, runDueCustomWeeklyRuleDispatch } from "./recurringRuleDispatch";
+import { loadNotificationRuleConfig } from "./ruleConfig";
 import { runDueScheduledBroadcastDispatch } from "./scheduledBroadcast";
 import { runDelivery, type DeliverySummary } from "./delivery";
+import { getJerusalemLocalNow } from "@/lib/time/jerusalemClock";
 import { peekAnyManagerScheduledBroadcastWorkDue, peekDueJobsCount } from "./store";
-import { runStage } from "./workerErrors";
+import { formatWorkerErrorLog, runStage, sanitizeWorkerError, WorkerStageError } from "./workerErrors";
 
 export interface ScheduledBroadcastWorkerTickSummary {
   /** True when the cheap pre-check found nothing due/recoverable -- no Google read, no dispatch, no delivery happened this tick. */
@@ -11,6 +14,8 @@ export interface ScheduledBroadcastWorkerTickSummary {
   scheduledBroadcastsDue: number;
   scheduledBroadcastsDispatched: number;
   scheduledBroadcastsFailed: number;
+  recurringRulesDispatched: number;
+  recurringRulesFailed: number;
   /** `runDelivery()`'s own claim count for THIS invocation -- includes any due job, not only ones this tick's dispatch just created (see this module's own docstring). */
   jobsClaimed: number;
   durationMs: number;
@@ -22,11 +27,16 @@ export interface ScheduledBroadcastWorkerTickSummary {
  * secret-gated entry point). This is a SEPARATE, narrower pipeline from
  * `runNotificationWorkerTick` (`pipeline.ts`, the main 5-minute worker) --
  * NOT a copy of it and NOT a "run everything every minute" shortcut. It
- * has TWO jobs, not one: dispatching due scheduled broadcasts, AND acting
- * as the <=1-minute fallback for any `notification_jobs` row that's
- * already due but wasn't picked up by a delivery pass yet (e.g. a manual
- * "Send Now" broadcast whose own best-effort immediate `after()` delivery
- * kick -- see `manualBroadcastActions.ts` -- never ran or failed).
+ * has THREE jobs: dispatching due one-time scheduled broadcasts,
+ * dispatching due CUSTOM WEEKLY RECURRING rules (the Fixed / Recurring
+ * Notifications Center's own `kind = 'custom_weekly'` rows -- see
+ * `recurringRuleDispatch.ts`; deliberately reuses this SAME minute-level
+ * worker rather than a second dedicated cron, per that feature's own
+ * spec), AND acting as the <=1-minute fallback for any `notification_jobs`
+ * row that's already due but wasn't picked up by a delivery pass yet
+ * (e.g. a manual "Send Now" broadcast whose own best-effort immediate
+ * `after()` delivery kick -- see `manualBroadcastActions.ts` -- never ran
+ * or failed).
  *
  * 1. A cheap, read-only Supabase pre-check considering BOTH kinds of work
  *    in parallel: `peekAnyManagerScheduledBroadcastWorkDue` (mirrors the
@@ -80,52 +90,102 @@ export interface ScheduledBroadcastWorkerTickSummary {
  * same live one. Same story for `claim_due_notification_jobs`'s
  * `for update skip locked`.
  */
+/**
+ * Read-only lookup of due custom-weekly-rule occurrences, isolated from
+ * the rest of this worker's pre-check: a `notification_rules` load
+ * failure (or any error inside `findDueCustomWeeklyOccurrences`) must
+ * NEVER take down this worker's PRIMARY job -- one-time scheduled
+ * broadcast dispatch and due-job delivery -- so this is caught and
+ * logged here rather than propagated. On failure, this tick simply
+ * dispatches zero recurring-rule occurrences (fail safe, never a guess),
+ * exactly like `pipeline.ts`'s own isolated rule-config phase.
+ */
+async function findDueCustomWeeklyOccurrencesSafely(now: ReturnType<typeof getJerusalemLocalNow>) {
+  try {
+    const ruleConfig = await runStage("rule_config", () => loadNotificationRuleConfig());
+    return await runStage("recurring_rules_due_lookup", () => findDueCustomWeeklyOccurrences(ruleConfig.customWeeklyRules, now));
+  } catch (error) {
+    const stage = error instanceof WorkerStageError ? error.stage : "rule_config";
+    const cause = error instanceof WorkerStageError ? error.cause : error;
+    console.error(formatWorkerErrorLog(stage, sanitizeWorkerError(cause)));
+    return [];
+  }
+}
+
 export async function runScheduledBroadcastWorkerTick(): Promise<ScheduledBroadcastWorkerTickSummary> {
   const startedAt = performance.now();
+  const now = getJerusalemLocalNow();
 
-  const [scheduledDueCount, dueJobsCount] = await Promise.all([
+  const [scheduledDueCount, dueJobsCount, recurringDue] = await Promise.all([
     runStage("scheduled_broadcasts_work_check", () => peekAnyManagerScheduledBroadcastWorkDue()),
     runStage("jobs_due_lookup", () => peekDueJobsCount()),
+    findDueCustomWeeklyOccurrencesSafely(now),
   ]);
 
-  if (scheduledDueCount === 0 && dueJobsCount === 0) {
+  if (scheduledDueCount === 0 && dueJobsCount === 0 && recurringDue.length === 0) {
     return {
       skipped: true,
       scheduledBroadcastsDue: 0,
       scheduledBroadcastsDispatched: 0,
       scheduledBroadcastsFailed: 0,
+      recurringRulesDispatched: 0,
+      recurringRulesFailed: 0,
       jobsClaimed: 0,
       durationMs: Math.round(performance.now() - startedAt),
     };
   }
 
-  if (scheduledDueCount === 0) {
-    // Stranded-job recovery path: no due/recoverable scheduled broadcast,
-    // so there is nothing for a personnel read or dispatch to do -- go
-    // straight to delivery for whatever is already due (e.g. a manual
-    // "Send Now" broadcast whose own immediate `after()` kick never ran).
+  if (scheduledDueCount === 0 && recurringDue.length === 0) {
+    // Stranded-job recovery path: no due/recoverable scheduled broadcast
+    // and no due recurring-rule occurrence, so there is nothing for a
+    // personnel read or dispatch to do -- go straight to delivery for
+    // whatever is already due (e.g. a manual "Send Now" broadcast whose
+    // own immediate `after()` kick never ran).
     const deliverySummary: DeliverySummary = await runStage("delivery", () => runDelivery());
     return {
       skipped: false,
       scheduledBroadcastsDue: 0,
       scheduledBroadcastsDispatched: 0,
       scheduledBroadcastsFailed: 0,
+      recurringRulesDispatched: 0,
+      recurringRulesFailed: 0,
       jobsClaimed: deliverySummary.jobsClaimed,
       durationMs: Math.round(performance.now() - startedAt),
     };
   }
 
+  // Either a due/recoverable scheduled broadcast or a due recurring-rule
+  // occurrence (or both) exists -- both dispatch paths need the SAME
+  // personnel-ONLY fresh read, fetched exactly once here.
   const { people } = await runStage("fresh_personnel_read", () => fetchFreshPersonnelRead());
 
-  const dispatchResult = await runStage("scheduled_broadcasts", () => runDueScheduledBroadcastDispatch(people));
+  let scheduledBroadcastsDue = 0;
+  let scheduledBroadcastsDispatched = 0;
+  let scheduledBroadcastsFailed = 0;
+  if (scheduledDueCount > 0) {
+    const dispatchResult = await runStage("scheduled_broadcasts", () => runDueScheduledBroadcastDispatch(people));
+    scheduledBroadcastsDue = dispatchResult.claimed;
+    scheduledBroadcastsDispatched = dispatchResult.dispatched;
+    scheduledBroadcastsFailed = dispatchResult.failed;
+  }
+
+  let recurringRulesDispatched = 0;
+  let recurringRulesFailed = 0;
+  if (recurringDue.length > 0) {
+    const recurringResult = await runStage("recurring_rules", () => runDueCustomWeeklyRuleDispatch(recurringDue, people));
+    recurringRulesDispatched = recurringResult.dispatched;
+    recurringRulesFailed = recurringResult.failed;
+  }
 
   const deliverySummary: DeliverySummary = await runStage("delivery", () => runDelivery());
 
   return {
     skipped: false,
-    scheduledBroadcastsDue: dispatchResult.claimed,
-    scheduledBroadcastsDispatched: dispatchResult.dispatched,
-    scheduledBroadcastsFailed: dispatchResult.failed,
+    scheduledBroadcastsDue,
+    scheduledBroadcastsDispatched,
+    scheduledBroadcastsFailed,
+    recurringRulesDispatched,
+    recurringRulesFailed,
     jobsClaimed: deliverySummary.jobsClaimed,
     durationMs: Math.round(performance.now() - startedAt),
   };

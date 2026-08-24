@@ -24,6 +24,9 @@ const runDueScheduledBroadcastDispatch = vi.fn();
 const runDelivery = vi.fn();
 const peekDueJobsCount = vi.fn();
 const peekDueManagerScheduledBroadcastsCount = vi.fn();
+const loadNotificationRuleConfig = vi.fn();
+const findDueCustomWeeklyOccurrences = vi.fn();
+const runDueCustomWeeklyRuleDispatch = vi.fn();
 
 vi.mock("./freshRead", () => ({ fetchFreshWorkbookRead: (...args: unknown[]) => fetchFreshWorkbookRead(...args) }));
 vi.mock("./recipients", () => ({ resolveNotificationRecipients: (...args: unknown[]) => resolveNotificationRecipients(...args) }));
@@ -33,6 +36,11 @@ vi.mock("./scheduledBroadcast", () => ({
   runDueScheduledBroadcastDispatch: (...args: unknown[]) => runDueScheduledBroadcastDispatch(...args),
 }));
 vi.mock("./delivery", () => ({ runDelivery: (...args: unknown[]) => runDelivery(...args) }));
+vi.mock("./ruleConfig", () => ({ loadNotificationRuleConfig: (...args: unknown[]) => loadNotificationRuleConfig(...args) }));
+vi.mock("./recurringRuleDispatch", () => ({
+  findDueCustomWeeklyOccurrences: (...args: unknown[]) => findDueCustomWeeklyOccurrences(...args),
+  runDueCustomWeeklyRuleDispatch: (...args: unknown[]) => runDueCustomWeeklyRuleDispatch(...args),
+}));
 vi.mock("./store", () => ({
   peekDueJobsCount: (...args: unknown[]) => peekDueJobsCount(...args),
   peekDueManagerScheduledBroadcastsCount: (...args: unknown[]) => peekDueManagerScheduledBroadcastsCount(...args),
@@ -54,6 +62,7 @@ const ZERO_REMINDERS_SUMMARY = {
   logisticsWithdrawalNoonTeamJobs: 0,
   almashCheckInJobs: 0,
   constraintsJobs: 0,
+  constraintsCancelled: 0,
 };
 
 function setupHappyDefaults() {
@@ -64,6 +73,9 @@ function setupHappyDefaults() {
   resolveNotificationRecipients.mockResolvedValue({ resolved: new Map(), unmappedCount: 0, ambiguousEmailCount: 0, noEmailCount: 0 });
   runChangeDetection.mockResolvedValue({ baselineAction: "unchanged", semanticChangesDetected: 0, pendingChangesOpen: 0, jobsCreated: 0 });
   runReminders.mockResolvedValue(ZERO_REMINDERS_SUMMARY);
+  loadNotificationRuleConfig.mockResolvedValue({ systemRules: new Map(), customWeeklyRules: [] });
+  findDueCustomWeeklyOccurrences.mockResolvedValue([]);
+  runDueCustomWeeklyRuleDispatch.mockResolvedValue({ dispatched: 0, failed: 0 });
   runDueScheduledBroadcastDispatch.mockResolvedValue({ claimed: 0, dispatched: 0, failed: 0 });
   runDelivery.mockResolvedValue({
     jobsClaimed: 0,
@@ -143,5 +155,83 @@ describe("runNotificationWorkerTick -- scheduled-broadcast fallback phase wiring
     await runNotificationWorkerTick("send");
 
     expect(runDueScheduledBroadcastDispatch).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("runNotificationWorkerTick -- custom weekly recurring rule fallback phase wiring", () => {
+  it("in 'send' mode, dispatches due recurring-rule occurrences using THIS tick's own already-loaded rule config and roster, before delivery runs", async () => {
+    setupHappyDefaults();
+    const rule = { id: "rule-1", enabled: true, weekday: 6, localHour: 21, localMinute: 0, title: "t", body: "b", audienceKind: "everyone", targetPersonIds: [], createdByPersonId: null, createdByPersonName: null };
+    loadNotificationRuleConfig.mockResolvedValue({ systemRules: new Map(), customWeeklyRules: [rule] });
+    const occurrence = { ruleId: rule.id, occurrenceDate: "2026-08-22" };
+    findDueCustomWeeklyOccurrences.mockResolvedValue([occurrence]);
+
+    const callOrder: string[] = [];
+    runDueCustomWeeklyRuleDispatch.mockImplementation(async () => {
+      callOrder.push("recurring_rules");
+      return { dispatched: 1, failed: 0 };
+    });
+    runDelivery.mockImplementation(async () => {
+      callOrder.push("delivery");
+      return {
+        jobsClaimed: 0,
+        deliveriesSucceeded: 0,
+        deliveriesFailedPermanent: 0,
+        deliveriesFailedTransient: 0,
+        subscriptionsRemoved: 0,
+        jobsCompleted: 0,
+        jobsFailed: 0,
+        jobsSkipped: 0,
+        jobsPending: 0,
+      };
+    });
+
+    const { runNotificationWorkerTick } = await loadModule();
+    const result = await runNotificationWorkerTick("send");
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.summary.recurringRulesDispatched).toBe(1);
+    expect(result.summary.recurringRulesFailed).toBe(0);
+    expect(findDueCustomWeeklyOccurrences).toHaveBeenCalledWith([rule], expect.anything());
+    expect(runDueCustomWeeklyRuleDispatch).toHaveBeenCalledWith([occurrence], PEOPLE);
+    expect(callOrder).toEqual(["recurring_rules", "delivery"]);
+  });
+
+  it("in 'dry_run' mode, never looks up or dispatches recurring-rule occurrences", async () => {
+    setupHappyDefaults();
+
+    const { runNotificationWorkerTick } = await loadModule();
+    const result = await runNotificationWorkerTick("dry_run");
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.summary.recurringRulesDispatched).toBe(0);
+    expect(findDueCustomWeeklyOccurrences).not.toHaveBeenCalled();
+    expect(runDueCustomWeeklyRuleDispatch).not.toHaveBeenCalled();
+  });
+
+  it("a rule-config load failure never blocks scheduled-broadcast dispatch or delivery -- isolated, fail-safe, logged", async () => {
+    setupHappyDefaults();
+    loadNotificationRuleConfig.mockRejectedValue(new Error("boom"));
+    runDueScheduledBroadcastDispatch.mockResolvedValue({ claimed: 1, dispatched: 1, failed: 0 });
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { runNotificationWorkerTick } = await loadModule();
+    const result = await runNotificationWorkerTick("send");
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    // Reminders never even attempted once rule config failed to load.
+    expect(runReminders).not.toHaveBeenCalled();
+    // But scheduled-broadcast dispatch and delivery still ran normally.
+    expect(runDueScheduledBroadcastDispatch).toHaveBeenCalledTimes(1);
+    expect(result.summary.scheduledBroadcastsDispatched).toBe(1);
+    expect(runDelivery).toHaveBeenCalledTimes(1);
+    // No due recurring occurrences either (an empty fallback config), never a crash.
+    expect(result.summary.recurringRulesDispatched).toBe(0);
+    expect(consoleErrorSpy).toHaveBeenCalled();
+
+    consoleErrorSpy.mockRestore();
   });
 });

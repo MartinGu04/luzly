@@ -1,8 +1,8 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { Badge } from "@/components/ui/Badge";
 import { Panel } from "@/components/ui/Panel";
+import { RosterPersonPicker } from "./RosterPersonPicker";
 import {
   sendManagerBroadcastAction,
   type SendManagerBroadcastActionResult,
@@ -15,8 +15,7 @@ import {
   type ScheduledBroadcastView,
 } from "@/lib/notifications/scheduledBroadcastActions";
 import { formatScheduledBroadcastMoment } from "@/lib/presentation/scheduledBroadcast";
-import { computeAudienceSummary, unresolvedReasonLabel } from "@/lib/presentation/managerBroadcast";
-import { groupRosterHierarchy } from "@/lib/presentation/roster";
+import { computeAudienceSummary } from "@/lib/presentation/managerBroadcast";
 import type { ManagerAdoptionPersonView, ManagerPersonSummary } from "@/lib/readModels/managerTypes";
 
 type AudienceKind = "person" | "people" | "everyone";
@@ -73,45 +72,6 @@ const ERROR_LABELS: Record<string, string> = {
 
 function errorLabel(error: string): string {
   return ERROR_LABELS[error] ?? "השליחה נכשלה. נסה/י שוב.";
-}
-
-function PersonCheckbox({
-  person,
-  checked,
-  onToggle,
-  adoption,
-}: {
-  person: ManagerPersonSummary;
-  checked: boolean;
-  onToggle: () => void;
-  adoption: ManagerAdoptionPersonView | undefined;
-}) {
-  const reason = adoption ? unresolvedReasonLabel(adoption) : null;
-
-  return (
-    <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-overlay-soft">
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={onToggle}
-        className="h-4 w-4 shrink-0 accent-[var(--color-primary)]"
-      />
-      <span className="min-w-0 flex-1 truncate text-foreground">{person.name}</span>
-      {adoption?.notificationStatus === "ready" ? (
-        <Badge tone="success" className="shrink-0">
-          Push
-        </Badge>
-      ) : adoption?.notificationStatus === "not_enabled" ? (
-        <Badge tone="neutral" className="shrink-0">
-          התראה בלבד
-        </Badge>
-      ) : reason ? (
-        <Badge tone="warning" className="shrink-0">
-          {reason}
-        </Badge>
-      ) : null}
-    </label>
-  );
 }
 
 function minuteOfDayToTimeValue(minuteOfDay: number): string {
@@ -182,9 +142,6 @@ export function ManagerBroadcastComposer({
     () => new Map(adoptionPeople.map((person) => [person.personId, person])),
     [adoptionPeople],
   );
-
-  const groups = useMemo(() => groupRosterHierarchy(roster), [roster]);
-  const normalizedQuery = query.trim().toLowerCase();
 
   const effectiveSelectedIds = audienceKind === "everyone" ? roster.map((person) => person.id) : selectedIds;
   const summary = useMemo(
@@ -337,44 +294,14 @@ export function ManagerBroadcastComposer({
         </div>
 
         {audienceKind !== "everyone" ? (
-          <div className="rounded-xl bg-overlay-faint p-2 ring-1 ring-border">
-            <input
-              type="search"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="חיפוש לפי שם"
-              aria-label="חיפוש איש/אשת צוות"
-              className="mb-1.5 w-full rounded-lg bg-surface-1 px-3 py-1.5 text-sm text-foreground placeholder:text-muted-2 focus:outline-none"
-            />
-            <ul className="max-h-56 overflow-y-auto">
-              {groups.map((group) => {
-                const rows =
-                  group.subgroups.length > 0
-                    ? group.subgroups.flatMap((subgroup) => subgroup.people)
-                    : group.people;
-                const matching = rows.filter(
-                  (person) => normalizedQuery === "" || person.name.toLowerCase().includes(normalizedQuery),
-                );
-                if (matching.length === 0) return null;
-                return (
-                  <li key={group.group}>
-                    <div className="px-2 pt-2 pb-1 text-[11px] font-semibold text-muted-2 first:pt-0">
-                      {group.label}
-                    </div>
-                    {matching.map((person) => (
-                      <PersonCheckbox
-                        key={person.id}
-                        person={person}
-                        checked={selectedIds.includes(person.id)}
-                        onToggle={() => togglePerson(person.id)}
-                        adoption={adoptionByPersonId.get(person.id)}
-                      />
-                    ))}
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
+          <RosterPersonPicker
+            roster={roster}
+            adoptionPeople={adoptionPeople}
+            query={query}
+            onQueryChange={setQuery}
+            selectedIds={selectedIds}
+            onTogglePerson={togglePerson}
+          />
         ) : null}
 
         <div className="grid gap-3 sm:grid-cols-2">

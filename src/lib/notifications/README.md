@@ -70,3 +70,26 @@ communication screen reflects a background dispatch via lightweight
 polling, never Realtime/WebSocket -- see
 `components/manager/ManagerScheduledBroadcastsSection.tsx` and
 `ManagerRecentBroadcastsSection.tsx`.
+
+### Fixed / Recurring Notifications Center -- the managed source of truth
+for fixed system reminders + manager-created weekly recurring rules
+
+Every EXISTING fixed/system reminder category (tomorrow shift/duty/
+logistics-withdrawal, its day-before supervisor variant, the same-day
+noon logistics trio, עלמ״ש check-in, and the two weekly constraints
+reminders) is now a persisted, manager-visible `notification_rules` row
+(`kind = 'system'`) rather than invisible code configuration -- a
+manager can see, enable/disable, and retime each one from "📌 התראות
+קבועות" (`components/manager/ManagerFixedNotificationsSection.tsx`).
+System identity/trigger/audience logic stays entirely protected in
+`engine/reminders.ts` -- this table only ever configures WHETHER and
+WHEN, never WHO or WHY. A SECOND kind (`kind = 'custom_weekly'`) lets a
+manager author their own weekly recurring broadcast (one weekday + local
+time, V1) that reuses the existing manager broadcast/batch/job pipeline
+for dispatch -- see `engine/ruleConfig.ts` (the typed loader) and
+`engine/recurringRuleDispatch.ts` (occurrence resolution + dispatch,
+piggybacking on the SAME once-a-minute worker that already dispatches
+one-time scheduled broadcasts, never a second cron). `ruleActions.ts`
+("use server") is this feature's one manager-gated CRUD surface -- see
+`engine/README.md`'s own section for the full worker-integration
+picture, and the migration's own doc comment for the schema.
