@@ -1,4 +1,4 @@
-import { dayOfWeek, daysBetweenCalendarDates, parseCalendarDate } from "./dutyBlocks";
+import { buildDutyBlocks, dayOfWeek, daysBetweenCalendarDates, parseCalendarDate, type DutyBlock } from "./dutyBlocks";
 import type { Event } from "./event";
 import type { PotentialAllocation } from "./potentialAllocation";
 import { EXACT_SLOT_FAMILIES } from "./potentialReconciliation";
@@ -35,19 +35,24 @@ import type { Person } from "./types";
  * For `dutyFamily`/`slot`, "the exact same" means the exact same DATE too --
  * EXCEPT for guard/reserve (`EXACT_SLOT_FAMILIES`, reused from
  * `potentialReconciliation.ts` rather than a second copy of the same
- * family list). For those two families specifically, the numbered slot
- * represents ONE continuous real-world requirement across its whole
- * half-week/week block, not a series of independent per-day requirements --
- * so a real internal duty anywhere in the SAME Sunday-Saturday calendar
- * week as the allocation's date already covers it, even on a different
- * exact date. This is what fixes a stale/superseded Potential entry from
- * BEFORE a real internal swap: e.g. Potential names a person for guard
- * slot 4 starting Sunday, but their real internal duty for that same slot
- * was later scheduled to start Tuesday of the SAME week (a swap) -- the
- * Sunday Potential entry is stale, not a genuine gap, and must never
- * surface as a second, phantom tentative duty. Every other family keeps
- * the original exact-date rule unchanged -- they carry no real internal
- * slot at all, so there is no "same continuous requirement" concept to
+ * family list). The real workbook can carry TWO distinct guard/reserve
+ * requirements for the SAME slot in the SAME week (e.g. a first-half and a
+ * second-half half-week block are each their own row) -- so a numbered
+ * slot is NOT one continuous requirement per week; it is per REAL,
+ * distinguishable confirmed block. Reconciliation for these two families is
+ * therefore one-to-one, via `resolveCoveredPersonalAllocations` below: each
+ * real confirmed `DutyBlock` for that `(dutyFamily, slot)` may supersede AT
+ * MOST ONE Potential allocation, matched by exact date first, then -- for
+ * whichever allocations and blocks are still unmatched after that -- by
+ * falling in the SAME Sunday-Saturday calendar week. This is what fixes a
+ * stale/superseded Potential entry from BEFORE a real internal swap (e.g.
+ * Potential names a person for guard slot 4 starting Sunday, but their real
+ * internal duty for that same slot was later moved to start Tuesday of the
+ * SAME week) WITHOUT letting that one real block also swallow a genuinely
+ * separate, still-unfulfilled Potential requirement elsewhere in that same
+ * week (e.g. the OTHER half-week's own slot-4 allocation). Every other
+ * family keeps the original independent exact-date rule unchanged -- they
+ * carry no real internal slot at all, so there is no per-block identity to
  * reconcile across dates for them.
  *
  * Certainty is always `"tentative"` -- a Potential allocation is the
@@ -64,12 +69,18 @@ export function buildPotentialDutyEvents(
   personnel: readonly Person[],
   personDutyEvents: readonly Event[],
 ): Event[] {
-  const events: Event[] = [];
-
+  const personAllocations: PotentialAllocation[] = [];
   for (const allocation of allocations) {
     const scoped = scopeManagerPotentialAllocation(allocation, personnel);
     if (!scoped || scoped.resolvedSourcePersonId !== person.id) continue;
-    if (isAlreadyCoveredByInternalDuty(allocation, personDutyEvents)) continue;
+    personAllocations.push(allocation);
+  }
+
+  const covered = resolveCoveredPersonalAllocations(personAllocations, personDutyEvents);
+
+  const events: Event[] = [];
+  for (const allocation of personAllocations) {
+    if (covered.has(allocation)) continue;
 
     events.push({
       personId: person.id,
@@ -96,17 +107,137 @@ export function buildPotentialDutyEvents(
   return events;
 }
 
-function isAlreadyCoveredByInternalDuty(
-  allocation: PotentialAllocation,
+/**
+ * Which of `personAllocations` (already resolved/scoped to ONE person) are
+ * already fulfilled by a real internal duty, and must never be synthesized.
+ *
+ * Non-slotted families (everything except guard/reserve, `EXACT_SLOT_FAMILIES`):
+ * unchanged, independent per-allocation exact-date matching -- these carry
+ * no real internal slot at all (`slot: null` on both sides), so there is no
+ * per-block identity to consume; one real event can validly correspond to
+ * more than one same-date allocation without any bookkeeping.
+ *
+ * Guard/reserve: reconciled one-to-one per `(dutyFamily, slot)`, via
+ * `resolveCoveredSlottedAllocations` -- see that function's own docs for
+ * why a simple "is there ANY matching real event/week" boolean predicate is
+ * unsafe once the SAME slot can carry two distinct real-world requirements
+ * in the same week (the real workbook does: a first-half and a second-half
+ * block are each their own row).
+ */
+function resolveCoveredPersonalAllocations(
+  personAllocations: readonly PotentialAllocation[],
   personDutyEvents: readonly Event[],
-): boolean {
-  return personDutyEvents.some((event) => {
-    if (event.dutyFamily !== allocation.dutyFamily || event.slot !== allocation.slot) return false;
-    if (EXACT_SLOT_FAMILIES.has(allocation.dutyFamily)) {
-      return isSameCalendarWeek(event.date, allocation.date);
+): ReadonlySet<PotentialAllocation> {
+  const covered = new Set<PotentialAllocation>();
+  const slottedByFamilyAndSlot = new Map<string, PotentialAllocation[]>();
+
+  for (const allocation of personAllocations) {
+    if (!EXACT_SLOT_FAMILIES.has(allocation.dutyFamily)) {
+      const isCovered = personDutyEvents.some(
+        (event) =>
+          event.dutyFamily === allocation.dutyFamily &&
+          event.slot === allocation.slot &&
+          event.date === allocation.date,
+      );
+      if (isCovered) covered.add(allocation);
+      continue;
     }
-    return event.date === allocation.date;
-  });
+
+    const key = `${allocation.dutyFamily}|${allocation.slot ?? ""}`;
+    const group = slottedByFamilyAndSlot.get(key);
+    if (group) group.push(allocation);
+    else slottedByFamilyAndSlot.set(key, [allocation]);
+  }
+
+  if (slottedByFamilyAndSlot.size > 0) {
+    const confirmedBlocks = buildDutyBlocks(personDutyEvents);
+
+    for (const groupAllocations of slottedByFamilyAndSlot.values()) {
+      const { dutyFamily, slot } = groupAllocations[0];
+      const blocks = confirmedBlocks.filter((block) => block.dutyFamily === dutyFamily && block.slot === slot);
+      for (const allocation of resolveCoveredSlottedAllocations(groupAllocations, blocks)) {
+        covered.add(allocation);
+      }
+    }
+  }
+
+  return covered;
+}
+
+/**
+ * One-to-one reconciliation for ONE guard/reserve `(dutyFamily, slot)`
+ * group: which of `allocations` (all sharing that family/slot, for one
+ * person) are already fulfilled by one of `blocks` (that same person's
+ * REAL confirmed `DutyBlock`s for that SAME family/slot, built via
+ * `buildDutyBlocks` -- never a second grouping implementation). A block may
+ * cover AT MOST ONE allocation: the real workbook can carry two distinct
+ * requirements for the same slot in the same week (a first-half and a
+ * second-half block), so letting one real block silently satisfy EVERY
+ * allocation sharing its week (this reconciliation's earlier, unsafe
+ * shape -- a bare `.some(...)` predicate with no consumption tracking)
+ * would wrongly drop a genuinely still-open second requirement.
+ *
+ * Two passes, in this fixed order -- exact date always wins first, so a
+ * block that genuinely matches one allocation's exact date can never be
+ * "stolen" by a same-week fuzzy match for a DIFFERENT allocation processed
+ * earlier:
+ *
+ * 1. EXACT DATE: an allocation is covered by the (at most one) still
+ *    -unconsumed block whose real dates include the allocation's exact
+ *    date.
+ * 2. SAME CALENDAR WEEK: for whatever remains unmatched after pass 1, an
+ *    allocation is covered by the first still-unconsumed block sharing its
+ *    Sunday-Saturday week (`isSameCalendarWeek`, checked against EVERY one
+ *    of the block's real dates, not just its `startDate` -- a block can
+ *    itself span a week boundary, e.g. a real 4-day weekend block). This is
+ *    the stale/superseded-Potential-entry case: a real internal swap moved
+ *    the same logical requirement to a different date within the same
+ *    week.
+ *
+ * Both passes process `allocations` in a stable (date, then sourceSheet/
+ * sourceCell) order, and `blocks` in their own already-startDate-sorted
+ * order (per `buildDutyBlocks`) -- deterministic regardless of input order,
+ * never left to incidental Map/array iteration order.
+ */
+function resolveCoveredSlottedAllocations(
+  allocations: readonly PotentialAllocation[],
+  blocks: readonly DutyBlock[],
+): PotentialAllocation[] {
+  const sortedAllocations = [...allocations].sort(compareAllocationsForReconciliation);
+  const consumedBlockIndices = new Set<number>();
+  const covered: PotentialAllocation[] = [];
+
+  for (const allocation of sortedAllocations) {
+    const blockIndex = blocks.findIndex(
+      (block, index) => !consumedBlockIndices.has(index) && block.dates.includes(allocation.date),
+    );
+    if (blockIndex === -1) continue;
+    consumedBlockIndices.add(blockIndex);
+    covered.push(allocation);
+  }
+
+  const coveredByExactDate = new Set(covered);
+
+  for (const allocation of sortedAllocations) {
+    if (coveredByExactDate.has(allocation)) continue;
+
+    const blockIndex = blocks.findIndex(
+      (block, index) =>
+        !consumedBlockIndices.has(index) && block.dates.some((date) => isSameCalendarWeek(date, allocation.date)),
+    );
+    if (blockIndex === -1) continue;
+    consumedBlockIndices.add(blockIndex);
+    covered.push(allocation);
+  }
+
+  return covered;
+}
+
+/** Deterministic tiebreak for reconciling allocations -- date first, then the same sourceSheet/sourceCell identity `potentialReconciliation.ts`'s `allocationIdentity` already uses. */
+function compareAllocationsForReconciliation(a: PotentialAllocation, b: PotentialAllocation): number {
+  if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+  if (a.sourceSheet !== b.sourceSheet) return a.sourceSheet < b.sourceSheet ? -1 : 1;
+  return a.sourceCell < b.sourceCell ? -1 : a.sourceCell > b.sourceCell ? 1 : 0;
 }
 
 /**

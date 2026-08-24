@@ -403,6 +403,129 @@ describe("buildPotentialDutyEvents — production swap regression (איתי/שי
   });
 });
 
+describe("buildPotentialDutyEvents — one-to-one guard/reserve reconciliation (multiplicity): one real confirmed block may supersede AT MOST ONE Potential allocation, never every allocation sharing its week/slot", () => {
+  const ITAY = person({ id: "p_itay", name: "איתן בדיקה" });
+  const PERSONNEL_WITH_ITAY = [ITAY];
+
+  // 2026-09-06 (Sun) and 2026-09-09 (Wed) are the SAME Sun-Sat week
+  // (06-12 Sep 2026) -- the real workbook shape this whole describe block
+  // is modeled on: the SAME guard/reserve slot can carry TWO distinct
+  // requirements in one week (a first-half and a second-half block).
+  const FIRST_HALF_DATE = "2026-09-06";
+  const SECOND_HALF_DATE = "2026-09-09";
+  const DIFFERENT_WEEK_DATE = "2026-09-27"; // three weeks later -- unambiguously a different week
+
+  function guardAllocation(date: string, overrides: Partial<PotentialAllocation> = {}): PotentialAllocation {
+    return allocation({
+      date,
+      dutyFamily: "guard",
+      slot: 4,
+      columnLabel: "שומר 4",
+      sourceAllocationLabel: ITAY.name,
+      ...overrides,
+    });
+  }
+
+  function reserveAllocation(date: string, overrides: Partial<PotentialAllocation> = {}): PotentialAllocation {
+    return allocation({
+      date,
+      dutyFamily: "reserve",
+      slot: 1,
+      sourceSlot: 1,
+      columnLabel: "עתודה 1",
+      sourceAllocationLabel: ITAY.name,
+      ...overrides,
+    });
+  }
+
+  function realGuardDuty(date: string): Event {
+    return dutyEvent({ personId: ITAY.id, personName: ITAY.name, date, dutyFamily: "guard", slot: 4 });
+  }
+
+  function realReserveDuty(date: string): Event {
+    return dutyEvent({ personId: ITAY.id, personName: ITAY.name, date, dutyFamily: "reserve", slot: 1, title: "עתודה 1" });
+  }
+
+  it("3. MULTIPLICITY ANTI-REGRESSION (guard): two same-week Potential guard-4 allocations, only ONE confirmed block -- exactly ONE is suppressed, the other stays tentative", () => {
+    const firstHalf = guardAllocation(FIRST_HALF_DATE);
+    const secondHalf = guardAllocation(SECOND_HALF_DATE);
+    // The single confirmed block exactly matches the second half only.
+    const events = buildPotentialDutyEvents([firstHalf, secondHalf], ITAY, PERSONNEL_WITH_ITAY, [
+      realGuardDuty(SECOND_HALF_DATE),
+    ]);
+    expect(events).toEqual([expect.objectContaining({ date: FIRST_HALF_DATE, certainty: "tentative" })]);
+  });
+
+  it("4. the SAME multiplicity case with reserve", () => {
+    const firstHalf = reserveAllocation(FIRST_HALF_DATE);
+    const secondHalf = reserveAllocation(SECOND_HALF_DATE);
+    const events = buildPotentialDutyEvents([firstHalf, secondHalf], ITAY, PERSONNEL_WITH_ITAY, [
+      realReserveDuty(SECOND_HALF_DATE),
+    ]);
+    expect(events).toEqual([expect.objectContaining({ date: FIRST_HALF_DATE, dutyFamily: "reserve", certainty: "tentative" })]);
+  });
+
+  it("5. two Potential allocations + two confirmed blocks -- both reconcile via exact date, no tentative leftovers", () => {
+    const firstHalf = guardAllocation(FIRST_HALF_DATE);
+    const secondHalf = guardAllocation(SECOND_HALF_DATE);
+    const events = buildPotentialDutyEvents([firstHalf, secondHalf], ITAY, PERSONNEL_WITH_ITAY, [
+      realGuardDuty(FIRST_HALF_DATE),
+      realGuardDuty(SECOND_HALF_DATE),
+    ]);
+    expect(events).toEqual([]);
+  });
+
+  it("6. no confirmed block at all -- both Potential allocations remain tentative", () => {
+    const firstHalf = guardAllocation(FIRST_HALF_DATE);
+    const secondHalf = guardAllocation(SECOND_HALF_DATE);
+    const events = buildPotentialDutyEvents([firstHalf, secondHalf], ITAY, PERSONNEL_WITH_ITAY, []);
+    expect(events).toHaveLength(2);
+    expect(events.map((e) => e.date).sort()).toEqual([FIRST_HALF_DATE, SECOND_HALF_DATE].sort());
+  });
+
+  it("7. a confirmed block for a DIFFERENT slot never consumes the allocation, even on the exact same date", () => {
+    const events = buildPotentialDutyEvents(
+      [guardAllocation(FIRST_HALF_DATE)],
+      ITAY,
+      PERSONNEL_WITH_ITAY,
+      [dutyEvent({ personId: ITAY.id, personName: ITAY.name, date: FIRST_HALF_DATE, dutyFamily: "guard", slot: 2 })],
+    );
+    expect(events).toHaveLength(1);
+  });
+
+  it("8. a confirmed block for a DIFFERENT family never consumes the allocation, even on the exact same date and matching slot number", () => {
+    const events = buildPotentialDutyEvents(
+      [guardAllocation(FIRST_HALF_DATE)],
+      ITAY,
+      PERSONNEL_WITH_ITAY,
+      [dutyEvent({ personId: ITAY.id, personName: ITAY.name, date: FIRST_HALF_DATE, dutyFamily: "reserve", slot: 4, title: "עתודה" })],
+    );
+    expect(events).toHaveLength(1);
+  });
+
+  it("9. a confirmed block in a DIFFERENT week/cycle never consumes the allocation", () => {
+    const events = buildPotentialDutyEvents(
+      [guardAllocation(FIRST_HALF_DATE)],
+      ITAY,
+      PERSONNEL_WITH_ITAY,
+      [realGuardDuty(DIFFERENT_WEEK_DATE)],
+    );
+    expect(events).toHaveLength(1);
+  });
+
+  it("10. exact-date matching always wins first -- a same-week allocation with NO exact match never steals the block from another allocation that DOES have one, regardless of input order", () => {
+    const noExactMatch = guardAllocation(FIRST_HALF_DATE); // no real duty this exact date
+    const hasExactMatch = guardAllocation(SECOND_HALF_DATE); // real duty exists exactly here
+    const block = [realGuardDuty(SECOND_HALF_DATE)];
+
+    const forwardOrder = buildPotentialDutyEvents([noExactMatch, hasExactMatch], ITAY, PERSONNEL_WITH_ITAY, block);
+    expect(forwardOrder).toEqual([expect.objectContaining({ date: FIRST_HALF_DATE })]);
+
+    const reverseOrder = buildPotentialDutyEvents([hasExactMatch, noExactMatch], ITAY, PERSONNEL_WITH_ITAY, block);
+    expect(reverseOrder).toEqual([expect.objectContaining({ date: FIRST_HALF_DATE })]);
+  });
+});
+
 describe("buildPotentialDutyEventsForRoster — the same per-person conversion, run across a whole roster", () => {
   it("produces one synthetic Event per person whose allocation resolves and isn't already covered", () => {
     const events = buildPotentialDutyEventsForRoster(

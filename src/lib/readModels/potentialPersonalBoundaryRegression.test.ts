@@ -338,4 +338,32 @@ describe("Potential never surfaces a stale same-week guard/reserve entry once th
       expect.objectContaining({ date: "2026-09-06", dutyFamily: "guard", certainty: "confirmed" }),
     ]);
   });
+
+  it("multiplicity anti-regression: TWO same-week Potential guard-4 entries (first-half + second-half, as the real workbook actually structures them) with only ONE confirmed block -- exactly one is suppressed, the genuinely still-open other one stays tentative on the personal calendar", () => {
+    // 06/09 and 09/09 are both in the SAME week as the earlier tests, but
+    // here BOTH are separate Potential requirements (unlike the swap
+    // scenario above, which has just one). Only the second-half (09/09) has
+    // a real confirmed duty; the first-half (06/09) genuinely has none yet.
+    const model = buildPersonalScheduleReadModel({
+      person: ITAY,
+      people,
+      events: [realGuardDuty("2026-09-09", "C1")],
+      shiftSchedule: schedule,
+      fetchedAt: "2026-09-01T08:00:00.000Z",
+      now: { date: "2026-09-01", minuteOfDay: 600 } satisfies LocalNow,
+      potentialAllocations: [
+        guardAllocation({ date: "2026-09-06", sourceCell: "D1" }),
+        guardAllocation({ date: "2026-09-09", sourceCell: "D2" }),
+      ],
+    });
+
+    const dutyEvents = model.calendarEvents.filter((event) => event.category === "duty");
+    expect(dutyEvents).toEqual([
+      expect.objectContaining({ date: "2026-09-06", dutyFamily: "guard", certainty: "tentative" }),
+      expect.objectContaining({ date: "2026-09-09", dutyFamily: "guard", certainty: "confirmed" }),
+    ]);
+    // Never both suppressed, and never the confirmed duty duplicated by a
+    // second, redundant tentative entry on its own exact date.
+    expect(dutyEvents).toHaveLength(2);
+  });
 });
