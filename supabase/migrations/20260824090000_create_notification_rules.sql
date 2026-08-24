@@ -40,7 +40,12 @@
 --  `local_hour`/`local_minute`, `title`, `body`, and `audience_kind`/
 --  `target_person_ids` (the SAME `person`/`people`/`everyone` shape
 --  `manager_notification_batches.audience_kind` already uses) are all
---  manager-authored. `system_key` is always null for one of these.
+--  manager-authored. `system_key` is always null for one of these. Each
+--  weekly occurrence is dispatched at-most-once through the CLAIM
+--  boundary `notification_rule_occurrences`/`claim_notification_rule_occurrence`
+--  own further down this file -- see that table's own extensive doc
+--  comment for exactly why a `manager_notification_batches` row's mere
+--  existence is never a safe "already dispatched" signal on its own.
 --
 -- Seeding: every existing fixed reminder is inserted below with its
 -- CURRENT production send time (see `src/lib/config/notificationTiming.ts`,
@@ -189,3 +194,180 @@ values
   ('system', 'constraints_sunday', true, 18, 0),
   ('system', 'constraints_monday', true, 9, 0)
 on conflict (system_key) where kind = 'system' do nothing;
+
+-- ---------------------------------------------------------------------
+-- notification_rule_occurrences -- the at-most-once CLAIM boundary for
+-- one custom_weekly rule's one local calendar occurrence
+-- (rule_id, occurrence_date). Deliberately a SEPARATE row from
+-- `manager_notification_batches`: that batch's own existence is NOT a
+-- safe "this occurrence is fully dispatched" signal, because batch
+-- creation and per-recipient `notification_jobs` creation are two
+-- separate writes -- a crash between them would otherwise leave a
+-- half-dispatched occurrence that `notification_rules`'s own dispatch
+-- code could never distinguish from a genuinely completed one, silently
+-- losing the missing recipients' notifications forever. This table is
+-- the ONE terminal-completion source of truth instead: an occurrence is
+-- "done" only when `status = 'completed'`, which the application layer
+-- (`lib/notifications/engine/recurringRuleDispatch.ts`) sets ONLY after
+-- every intended recipient's `notification_jobs` row has been created
+-- successfully.
+--
+-- Lifecycle: no row -> 'claimed' (a fresh claim, see
+-- `claim_notification_rule_occurrence` below) -> 'completed' (every job
+-- created). A crash while 'claimed' is recovered by a LATER call to the
+-- same claim function once its lease (`claimed_at`) goes stale -- same
+-- lease-based recovery shape `claim_due_manager_scheduled_broadcasts`
+-- already uses for one-time scheduled broadcasts, just keyed by
+-- (rule_id, occurrence_date) instead of a pre-existing row id, since a
+-- recurring occurrence has no row at all until the moment it's first
+-- claimed.
+--
+-- `batch_id` is this row's own dispatch checkpoint, exactly like
+-- `manager_scheduled_broadcasts.batch_id`: null means "no batch created
+-- yet for this occurrence", non-null means "the batch already exists,
+-- resume by reusing its already-frozen recipient set/copy, never
+-- re-resolve". This is what makes a crash AFTER batch creation but
+-- BEFORE the checkpoint update safe too -- the resumed attempt re-runs
+-- `insertManagerNotificationBatchIfAbsent`'s own idempotent insert
+-- (`manager_notification_batches.idempotency_key`), which transparently
+-- finds the already-created batch rather than creating a second one.
+-- ---------------------------------------------------------------------
+create table if not exists public.notification_rule_occurrences (
+  id uuid primary key default gen_random_uuid(),
+  rule_id uuid not null references public.notification_rules (id),
+  -- Asia/Jerusalem local calendar date this occurrence belongs to.
+  occurrence_date date not null,
+  status text not null default 'claimed',
+  batch_id uuid references public.manager_notification_batches (id),
+  claimed_at timestamptz not null default now(),
+  completed_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint notification_rule_occurrences_unique unique (rule_id, occurrence_date),
+  constraint notification_rule_occurrences_status_check check (status in ('claimed', 'completed'))
+);
+
+alter table public.notification_rule_occurrences enable row level security;
+
+-- No RLS policies declared -- same "service-role only, default-deny"
+-- convention every other notification-engine table already uses.
+
+-- -----------------------------------------------------------------------
+-- claim_notification_rule_occurrence -- the ONE atomic claim boundary for
+-- a custom weekly rule's occurrence, closing two distinct races at once:
+--
+-- 1. AT-MOST-ONCE DISPATCH under overlapping workers / retried ticks.
+--    A FRESH claim (no existing row yet) is a plain
+--    `insert ... on conflict (rule_id, occurrence_date) do nothing` --
+--    only one of two concurrent callers can ever win it; the other's
+--    insert affects zero rows and this function returns zero rows to it
+--    (a safe "someone else has it, do nothing" signal). A RESUME (a row
+--    already exists) is only granted when the existing claim's lease
+--    (`claimed_at`) has gone stale (`p_lease_seconds`, default 90s,
+--    mirroring the scheduled-broadcast claim's own lease window) -- an
+--    actively-leased row (another worker genuinely mid-dispatch right
+--    now) also returns zero rows, never a concurrent second claim of the
+--    same live occurrence. A `'completed'` row always returns zero rows
+--    -- the occurrence is genuinely done, forever.
+--
+-- 2. THE DISABLE/EDIT-BEFORE-CLAIM RACE. A FRESH claim additionally
+--    `select ... for update`s the rule's OWN row before ever inserting
+--    the occurrence claim, and refuses to claim at all if the rule is,
+--    RIGHT NOW, disabled/archived/gone -- never the possibly-stale
+--    in-memory rule snapshot `findDueCustomWeeklyOccurrences` computed
+--    earlier in the same tick (a manager's disable/edit/archive commits
+--    either strictly before this lock is acquired, in which case it's
+--    correctly honored below, or it blocks on this SAME row lock until
+--    this transaction commits the claim -- at which point the occurrence
+--    is already legitimately claimed and the disable only ever prevents
+--    the NEXT occurrence). A RESUME of an already-claimed row is
+--    deliberately NOT re-gated on the rule's current enabled state --
+--    that occurrence was legitimately claimed while the rule WAS enabled
+--    at the time, and a later disable must never leave a genuinely
+--    in-flight send stuck half-dispatched forever; it finishes
+--    idempotently instead, exactly per this feature's own spec.
+--
+-- Returns the frozen-at-claim rule content (title/body/audience) rather
+-- than making the caller re-read `notification_rules` separately, so a
+-- concurrent edit that lands AFTER this claim commits can never leak
+-- into an in-flight dispatch's content either.
+-- -----------------------------------------------------------------------
+create or replace function public.claim_notification_rule_occurrence(
+  p_rule_id uuid,
+  p_occurrence_date date,
+  p_lease_seconds integer default 90
+)
+returns table (
+  occurrence_id uuid,
+  batch_id uuid,
+  is_resume boolean,
+  rule_title text,
+  rule_body text,
+  rule_audience_kind text,
+  rule_target_person_ids text[]
+)
+language plpgsql
+as $$
+declare
+  existing_row public.notification_rule_occurrences;
+  rule_row public.notification_rules;
+  inserted_row public.notification_rule_occurrences;
+begin
+  select * into existing_row from public.notification_rule_occurrences
+    where rule_id = p_rule_id and occurrence_date = p_occurrence_date
+    for update;
+
+  if found then
+    if existing_row.status = 'completed' then
+      return; -- genuinely done -- zero rows
+    end if;
+
+    if existing_row.claimed_at >= now() - make_interval(secs => p_lease_seconds) then
+      return; -- actively leased by another worker right now -- zero rows
+    end if;
+
+    -- Stale claim -- resume UNCONDITIONALLY (see this function's own doc
+    -- comment above for why the rule's current enabled state is
+    -- deliberately irrelevant here).
+    update public.notification_rule_occurrences
+      set claimed_at = now(), updated_at = now()
+      where id = existing_row.id;
+
+    select * into rule_row from public.notification_rules where id = p_rule_id;
+
+    return query
+      select existing_row.id, existing_row.batch_id, true,
+             rule_row.title, rule_row.body, rule_row.audience_kind, rule_row.target_person_ids;
+    return;
+  end if;
+
+  -- Fresh claim -- lock the rule row FIRST so a concurrent disable/edit/
+  -- archive (which updates this same row) cannot interleave: see this
+  -- function's own doc comment above.
+  select * into rule_row from public.notification_rules where id = p_rule_id for update;
+
+  if not found
+     or rule_row.kind is distinct from 'custom_weekly'
+     or rule_row.enabled is not true
+     or rule_row.archived_at is not null
+  then
+    return; -- disabled/archived/missing RIGHT NOW -- never claim, zero rows
+  end if;
+
+  insert into public.notification_rule_occurrences (rule_id, occurrence_date, status, claimed_at)
+  values (p_rule_id, p_occurrence_date, 'claimed', now())
+  on conflict (rule_id, occurrence_date) do nothing
+  returning * into inserted_row;
+
+  if inserted_row.id is null then
+    return; -- lost a race to a concurrent fresh claim -- zero rows, safe
+  end if;
+
+  return query
+    select inserted_row.id, inserted_row.batch_id, false,
+           rule_row.title, rule_row.body, rule_row.audience_kind, rule_row.target_person_ids;
+end;
+$$;
+
+revoke all on function public.claim_notification_rule_occurrence(uuid, date, integer) from public, anon, authenticated;
+grant execute on function public.claim_notification_rule_occurrence(uuid, date, integer) to service_role;

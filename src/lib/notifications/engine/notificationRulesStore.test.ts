@@ -342,3 +342,163 @@ describe("setCustomWeeklyRuleEnabled / archiveCustomWeeklyRule", () => {
     expect(await archiveCustomWeeklyRule("rule-1", "p", "n")).toBeNull();
   });
 });
+
+describe("claimNotificationRuleOccurrence / setNotificationRuleOccurrenceBatchId / completeNotificationRuleOccurrence / listCompletedNotificationRuleOccurrenceKeys", () => {
+  function makeFakeOccurrenceClient(rpcResult: { data: unknown; error: unknown } = { data: [], error: null }) {
+    const rpc = vi.fn(async () => rpcResult);
+    const updateCalls: { table: string; patch: Record<string, unknown>; filters: [string, unknown][] }[] = [];
+    let completedRows: { rule_id: string; occurrence_date: string }[] = [];
+
+    function setCompletedRows(rows: { rule_id: string; occurrence_date: string }[]) {
+      completedRows = rows;
+    }
+
+    const client = {
+      rpc,
+      from: (table: string) => {
+        if (table === "notification_rule_occurrences") {
+          return {
+            update: (patch: Record<string, unknown>) => {
+              const filters: [string, unknown][] = [];
+              const builder = {
+                eq: (column: string, value: unknown) => {
+                  filters.push([column, value]);
+                  return builder;
+                },
+                is: (column: string, value: unknown) => {
+                  filters.push([column, value]);
+                  return builder;
+                },
+                then: (resolve: (result: { data: null; error: null }) => void) => {
+                  updateCalls.push({ table, patch, filters });
+                  resolve({ data: null, error: null });
+                },
+              };
+              return builder;
+            },
+            select: () => ({
+              in: () => ({
+                in: () => ({
+                  eq: async () => ({ data: completedRows, error: null }),
+                }),
+              }),
+            }),
+          };
+        }
+        throw new Error(`unexpected table ${table}`);
+      },
+    };
+
+    return { client, rpc, updateCalls, setCompletedRows };
+  }
+
+  it("claimNotificationRuleOccurrence maps a fresh claim's RPC row", async () => {
+    const { client, rpc } = makeFakeOccurrenceClient({
+      data: [
+        {
+          occurrence_id: "occ-1",
+          batch_id: null,
+          is_resume: false,
+          rule_title: "כותרת",
+          rule_body: "גוף",
+          rule_audience_kind: "everyone",
+          rule_target_person_ids: [],
+        },
+      ],
+      error: null,
+    });
+    const { claimNotificationRuleOccurrence } = await loadModule(client);
+
+    const claim = await claimNotificationRuleOccurrence("rule-1", "2026-08-22");
+
+    expect(claim).toEqual({
+      occurrenceId: "occ-1",
+      batchId: null,
+      isResume: false,
+      ruleTitle: "כותרת",
+      ruleBody: "גוף",
+      ruleAudienceKind: "everyone",
+      ruleTargetPersonIds: [],
+    });
+    expect(rpc).toHaveBeenCalledWith("claim_notification_rule_occurrence", { p_rule_id: "rule-1", p_occurrence_date: "2026-08-22" });
+  });
+
+  it("claimNotificationRuleOccurrence returns null when the RPC returns zero rows -- already completed, actively leased, or disabled/archived", async () => {
+    const { client } = makeFakeOccurrenceClient({ data: [], error: null });
+    const { claimNotificationRuleOccurrence } = await loadModule(client);
+
+    expect(await claimNotificationRuleOccurrence("rule-1", "2026-08-22")).toBeNull();
+  });
+
+  it("claimNotificationRuleOccurrence maps a resumed claim, including its already-checkpointed batchId", async () => {
+    const { client } = makeFakeOccurrenceClient({
+      data: [
+        {
+          occurrence_id: "occ-1",
+          batch_id: "batch-1",
+          is_resume: true,
+          rule_title: "כותרת",
+          rule_body: "גוף",
+          rule_audience_kind: "everyone",
+          rule_target_person_ids: [],
+        },
+      ],
+      error: null,
+    });
+    const { claimNotificationRuleOccurrence } = await loadModule(client);
+
+    const claim = await claimNotificationRuleOccurrence("rule-1", "2026-08-22");
+
+    expect(claim).toMatchObject({ batchId: "batch-1", isResume: true });
+  });
+
+  it("setNotificationRuleOccurrenceBatchId guards to batch_id is null", async () => {
+    const { client, updateCalls } = makeFakeOccurrenceClient();
+    const { setNotificationRuleOccurrenceBatchId } = await loadModule(client);
+
+    await setNotificationRuleOccurrenceBatchId("occ-1", "batch-1");
+
+    expect(updateCalls).toHaveLength(1);
+    expect(updateCalls[0].patch.batch_id).toBe("batch-1");
+    expect(updateCalls[0].filters).toContainEqual(["id", "occ-1"]);
+    expect(updateCalls[0].filters).toContainEqual(["batch_id", null]);
+  });
+
+  it("completeNotificationRuleOccurrence guards to status = 'claimed'", async () => {
+    const { client, updateCalls } = makeFakeOccurrenceClient();
+    const { completeNotificationRuleOccurrence } = await loadModule(client);
+
+    await completeNotificationRuleOccurrence("occ-1");
+
+    expect(updateCalls).toHaveLength(1);
+    expect(updateCalls[0].patch.status).toBe("completed");
+    expect(updateCalls[0].filters).toContainEqual(["id", "occ-1"]);
+    expect(updateCalls[0].filters).toContainEqual(["status", "claimed"]);
+  });
+
+  it("listCompletedNotificationRuleOccurrenceKeys returns an empty set for an empty candidate list without querying", async () => {
+    const { client, rpc } = makeFakeOccurrenceClient();
+    const { listCompletedNotificationRuleOccurrenceKeys } = await loadModule(client);
+
+    const result = await listCompletedNotificationRuleOccurrenceKeys([]);
+
+    expect(result).toEqual(new Set());
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("listCompletedNotificationRuleOccurrenceKeys only returns rows matching an exact (ruleId, date) candidate pair", async () => {
+    const { client, setCompletedRows } = makeFakeOccurrenceClient();
+    setCompletedRows([
+      { rule_id: "rule-1", occurrence_date: "2026-08-22" },
+      { rule_id: "rule-2", occurrence_date: "2026-08-15" }, // not a requested candidate -- must be excluded
+    ]);
+    const { listCompletedNotificationRuleOccurrenceKeys } = await loadModule(client);
+
+    const result = await listCompletedNotificationRuleOccurrenceKeys([
+      { ruleId: "rule-1", occurrenceDate: "2026-08-22" },
+      { ruleId: "rule-2", occurrenceDate: "2026-08-22" },
+    ]);
+
+    expect(result).toEqual(new Set(["rule-1:2026-08-22"]));
+  });
+});

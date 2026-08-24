@@ -937,28 +937,119 @@ export async function insertManagerNotificationBatchIfAbsent(
   return { row: toBatchRow(data as Record<string, unknown>), created: true };
 }
 
+// ---------------------------------------------------------------------------
+// notification_rule_occurrences -- the recurring-rule at-most-once CLAIM
+// boundary. See `supabase/migrations/*_create_notification_rules.sql`'s own
+// extensive doc comment on this table + `claim_notification_rule_occurrence`
+// for exactly why a `manager_notification_batches` row's mere existence is
+// never a safe "this occurrence is fully dispatched" signal on its own --
+// batch creation and per-recipient `notification_jobs` creation are two
+// separate writes, so a crash between them must be recoverable, never
+// mistaken for completion.
+// ---------------------------------------------------------------------------
+
+export interface NotificationRuleOccurrenceClaim {
+  occurrenceId: string;
+  batchId: string | null;
+  /** `true` when this call resumed an existing (previously claimed, now stale-leased) occurrence rather than creating a fresh one. */
+  isResume: boolean;
+  /** The rule's content AS OF THE CLAIM INSTANT -- never the caller's own possibly-stale earlier snapshot. */
+  ruleTitle: string;
+  ruleBody: string;
+  ruleAudienceKind: BroadcastAudienceKind;
+  ruleTargetPersonIds: string[];
+}
+
 /**
- * Which of `idempotencyKeys` already have a `manager_notification_batches`
- * row -- one bulk `.in()` query, never one lookup per key. Used by the
- * custom-recurring-rule dispatch's own due-occurrence check
- * (`recurringRuleDispatch.ts`) to cheaply skip an occurrence that some
- * earlier tick (or a concurrently-overlapping one) already dispatched,
- * without needing a second table just to track "already sent" per
- * occurrence -- see that module's own docstring for why the batch's own
- * `idempotency_key` (`recurring:<ruleId>:<localDate>`) already serves as
- * the occurrence's at-most-once boundary.
+ * Atomically claims (or safely resumes) one custom weekly rule's one
+ * local occurrence -- the ONE call site of `claim_notification_rule_occurrence`.
+ * `null` means: already `'completed'`, actively leased by another
+ * worker right now, or the rule is disabled/archived/gone as of this
+ * instant -- in every case, the caller does nothing further for this
+ * occurrence this tick. See the RPC's own migration doc comment for the
+ * full at-most-once + disable-before-claim race analysis.
  */
-export async function listExistingManagerNotificationBatchIdempotencyKeys(
-  idempotencyKeys: readonly string[],
+export async function claimNotificationRuleOccurrence(
+  ruleId: string,
+  occurrenceDate: string,
+): Promise<NotificationRuleOccurrenceClaim | null> {
+  const supabase = getNotificationServiceClient();
+  const { data, error } = await supabase.rpc("claim_notification_rule_occurrence", {
+    p_rule_id: ruleId,
+    p_occurrence_date: occurrenceDate,
+  });
+  if (error) throw error;
+  const rows = (data ?? []) as Record<string, unknown>[];
+  if (rows.length === 0) return null;
+  const row = rows[0];
+  return {
+    occurrenceId: row.occurrence_id as string,
+    batchId: (row.batch_id as string | null) ?? null,
+    isResume: row.is_resume as boolean,
+    ruleTitle: row.rule_title as string,
+    ruleBody: row.rule_body as string,
+    ruleAudienceKind: row.rule_audience_kind as BroadcastAudienceKind,
+    ruleTargetPersonIds: (row.rule_target_person_ids as string[] | null) ?? [],
+  };
+}
+
+/** The dispatch checkpoint: once this succeeds, this occurrence's eventual batch is fixed -- a crash after this point only ever needs to retry idempotent job creation, never re-decide whether a batch should exist. Guarded to `batch_id is null` (only ever applies once); a second call is a harmless no-op, exactly like `setManagerScheduledBroadcastBatchId`. */
+export async function setNotificationRuleOccurrenceBatchId(occurrenceId: string, batchId: string): Promise<void> {
+  const supabase = getNotificationServiceClient();
+  const { error } = await supabase
+    .from("notification_rule_occurrences")
+    .update({ batch_id: batchId, updated_at: new Date().toISOString() })
+    .eq("id", occurrenceId)
+    .is("batch_id", null);
+  if (error) throw error;
+}
+
+/** The terminal transition -- set ONLY after every intended recipient's `notification_jobs` row has been created successfully. Guarded to `status = 'claimed'`; a second call (a harmless retry) is a no-op. */
+export async function completeNotificationRuleOccurrence(occurrenceId: string): Promise<void> {
+  const supabase = getNotificationServiceClient();
+  const { error } = await supabase
+    .from("notification_rule_occurrences")
+    .update({ status: "completed", completed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+    .eq("id", occurrenceId)
+    .eq("status", "claimed");
+  if (error) throw error;
+}
+
+/**
+ * Bulk-checks which of `candidates` already have a `'completed'`
+ * occurrence row -- one query for the whole tick's candidate set, never
+ * one per candidate. Used ONLY as a cheap pre-filter (`recurringRuleDispatch.ts`'s
+ * `findDueCustomWeeklyOccurrences`) to skip attempting a claim for an
+ * occurrence that's obviously already done, saving a personnel read on
+ * an otherwise-quiet tick -- never the actual completion authority
+ * itself (that's `claim_notification_rule_occurrence`'s own atomic
+ * read, which this cannot race unsafely against: at worst this filter
+ * is stale by a few seconds and the caller attempts one harmless claim
+ * that correctly returns null).
+ */
+export async function listCompletedNotificationRuleOccurrenceKeys(
+  candidates: readonly { ruleId: string; occurrenceDate: string }[],
 ): Promise<Set<string>> {
-  if (idempotencyKeys.length === 0) return new Set();
+  if (candidates.length === 0) return new Set();
+  const ruleIds = [...new Set(candidates.map((candidate) => candidate.ruleId))];
+  const dates = [...new Set(candidates.map((candidate) => candidate.occurrenceDate))];
+
   const supabase = getNotificationServiceClient();
   const { data, error } = await supabase
-    .from("manager_notification_batches")
-    .select("idempotency_key")
-    .in("idempotency_key", idempotencyKeys);
+    .from("notification_rule_occurrences")
+    .select("rule_id, occurrence_date")
+    .in("rule_id", ruleIds)
+    .in("occurrence_date", dates)
+    .eq("status", "completed");
   if (error) throw error;
-  return new Set(((data ?? []) as { idempotency_key: string }[]).map((row) => row.idempotency_key));
+
+  const candidateKeys = new Set(candidates.map((candidate) => `${candidate.ruleId}:${candidate.occurrenceDate}`));
+  const completed = new Set<string>();
+  for (const row of (data ?? []) as { rule_id: string; occurrence_date: string }[]) {
+    const key = `${row.rule_id}:${row.occurrence_date}`;
+    if (candidateKeys.has(key)) completed.add(key);
+  }
+  return completed;
 }
 
 /** A bounded recent-history read for the composer's own small audit list -- never a full archive. */

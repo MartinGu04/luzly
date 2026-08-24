@@ -92,3 +92,54 @@ describe("notification_rules migration -- security + shape (text-level only, see
     expect(sql).toMatch(/audience_kind is null or audience_kind in \('person', 'people', 'everyone'\)/);
   });
 });
+
+describe("notification_rule_occurrences -- the recurring-rule at-most-once claim boundary", () => {
+  const sql = readNotificationRulesMigration();
+
+  it("enables row level security and declares zero policies -- default-deny, same as every other engine table", () => {
+    expect(sql).toMatch(/alter table public\.notification_rule_occurrences enable row level security/i);
+  });
+
+  it("one row per (rule_id, occurrence_date), enforced at the database level", () => {
+    expect(sql).toMatch(/notification_rule_occurrences_unique unique \(rule_id, occurrence_date\)/i);
+  });
+
+  it("status is restricted to claimed/completed only", () => {
+    expect(sql).toMatch(/notification_rule_occurrences_status_check check \(status in \('claimed', 'completed'\)\)/);
+  });
+
+  it("batch_id references manager_notification_batches -- the dispatch checkpoint, not the completion marker", () => {
+    expect(sql).toMatch(/batch_id uuid references public\.manager_notification_batches \(id\)/);
+  });
+
+  it("the claim function is revoked from public/anon/authenticated and granted only to service_role", () => {
+    expect(sql).toMatch(
+      /revoke all on function public\.claim_notification_rule_occurrence\(uuid, date, integer\)[\s\S]*?from public, anon, authenticated/i,
+    );
+    expect(sql).toMatch(
+      /grant execute on function public\.claim_notification_rule_occurrence\(uuid, date, integer\)[\s\S]*?to service_role/i,
+    );
+  });
+
+  it("a completed occurrence always returns zero rows -- the sole terminal marker", () => {
+    expect(sql).toMatch(/if existing_row\.status = 'completed' then\s*\n\s*return; -- genuinely done/);
+  });
+
+  it("an actively-leased (non-stale) claim also returns zero rows -- never a concurrent second claim of the same live occurrence", () => {
+    expect(sql).toMatch(/existing_row\.claimed_at >= now\(\) - make_interval\(secs => p_lease_seconds\)/);
+  });
+
+  it("a stale claim resumes unconditionally, independent of the rule's current enabled state", () => {
+    expect(sql).toMatch(/Stale claim -- resume UNCONDITIONALLY/);
+  });
+
+  it("a fresh claim locks the rule row (for update) before ever inserting the occurrence, closing the disable-before-claim race", () => {
+    expect(sql).toMatch(/select \* into rule_row from public\.notification_rules where id = p_rule_id for update;/);
+    expect(sql).toMatch(/rule_row\.enabled is not true/);
+    expect(sql).toMatch(/rule_row\.archived_at is not null/);
+  });
+
+  it("a fresh claim is a plain on-conflict-do-nothing insert -- concurrent callers can never both win it", () => {
+    expect(sql).toMatch(/on conflict \(rule_id, occurrence_date\) do nothing/);
+  });
+});

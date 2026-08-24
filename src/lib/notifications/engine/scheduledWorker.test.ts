@@ -154,7 +154,7 @@ describe("runScheduledBroadcastWorkerTick -- due custom weekly recurring rule oc
     peekAnyManagerScheduledBroadcastWorkDue.mockResolvedValue(0);
     peekDueJobsCount.mockResolvedValue(0);
     loadNotificationRuleConfig.mockResolvedValue({ systemRules: new Map(), customWeeklyRules: [{ id: "rule-1" }] });
-    const occurrence = { rule: { id: "rule-1" }, occurrenceDate: "2026-08-22", idempotencyKey: "recurring:rule-1:2026-08-22" };
+    const occurrence = { rule: { id: "rule-1" }, occurrenceDate: "2026-08-22" };
     findDueCustomWeeklyOccurrences.mockResolvedValue([occurrence]);
     fetchFreshPersonnelRead.mockResolvedValue({ people: PEOPLE, fetchedAt: "2026-08-22T18:00:00.000Z" });
 
@@ -191,7 +191,7 @@ describe("runScheduledBroadcastWorkerTick -- due custom weekly recurring rule oc
     peekAnyManagerScheduledBroadcastWorkDue.mockResolvedValue(1);
     peekDueJobsCount.mockResolvedValue(0);
     loadNotificationRuleConfig.mockResolvedValue({ systemRules: new Map(), customWeeklyRules: [{ id: "rule-1" }] });
-    findDueCustomWeeklyOccurrences.mockResolvedValue([{ rule: { id: "rule-1" }, occurrenceDate: "2026-08-22", idempotencyKey: "k" }]);
+    findDueCustomWeeklyOccurrences.mockResolvedValue([{ rule: { id: "rule-1" }, occurrenceDate: "2026-08-22" }]);
     fetchFreshPersonnelRead.mockResolvedValue({ people: PEOPLE, fetchedAt: "2026-08-22T18:00:00.000Z" });
     runDueScheduledBroadcastDispatch.mockResolvedValue({ claimed: 1, dispatched: 1, failed: 0 });
     runDueCustomWeeklyRuleDispatch.mockResolvedValue({ dispatched: 1, failed: 0 });
@@ -260,7 +260,7 @@ describe("runScheduledBroadcastWorkerTick -- NO scheduled broadcast/recurring oc
     peekAnyManagerScheduledBroadcastWorkDue.mockResolvedValue(0);
     peekDueJobsCount.mockResolvedValue(0);
     loadNotificationRuleConfig.mockResolvedValue({ systemRules: new Map(), customWeeklyRules: [{ id: "rule-1" }] });
-    findDueCustomWeeklyOccurrences.mockResolvedValue([{ rule: { id: "rule-1" }, occurrenceDate: "2026-08-22", idempotencyKey: "k" }]);
+    findDueCustomWeeklyOccurrences.mockResolvedValue([{ rule: { id: "rule-1" }, occurrenceDate: "2026-08-22" }]);
     fetchFreshPersonnelRead.mockResolvedValue({ people: PEOPLE, fetchedAt: "2026-08-22T18:00:00.000Z" });
     runDueCustomWeeklyRuleDispatch.mockResolvedValue({ dispatched: 1, failed: 0 });
     runDelivery.mockResolvedValue(ZERO_DELIVERY_SUMMARY);

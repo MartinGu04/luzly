@@ -163,7 +163,7 @@ describe("runNotificationWorkerTick -- custom weekly recurring rule fallback pha
     setupHappyDefaults();
     const rule = { id: "rule-1", enabled: true, weekday: 6, localHour: 21, localMinute: 0, title: "t", body: "b", audienceKind: "everyone", targetPersonIds: [], createdByPersonId: null, createdByPersonName: null };
     loadNotificationRuleConfig.mockResolvedValue({ systemRules: new Map(), customWeeklyRules: [rule] });
-    const occurrence = { rule, occurrenceDate: "2026-08-22", idempotencyKey: "recurring:rule-1:2026-08-22" };
+    const occurrence = { rule, occurrenceDate: "2026-08-22" };
     findDueCustomWeeklyOccurrences.mockResolvedValue([occurrence]);
 
     const callOrder: string[] = [];

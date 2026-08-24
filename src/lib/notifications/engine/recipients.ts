@@ -185,8 +185,9 @@ export function filterManagerRecipients(
  *
  * NEVER the recipient source for a logical `notification_job` -- push
  * subscription state is a DELIVERY-channel concern only (see
- * `fetchAllAuthUserIds` below for why weekly constraints reminders no
- * longer use this).
+ * `resolveNonPermanentConstraintsRecipients` below, the weekly
+ * constraints reminders' own recipient source, which never gates on
+ * this either).
  */
 export async function fetchAllSubscribedUserIds(): Promise<string[]> {
   const supabase = getNotificationServiceClient();
@@ -201,31 +202,6 @@ export async function fetchAllSubscribedUserIds(): Promise<string[]> {
 }
 
 /**
- * Every real Supabase auth account id, account-wide -- never filtered by
- * כ"א/roster/email mapping (unlike `resolveNotificationRecipients`) and
- * never filtered by push-subscription state (unlike
- * `fetchAllSubscribedUserIds`). The canonical recipient source for a
- * reminder category that is intentionally "every app user", such as the
- * weekly constraints reminders (spec section 18) -- a logical
- * `notification_job`/inbox item must exist for EVERY account regardless
- * of whether that account currently has Push enabled; Push is only ever
- * an optional delivery channel on top.
- *
- * Reuses the SAME Admin API listing `fetchAllUserIdsByEmail` already
- * does -- never a second identity source -- and dedupes by `userId`
- * (not email) so a caller never has to reason about whether one account
- * could appear under two normalized-identical emails.
- */
-export async function fetchAllAuthUserIds(): Promise<string[]> {
-  const emailToAccount = await fetchAllUserIdsByEmail();
-  const userIds = new Set<string>();
-  for (const account of emailToAccount.values()) {
-    userIds.add(account.userId);
-  }
-  return [...userIds];
-}
-
-/**
  * The weekly constraints reminders' recipient source (system rules
  * `constraints_sunday`/`constraints_monday`, `reminders.ts`) -- every
  * currently-rostered person who is NOT `classifyPersonnelType(...) ===
@@ -235,11 +211,12 @@ export async function fetchAllAuthUserIds(): Promise<string[]> {
  * `classifyPersonnelType` docstring for the exact "קבע"/"חובה"/"מילואים"
  * classification this reuses (never a raw Hebrew string comparison here).
  *
- * Deliberately narrower than the OLD `fetchAllAuthUserIds` source this
- * replaces in two ways at once: (1) roster-derived, not "every real auth
- * account" -- an auth account with no כ"א mapping at all can never be
- * proven non-permanent, so it is correctly excluded (fails CONSERVATIVE,
- * never accidentally includes an unmappable account); (2) even a mapped,
+ * Deliberately narrower than the OLD "every real Supabase auth account"
+ * source this replaces in two ways at once: (1) roster-derived, not
+ * "every real auth account" -- an auth account with no כ"א mapping at
+ * all can never be proven non-permanent, so it is correctly excluded
+ * (fails CONSERVATIVE, never accidentally includes an unmappable
+ * account); (2) even a mapped,
  * roster-derived person is excluded when their OWN personnelType resolves
  * to "permanent". `resolvePersonIdentity`'s existing `no_email`/
  * `not_found`/`ambiguous`/`unmapped` non-"mapped" states are all treated
