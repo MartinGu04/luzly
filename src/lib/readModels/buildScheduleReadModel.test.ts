@@ -603,6 +603,53 @@ describe("buildManagerScheduleReadModel — 'self'/'person' perspectives: תקש
     expect(model.everyone?.duties).toEqual([]);
   });
 
+  it("source-precedence swap regression ('person' perspective): a stale same-week Potential guard entry is suppressed once a real internal duty for the same slot exists elsewhere in that week", () => {
+    // 2026-08-20 (Thu) and 2026-08-22 (Sat) are in the SAME Sun-Sat week
+    // (16-22 Aug) -- a real internal swap moved the guard slot 1 duty from
+    // Thursday to Saturday within that same week.
+    const model = buildManagerScheduleReadModel({
+      manager: MANAGER,
+      people: PEOPLE,
+      events: [event({ category: "duty", role: null, period: "unspecified", dutyFamily: "guard", slot: 1, date: "2026-08-22" })],
+      shiftSchedule: schedule,
+      fetchedAt: "2026-08-13T08:00:00.000Z",
+      now,
+      monthDates: AUGUST_DATES,
+      requestedPersonId: DANIEL.id,
+      potentialAllocations: [allocation({ date: "2026-08-20", dutyFamily: "guard", slot: 1 })],
+    });
+    const dutyEvents = model.personal?.calendarEvents.filter((e) => e.category === "duty") ?? [];
+    expect(dutyEvents).toEqual([expect.objectContaining({ date: "2026-08-22", dutyFamily: "guard", slot: 1 })]);
+  });
+
+  it("source-precedence swap regression ('all' perspective): the roster-wide duties list never shows the stale same-week Potential entry either", () => {
+    const model = buildManagerScheduleReadModel({
+      manager: MANAGER,
+      people: PEOPLE,
+      events: [
+        event({
+          personId: DANIEL.id,
+          personName: DANIEL.name,
+          category: "duty",
+          role: null,
+          period: "unspecified",
+          dutyFamily: "guard",
+          slot: 1,
+          date: "2026-08-22",
+        }),
+      ],
+      shiftSchedule: schedule,
+      fetchedAt: "2026-08-13T08:00:00.000Z",
+      now,
+      monthDates: AUGUST_DATES,
+      requestedPersonId: "all",
+      potentialAllocations: [allocation({ date: "2026-08-20", dutyFamily: "guard", slot: 1 })],
+    });
+    expect(model.everyone?.duties).toEqual([
+      expect.objectContaining({ personId: DANIEL.id, date: "2026-08-22", dutyFamily: "guard", slot: 1 }),
+    ]);
+  });
+
   it("omitting potentialAllocations entirely keeps the 'all' perspective working unchanged", () => {
     const model = buildManagerScheduleReadModel({
       manager: MANAGER,

@@ -524,6 +524,31 @@ describe("buildManagerOverviewReadModel — duties", () => {
     });
     expect(model.duties).toEqual([]);
   });
+
+  it("source-precedence swap regression: a stale same-week Potential guard entry is suppressed once a real internal duty for the same slot exists elsewhere in that week -- never a phantom extra roster-wide duty", () => {
+    // 2026-08-13 (Thu) and 2026-08-15 (Sat) fall in the SAME Sun-Sat week
+    // (09-15 Aug) -- e.g. a real internal swap moved MARTIN's guard slot 1
+    // from Thursday to Saturday within the same week.
+    const events: Event[] = [
+      event({
+        personId: MARTIN.id,
+        personName: MARTIN.name,
+        date: "2026-08-15",
+        category: "duty",
+        role: null,
+        period: "unspecified",
+        dutyFamily: "guard",
+        slot: 1,
+      }),
+    ];
+    const model = buildModel({
+      events,
+      potentialAllocations: [allocation({ date: "2026-08-13", dutyFamily: "guard", slot: 1 })],
+    });
+    expect(model.duties).toEqual([
+      expect.objectContaining({ personId: MARTIN.id, date: "2026-08-15", dutyFamily: "guard", slot: 1 }),
+    ]);
+  });
 });
 
 describe("buildManagerOverviewReadModel — absences", () => {
