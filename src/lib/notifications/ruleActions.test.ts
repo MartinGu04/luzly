@@ -72,6 +72,11 @@ function systemRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/** Wraps `systemRow(...)` in the `updateSystemRule` "ok" outcome shape (`store.ts`'s `UpdateSystemRuleOutcome`). */
+function okOutcome(overrides: Record<string, unknown> = {}) {
+  return { status: "ok" as const, rule: systemRow(overrides) };
+}
+
 function customRow(overrides: Record<string, unknown> = {}) {
   return {
     id: "rule-custom-1",
@@ -168,6 +173,7 @@ describe("updateSystemRuleAction -- authorization + validation + audience/copy r
       bodyOverride: null,
       audienceMode: "all_eligible" as const,
       targetPersonIds: [] as string[],
+      expectedRevision: 1, // matches systemRow()'s own default `revision: 1`
       ...overrides,
     };
   }
@@ -196,7 +202,7 @@ describe("updateSystemRuleAction -- authorization + validation + audience/copy r
   });
 
   it("an authorized manager can disable/enable, change the send time, and clear copy/audience overrides -- all sent to the store layer together", async () => {
-    updateSystemRule.mockResolvedValue(systemRow({ enabled: false, localHour: 19, localMinute: 30 }));
+    updateSystemRule.mockResolvedValue(okOutcome({ enabled: false, localHour: 19, localMinute: 30 }));
 
     const result = await updateSystemRuleAction("rule-1", validInput({ enabled: false }));
 
@@ -209,9 +215,42 @@ describe("updateSystemRuleAction -- authorization + validation + audience/copy r
       bodyOverride: null,
       audienceMode: "all_eligible",
       targetPersonIds: [],
+      expectedRevision: 1,
       updatedByPersonId: "p_manager",
       updatedByPersonName: "דני מנהל",
     });
+  });
+
+  it("rejects a missing/non-positive-integer expectedRevision before ever touching the store or roster", async () => {
+    const zero = await updateSystemRuleAction("rule-1", validInput({ expectedRevision: 0 }));
+    expect(zero).toEqual({ ok: false, error: "invalid_request" });
+
+    const fractional = await updateSystemRuleAction("rule-1", validInput({ expectedRevision: 1.5 }));
+    expect(fractional).toEqual({ ok: false, error: "invalid_request" });
+
+    const missing = await updateSystemRuleAction("rule-1", validInput({ expectedRevision: undefined }));
+    expect(missing).toEqual({ ok: false, error: "invalid_request" });
+
+    expect(updateSystemRule).not.toHaveBeenCalled();
+  });
+
+  it("[mandatory 6] a successful edit's returned SystemRuleView exposes the INCREMENTED revision from the store layer", async () => {
+    updateSystemRule.mockResolvedValue(okOutcome({ revision: 2 }));
+
+    const result = await updateSystemRuleAction("rule-1", validInput({ expectedRevision: 1 }));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.rule.revision).toBe(2);
+  });
+
+  it("a stale expectedRevision (someone else edited this rule since it was loaded) is reported as 'conflict', never silently applied", async () => {
+    updateSystemRule.mockResolvedValue({ status: "conflict" as const });
+
+    const result = await updateSystemRuleAction("rule-1", validInput({ expectedRevision: 4 }));
+
+    expect(result).toEqual({ ok: false, error: "conflict" });
+    expect(updateSystemRule).toHaveBeenCalledWith("rule-1", expect.objectContaining({ expectedRevision: 4 }));
   });
 
   it("a not-found/not-a-system-row id fails truthfully before ever calling the store's update", async () => {
@@ -235,7 +274,7 @@ describe("updateSystemRuleAction -- authorization + validation + audience/copy r
   describe("copy validation", () => {
     it("trims and saves a static title/body override outright (tomorrow_logistics_withdrawal -- static_editable)", async () => {
       getNotificationRuleById.mockResolvedValue(systemRow({ systemKey: "tomorrow_logistics_withdrawal" }));
-      updateSystemRule.mockResolvedValue(systemRow({ systemKey: "tomorrow_logistics_withdrawal" }));
+      updateSystemRule.mockResolvedValue(okOutcome({ systemKey: "tomorrow_logistics_withdrawal" }));
 
       const result = await updateSystemRuleAction(
         "rule-1",
@@ -250,7 +289,7 @@ describe("updateSystemRuleAction -- authorization + validation + audience/copy r
     });
 
     it("a blank/whitespace-only override is treated as a reset to default (null), same as the explicit reset button", async () => {
-      updateSystemRule.mockResolvedValue(systemRow());
+      updateSystemRule.mockResolvedValue(okOutcome());
 
       const result = await updateSystemRuleAction("rule-1", validInput({ titleOverride: "   ", bodyOverride: "" }));
 
@@ -272,7 +311,7 @@ describe("updateSystemRuleAction -- authorization + validation + audience/copy r
 
     it("a dynamic-body category's saved template MUST contain exactly one {details} -- accepted with exactly one", async () => {
       getNotificationRuleById.mockResolvedValue(systemRow({ systemKey: "tomorrow_shift" })); // dynamic_details_required
-      updateSystemRule.mockResolvedValue(systemRow({ systemKey: "tomorrow_shift" }));
+      updateSystemRule.mockResolvedValue(okOutcome({ systemKey: "tomorrow_shift" }));
 
       const result = await updateSystemRuleAction("rule-1", validInput({ bodyOverride: "תזכורת חשובה 👀 {details}" }));
 
@@ -300,7 +339,7 @@ describe("updateSystemRuleAction -- authorization + validation + audience/copy r
 
     it("a static-body category's body override is NEVER required to contain {details} -- ordinary free text is accepted as-is", async () => {
       getNotificationRuleById.mockResolvedValue(systemRow({ systemKey: "constraints_sunday" })); // static_editable
-      updateSystemRule.mockResolvedValue(systemRow({ systemKey: "constraints_sunday" }));
+      updateSystemRule.mockResolvedValue(okOutcome({ systemKey: "constraints_sunday" }));
 
       const result = await updateSystemRuleAction("rule-1", validInput({ bodyOverride: "תוכן חופשי לגמרי, בלי שום פרט מיוחד" }));
 
@@ -313,7 +352,7 @@ describe("updateSystemRuleAction -- authorization + validation + audience/copy r
 
     it("resetting BOTH title and body to null clears the overrides -- 'איפוס לברירת מחדל'", async () => {
       getNotificationRuleById.mockResolvedValue(systemRow({ systemTitleOverride: "ישן", systemBodyOverride: "ישן גם" }));
-      updateSystemRule.mockResolvedValue(systemRow());
+      updateSystemRule.mockResolvedValue(okOutcome());
 
       const result = await updateSystemRuleAction("rule-1", validInput({ titleOverride: null, bodyOverride: null }));
 
@@ -324,7 +363,7 @@ describe("updateSystemRuleAction -- authorization + validation + audience/copy r
 
   describe("audience validation", () => {
     it("'all_eligible' ignores any client-supplied targetPersonIds -- always forced to []", async () => {
-      updateSystemRule.mockResolvedValue(systemRow());
+      updateSystemRule.mockResolvedValue(okOutcome());
 
       const result = await updateSystemRuleAction(
         "rule-1",
@@ -342,7 +381,7 @@ describe("updateSystemRuleAction -- authorization + validation + audience/copy r
     });
 
     it("'selected' with a genuine current roster id saves it, canonicalized (deduplicated)", async () => {
-      updateSystemRule.mockResolvedValue(systemRow({ systemAudienceMode: "selected", systemTargetPersonIds: ["p_1"] }));
+      updateSystemRule.mockResolvedValue(okOutcome({ systemAudienceMode: "selected", systemTargetPersonIds: ["p_1"] }));
 
       const result = await updateSystemRuleAction(
         "rule-1",
@@ -364,7 +403,7 @@ describe("updateSystemRuleAction -- authorization + validation + audience/copy r
     });
 
     it("re-fetches a FRESH roster for this validation (loadManagerWorkbookContext, not the lighter loadManagerPersonnelContext) -- a stale/cached roster is never trusted", async () => {
-      updateSystemRule.mockResolvedValue(systemRow());
+      updateSystemRule.mockResolvedValue(okOutcome());
 
       await updateSystemRuleAction("rule-1", validInput({ audienceMode: "selected", targetPersonIds: ["p_1"] }));
 

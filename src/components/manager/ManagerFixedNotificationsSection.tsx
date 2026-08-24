@@ -25,6 +25,7 @@ const ERROR_LABELS: Record<string, string> = {
   unauthenticated: "יש להתחבר מחדש.",
   not_found: "הכלל לא נמצא -- ייתכן שכבר נערך/הוסר.",
   invalid_schedule: "יש לבחור שעה תקינה.",
+  conflict: "ההתראה השתנתה מאז שנטענה. הרשימה נטענת מחדש.",
 };
 
 function errorLabel(error: string): string {
@@ -44,11 +45,14 @@ function SystemRuleRow({
   rule,
   onChanged,
   onEdit,
+  onConflict,
   isEditing,
 }: {
   rule: SystemRuleView;
   onChanged: (updated: SystemRuleView) => void;
   onEdit: (rule: SystemRuleView) => void;
+  /** Called when the quick toggle is rejected because someone else edited this rule since it was loaded -- triggers a reload of the whole rules list so the Manager sees the newest state, rather than silently overwriting the newer edit. */
+  onConflict: () => void;
   isEditing: boolean;
 }) {
   const [isBusy, setIsBusy] = useState(false);
@@ -61,7 +65,10 @@ function SystemRuleRow({
       // The update RPC always writes every configurable field together --
       // there is no partial update -- so this quick toggle re-submits the
       // rule's OWN current copy/audience/time unchanged, flipping only
-      // `enabled`.
+      // `enabled`. `expectedRevision` is this row's own loaded revision --
+      // if someone else has since edited this rule (e.g. its copy/
+      // audience), the server rejects this whole request as a "conflict"
+      // rather than letting a stale toggle silently overwrite their edit.
       const outcome = await updateSystemRuleAction(rule.id, {
         enabled: !rule.enabled,
         localHour: rule.localHour,
@@ -70,9 +77,14 @@ function SystemRuleRow({
         bodyOverride: rule.bodyOverride,
         audienceMode: rule.audienceMode,
         targetPersonIds: rule.targetPersonIds,
+        expectedRevision: rule.revision,
       });
-      if (outcome.ok) onChanged(outcome.rule);
-      else setError(errorLabel(outcome.error));
+      if (outcome.ok) {
+        onChanged(outcome.rule);
+      } else {
+        setError(errorLabel(outcome.error));
+        if (outcome.error === "conflict") onConflict();
+      }
     } catch {
       setError(errorLabel("unknown"));
     } finally {
@@ -367,6 +379,7 @@ export function ManagerFixedNotificationsSection({ roster, adoptionPeople }: Man
                       setEditingRule(null);
                       setEditingSystemRule(item);
                     }}
+                    onConflict={() => setReloadToken((token) => token + 1)}
                   />
                 ))}
               </ul>

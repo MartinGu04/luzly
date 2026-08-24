@@ -75,9 +75,30 @@ describe("ManagerSystemRuleEditor -- fields + submission", () => {
         bodyOverride: null,
         audienceMode: "all_eligible",
         targetPersonIds: [],
+        expectedRevision: 1,
       }),
     );
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
+  });
+
+  it("[mandatory 7] submits the rule's OWN loaded revision as expectedRevision, not a hardcoded value", async () => {
+    updateSystemRuleAction.mockResolvedValue({ ok: true, rule: dynamicRule() });
+
+    render(<ManagerSystemRuleEditor rule={dynamicRule({ revision: 7 })} roster={ROSTER} adoptionPeople={ADOPTION} onSaved={vi.fn()} onCancel={vi.fn()} />);
+    fireEvent.click(screen.getByText("שמירת שינויים"));
+
+    await waitFor(() =>
+      expect(updateSystemRuleAction).toHaveBeenCalledWith("rule-1", expect.objectContaining({ expectedRevision: 7 })),
+    );
+  });
+
+  it("a 'conflict' error shows the truthful stale-edit message, distinct from other errors", async () => {
+    updateSystemRuleAction.mockResolvedValue({ ok: false, error: "conflict" });
+
+    render(<ManagerSystemRuleEditor rule={dynamicRule()} roster={ROSTER} adoptionPeople={ADOPTION} onSaved={vi.fn()} onCancel={vi.fn()} />);
+    fireEvent.click(screen.getByText("שמירת שינויים"));
+
+    await waitFor(() => expect(screen.getByText("ההתראה השתנתה מאז שפתחת אותה. טען/י מחדש ונסה/י שוב.")).toBeTruthy());
   });
 
   it("editing title/body sends the trimmed override text", async () => {

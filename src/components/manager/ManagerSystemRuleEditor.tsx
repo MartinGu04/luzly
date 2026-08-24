@@ -36,6 +36,7 @@ const ERROR_LABELS: Record<string, string> = {
   invalid_audience: "יש לבחור קהל יעד תקין.",
   invalid_targets: "הבחירה אינה תקפה יותר. נסה/י לבחור מחדש.",
   no_targets: "יש לבחור לפחות איש/אשת צוות אחד/ת.",
+  conflict: "ההתראה השתנתה מאז שפתחת אותה. טען/י מחדש ונסה/י שוב.",
 };
 
 function errorLabel(error: string): string {
@@ -118,6 +119,7 @@ export function ManagerSystemRuleEditor({ rule, roster, adoptionPeople, onSaved,
         bodyOverride: trimmedBody.length > 0 ? trimmedBody : null,
         audienceMode,
         targetPersonIds: audienceMode === "selected" ? selectedIds : [],
+        expectedRevision: rule.revision,
       });
       setResult(outcome);
       if (outcome.ok) onSaved(outcome.rule);

@@ -159,9 +159,44 @@ describe("ManagerFixedNotificationsSection -- system rule row actions", () => {
         bodyOverride: null,
         audienceMode: "selected",
         targetPersonIds: ["p_1"],
+        expectedRevision: 1,
       }),
     );
     await waitFor(() => expect(screen.getByText("הפעלה")).toBeTruthy());
+  });
+
+  it("[mandatory 8] the quick toggle submits the row's OWN loaded revision, not a hardcoded value", async () => {
+    const rule = systemRule({ revision: 9 });
+    listNotificationRulesAction.mockResolvedValue({ ok: true, systemRules: [rule], customWeeklyRules: [] });
+    updateSystemRuleAction.mockResolvedValue({ ok: true, rule: { ...rule, enabled: false } });
+
+    render(<ManagerFixedNotificationsSection roster={ROSTER} adoptionPeople={ADOPTION} />);
+    await waitFor(() => expect(screen.getByText("תזכורת למשמרת מחר")).toBeTruthy());
+
+    fireEvent.click(screen.getByText("השבתה"));
+
+    await waitFor(() =>
+      expect(updateSystemRuleAction).toHaveBeenCalledWith("rule-1", expect.objectContaining({ expectedRevision: 9 })),
+    );
+  });
+
+  it("a stale quick toggle (conflict -- someone else edited this rule since it loaded) shows a truthful error and triggers a full reload instead of silently overwriting the newer edit", async () => {
+    const rule = systemRule();
+    const refreshedRule = systemRule({ titleOverride: "כותרת של מנהל אחר", revision: 2 });
+    listNotificationRulesAction
+      .mockResolvedValueOnce({ ok: true, systemRules: [rule], customWeeklyRules: [] })
+      .mockResolvedValueOnce({ ok: true, systemRules: [refreshedRule], customWeeklyRules: [] });
+    updateSystemRuleAction.mockResolvedValue({ ok: false, error: "conflict" });
+
+    render(<ManagerFixedNotificationsSection roster={ROSTER} adoptionPeople={ADOPTION} />);
+    await waitFor(() => expect(screen.getByText("תזכורת למשמרת מחר")).toBeTruthy());
+
+    fireEvent.click(screen.getByText("השבתה"));
+
+    // The rejected toggle never applies -- the row stays enabled/"פעיל" --
+    // and the list reloads instead, surfacing the OTHER manager's newer edit.
+    await waitFor(() => expect(listNotificationRulesAction).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByText("✏️ הכותרת/התוכן הותאמו אישית.")).toBeTruthy());
   });
 
   it("never offers a delete action for a system rule -- only disable/enable and עריכה", async () => {

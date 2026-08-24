@@ -187,6 +187,16 @@ export interface UpdateSystemRuleActionInput {
   audienceMode: "all_eligible" | "selected";
   /** Untrusted candidate roster ids -- re-validated against the freshly-fetched roster before anything is saved (never Supabase auth ids). Ignored (forced to `[]`) when `audienceMode` is `"all_eligible"`. */
   targetPersonIds: string[];
+  /**
+   * The `revision` this edit's own caller loaded the rule at
+   * (`SystemRuleView.revision`) -- the Manager-edit optimistic
+   * concurrency token. If the rule's CURRENT revision no longer matches
+   * (someone else saved a change since this page loaded), the whole
+   * request is rejected with `"conflict"` rather than silently
+   * overwriting that newer edit -- see `store.ts`'s `updateSystemRule`
+   * for the full race this closes.
+   */
+  expectedRevision: number;
 }
 
 /**
@@ -210,11 +220,25 @@ export interface UpdateSystemRuleActionInput {
  * `updateCustomWeeklyRuleAction` already do for the same reason: a
  * client-supplied person id that isn't a genuine current roster member
  * fails the WHOLE request, never silently dropped.
+ *
+ * `input.expectedRevision` is an optimistic concurrency token: the
+ * revision the UI's own copy of the rule was loaded at. If another
+ * Manager's edit has since committed, the rule's current revision no
+ * longer matches, and this whole request is rejected with `"conflict"`
+ * -- never silently applied over the newer edit. This is what makes even
+ * the quick enable/disable toggle safe: it resubmits the FULL rule state
+ * (this RPC is full-state), so without this check a stale toggle could
+ * silently revert someone else's just-saved copy/audience change. See
+ * `store.ts`'s `updateSystemRule` for the full race and the RPC's own
+ * migration doc comment for the SQL-level guard.
  */
 export async function updateSystemRuleAction(id: string, input: UpdateSystemRuleActionInput): Promise<UpdateSystemRuleActionResult> {
   if (typeof id !== "string" || id.length === 0) return { ok: false, error: "invalid_request" };
   if (typeof input.enabled !== "boolean") return { ok: false, error: "invalid_request" };
   if (!isValidClockTime(input.localHour, input.localMinute)) return { ok: false, error: "invalid_schedule" };
+  if (!Number.isInteger(input.expectedRevision) || input.expectedRevision <= 0) {
+    return { ok: false, error: "invalid_request" };
+  }
 
   const titleResult = normalizeSystemCopyOverride(input.titleOverride, BROADCAST_TITLE_MAX_LENGTH);
   if (!titleResult.ok) return { ok: false, error: "invalid_title" };
@@ -258,7 +282,7 @@ export async function updateSystemRuleAction(id: string, input: UpdateSystemRule
     }
   }
 
-  const updated = await updateSystemRule(id, {
+  const outcome = await updateSystemRule(id, {
     enabled: input.enabled,
     localHour: input.localHour,
     localMinute: input.localMinute,
@@ -266,12 +290,14 @@ export async function updateSystemRuleAction(id: string, input: UpdateSystemRule
     bodyOverride: bodyResult.value,
     audienceMode: input.audienceMode,
     targetPersonIds: canonicalTargetPersonIds,
+    expectedRevision: input.expectedRevision,
     updatedByPersonId: manager.id,
     updatedByPersonName: manager.name,
   });
-  if (!updated) return { ok: false, error: "not_found" };
+  if (outcome.status === "not_found") return { ok: false, error: "not_found" };
+  if (outcome.status === "conflict") return { ok: false, error: "conflict" };
 
-  const view = toSystemRuleView(updated);
+  const view = toSystemRuleView(outcome.rule);
   if (!view) return { ok: false, error: "not_found" };
   return { ok: true, rule: view };
 }

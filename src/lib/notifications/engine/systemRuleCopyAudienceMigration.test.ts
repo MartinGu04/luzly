@@ -61,6 +61,26 @@ describe("editable system-rule copy/audience migration -- additive, never amends
     expect(sql).toMatch(/create or replace function public\.update_system_rule_configuration_and_invalidate_pending_jobs\(/);
   });
 
+  it("takes p_expected_revision as an optimistic-concurrency token on the Manager's own write path", () => {
+    const fnBlock = sql.match(/create or replace function public\.update_system_rule_configuration_and_invalidate_pending_jobs[\s\S]*?\$\$;/);
+    expect(fnBlock).not.toBeNull();
+    expect(fnBlock![0]).toMatch(/p_rule_id uuid,\s*\n\s*p_expected_revision bigint,/);
+  });
+
+  it("locks the row and rejects a stale p_expected_revision BEFORE writing anything or touching notification_jobs", () => {
+    const fnBlock = sql.match(/create or replace function public\.update_system_rule_configuration_and_invalidate_pending_jobs[\s\S]*?\$\$;/);
+    expect(fnBlock).not.toBeNull();
+    expect(fnBlock![0]).toMatch(/select \* into rule_row from public\.notification_rules where id = p_rule_id for update;/);
+    expect(fnBlock![0]).toMatch(/if not found or rule_row\.kind is distinct from 'system' then\s*\n\s*return;/);
+    expect(fnBlock![0]).toMatch(/if rule_row\.revision is distinct from p_expected_revision then\s*\n\s*return; -- stale Manager edit/);
+    // The stale-revision check must appear textually BEFORE the update
+    // statement -- nothing is written once a conflict is detected.
+    const revisionCheckIndex = fnBlock![0].indexOf("rule_row.revision is distinct from p_expected_revision");
+    const updateIndex = fnBlock![0].indexOf("update public.notification_rules");
+    expect(revisionCheckIndex).toBeGreaterThan(-1);
+    expect(updateIndex).toBeGreaterThan(revisionCheckIndex);
+  });
+
   it("the new RPC updates enabled/time/copy/audience AND increments revision, all in the SAME statement", () => {
     const fnBlock = sql.match(/create or replace function public\.update_system_rule_configuration_and_invalidate_pending_jobs[\s\S]*?\$\$;/);
     expect(fnBlock).not.toBeNull();
@@ -70,7 +90,7 @@ describe("editable system-rule copy/audience migration -- additive, never amends
     expect(fnBlock![0]).toMatch(/system_audience_mode = p_audience_mode,/);
     expect(fnBlock![0]).toMatch(/system_target_person_ids = coalesce\(p_target_person_ids, '\{\}'\),/);
     expect(fnBlock![0]).toMatch(/revision = revision \+ 1,/);
-    expect(fnBlock![0]).toMatch(/where id = p_rule_id and kind = 'system'/);
+    expect(fnBlock![0]).toMatch(/where id = p_rule_id\s*\n\s*returning \* into updated_row;/);
   });
 
   it("the new RPC hard-deletes still-pending jobs for the category in the SAME transaction, exactly like the PR #93 RPC", () => {
@@ -82,15 +102,15 @@ describe("editable system-rule copy/audience migration -- additive, never amends
   it("returns zero rows for a not-found/non-system id, never touching notification_jobs in that case", () => {
     const fnBlock = sql.match(/create or replace function public\.update_system_rule_configuration_and_invalidate_pending_jobs[\s\S]*?\$\$;/);
     expect(fnBlock).not.toBeNull();
-    expect(fnBlock![0]).toMatch(/if updated_row\.id is null then\s*\n\s*return; -- not found \/ not a system row/);
+    expect(fnBlock![0]).toMatch(/if not found or rule_row\.kind is distinct from 'system' then\s*\n\s*return; -- not found \/ not a system row/);
   });
 
-  it("is revoked from public/anon/authenticated and granted only to service_role", () => {
+  it("is revoked from public/anon/authenticated and granted only to service_role, with the widened bigint signature", () => {
     expect(sql).toMatch(
-      /revoke all on function public\.update_system_rule_configuration_and_invalidate_pending_jobs\(\s*\n\s*uuid, boolean, smallint, smallint, text, text, text, text\[\], text, text\s*\n\s*\) from public, anon, authenticated;/,
+      /revoke all on function public\.update_system_rule_configuration_and_invalidate_pending_jobs\(\s*\n\s*uuid, bigint, boolean, smallint, smallint, text, text, text, text\[\], text, text\s*\n\s*\) from public, anon, authenticated;/,
     );
     expect(sql).toMatch(
-      /grant execute on function public\.update_system_rule_configuration_and_invalidate_pending_jobs\(\s*\n\s*uuid, boolean, smallint, smallint, text, text, text, text\[\], text, text\s*\n\s*\) to service_role;/,
+      /grant execute on function public\.update_system_rule_configuration_and_invalidate_pending_jobs\(\s*\n\s*uuid, bigint, boolean, smallint, smallint, text, text, text, text\[\], text, text\s*\n\s*\) to service_role;/,
     );
   });
 
