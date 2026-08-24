@@ -254,7 +254,7 @@ describe("ManagerPage — category navigation", () => {
     expect(screen.getByRole("tab", { name: "משמרות" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "כוח אדם" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "תורנויות והיעדרויות" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "התחברויות והתראות" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "התחברויות" })).toBeInTheDocument();
   });
 
   it("Overview (default): shows דורש טיפול, never the other categories' sections", async () => {
@@ -299,7 +299,7 @@ describe("ManagerPage — category navigation", () => {
     expect(screen.queryByText("צוות")).toBeNull();
   });
 
-  it("Logins & Notifications category: shows the adoption summary + section, never the Overview/Shifts/Personnel/Duties sections", async () => {
+  it("Logins category: shows the adoption summary + section, never the Overview/Shifts/Personnel/Duties sections, and never the notification-management UI (that now lives at /notifications)", async () => {
     getRequestManagerOverview.mockResolvedValue(
       okResult(
         model({
@@ -333,12 +333,21 @@ describe("ManagerPage — category navigation", () => {
         }),
       ),
     );
-    await renderPage({ category: "logins" });
+    const { container } = await renderPage({ category: "logins" });
     expect(screen.getByText("טרם נכנסו למערכת")).toBeInTheDocument();
     expect(screen.queryByText("דורש טיפול")).toBeNull();
     expect(screen.queryByText("כיסוי משמרות")).toBeNull();
     expect(screen.queryByText("תורנויות")).toBeNull();
     expect(screen.queryByText("צוות")).toBeNull();
+    // The notification-management UI (immediate composer, scheduled list, recent
+    // history, fixed/recurring rules) no longer renders inside Logins at all --
+    // it moved to the standalone "מרכז התראות" (`/notifications`).
+    expect(container.querySelector('[data-testid="manager-broadcast-composer"]')).toBeNull();
+    expect(container.querySelector('[data-testid="manager-scheduled-broadcasts"]')).toBeNull();
+    expect(container.querySelector('[data-testid="manager-recent-broadcasts"]')).toBeNull();
+    expect(container.querySelector('[data-testid="manager-fixed-notifications"]')).toBeNull();
+    expect(screen.queryByText("📣 שליחת התראה")).toBeNull();
+    expect(screen.queryByText("📌 התראות קבועות")).toBeNull();
   });
 
   it("an unknown category value falls back to Overview, never a crash", async () => {
@@ -913,7 +922,7 @@ describe("ManagerPage — Overview issue wording matches the domain's own role-c
   });
 });
 
-describe("ManagerPage — Logins & Notifications (התחברויות והתראות) category", () => {
+describe("ManagerPage — Logins (התחברויות) category", () => {
   function adoptionState(overrides: {
     loggedIn?: number;
     notLoggedIn?: number;
@@ -1077,7 +1086,7 @@ describe("ManagerPage — Logins & Notifications (התחברויות והתרא�
   });
 });
 
-describe("ManagerPage — filter controls restore when leaving Logins & Notifications / Personnel", () => {
+describe("ManagerPage — filter controls restore when leaving Logins / Personnel", () => {
   it("Overview shows the person/range filters", async () => {
     getRequestManagerOverview.mockResolvedValue(okResult(model()));
     await renderPage();
@@ -1281,7 +1290,7 @@ describe("ManagerPage — privacy", () => {
     expect(container.textContent).not.toContain("spreadsheetId");
   });
 
-  it("never leaks a person's internal id or raw status string from the התחברויות והתראות category", async () => {
+  it("never leaks a person's internal id or raw status string from the התחברויות category", async () => {
     getRequestManagerOverview.mockResolvedValue(
       okResult(
         model({

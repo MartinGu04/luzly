@@ -213,9 +213,10 @@ export type ManagerPersonnelContextResult =
 /**
  * The LIGHTWEIGHT manager-authorization boundary for background/polling
  * reads that only ever need to know "is this caller a manager" plus the
- * roster (e.g. the Manager communication area's ~17s scheduled/recent
- * broadcast status polls -- see `scheduledBroadcastActions.ts`/
- * `manualBroadcastActions.ts`). `loadManagerWorkbookContext(["personnel"])`
+ * roster (e.g. the standalone "מרכז התראות" Notification Center's ~17s
+ * scheduled/recent broadcast status polls -- see `scheduledBroadcastActions.ts`/
+ * `manualBroadcastActions.ts` -- and its own page-level authorization,
+ * `notificationCenter.ts`). `loadManagerWorkbookContext(["personnel"])`
  * above now performs the SAME lightweight identity+personnel-only sequence
  * (its old dependency on the full Personal Schedule read model as an
  * authorization gate was removed as part of a Manager-latency pass -- see

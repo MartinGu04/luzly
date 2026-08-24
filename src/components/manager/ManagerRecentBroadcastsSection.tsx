@@ -9,12 +9,17 @@ interface ManagerRecentBroadcastsSectionProps {
   /** Bumped by the parent after any dispatch (immediate send, or a scheduled broadcast's "שלח עכשיו"/worker dispatch) so this list stays current. */
   reloadToken: number;
   /**
-   * Whether `ManagerScheduledBroadcastsSection` currently reports at least
-   * one active item -- this section only polls while that's true (spec
-   * §7: "while the communication area has active scheduled broadcasts"),
-   * since a background worker dispatch is the only kind of change that
-   * could land here WITHOUT this manager's own action already bumping
-   * `reloadToken`.
+   * Whether there is currently at least one active (not-yet-dispatched)
+   * scheduled broadcast -- this section only polls while that's true (spec
+   * §7: "while there are active scheduled broadcasts"), since a background
+   * worker dispatch is the only kind of change that could land here WITHOUT
+   * this manager's own action already bumping `reloadToken`. The caller
+   * decides how it knows this: inside the standalone Notification Center
+   * ("מרכז התראות"), `ManagerScheduledBroadcastsSection` lives on a
+   * DIFFERENT URL section ("תזמון", never mounted alongside "היסטוריה"), so
+   * `NotificationHistorySection` (`components/notifications/`) derives this
+   * itself via the SAME underlying `listActiveScheduledBroadcastsAction()`
+   * signal rather than reading it off a live sibling component.
    */
   pollWhileActive: boolean;
 }

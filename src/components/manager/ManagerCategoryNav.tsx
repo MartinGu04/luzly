@@ -12,7 +12,7 @@ const CATEGORY_OPTIONS: { key: ManagerCategory; label: string }[] = [
   { key: "shifts", label: "משמרות" },
   { key: "personnel", label: "כוח אדם" },
   { key: "duties", label: "תורנויות והיעדרויות" },
-  { key: "logins", label: "התחברויות והתראות" },
+  { key: "logins", label: "התחברויות" },
 ];
 
 const TAB_BASE =
@@ -22,16 +22,18 @@ const TAB_BASE =
  * The Manager Area's top-level category switch (redesign) -- "סקירה"
  * (Overview, the default command-center view), "משמרות" (coverage +
  * Potential reconciliation), "כוח אדם" (roster + person drill-down),
- * "תורנויות והיעדרויות" (cross-team duties/absences), "התחברויות והתראות"
- * (login/notification adoption). Real, server-rendered `Link`s (same idiom
- * `FairnessModeToggle`/`DutyViewToggle` already use), never client-only tab
- * state, so every category stays directly linkable/shareable/back-button-
- * safe. `role="tablist"` gives the selected state an accessible name beyond
- * color alone.
+ * "תורנויות והיעדרויות" (cross-team duties/absences), "התחברויות"
+ * (login/notification-readiness adoption -- ONLY that; sending/scheduling/
+ * history/recurring notification management is the separate standalone
+ * "מרכז התראות" product area, `/notifications`, never rendered here). Real,
+ * server-rendered `Link`s (same idiom `FairnessModeToggle`/`DutyViewToggle`
+ * already use), never client-only tab state, so every category stays
+ * directly linkable/shareable/back-button-safe. `role="tablist"` gives the
+ * selected state an accessible name beyond color alone.
  *
  * All five tabs stay on ONE row, always -- `whitespace-nowrap` on each tab
- * (a two-word Hebrew label like "תורנויות והיעדרויות"/"התחברויות והתראות"
- * would otherwise be free to break at its internal space once squeezed,
+ * (a two-word Hebrew label like "תורנויות והיעדרויות" would otherwise be
+ * free to break at its internal space once squeezed,
  * which reads as that tab detaching onto its own row rather than staying
  * part of the strip) combined with `shrink-0` means no tab can shrink below
  * its own full label width, so the `inline-flex` tablist's shrink-to-fit

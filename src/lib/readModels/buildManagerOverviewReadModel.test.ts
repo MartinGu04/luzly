@@ -1093,7 +1093,7 @@ describe("buildManagerOverviewReadModel — PR #16 manager Potential scope", () 
   });
 });
 
-describe("buildManagerOverviewReadModel — adoption (התחברויות והתראות) projection", () => {
+describe("buildManagerOverviewReadModel — adoption (התחברויות) projection", () => {
   it("status: skipped -- the caller never attempted the lookup (a person is selected)", () => {
     const model = buildModel({ adoption: { status: "skipped" } });
     expect(model.adoption).toEqual({ status: "skipped" });

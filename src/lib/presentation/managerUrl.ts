@@ -8,12 +8,15 @@ import type { ManagerRangeKey } from "@/lib/domain/dateRange";
  * three each own one previously-scattered slice of the old single long
  * page: "משמרות" (coverage + Potential reconciliation), "כוח אדם" (roster
  * + person drill-down), "תורנויות והיעדרויות" (cross-team duties/absences).
- * "התחברויות והתראות" is a management-visibility category, not operational
- * data: it reconciles the same roster against Supabase auth/push-
- * subscription state to show login/notification adoption -- see
- * `ManagerAdoptionView`. Formerly a small aside inside Overview (מצב
- * התראות); now its own full category so Overview can stay focused on
- * operational issues.
+ * "התחברויות" is a management-visibility category, not operational data: it
+ * reconciles the same roster against Supabase auth/push-subscription state
+ * to show login/notification-readiness adoption -- see `ManagerAdoptionView`.
+ * Formerly a small aside inside Overview (מצב התראות), then a combined
+ * "התחברויות והתראות" category that also hosted notification-management UI
+ * (composer/scheduled/history/fixed) -- that management surface now lives in
+ * its own standalone product area, "מרכז התראות" (`/notifications`); this
+ * category shows ONLY the login/readiness picture its narrower name
+ * describes, so Overview can stay focused on operational issues.
  */
 export type ManagerCategory = "overview" | "shifts" | "personnel" | "duties" | "logins";
 
@@ -24,7 +27,7 @@ export function parseManagerCategoryParam(raw: string | null | undefined): Manag
 }
 
 /**
- * `"logins"` ("התחברויות והתראות") is the ONLY category whose UI actually
+ * `"logins"` ("התחברויות") is the ONLY category whose UI actually
  * renders `model.adoption` -- every other category (including the
  * selected-person drill-down, which never routes through a
  * `ManagerCategory` at all) has no use for the privileged Supabase Admin
@@ -41,8 +44,8 @@ export function managerCategoryNeedsAdoptionReadiness(category: ManagerCategory)
 
 /**
  * Whether `ManagerCommandBar`'s person-scope + date-range controls make
- * sense for this category. `"logins"` ("התחברויות והתראות") is a current
- * snapshot, not scoped by either control (see
+ * sense for this category. `"logins"` ("התחברויות") is a current snapshot,
+ * not scoped by either control (see
  * `managerCategoryNeedsAdoptionReadiness` above). `"personnel"` ("כוח אדם")
  * is the same kind of unscoped view -- a straightforward workforce/roster
  * page, not filtered by person or date range either -- so it hides the same

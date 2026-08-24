@@ -6,7 +6,7 @@ interface ManagerAdoptionSummaryProps {
 }
 
 /**
- * The "התחברויות והתראות" category's top summary -- a headline sentence
+ * The "התחברויות" category's top summary -- a headline sentence
  * ("X מתוך Y כבר נכנסו למערכת") plus every count from the product spec
  * (`buildAdoptionStats` in `lib/presentation/managerAdoption.ts`), never a
  * decorative statistic. `unavailable` shows the same small neutral notice

@@ -4,7 +4,6 @@ import type { IssueRowView } from "@/components/issues/types";
 import { ManagerAdoptionSection } from "@/components/manager/ManagerAdoptionSection";
 import { ManagerAdoptionSummary } from "@/components/manager/ManagerAdoptionSummary";
 import { ManagerAttentionSection } from "@/components/manager/ManagerAttentionSection";
-import { ManagerBroadcastArea } from "@/components/manager/ManagerBroadcastArea";
 import { ManagerCategoryNav } from "@/components/manager/ManagerCategoryNav";
 import { ManagerCommandBar } from "@/components/manager/ManagerCommandBar";
 import { ManagerCoverageSection } from "@/components/manager/ManagerCoverageSection";
@@ -294,12 +293,16 @@ function toHrefParams(model: ManagerOverviewReadModel, category: ManagerHrefPara
 /**
  * "אזור מנהל" -- the manager's full operational picture (redesign): a
  * command-center Overview by default, plus four focused categories
- * (Shifts / Personnel / Duties & Absences / Logins & Notifications), or
- * one selected person's drill-down. "התחברויות והתראות" is the one
- * management-visibility category among these -- it never touches
- * Google Sheets beyond the roster already loaded; it reconciles that
- * roster against Supabase auth + push-subscription state (see
- * `ManagerAdoptionView`, `model.adoption`). Entirely driven by
+ * (Shifts / Personnel / Duties & Absences / Logins), or one selected
+ * person's drill-down. "התחברויות" is the one management-visibility
+ * category among these -- it never touches Google Sheets beyond the roster
+ * already loaded; it reconciles that roster against Supabase auth +
+ * push-subscription state (see `ManagerAdoptionView`, `model.adoption`) and
+ * shows ONLY that login/notification-readiness picture (`ManagerAdoptionSummary`/
+ * `ManagerAdoptionSection`). Sending/scheduling/history/recurring
+ * notification MANAGEMENT is a separate top-level product surface now --
+ * "מרכז התראות" (`/notifications`, `app/(app)/notifications/page.tsx`) --
+ * never rendered from here. Entirely driven by
  * `ManagerOverviewReadModel` (see
  * `getRequestManagerOverview`/`loadManagerOverviewReadModel`) -- this page
  * never fetches Google itself, never re-runs `detectOperationalIssues()`,
@@ -503,10 +506,6 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
 
       {category === "logins" ? (
         <div className="flex flex-col gap-4">
-          <ManagerBroadcastArea
-            roster={model.roster}
-            adoptionPeople={model.adoption.status === "available" ? model.adoption.view.people : []}
-          />
           <ManagerAdoptionSummary view={adoptionView} />
           <ManagerAdoptionSection view={adoptionView} />
         </div>

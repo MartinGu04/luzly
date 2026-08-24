@@ -66,7 +66,8 @@ function errorLabel(error: string): string {
  * "🕒 התראות מתוזמנות" -- every not-yet-dispatched scheduled broadcast
  * (including one currently `'claimed'` mid-dispatch, a normally brief
  * transient state where actions are disabled). "עריכה" hands the item up
- * to the composer (`ManagerBroadcastArea`); "שלח עכשיו"/"ביטול" call their
+ * to the composer (`NotificationScheduleSection`, `components/notifications/`);
+ * "שלח עכשיו"/"ביטול" call their
  * own server actions directly and refresh this list (and, for "שלח עכשיו",
  * the "נשלחו לאחרונה" list) via `onChanged`.
  */

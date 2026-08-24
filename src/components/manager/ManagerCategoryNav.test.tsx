@@ -22,7 +22,7 @@ describe("ManagerCategoryNav", () => {
     expect(screen.getByRole("tab", { name: "משמרות" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "כוח אדם" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "תורנויות והיעדרויות" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "התחברויות והתראות" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "התחברויות" })).toBeInTheDocument();
   });
 
   it("overview is the omitted default -- its href is the bare /manager", () => {
@@ -38,7 +38,7 @@ describe("ManagerCategoryNav", () => {
       "href",
       "/manager?category=duties",
     );
-    expect(screen.getByRole("tab", { name: "התחברויות והתראות" })).toHaveAttribute(
+    expect(screen.getByRole("tab", { name: "התחברויות" })).toHaveAttribute(
       "href",
       "/manager?category=logins",
     );
@@ -60,7 +60,7 @@ describe("ManagerCategoryNav", () => {
 
   it("every tab never wraps its own label onto a second line -- whitespace-nowrap, so a long two-word label can never read as a detached row", () => {
     render(<ManagerCategoryNav active="overview" current={BASE} />);
-    for (const name of ["סקירה", "משמרות", "כוח אדם", "תורנויות והיעדרויות", "התחברויות והתראות"]) {
+    for (const name of ["סקירה", "משמרות", "כוח אדם", "תורנויות והיעדרויות", "התחברויות"]) {
       expect(screen.getByRole("tab", { name })).toHaveClass("whitespace-nowrap");
     }
   });
@@ -70,7 +70,7 @@ describe("ManagerCategoryNav", () => {
     const tablist = screen.getByRole("tablist");
     expect(tablist).toHaveClass("inline-flex");
     expect(tablist.className).not.toMatch(/\bflex-wrap\b/);
-    for (const name of ["סקירה", "משמרות", "כוח אדם", "תורנויות והיעדרויות", "התחברויות והתראות"]) {
+    for (const name of ["סקירה", "משמרות", "כוח אדם", "תורנויות והיעדרויות", "התחברויות"]) {
       expect(screen.getByRole("tab", { name })).toHaveClass("shrink-0");
     }
   });

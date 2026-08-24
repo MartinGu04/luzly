@@ -2,14 +2,16 @@ import { describe, expect, it } from "vitest";
 import { navItems, visibleNavItems } from "./nav-items";
 
 describe("visibleNavItems", () => {
-  it("hides the manager-only item entirely for a non-manager", () => {
+  it("hides every manager-only item entirely for a non-manager", () => {
     const items = visibleNavItems(false);
     expect(items.some((item) => item.href === "/manager")).toBe(false);
+    expect(items.some((item) => item.href === "/notifications")).toBe(false);
   });
 
-  it("shows the manager-only item for a manager", () => {
+  it("shows every manager-only item for a manager", () => {
     const items = visibleNavItems(true);
     expect(items.some((item) => item.href === "/manager")).toBe(true);
+    expect(items.some((item) => item.href === "/notifications")).toBe(true);
   });
 
   it("never hides a non-manager-only item, for either viewer", () => {
@@ -28,7 +30,15 @@ describe("visibleNavItems", () => {
     expect(manager?.inBottomNav).toBe(false);
   });
 
-  it("the bottom-nav set stays at exactly four items regardless of manager status (PR #4 adds טבלת צדק)", () => {
+  it("/notifications is enabled, manager-only, and NOT part of the mobile bottom nav", () => {
+    const notifications = navItems.find((item) => item.href === "/notifications");
+    expect(notifications?.enabled).toBe(true);
+    expect(notifications?.managerOnly).toBe(true);
+    expect(notifications?.inBottomNav).toBe(false);
+    expect(notifications?.label).toBe("מרכז התראות");
+  });
+
+  it("the bottom-nav set stays at exactly four items regardless of manager status -- /notifications never joins it", () => {
     for (const isManager of [true, false]) {
       const bottomNavCount = visibleNavItems(isManager).filter((item) => item.inBottomNav).length;
       expect(bottomNavCount).toBe(4);
@@ -94,9 +104,17 @@ describe("navItems — obsolete sync placeholder removed (PR #18)", () => {
     expect(navItems.some((item) => item.href === "/sync")).toBe(false);
   });
 
-  it("every other enabled route is unchanged (PR #4 adds /fairness, /shooting-ranges joins before /manager)", () => {
+  it("every other enabled route is unchanged (PR #4 adds /fairness; /shooting-ranges joins before /manager; /notifications is added after /manager)", () => {
     const enabledHrefs = navItems.filter((item) => item.enabled).map((item) => item.href);
-    expect(enabledHrefs).toEqual(["/", "/schedule", "/duties", "/fairness", "/shooting-ranges", "/manager"]);
+    expect(enabledHrefs).toEqual([
+      "/",
+      "/schedule",
+      "/duties",
+      "/fairness",
+      "/shooting-ranges",
+      "/manager",
+      "/notifications",
+    ]);
   });
 
   it("manager visibility rules are unchanged", () => {
