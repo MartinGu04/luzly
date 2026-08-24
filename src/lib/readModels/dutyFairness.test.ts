@@ -473,6 +473,91 @@ describe("loadDutyFairnessReadModel — Duty-Fairness-local Potential-derived co
   });
 });
 
+describe("loadDutyFairnessReadModel — Potential source-precedence swap regression (production-shaped, guard/reserve): a stale same-week Potential entry never adds a phantom extra completed-duty contribution", () => {
+  const ITAY = person({ id: "p_itay", name: "איתן בדיקה", isTechnician: false, isSupervisor: false });
+
+  function potentialSheetWithGuard4(name: string, operationalRows: string[][]): RawSheet {
+    return {
+      name,
+      values: [
+        ["תאריך", "יום", "שומר 4"],
+        ...operationalRows,
+        [],
+        FAIRNESS_HEADER,
+        [ITAY.name, "אחר", "4", "5", "0", "-"],
+      ],
+    };
+  }
+
+  function contextForSwap(overrides: Partial<{ scheduleRows: string[][] }> = {}) {
+    return {
+      status: "ok" as const,
+      context: {
+        person: ITAY,
+        people: [ITAY],
+        avatarByPersonId: new Map<string, string | null>(),
+        snapshot: {
+          fetchedAt: "2026-08-15T10:00:00.000Z",
+          sheets: [
+            { name: 'כ"א', values: [] },
+            {
+              name: "משמרות + תורנויות",
+              values: overrides.scheduleRows ? [["תאריך", "יום", ITAY.name], ...overrides.scheduleRows] : [],
+            },
+            potentialSheetWithGuard4('פוטנציאל תקש"אס 1-6/2026', []),
+            potentialSheetWithGuard4('פוטנציאל תקש"אס 7-12/2026', [["12/07/2026", "א", ITAY.name]]),
+          ],
+        },
+      },
+    };
+  }
+
+  it("a stale 12/07 Potential guard-4 entry never adds a phantom extra contribution once the real internal duty moved to 14-16/07 within the SAME week (a swap) -- total is just the real block's own half_week weight (0.5), never real+phantom (0.75)", async () => {
+    loadFairnessWorkbookContext.mockResolvedValue(
+      contextForSwap({
+        scheduleRows: [
+          ["14/07/2026", "ג", "שומר 4"],
+          ["15/07/2026", "ד", "שומר 4"],
+          ["16/07/2026", "ה", "שומר 4"],
+        ],
+      }),
+    );
+    const result = await loadDutyFairnessReadModel("h2");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    const otherGroup = result.model.groups.find((g) => g.key === "other");
+    const row = otherGroup?.rows.find((r) => r.sourceName === ITAY.name);
+    expect(row?.completedAllocationTotal).toBeCloseTo(0.5);
+  });
+
+  it("anti-regression: the SAME Potential guard-4 entry still counts as completed-duty evidence on its own when there is NO real internal duty for that slot anywhere in that week", async () => {
+    loadFairnessWorkbookContext.mockResolvedValue(contextForSwap());
+    const result = await loadDutyFairnessReadModel("h2");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    const otherGroup = result.model.groups.find((g) => g.key === "other");
+    const row = otherGroup?.rows.find((r) => r.sourceName === ITAY.name);
+    expect(row?.completedAllocationTotal).toBeCloseTo(0.25);
+  });
+
+  it("anti-regression: a real duty for the same slot in a DIFFERENT week never suppresses the Potential entry's own contribution", async () => {
+    loadFairnessWorkbookContext.mockResolvedValue(
+      contextForSwap({
+        // A guard-4 block the week before 12/07 -- a different, already-
+        // completed requirement, never evidence that 12/07 is stale.
+        scheduleRows: [["05/07/2026", "א", "שומר 4"]],
+      }),
+    );
+    const result = await loadDutyFairnessReadModel("h2");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    const otherGroup = result.model.groups.find((g) => g.key === "other");
+    const row = otherGroup?.rows.find((r) => r.sourceName === ITAY.name);
+    // 0.25 (05/07 real single-day) + 0.25 (12/07 Potential-derived single-day) = 0.5
+    expect(row?.completedAllocationTotal).toBeCloseTo(0.5);
+  });
+});
+
 describe("loadDutyFairnessReadModel — Justice Table redesign, corrected: personalTargetTotal is the workbook's own currentScore column (\"ניקוד לפוטנציאל הנוכחי\"), never reconstructed from Potential events and never a role-based constant", () => {
   const DANI = person({ id: "p_dani", name: "דני טכנאי", isTechnician: true });
   const NOA = person({ id: "p_noa", name: "נועה טכנאית", isTechnician: true });

@@ -218,6 +218,55 @@ describe("loadCalendarFeedForToken -- 30-day past window (future unbounded)", ()
   });
 });
 
+const SWAP_SCHEDULE_SHEET: RawSheet = {
+  name: SHEET_SOURCES.schedule,
+  values: [
+    ["תאריך", "יום", "דני בדיקה"],
+    ["08/09/2026", "ג", "שומר 4"],
+    ["09/09/2026", "ד", "שומר 4"],
+    ["10/09/2026", "ה", "שומר 4"],
+  ],
+};
+
+const SWAP_POTENTIAL_H2_SHEET: RawSheet = {
+  name: SHEET_SOURCES.potentialH2,
+  values: [
+    ["תאריך", "יום", "שומר 4"],
+    ["06/09/2026", "א", "דני בדיקה"],
+  ],
+};
+
+function makeSwapSnapshot(): RawWorkbookSnapshot {
+  return {
+    fetchedAt: "2026-08-19T00:00:00.000Z",
+    sheets: [
+      PERSONNEL_SHEET,
+      SWAP_SCHEDULE_SHEET,
+      SETTINGS_SHEET,
+      EMPTY_POTENTIAL_SHEET(SHEET_SOURCES.potentialH1),
+      SWAP_POTENTIAL_H2_SHEET,
+    ],
+  };
+}
+
+describe("loadCalendarFeedForToken -- Potential source-precedence swap regression (production-shaped, no independent construction path)", () => {
+  it("never renders a phantom guard-4 event on the stale 06/09 Potential date once the real internal duty moved to 08-10/09 within the same week -- exactly buildPotentialDutyEvents' own dedup, no second reconciliation here", async () => {
+    resolveCalendarFeedOwnerByToken.mockReset().mockResolvedValue({ status: "ok", email: "dani@example.com" });
+    getWorkbookSnapshot.mockReset().mockResolvedValue(makeSwapSnapshot());
+
+    const result = await loadCalendarFeedForToken("tok");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+
+    expect(result.icsText).not.toContain("DTSTART;VALUE=DATE:20260906");
+    expect(result.icsText).not.toContain("DTSTART;VALUE=DATE:20260907");
+    expect(result.icsText).toContain("DTSTART;VALUE=DATE:20260908");
+    expect(result.icsText).toContain("DTSTART;VALUE=DATE:20260909");
+    expect(result.icsText).toContain("DTSTART;VALUE=DATE:20260910");
+    expect(result.icsText.match(/BEGIN:VEVENT/g)).toHaveLength(3);
+  });
+});
+
 describe("loadCalendarFeedForToken -- shift roster in DESCRIPTION (end-to-end, dynamic)", () => {
   const ROSTER_PERSONNEL_SHEET: RawSheet = {
     name: SHEET_SOURCES.personnel,

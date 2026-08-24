@@ -47,7 +47,16 @@ export interface ManagerRequirementReconciliation {
   sourceConflict: ManagerSourceConflict | null;
 }
 
-const EXACT_SLOT_FAMILIES: ReadonlySet<DutyFamily> = new Set(["guard", "reserve"]);
+/**
+ * Guard/reserve are the only families that carry a real, exact numbered
+ * internal `Event.slot` (see `event.ts`'s `GUARD_RE`/`RESERVE_RE`) -- every
+ * other family is internally unslotted (`slot: null` on both the internal
+ * Event side and the Potential allocation side). Exported so
+ * `lib/domain/potentialDutyEvents.ts` can reuse the SAME family
+ * classification for its own same-slot dedup, rather than defining a
+ * second, potentially-drifting copy of "which families are slotted."
+ */
+export const EXACT_SLOT_FAMILIES: ReadonlySet<DutyFamily> = new Set(["guard", "reserve"]);
 const SINGLE_FAMILIES: ReadonlySet<DutyFamily> = new Set(["evacuation_on_call"]);
 const MULTIPLICITY_FAMILIES: ReadonlySet<DutyFamily> = new Set([
   "oxid",

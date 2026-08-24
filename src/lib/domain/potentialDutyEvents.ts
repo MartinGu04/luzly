@@ -1,5 +1,7 @@
+import { dayOfWeek, daysBetweenCalendarDates, parseCalendarDate } from "./dutyBlocks";
 import type { Event } from "./event";
 import type { PotentialAllocation } from "./potentialAllocation";
+import { EXACT_SLOT_FAMILIES } from "./potentialReconciliation";
 import { scopeManagerPotentialAllocation } from "./potentialSourceOwnership";
 import type { Person } from "./types";
 
@@ -19,7 +21,7 @@ import type { Person } from "./types";
  * resolver, and are exercised again here only through it).
  *
  * An allocation is skipped when `personDutyEvents` already has a real duty
- * Event for the exact same `(date, dutyFamily, slot)` -- the identity
+ * Event covering the exact same `(dutyFamily, slot)` -- the identity
  * `buildDutyBlocks` itself groups by, and the same slot convention
  * `potentialReconciliation.ts` already established (guard/reserve carry a
  * real internal slot; every other family is always `slot: null` on BOTH
@@ -29,6 +31,24 @@ import type { Person } from "./types";
  * being duplicated: whenever their real duty already covers a slot, the
  * matching Potential allocation (if any) is silently dropped here rather
  * than becoming a second, redundant entry.
+ *
+ * For `dutyFamily`/`slot`, "the exact same" means the exact same DATE too --
+ * EXCEPT for guard/reserve (`EXACT_SLOT_FAMILIES`, reused from
+ * `potentialReconciliation.ts` rather than a second copy of the same
+ * family list). For those two families specifically, the numbered slot
+ * represents ONE continuous real-world requirement across its whole
+ * half-week/week block, not a series of independent per-day requirements --
+ * so a real internal duty anywhere in the SAME Sunday-Saturday calendar
+ * week as the allocation's date already covers it, even on a different
+ * exact date. This is what fixes a stale/superseded Potential entry from
+ * BEFORE a real internal swap: e.g. Potential names a person for guard
+ * slot 4 starting Sunday, but their real internal duty for that same slot
+ * was later scheduled to start Tuesday of the SAME week (a swap) -- the
+ * Sunday Potential entry is stale, not a genuine gap, and must never
+ * surface as a second, phantom tentative duty. Every other family keeps
+ * the original exact-date rule unchanged -- they carry no real internal
+ * slot at all, so there is no "same continuous requirement" concept to
+ * reconcile across dates for them.
  *
  * Certainty is always `"tentative"` -- a Potential allocation is the
  * source/framework plan, never a confirmed internal schedule entry (see
@@ -80,12 +100,36 @@ function isAlreadyCoveredByInternalDuty(
   allocation: PotentialAllocation,
   personDutyEvents: readonly Event[],
 ): boolean {
-  return personDutyEvents.some(
-    (event) =>
-      event.date === allocation.date &&
-      event.dutyFamily === allocation.dutyFamily &&
-      event.slot === allocation.slot,
-  );
+  return personDutyEvents.some((event) => {
+    if (event.dutyFamily !== allocation.dutyFamily || event.slot !== allocation.slot) return false;
+    if (EXACT_SLOT_FAMILIES.has(allocation.dutyFamily)) {
+      return isSameCalendarWeek(event.date, allocation.date);
+    }
+    return event.date === allocation.date;
+  });
+}
+
+/**
+ * Whether `dateA`/`dateB` fall in the SAME Sunday-Saturday calendar week --
+ * pure integer/local-calendar-date arithmetic (`dutyBlocks.ts`'s exported
+ * `parseCalendarDate`/`dayOfWeek`/`daysBetweenCalendarDates`, never a
+ * second date-math implementation, never `Date`/UTC). Two dates share a
+ * week iff their day-count difference equals the difference between their
+ * weekday indices (0=Sunday..6=Saturday) -- equivalent to both dates
+ * having the same Sunday week-start, without ever constructing that
+ * week-start date explicitly. An unparseable date never counts as
+ * same-week (fails closed to `false`, same as every other date check in
+ * this codebase).
+ */
+function isSameCalendarWeek(dateA: string, dateB: string): boolean {
+  const a = parseCalendarDate(dateA);
+  const b = parseCalendarDate(dateB);
+  if (!a || !b) return false;
+
+  const diffDays = daysBetweenCalendarDates(dateA, dateB);
+  if (diffDays === null) return false;
+
+  return diffDays === dayOfWeek(b) - dayOfWeek(a);
 }
 
 /**

@@ -1232,9 +1232,35 @@ describe("dutyBlocks — תקשא\"ס period (Potential) sources are a GAP-FILLE
     expect(model.person.isSupervisor).toBe(false);
   });
 
-  it("a duty spanning both sources on consecutive dates (no real duty on the Potential date) merges into ONE block via the existing buildDutyBlocks grouping, not two", () => {
+  it("guard/reserve: an adjacent-date Potential entry for the SAME slot, in the SAME calendar week as a real duty, is suppressed rather than merged -- the slot is one continuous requirement per week, so a same-week Potential entry is redundant/stale evidence, never a genuine gap to fill in", () => {
+    // 2026-08-20 (Thu) and 2026-08-21 (Fri) are the SAME Sun-Sat week
+    // (16-22 Aug). Before the source-precedence fix, this merged into one
+    // 2-day "mixed" block (Potential filling in the very next day); the
+    // confirmed business rule is now that guard/reserve's numbered slot
+    // represents ONE requirement across its whole week -- a real duty
+    // ANYWHERE in that week already covers it, so the adjacent Potential
+    // entry is treated as redundant, not a genuine continuation. See
+    // `lib/domain/potentialDutyEvents.ts`'s `isAlreadyCoveredByInternalDuty`
+    // (the SAME production-swap fix that keeps a stale/superseded Potential
+    // entry from surfacing when a real internal duty for that slot was
+    // simply moved to a different date within the same week).
     const events = [myDuty({ date: "2026-08-20", dutyFamily: "guard", slot: 1 })];
     const potentialAllocations = [allocation({ date: "2026-08-21", dutyFamily: "guard", slot: 1 })];
+    const model = build({ events, potentialAllocations });
+    expect(model.dutyBlocks).toHaveLength(1);
+    expect(model.dutyBlocks[0]).toMatchObject({
+      startDate: "2026-08-20",
+      endDate: "2026-08-20",
+      dayCount: 1,
+      certainty: "confirmed",
+    });
+  });
+
+  it("non-slotted families (no real internal slot at all, e.g. full_kitchen) still merge an adjacent-date Potential gap-filler exactly as before -- the week-based rule is scoped to guard/reserve only", () => {
+    const events = [myDuty({ date: "2026-08-20", dutyFamily: "full_kitchen", slot: null })];
+    const potentialAllocations = [
+      allocation({ date: "2026-08-21", dutyFamily: "full_kitchen", slot: null, sourceSlot: 1, columnLabel: "מטבח מלא 1" }),
+    ];
     const model = build({ events, potentialAllocations });
     expect(model.dutyBlocks).toHaveLength(1);
     expect(model.dutyBlocks[0]).toMatchObject({
