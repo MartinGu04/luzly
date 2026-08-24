@@ -19,11 +19,19 @@ import { computeAudienceSummary } from "@/lib/presentation/managerBroadcast";
 import type { ManagerAdoptionPersonView, ManagerPersonSummary } from "@/lib/readModels/managerTypes";
 
 type AudienceKind = "person" | "people" | "everyone";
-type SendMode = "now" | "schedule";
+export type SendMode = "now" | "schedule";
 
 interface ManagerBroadcastComposerProps {
+  /**
+   * Fixed by the parent Notification Center section ("עכשיו"/"תזמון") --
+   * this component itself never toggles between them anymore (see this
+   * file's own docstring). Only ever `"schedule"` when `editingItem` is
+   * set: editing an existing scheduled broadcast only ever happens from
+   * "תזמון".
+   */
+  mode: SendMode;
   roster: ManagerPersonSummary[];
-  /** Empty when the "התחברויות והתראות" readiness lookup itself is unavailable -- the picker still works, it just can't annotate anyone's readiness. */
+  /** Empty when the readiness lookup itself is unavailable -- the picker still works, it just can't annotate anyone's readiness. */
   adoptionPeople: ManagerAdoptionPersonView[];
   /** Set while the manager is editing an existing scheduled broadcast (from "🕒 התראות מתוזמנות"'s own "עריכה" action) -- pre-fills the form and switches submission to `editScheduledBroadcastAction`. `null`/omitted is the ordinary "new broadcast" composer. */
   editingItem?: ScheduledBroadcastView | null;
@@ -37,11 +45,6 @@ const AUDIENCE_OPTIONS: { value: AudienceKind; label: string }[] = [
   { value: "person", label: "אדם מסוים" },
   { value: "people", label: "כמה אנשים" },
   { value: "everyone", label: "כולם" },
-];
-
-const SEND_MODE_OPTIONS: { value: SendMode; label: string }[] = [
-  { value: "now", label: "עכשיו" },
-  { value: "schedule", label: "תזמון" },
 ];
 
 function newIdempotencyKey(): string {
@@ -88,10 +91,12 @@ function parseTimeValue(timeValue: string): { hour: number; minute: number } | n
 }
 
 /**
- * "📣 שליחת התראה" -- the manager-only manual-broadcast composer. Lives
- * above the adoption/readiness sections in the "התחברויות והתראות"
- * category (see `app/(app)/manager/page.tsx`). Purely a thin client shell
- * around `sendManagerBroadcastAction`/`createScheduledBroadcastAction`/
+ * "📣 שליחת התראה" -- the manager-only manual-broadcast composer. Rendered
+ * by the standalone Notification Center's own "עכשיו"/"תזמון" sections
+ * (`app/(app)/notifications/page.tsx`), each fixing this component's `mode`
+ * -- the component itself no longer owns an "עכשיו / תזמון" switch (that
+ * choice is now which SECTION the manager is on). Purely a thin client
+ * shell around `sendManagerBroadcastAction`/`createScheduledBroadcastAction`/
  * `editScheduledBroadcastAction` -- every real decision (who counts as a
  * valid recipient, push-capable vs. inbox-only vs. unresolved, dedupe,
  * audience-snapshot freezing) happens server-side; this component's own
@@ -99,15 +104,17 @@ function parseTimeValue(timeValue: string): { hour: number; minute: number } | n
  * before sending/scheduling, never the source of truth (see that
  * function's own docstring).
  *
- * "מתי לשלוח?" (עכשיו / תזמון) branches the SAME form to one of three
- * server actions: an immediate send is byte-for-byte the PR #78 behavior
- * (`sendManagerBroadcastAction`, unchanged); "תזמון" saves a still-mutable
- * scheduled broadcast instead of sending anything (`createScheduledBroadcastAction`)
- * -- never claims Push was sent. `editingItem` repurposes the exact same
- * form to edit an existing scheduled broadcast in place
+ * `mode` branches the SAME form to one of three server actions: an
+ * immediate send is byte-for-byte the PR #78 behavior
+ * (`sendManagerBroadcastAction`, unchanged); `mode === "schedule"` saves a
+ * still-mutable scheduled broadcast instead of sending anything
+ * (`createScheduledBroadcastAction`) -- never claims Push was sent.
+ * `editingItem` repurposes the exact same form (always `mode === "schedule"`
+ * while editing) to edit an existing scheduled broadcast in place
  * (`editScheduledBroadcastAction`) rather than a second editor UI.
  */
 export function ManagerBroadcastComposer({
+  mode,
   roster,
   adoptionPeople,
   editingItem = null,
@@ -115,10 +122,10 @@ export function ManagerBroadcastComposer({
   onCancelEdit,
 }: ManagerBroadcastComposerProps) {
   // Initial state is derived from `editingItem` once, on mount -- the
-  // parent (`ManagerBroadcastArea`) remounts this component with a fresh
-  // `key` whenever `editingItem` changes identity (a different scheduled
-  // broadcast, or leaving/entering edit mode), so there is no need to
-  // re-sync these via an effect.
+  // parent section remounts this component with a fresh `key` whenever
+  // `editingItem` changes identity (a different scheduled broadcast, or
+  // leaving/entering edit mode), so there is no need to re-sync these via
+  // an effect.
   const [audienceKind, setAudienceKind] = useState<AudienceKind>(() =>
     editingItem && editingItem.audienceKind !== "everyone" ? editingItem.audienceKind : editingItem ? "everyone" : "person",
   );
@@ -128,7 +135,6 @@ export function ManagerBroadcastComposer({
   const [query, setQuery] = useState("");
   const [title, setTitle] = useState(() => editingItem?.title ?? "");
   const [body, setBody] = useState(() => editingItem?.body ?? "");
-  const [sendMode, setSendMode] = useState<SendMode>(() => (editingItem ? "schedule" : "now"));
   const [scheduledDate, setScheduledDate] = useState(() => editingItem?.scheduledLocalDate ?? "");
   const [scheduledTime, setScheduledTime] = useState(() =>
     editingItem ? minuteOfDayToTimeValue(editingItem.scheduledLocalMinuteOfDay) : "",
@@ -153,7 +159,7 @@ export function ManagerBroadcastComposer({
   const trimmedBody = body.trim();
   const parsedTime = parseTimeValue(scheduledTime);
   const scheduleSummary =
-    sendMode === "schedule" && scheduledDate && parsedTime
+    mode === "schedule" && scheduledDate && parsedTime
       ? formatScheduledBroadcastMoment(scheduledDate, parsedTime.hour * 60 + parsedTime.minute)
       : null;
 
@@ -164,7 +170,7 @@ export function ManagerBroadcastComposer({
     trimmedBody.length > 0 &&
     trimmedBody.length <= BROADCAST_BODY_MAX_LENGTH &&
     effectiveSelectedIds.length > 0 &&
-    (sendMode === "now" || (scheduledDate.length > 0 && parsedTime !== null));
+    (mode === "now" || (scheduledDate.length > 0 && parsedTime !== null));
 
   function resetForm() {
     setTitle("");
@@ -173,7 +179,6 @@ export function ManagerBroadcastComposer({
     setQuery("");
     setScheduledDate("");
     setScheduledTime("");
-    setSendMode("now");
     setIdempotencyKey(newIdempotencyKey());
   }
 
@@ -196,7 +201,7 @@ export function ManagerBroadcastComposer({
     setScheduleResult(null);
 
     startTransition(async () => {
-      if (sendMode === "now" && !editingItem) {
+      if (mode === "now") {
         const outcome = await sendManagerBroadcastAction({
           audienceKind,
           targetPersonIds: audienceKind === "everyone" ? [] : selectedIds,
@@ -249,30 +254,11 @@ export function ManagerBroadcastComposer({
           </p>
         </div>
 
-        {!editingItem ? (
-          <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="מתי לשלוח">
-            {SEND_MODE_OPTIONS.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                role="radio"
-                aria-checked={sendMode === option.value}
-                onClick={() => setSendMode(option.value)}
-                className={`rounded-full px-3 py-1.5 text-sm font-medium ring-1 transition-colors duration-150 ${
-                  sendMode === option.value
-                    ? "bg-primary text-primary-foreground ring-primary"
-                    : "bg-overlay-soft text-foreground ring-border hover:bg-overlay-strong"
-                }`}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-        ) : (
+        {editingItem ? (
           <button type="button" onClick={onCancelEdit} className="self-start text-xs font-medium text-muted underline">
             ביטול עריכה
           </button>
-        )}
+        ) : null}
 
         <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="למי לשלוח">
           {AUDIENCE_OPTIONS.map((option) => (
@@ -336,7 +322,7 @@ export function ManagerBroadcastComposer({
           </label>
         </div>
 
-        {sendMode === "schedule" ? (
+        {mode === "schedule" ? (
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="flex flex-col gap-1">
               <span className="text-xs font-medium text-muted">תאריך</span>
@@ -383,7 +369,7 @@ export function ManagerBroadcastComposer({
               <li className="text-warning">{summary.unresolvedCount} לא ניתנים לשליחה כרגע</li>
             ) : null}
           </ul>
-          {sendMode === "schedule" ? (
+          {mode === "schedule" ? (
             <p className="mt-1 text-[11px] text-muted-2">
               ההערכה משקפת את המצב הנוכחי בלבד -- היא עשויה להשתנות עד למועד השליחה בפועל.
             </p>
@@ -402,7 +388,7 @@ export function ManagerBroadcastComposer({
               ? "שולח/ת…"
               : editingItem
                 ? "שמירת שינויים"
-                : sendMode === "now"
+                : mode === "now"
                   ? "שלח התראה"
                   : "שמירת תזמון"}
           </button>

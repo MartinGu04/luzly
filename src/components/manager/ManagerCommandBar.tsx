@@ -12,10 +12,10 @@ interface ManagerCommandBarProps {
   fetchedAt: string;
   /**
    * Whether the person-scope + date-range controls are shown at all --
-   * `true` everywhere except the "התחברויות והתראות" and "כוח אדם"
+   * `true` everywhere except the "התחברויות" and "כוח אדם"
    * categories (see `page.tsx`'s `managerCategoryNeedsFilters`). Both are
-   * unscoped, current-snapshot views -- "התחברויות והתראות" is an
-   * adoption/readiness snapshot, "כוח אדם" a straightforward workforce/
+   * unscoped, current-snapshot views -- "התחברויות" is a login/readiness
+   * adoption snapshot, "כוח אדם" a straightforward workforce/
    * roster page -- neither filtered by an operational date range or scoped
    * to one person, so showing "כולם"/"היום"/"7 ימים"/"30 יום"/"החודש" there
    * would offer controls that do nothing. `DataFreshnessStatus` (the Google

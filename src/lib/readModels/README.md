@@ -309,10 +309,11 @@ giant read model.
   same snapshot instead of a fresh Google request each time.
 - **Lightweight polling boundary.** The same file's `loadManagerPersonnelContext()`
   is a deliberately NARROWER sibling for background/polling reads that
-  only need "is this caller a manager" plus the roster (the Manager
-  communication area's ~17s scheduled/recent-broadcast status polls --
-  see `lib/notifications/scheduledBroadcastActions.ts`/
-  `manualBroadcastActions.ts`). `loadManagerWorkbookContext(["personnel"])`
+  only need "is this caller a manager" plus the roster (the standalone
+  "מרכז התראות" Notification Center's ~17s scheduled/recent-broadcast status
+  polls -- see `lib/notifications/scheduledBroadcastActions.ts`/
+  `manualBroadcastActions.ts` -- and its own page-level authorization,
+  `notificationCenter.ts` below). `loadManagerWorkbookContext(["personnel"])`
   now performs the SAME lightweight identity+personnel-only sequence (see
   above) — this sibling still exists, unmerged, purely because its
   narrower return type (no `snapshot`/`avatarUrl`) matches what these
@@ -390,14 +391,19 @@ client component at all). PR #15 never recommends who should be assigned
 next ("הבא בתור") — that is explicitly out of scope, reserved for a
 future PR #16 that adds assignment-specific eligibility.
 
-## Manager adoption — "התחברויות והתראות"
+## Manager adoption — "התחברויות" (Manager Area) + the standalone "מרכז התראות"
 
 A management-visibility category, not an operational one: it reconciles
 the SAME כ"א roster every other manager category uses against Supabase
 auth + push-subscription state, so a manager can see who has logged into
 מי-מה-מו, who hasn't, and who can currently receive push notifications.
-Formerly a small aside inside Overview (מצב התראות, PR #40); now its own
-top-level `ManagerCategory` (`"logins"`) so Overview stays focused on
+Formerly a small aside inside Overview (מצב התראות, PR #40), then a
+combined "התחברויות והתראות" Manager category that ALSO hosted
+notification-management UI (immediate/scheduled composer, history, fixed/
+recurring rules) — that management surface has since moved to its own
+standalone top-level product area, "מרכז התראות" (`/notifications`, see
+below); the Manager Area's own `"logins"` category (`ManagerCategory`) now
+shows ONLY this login/readiness picture, so Overview stays focused on
 operational shift/duty issues. No new database schema and no parallel
 personnel list — every fact here already existed, just split into the two
 questions a manager actually asks instead of one collapsed engine enum.
@@ -405,8 +411,8 @@ questions a manager actually asks instead of one collapsed engine enum.
 - **Engine reuse.** `lib/notifications/engine/readiness.ts`'s
   `computeNotificationReadiness()` (the SAME bulk Supabase Admin API +
   `push_subscriptions` lookup PR #40's aside already used) is still the
-  ONLY place identity/subscription state is computed — this read model
-  never re-queries Supabase itself. `PersonReadinessResult` now also
+  ONLY place identity/subscription state is computed — neither read model
+  below ever re-queries Supabase itself. `PersonReadinessResult` also
   carries `avatarUrl` (the person's Google profile photo), read from the
   SAME already-fetched bulk `listUsers()` page via
   `lib/auth/currentUser.ts`'s `extractAvatarUrl` (exported for this reuse)
@@ -414,37 +420,65 @@ questions a manager actually asks instead of one collapsed engine enum.
   (`last_sign_in_at`/`created_at` exist on the Admin API response but
   nothing here reads them; login recency stays a possible future
   enhancement, not a fabricated approximation).
-- **`managerTypes.ts`** — `ManagerAdoptionPersonView` splits each person's
-  single `PersonNotificationReadiness` into `loginStatus`
-  (`logged_in`/`not_logged_in`, `null` when a `dataIssue` makes the
-  question unanswerable), `notificationStatus` (`ready`/`not_enabled`,
-  `null` before `logged_in`), and `dataIssue`
-  (`missing_email`/`ambiguous_email` — a roster problem to fix in כ"א, not
-  a person to remind). `needsNudge` is true exactly for
-  `not_logged_in`/`not_enabled`. `ManagerAdoptionSummary` carries only the
-  counts the product spec actually asks for (total/logged-in/not-logged-
-  in/notification-ready/logged-in-not-ready/data-issue) — never a
-  decorative statistic. `ManagerAdoptionState` mirrors the same
-  skipped/unavailable/available three-way the old aside used, except
-  `available` is shown even when every count but the total is calm — this
-  is a full category page a manager navigates to on purpose, not a
-  transient note.
-- **`buildManagerOverviewReadModel.ts`** — `toManagerAdoptionPerson()` is
-  the one exhaustive switch over `PersonNotificationReadiness` that
-  performs the split above; `toManagerAdoptionView()` derives every
-  summary count from that SAME single pass, so they can never drift out
-  of agreement with `people` by construction. Every roster person survives
-  into `ManagerAdoptionView.people` (unlike the old aside, which dropped
-  every `ready` person).
+- **`managerAdoptionProjection.ts`** — the SHARED pure projection both
+  `buildManagerOverviewReadModel.ts` (Manager Area's "התחברויות") and
+  `notificationCenter.ts` (the standalone Notification Center, below) build
+  on, so the two surfaces can never quietly compute this differently.
+  `buildManagerRoster()` is the manager-safe roster projection (map + the
+  by-name/id sort, no email). `toManagerAdoptionState()` narrows a caller's
+  own `AdoptionReadinessLookup` (`skipped`/`unavailable`/`ok`) into the
+  exported `ManagerAdoptionState`; internally, `toManagerAdoptionPerson()`
+  is the one exhaustive switch over `PersonNotificationReadiness` that
+  splits each person into `loginStatus`/`notificationStatus`/`dataIssue`/
+  `needsNudge` (see `managerTypes.ts`'s own docs for exactly what each
+  means), and `toManagerAdoptionView()` derives every summary count from
+  that SAME single pass, so they can never drift out of agreement with
+  `people` by construction. Every roster person survives into
+  `ManagerAdoptionView.people` (unlike the old aside, which dropped every
+  `ready` person).
+- **`buildManagerOverviewReadModel.ts`** (Manager Area) — imports
+  `buildManagerRoster`/`toManagerAdoptionState` from the shared module
+  above rather than defining its own copy; `loadAdoptionReadiness()`
+  (`managerOverview.ts`) is the orchestration wrapper that actually calls
+  `computeNotificationReadiness()`, gated by `needsAdoptionReadiness`
+  (`category === "logins"`, and never for a selected-person drilldown).
+- **`notificationCenter.ts`** (standalone Notification Center) —
+  `loadNotificationCenterContext(needsRosterAndAdoption)`, the completely
+  separate, narrower orchestration for `/notifications`. Authorization +
+  the roster come from `loadManagerPersonnelContext()`
+  (`managerWorkbookContext.ts`, the SAME lightweight personnel-only,
+  short-TTL-cached boundary the scheduled/recent-broadcast polls and
+  notification-rule actions already use — never the heavier 5-source
+  `loadManagerWorkbookContext()`, and no schedule/settings/Potential
+  parsing, no `detectOperationalIssues()`, no `ShiftSchedule` at all). When
+  `needsRosterAndAdoption` is true ("עכשיו"/"תזמון"/"קבועות", which all
+  render an audience picker) it also calls `computeNotificationReadiness()`
+  itself and narrows the result via the SAME shared projection above; when
+  false ("היסטוריה", which renders no picker at all) neither the roster nor
+  the readiness lookup is built at all. `getRequestNotificationCenterContext.ts`
+  is the `cache()`-wrapped request-scoped memoization, keyed on that same
+  boolean — same convention as `getRequestManagerOverview`.
+  `NotificationCenterContext` exposes only `roster`/`adoptionPeople` — a
+  narrower projection than `ManagerOverviewReadModel`, never a raw
+  `Person`/Supabase `User`/email/push-subscription record.
 - **`lib/presentation/managerAdoption.ts`** — `buildManagerAdoptionSectionView()`
-  groups people into the four buckets the "התחברויות והתראות" UI actually
-  renders (`notLoggedInGroup`/`notificationsOffGroup` — always visible,
-  actionable; `readyGroup` — quiet, collapsed by default;
+  groups people into the four buckets the Manager Area's "התחברויות" UI
+  actually renders (`notLoggedInGroup`/`notificationsOffGroup` — always
+  visible, actionable; `readyGroup` — quiet, collapsed by default;
   `dataIssueGroup` — visually distinct roster-data framing), plus a
-  headline sentence and the stat list for `ManagerAdoptionSummary`.
+  headline sentence and the stat list for `ManagerAdoptionSummary`. The
+  Notification Center's sections consume the narrower
+  `ManagerAdoptionPersonView[]` directly (via `RosterPersonPicker`/
+  `computeAudienceSummary`) rather than this grouped view — they're
+  audience pickers, not a login-adoption report.
 - **UI** — `ManagerAdoptionSummary`/`ManagerAdoptionSection`
   (`components/manager/`), rendered only for `category === "logins"` in
-  `app/(app)/manager/page.tsx`.
+  `app/(app)/manager/page.tsx`. The notification-management UI
+  (`ManagerBroadcastComposer`, `ManagerScheduledBroadcastsSection`,
+  `ManagerRecentBroadcastsSection`, `ManagerFixedNotificationsSection`) is
+  reused as-is but now renders exclusively from
+  `app/(app)/notifications/page.tsx` and its `components/notifications/`
+  coordinators — never from `/manager` anymore.
 
 ## Manager Area shift snapshot ("תמונת מצב משמרות")
 

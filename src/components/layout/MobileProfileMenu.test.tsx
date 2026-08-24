@@ -85,10 +85,25 @@ describe("MobileProfileMenu — manager access", () => {
     expect(screen.getByText("מנהל/ת")).toBeInTheDocument();
   });
 
-  it("a non-manager never sees the manager entry", () => {
+  it('a manager ALSO sees "מרכז התראות", linking to /notifications', () => {
+    renderWithTheme(<MobileProfileMenu name="נועה מנהלת" isManager={true} avatarUrl={null} />);
+    fireEvent.click(screen.getByRole("button", { name: /תפריט פרופיל/ }));
+    const link = screen.getByRole("menuitem", { name: "מרכז התראות" });
+    expect(link).toHaveAttribute("href", "/notifications");
+  });
+
+  it("both manager-only entries appear together, as separate menu items", () => {
+    renderWithTheme(<MobileProfileMenu name="נועה מנהלת" isManager={true} avatarUrl={null} />);
+    fireEvent.click(screen.getByRole("button", { name: /תפריט פרופיל/ }));
+    expect(screen.getByRole("menuitem", { name: "אזור מנהל" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "מרכז התראות" })).toBeInTheDocument();
+  });
+
+  it("a non-manager never sees either manager-only entry", () => {
     renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} avatarUrl={null} />);
     fireEvent.click(screen.getByRole("button", { name: /תפריט פרופיל/ }));
     expect(screen.queryByRole("menuitem", { name: "אזור מנהל" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "מרכז התראות" })).toBeNull();
     expect(screen.queryByText("מנהל/ת")).toBeNull();
   });
 });

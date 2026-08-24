@@ -8,7 +8,7 @@ import type { ManagerAdoptionPersonView, ManagerPersonSummary } from "@/lib/read
 
 interface RosterPersonPickerProps {
   roster: ManagerPersonSummary[];
-  /** Empty when the "התחברויות והתראות" readiness lookup itself is unavailable -- the picker still works, it just can't annotate anyone's readiness. */
+  /** Empty when the readiness lookup itself is unavailable -- the picker still works, it just can't annotate anyone's readiness. */
   adoptionPeople: ManagerAdoptionPersonView[];
   query: string;
   onQueryChange: (query: string) => void;

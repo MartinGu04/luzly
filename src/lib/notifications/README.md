@@ -66,10 +66,14 @@ still dispatching due schedules as a deliberate fallback, in case the
 dedicated worker's manually-configured Cron job is ever missing,
 disabled, or broken (see `engine/README.md`'s own section for why
 overlapping callers of the same claim are safe). The manager's open
-communication screen reflects a background dispatch via lightweight
-polling, never Realtime/WebSocket -- see
-`components/manager/ManagerScheduledBroadcastsSection.tsx` and
-`ManagerRecentBroadcastsSection.tsx`.
+Notification Center ("מרכז התראות", `app/(app)/notifications/page.tsx`)
+reflects a background dispatch via lightweight polling, never Realtime/
+WebSocket -- "תזמון" renders `components/manager/ManagerScheduledBroadcastsSection.tsx`
+directly; "היסטוריה" renders `ManagerRecentBroadcastsSection.tsx`, gated on
+an equivalent "is anything currently active?" signal it derives itself
+(`components/notifications/NotificationHistorySection.tsx`) since the two
+sections are never mounted on the same page anymore (they used to share one
+combined Manager Area category, "התחברויות והתראות").
 
 ### Fixed / Recurring Notifications Center -- the managed source of truth
 for fixed system reminders + manager-created weekly recurring rules
@@ -80,7 +84,8 @@ noon logistics trio, עלמ״ש check-in, and the two weekly constraints
 reminders) is now a persisted, manager-visible `notification_rules` row
 (`kind = 'system'`) rather than invisible code configuration -- a
 manager can see, enable/disable, and retime each one from "📌 התראות
-קבועות" (`components/manager/ManagerFixedNotificationsSection.tsx`).
+קבועות" (`components/manager/ManagerFixedNotificationsSection.tsx`, rendered
+by the standalone Notification Center's own "קבועות" section).
 System identity/trigger/audience logic stays entirely protected in
 `engine/reminders.ts` -- this table only ever configures WHETHER and
 WHEN, never WHO or WHY. A SECOND kind (`kind = 'custom_weekly'`) lets a

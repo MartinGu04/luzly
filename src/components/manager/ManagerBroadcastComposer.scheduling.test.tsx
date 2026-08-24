@@ -39,16 +39,23 @@ function fillTitleAndBody() {
   fireEvent.change(screen.getByPlaceholderText("תוכן ההתראה שיוצג לאנשי הצוות"), { target: { value: "תוכן" } });
 }
 
-describe("ManagerBroadcastComposer -- 'מתי לשלוח' scheduling", () => {
-  it("defaults to 'עכשיו' -- the immediate-send button label is unchanged", () => {
-    render(<ManagerBroadcastComposer roster={ROSTER} adoptionPeople={ADOPTION} />);
-    expect(screen.getByRole("radio", { name: "עכשיו" })).toHaveAttribute("aria-checked", "true");
+describe("ManagerBroadcastComposer -- mode is fixed by the parent, no internal 'מתי לשלוח' selector", () => {
+  it("mode='now' never renders a מתי לשלוח selector -- the immediate-send button is available directly", () => {
+    render(<ManagerBroadcastComposer mode="now" roster={ROSTER} adoptionPeople={ADOPTION} />);
+    expect(screen.queryByRole("radiogroup", { name: "מתי לשלוח" })).toBeNull();
     expect(screen.getByRole("button", { name: "שלח התראה" })).toBeInTheDocument();
   });
 
-  it("switching to 'תזמון' reveals date/time inputs and disables submit until both are filled", () => {
-    render(<ManagerBroadcastComposer roster={ROSTER} adoptionPeople={ADOPTION} />);
-    fireEvent.click(screen.getByRole("radio", { name: "תזמון" }));
+  it("mode='schedule' never renders a מתי לשלוח selector either -- date/time inputs are shown directly", () => {
+    render(<ManagerBroadcastComposer mode="schedule" roster={ROSTER} adoptionPeople={ADOPTION} />);
+    expect(screen.queryByRole("radiogroup", { name: "מתי לשלוח" })).toBeNull();
+    expect(screen.getByLabelText("תאריך השליחה")).toBeInTheDocument();
+    expect(screen.getByLabelText("שעת השליחה")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "שמירת תזמון" })).toBeInTheDocument();
+  });
+
+  it("mode='schedule' disables submit until both date and time are filled", () => {
+    render(<ManagerBroadcastComposer mode="schedule" roster={ROSTER} adoptionPeople={ADOPTION} />);
     fireEvent.click(screen.getByText("דנה"));
     fillTitleAndBody();
 
@@ -67,8 +74,7 @@ describe("ManagerBroadcastComposer -- 'מתי לשלוח' scheduling", () => {
       ok: true,
       item: { id: "sb_1", scheduledLocalDate: "2026-08-23", scheduledLocalMinuteOfDay: 20 * 60, status: "scheduled" },
     });
-    render(<ManagerBroadcastComposer roster={ROSTER} adoptionPeople={ADOPTION} />);
-    fireEvent.click(screen.getByRole("radio", { name: "תזמון" }));
+    render(<ManagerBroadcastComposer mode="schedule" roster={ROSTER} adoptionPeople={ADOPTION} />);
     fireEvent.click(screen.getByText("דנה"));
     fillTitleAndBody();
     fireEvent.change(screen.getByLabelText("תאריך השליחה"), { target: { value: "2026-08-23" } });
@@ -96,8 +102,7 @@ describe("ManagerBroadcastComposer -- 'מתי לשלוח' scheduling", () => {
 
   it("shows a Hebrew error and keeps the form filled when scheduling fails", async () => {
     createScheduledBroadcastAction.mockResolvedValue({ ok: false, error: "invalid_schedule" });
-    render(<ManagerBroadcastComposer roster={ROSTER} adoptionPeople={ADOPTION} />);
-    fireEvent.click(screen.getByRole("radio", { name: "תזמון" }));
+    render(<ManagerBroadcastComposer mode="schedule" roster={ROSTER} adoptionPeople={ADOPTION} />);
     fireEvent.click(screen.getByText("דנה"));
     fillTitleAndBody();
     fireEvent.change(screen.getByLabelText("תאריך השליחה"), { target: { value: "2020-01-01" } });
@@ -111,7 +116,7 @@ describe("ManagerBroadcastComposer -- 'מתי לשלוח' scheduling", () => {
   });
 });
 
-describe("ManagerBroadcastComposer -- editing an existing scheduled broadcast", () => {
+describe("ManagerBroadcastComposer -- editing an existing scheduled broadcast (always mode='schedule')", () => {
   const EDITING_ITEM: ScheduledBroadcastView = {
     id: "sb_1",
     status: "scheduled",
@@ -126,8 +131,8 @@ describe("ManagerBroadcastComposer -- editing an existing scheduled broadcast", 
     lastChangedByPersonName: null,
   };
 
-  it("pre-fills the form from the editing item and hides the עכשיו/תזמון toggle", () => {
-    render(<ManagerBroadcastComposer roster={ROSTER} adoptionPeople={ADOPTION} editingItem={EDITING_ITEM} />);
+  it("pre-fills the form from the editing item and never renders a מתי לשלוח selector", () => {
+    render(<ManagerBroadcastComposer mode="schedule" roster={ROSTER} adoptionPeople={ADOPTION} editingItem={EDITING_ITEM} />);
     expect(screen.getByPlaceholderText("לדוגמה: עדכון חשוב")).toHaveValue("כותרת קיימת");
     expect(screen.getByPlaceholderText("תוכן ההתראה שיוצג לאנשי הצוות")).toHaveValue("תוכן קיים");
     expect(screen.getByLabelText("תאריך השליחה")).toHaveValue("2026-08-23");
@@ -145,6 +150,7 @@ describe("ManagerBroadcastComposer -- editing an existing scheduled broadcast", 
     const onCancelEdit = vi.fn();
     render(
       <ManagerBroadcastComposer
+        mode="schedule"
         roster={ROSTER}
         adoptionPeople={ADOPTION}
         editingItem={EDITING_ITEM}
@@ -164,7 +170,9 @@ describe("ManagerBroadcastComposer -- editing an existing scheduled broadcast", 
 
   it("calls onCancelEdit when 'ביטול עריכה' is clicked", () => {
     const onCancelEdit = vi.fn();
-    render(<ManagerBroadcastComposer roster={ROSTER} adoptionPeople={ADOPTION} editingItem={EDITING_ITEM} onCancelEdit={onCancelEdit} />);
+    render(
+      <ManagerBroadcastComposer mode="schedule" roster={ROSTER} adoptionPeople={ADOPTION} editingItem={EDITING_ITEM} onCancelEdit={onCancelEdit} />,
+    );
     fireEvent.click(screen.getByText("ביטול עריכה"));
     expect(onCancelEdit).toHaveBeenCalledTimes(1);
   });

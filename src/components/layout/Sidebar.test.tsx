@@ -95,6 +95,29 @@ describe("Sidebar", () => {
       expect(screen.getByRole("link", { name: /אזור מנהל/ })).toHaveAttribute("aria-current", "page");
     });
 
+    it("a non-manager sees no /notifications link at all -- not even disabled", () => {
+      renderWithTheme(<Sidebar person={{ name: "דני עובד", isManager: false, avatarUrl: null }} />);
+      expect(screen.queryByRole("link", { name: /מרכז התראות/ })).toBeNull();
+      expect(screen.queryByText("מרכז התראות")).toBeNull();
+    });
+
+    it("no person prop at all (defensive default) also hides /notifications", () => {
+      renderWithTheme(<Sidebar />);
+      expect(screen.queryByText("מרכז התראות")).toBeNull();
+    });
+
+    it("a manager sees BOTH אזור מנהל and מרכז התראות as real enabled links", () => {
+      renderWithTheme(<Sidebar person={{ name: "דני מנהל", isManager: true, avatarUrl: null }} />);
+      expect(screen.getByRole("link", { name: /אזור מנהל/ })).toHaveAttribute("href", "/manager");
+      expect(screen.getByRole("link", { name: /מרכז התראות/ })).toHaveAttribute("href", "/notifications");
+    });
+
+    it("marks /notifications as the active route with aria-current for a manager", () => {
+      usePathname.mockReturnValue("/notifications");
+      renderWithTheme(<Sidebar person={{ name: "דני מנהל", isManager: true, avatarUrl: null }} />);
+      expect(screen.getByRole("link", { name: /מרכז התראות/ })).toHaveAttribute("aria-current", "page");
+    });
+
     it("existing enabled routes remain visible for a manager too", () => {
       renderWithTheme(<Sidebar person={{ name: "דני מנהל", isManager: true, avatarUrl: null }} />);
       expect(screen.getByRole("link", { name: /תורנויות/ })).toHaveAttribute("href", "/duties");
