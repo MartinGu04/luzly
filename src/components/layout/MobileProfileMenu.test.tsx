@@ -138,6 +138,15 @@ describe("MobileProfileMenu — single-button theme toggle", () => {
   });
 });
 
+describe("MobileProfileMenu — shooting ranges link", () => {
+  it('every user sees "מטווחים", linking to /shooting-ranges', () => {
+    renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} avatarUrl={null} />);
+    fireEvent.click(screen.getByRole("button", { name: /תפריט פרופיל/ }));
+    const link = screen.getByRole("menuitem", { name: "מטווחים" });
+    expect(link).toHaveAttribute("href", "/shooting-ranges");
+  });
+});
+
 describe("MobileProfileMenu — settings link", () => {
   it('every user sees "הגדרות", linking to /settings', () => {
     renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} avatarUrl={null} />);

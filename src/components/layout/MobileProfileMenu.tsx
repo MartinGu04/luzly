@@ -3,7 +3,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import Link from "next/link";
-import { Loader2, LogOut, Moon, Settings, Sun, UserCog } from "lucide-react";
+import { Loader2, LogOut, Moon, Settings, Sun, Target, UserCog } from "lucide-react";
 import { signOutAction } from "@/lib/auth/actions";
 import { Avatar } from "@/components/ui/Avatar";
 import { PushEndpointHiddenField } from "@/components/pwa/PushEndpointHiddenField";
@@ -145,6 +145,16 @@ export function MobileProfileMenu({ name, isManager, avatarUrl }: MobileProfileM
               אזור מנהל
             </Link>
           ) : null}
+
+          <Link
+            href="/shooting-ranges"
+            role="menuitem"
+            onClick={() => setOpen(false)}
+            className="flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-sm font-medium text-foreground transition-colors duration-150 hover:bg-overlay-soft"
+          >
+            <Target className="h-4 w-4 text-muted" aria-hidden="true" strokeWidth={1.75} />
+            מטווחים
+          </Link>
 
           <Link
             href="/settings"
