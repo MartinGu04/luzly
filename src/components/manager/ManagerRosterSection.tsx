@@ -8,9 +8,11 @@ import { groupRosterHierarchy, type RosterTopGroup } from "@/lib/presentation/ro
 interface ManagerRosterSectionProps {
   roster: ManagerPersonSummary[];
   current: ManagerHrefParams;
-  /** The viewing manager's own id + Google profile photo (already resolved from the current auth session, never a new lookup) -- used ONLY to show a real photo for the manager's own row, if they appear in their own roster. Every other person has no photo data available, so they always fall back to initials. */
+  /** The viewing manager's own id + Google profile photo (already resolved from the current auth session, never a new lookup) -- used as the FALLBACK for the manager's own row when `rosterAvatarByPersonId` has no entry for them (e.g. the lookup itself failed). Every other person's photo, when available, comes from `rosterAvatarByPersonId`. */
   managerId: string;
   managerAvatarUrl: string | null;
+  /** Real Google profile photos for roster members who have logged in, keyed by `personId` -- see `ManagerOverviewReadModel.rosterAvatarByPersonId`. A person absent from this map falls back to initials (no account, no photo, or an unmapped/ambiguous identity) -- never a broken-image icon, never guessed by name. */
+  rosterAvatarByPersonId: ReadonlyMap<string, string>;
 }
 
 /** Real capabilities, independent of which presentation group/subgroup the person landed in -- never a second source of truth, just `person.isSupervisor`/`isTechnician` echoed back. */
@@ -71,14 +73,23 @@ function groupCount(group: RosterTopGroup<ManagerPersonSummary>): number {
  * existing `personnelType`/`isSupervisor`/`isTechnician` fields only -- no
  * new Google fetch, no re-derived flags. Each row drills down via
  * `buildManagerHref`, preserving the current range/category URL state.
- * `managerAvatarUrl` (the viewer's own already-resolved Google photo) is
- * shown ONLY on the manager's own row, if present in this roster --
- * every other person has no photo data without a new lookup, so they stay
- * on the initials fallback (see `ManagerOverviewReadModel.manager.avatarUrl`).
+ * Every roster member's real Google photo (`rosterAvatarByPersonId`, see
+ * `ManagerOverviewReadModel`'s own docs) is shown when available; the
+ * viewing manager's own already-resolved `managerAvatarUrl` is the fallback
+ * for their own row specifically (e.g. if the roster-avatar lookup itself
+ * failed) -- everyone else without a mapped photo stays on the initials
+ * fallback, same as always.
  */
-export function ManagerRosterSection({ roster, current, managerId, managerAvatarUrl }: ManagerRosterSectionProps) {
+export function ManagerRosterSection({
+  roster,
+  current,
+  managerId,
+  managerAvatarUrl,
+  rosterAvatarByPersonId,
+}: ManagerRosterSectionProps) {
   const groups = groupRosterHierarchy(roster);
-  const avatarUrlFor = (personId: string): string | null => (personId === managerId ? managerAvatarUrl : null);
+  const avatarUrlFor = (personId: string): string | null =>
+    rosterAvatarByPersonId.get(personId) ?? (personId === managerId ? managerAvatarUrl : null);
 
   if (groups.length === 0) {
     return (

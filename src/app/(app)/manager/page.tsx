@@ -48,6 +48,8 @@ import {
 } from "@/lib/presentation/labels";
 import {
   managerCategoryNeedsAdoptionReadiness,
+  managerCategoryNeedsFilters,
+  managerCategoryNeedsRosterAvatars,
   parseManagerCategoryParam,
   type ManagerHrefParams,
 } from "@/lib/presentation/managerUrl";
@@ -329,8 +331,21 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
   // changes which Google workbook sources are requested (see this
   // component's own docstring below).
   const needsAdoptionReadiness = managerCategoryNeedsAdoptionReadiness(category);
+  // Same "derive from category, thread into the loader" pattern as
+  // `needsAdoptionReadiness` above, for the Personnel category's own,
+  // narrower privileged lookup (roster avatars, never `push_subscriptions`)
+  // -- see `managerCategoryNeedsRosterAvatars` and `loadRosterAvatarLookup`
+  // (`managerOverview.ts`) for why this stays independent of adoption
+  // readiness.
+  const needsRosterAvatars = managerCategoryNeedsRosterAvatars(category);
 
-  const result = await getRequestManagerOverview(params.personId, params.range, params.month, needsAdoptionReadiness);
+  const result = await getRequestManagerOverview(
+    params.personId,
+    params.range,
+    params.month,
+    needsAdoptionReadiness,
+    needsRosterAvatars,
+  );
 
   if (result.status === "forbidden") {
     return <ManagerForbiddenState />;
@@ -436,7 +451,7 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
         current={hrefParams}
         currentMonth={model.range.month}
         fetchedAt={model.fetchedAt}
-        showFilters={category !== "logins"}
+        showFilters={managerCategoryNeedsFilters(category)}
       />
 
       {category === "overview" ? (
@@ -475,6 +490,7 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
           current={hrefParams}
           managerId={model.manager.id}
           managerAvatarUrl={model.manager.avatarUrl}
+          rosterAvatarByPersonId={model.rosterAvatarByPersonId}
         />
       ) : null}
 

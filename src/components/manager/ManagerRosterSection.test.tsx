@@ -21,7 +21,7 @@ function person(overrides: Partial<ManagerPersonSummary> = {}): ManagerPersonSum
 }
 
 const CURRENT: ManagerHrefParams = { personId: null, range: "7d", month: null, category: "overview" };
-const NO_AVATAR = { managerId: "not-in-this-roster", managerAvatarUrl: null };
+const NO_AVATAR = { managerId: "not-in-this-roster", managerAvatarUrl: null, rosterAvatarByPersonId: new Map() };
 
 describe("ManagerRosterSection", () => {
   it("shows an empty message for an empty roster", () => {
@@ -99,6 +99,7 @@ describe("ManagerRosterSection", () => {
         current={CURRENT}
         managerId="p1"
         managerAvatarUrl="https://example.invalid/photo.jpg"
+        rosterAvatarByPersonId={new Map()}
       />,
     );
     const photos = container.querySelectorAll('img[data-testid="avatar-photo"]');
@@ -109,9 +110,78 @@ describe("ManagerRosterSection", () => {
   it("no manager avatarUrl at all -- every row falls back to initials, never a broken image", () => {
     const roster = [person({ id: "p1", name: "המנהל עצמו", personnelType: "קבע" })];
     const { container } = render(
-      <ManagerRosterSection roster={roster} current={CURRENT} managerId="p1" managerAvatarUrl={null} />,
+      <ManagerRosterSection
+        roster={roster}
+        current={CURRENT}
+        managerId="p1"
+        managerAvatarUrl={null}
+        rosterAvatarByPersonId={new Map()}
+      />,
     );
     expect(container.querySelectorAll('img[data-testid="avatar-photo"]')).toHaveLength(0);
+  });
+
+  it("shows a real photo for a non-manager roster member mapped to a Google account with a photo", () => {
+    const roster = [
+      person({ id: "p1", name: "מנהל", personnelType: "קבע" }),
+      person({ id: "p2", name: "עובד עם תמונה", personnelType: "קבע" }),
+    ];
+    const { container } = render(
+      <ManagerRosterSection
+        roster={roster}
+        current={CURRENT}
+        managerId="p1"
+        managerAvatarUrl={null}
+        rosterAvatarByPersonId={new Map([["p2", "https://example.invalid/p2.jpg"]])}
+      />,
+    );
+    const photos = container.querySelectorAll('img[data-testid="avatar-photo"]');
+    expect(photos).toHaveLength(1);
+    expect(photos[0].closest("a")).toHaveAttribute("href", expect.stringContaining("person=p2"));
+  });
+
+  it("a roster member with no entry in rosterAvatarByPersonId (unmapped/no account/no photo) falls back to initials", () => {
+    const roster = [person({ id: "p1", name: "מנהל", personnelType: "קבע" }), person({ id: "p2", name: "ללא תמונה", personnelType: "קבע" })];
+    const { container } = render(
+      <ManagerRosterSection
+        roster={roster}
+        current={CURRENT}
+        managerId="p1"
+        managerAvatarUrl={null}
+        rosterAvatarByPersonId={new Map([["p3", "https://example.invalid/someone-else.jpg"]])}
+      />,
+    );
+    expect(container.querySelectorAll('img[data-testid="avatar-photo"]')).toHaveLength(0);
+  });
+
+  it("rosterAvatarByPersonId takes precedence over managerAvatarUrl for the manager's own row when both are present", () => {
+    const roster = [person({ id: "p1", name: "מנהל", personnelType: "קבע" })];
+    const { container } = render(
+      <ManagerRosterSection
+        roster={roster}
+        current={CURRENT}
+        managerId="p1"
+        managerAvatarUrl="https://example.invalid/stale-manager-photo.jpg"
+        rosterAvatarByPersonId={new Map([["p1", "https://example.invalid/fresh-lookup-photo.jpg"]])}
+      />,
+    );
+    const photo = container.querySelector('img[data-testid="avatar-photo"]');
+    expect(photo).toHaveAttribute("src", "https://example.invalid/fresh-lookup-photo.jpg");
+  });
+
+  it("falls back to managerAvatarUrl for the manager's own row when rosterAvatarByPersonId has no entry for them", () => {
+    const roster = [person({ id: "p1", name: "מנהל", personnelType: "קבע" })];
+    const { container } = render(
+      <ManagerRosterSection
+        roster={roster}
+        current={CURRENT}
+        managerId="p1"
+        managerAvatarUrl="https://example.invalid/manager-photo.jpg"
+        rosterAvatarByPersonId={new Map()}
+      />,
+    );
+    const photo = container.querySelector('img[data-testid="avatar-photo"]');
+    expect(photo).toHaveAttribute("src", "https://example.invalid/manager-photo.jpg");
   });
 
   it("every person appears exactly once across the whole roster, never duplicated across groups", () => {

@@ -39,6 +39,37 @@ export function managerCategoryNeedsAdoptionReadiness(category: ManagerCategory)
   return category === "logins";
 }
 
+/**
+ * Whether `ManagerCommandBar`'s person-scope + date-range controls make
+ * sense for this category. `"logins"` ("התחברויות והתראות") is a current
+ * snapshot, not scoped by either control (see
+ * `managerCategoryNeedsAdoptionReadiness` above). `"personnel"` ("כוח אדם")
+ * is the same kind of unscoped view -- a straightforward workforce/roster
+ * page, not filtered by person or date range either -- so it hides the same
+ * controls for the same reason, even though it has its own, unrelated
+ * readiness gate (`managerCategoryNeedsRosterAvatars`). `DataFreshnessStatus`
+ * is never gated by this -- see `ManagerCommandBar`'s own `showFilters` doc.
+ */
+export function managerCategoryNeedsFilters(category: ManagerCategory): boolean {
+  return category !== "logins" && category !== "personnel";
+}
+
+/**
+ * Whether the Personnel category ("כוח אדם") should decorate the roster
+ * with real Google profile photos -- the ONLY category that renders
+ * `ManagerRosterSection` with per-person avatars beyond the viewing
+ * manager's own row. Deliberately independent of
+ * `managerCategoryNeedsAdoptionReadiness`: Personnel needs presentation-only
+ * account/avatar data (one bulk `fetchAllUserIdsByEmail()` lookup), never
+ * the full `computeNotificationReadiness()` (which additionally queries
+ * `push_subscriptions`) that `"logins"` needs -- see
+ * `loadRosterAvatarLookup` (`managerOverview.ts`) for how this stays a
+ * separate, narrower privileged lookup.
+ */
+export function managerCategoryNeedsRosterAvatars(category: ManagerCategory): boolean {
+  return category === "personnel";
+}
+
 export interface ManagerHrefParams {
   personId: string | null;
   range: ManagerRangeKey;

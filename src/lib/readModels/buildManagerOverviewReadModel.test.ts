@@ -115,6 +115,7 @@ function buildModel(overrides: Partial<Parameters<typeof buildManagerOverviewRea
     selectedPersonId: null,
     managerAvatarUrl: null,
     adoption: { status: "skipped" },
+    rosterAvatars: { status: "skipped" },
     ...overrides,
   });
 }
@@ -1231,6 +1232,46 @@ describe("buildManagerOverviewReadModel — adoption (התחברויות והת�
       loggedInNotReadyCount: 0,
       dataIssueCount: 0,
     });
+  });
+});
+
+describe("buildManagerOverviewReadModel — Personnel (כוח אדם) roster-avatar projection", () => {
+  it("skipped: rosterAvatarByPersonId is an empty map", () => {
+    const model = buildModel({ rosterAvatars: { status: "skipped" } });
+    expect(model.rosterAvatarByPersonId.size).toBe(0);
+  });
+
+  it("unavailable: rosterAvatarByPersonId is an empty map -- never conflated with a thrown error", () => {
+    const model = buildModel({ rosterAvatars: { status: "unavailable" } });
+    expect(model.rosterAvatarByPersonId.size).toBe(0);
+  });
+
+  it("ok: passes the resolved avatar map straight through, keyed by personId", () => {
+    const model = buildModel({
+      rosterAvatars: {
+        status: "ok",
+        avatars: new Map([[MARTIN.id, "https://example.invalid/martin.jpg"]]),
+      },
+    });
+    expect(model.rosterAvatarByPersonId.get(MARTIN.id)).toBe("https://example.invalid/martin.jpg");
+    expect(model.rosterAvatarByPersonId.has(EITAN.id)).toBe(false);
+  });
+
+  it("a person absent from the ok avatars map falls back to initials (no entry at all, never a null placeholder)", () => {
+    const model = buildModel({
+      rosterAvatars: { status: "ok", avatars: new Map([[MARTIN.id, "https://example.invalid/martin.jpg"]]) },
+    });
+    expect(model.rosterAvatarByPersonId.has(NOA.id)).toBe(false);
+    expect(model.rosterAvatarByPersonId.has(MANAGER.id)).toBe(false);
+  });
+
+  it("never leaks an email or auth user id into the serialized read model", () => {
+    const model = buildModel({
+      rosterAvatars: { status: "ok", avatars: new Map([[MARTIN.id, "https://example.invalid/martin.jpg"]]) },
+    });
+    const serialized = JSON.stringify([...model.rosterAvatarByPersonId.entries()]);
+    expect(serialized).not.toContain("@");
+    expect(serialized).not.toContain("userId");
   });
 });
 

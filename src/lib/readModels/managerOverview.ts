@@ -5,6 +5,7 @@ import { ShiftConfigurationError, buildShiftSchedule, type ShiftSchedule } from 
 import type { Person } from "@/lib/domain/types";
 import { timedStage, timedSyncStage } from "@/lib/config/timingDiagnostics";
 import { parseSourcePeriodYear, type RawSheet } from "@/lib/google";
+import { fetchAllUserIdsByEmail, resolvePersonIdentity } from "@/lib/notifications/engine/recipients";
 import { computeNotificationReadiness } from "@/lib/notifications/engine/readiness";
 import { parseEvent } from "@/lib/parsers/event";
 import { parseFairnessTable } from "@/lib/parsers/fairness";
@@ -12,7 +13,11 @@ import { parsePotentialSheet } from "@/lib/parsers/potential";
 import { parseScheduleSheet } from "@/lib/parsers/schedule";
 import { parseSettingsSheet } from "@/lib/parsers/settings";
 import { getJerusalemLocalNow } from "@/lib/time/jerusalemClock";
-import { buildManagerOverviewReadModel, type AdoptionReadinessLookup } from "./buildManagerOverviewReadModel";
+import {
+  buildManagerOverviewReadModel,
+  type AdoptionReadinessLookup,
+  type RosterAvatarLookup,
+} from "./buildManagerOverviewReadModel";
 import { getManagerWorkbookSheet, loadManagerWorkbookContext } from "./managerWorkbookContext";
 import type { ManagerOverviewParams } from "./managerOverviewParams";
 import type { ManagerOverviewReadModel } from "./managerTypes";
@@ -55,15 +60,17 @@ export type ManagerOverviewLoadResult =
 export async function loadManagerOverviewReadModel(
   params: ManagerOverviewParams,
   needsAdoptionReadiness: boolean,
+  needsRosterAvatars = false,
 ): Promise<ManagerOverviewLoadResult> {
   return timedStage("managerOverview.total", () =>
-    loadManagerOverviewReadModelInner(params, needsAdoptionReadiness),
+    loadManagerOverviewReadModelInner(params, needsAdoptionReadiness, needsRosterAvatars),
   );
 }
 
 async function loadManagerOverviewReadModelInner(
   params: ManagerOverviewParams,
   needsAdoptionReadiness: boolean,
+  needsRosterAvatars: boolean,
 ): Promise<ManagerOverviewLoadResult> {
   const contextResult = await loadManagerWorkbookContext();
   if (contextResult.status !== "ok") return contextResult;
@@ -76,6 +83,11 @@ async function loadManagerOverviewReadModelInner(
   // parsing below instead of serially after it. `loadAdoptionReadiness`
   // itself decides skipped/unavailable/ok -- see its own docstring.
   const adoptionReadinessPromise = loadAdoptionReadiness(people, params.personId, needsAdoptionReadiness);
+  // Same reasoning, for the Personnel category's own, narrower privileged
+  // lookup -- started concurrently with everything else, never serialized
+  // after it. `loadRosterAvatarLookup` never touches `push_subscriptions`
+  // (PR #96's performance fix) -- see its own docstring.
+  const rosterAvatarsPromise = loadRosterAvatarLookup(people, params.personId, needsRosterAvatars);
 
   const settings = timedSyncStage("manager.settings.parse", () =>
     parseSettingsSheet(getManagerWorkbookSheet(snapshot, "settings")),
@@ -121,7 +133,7 @@ async function loadManagerOverviewReadModelInner(
   const now = getJerusalemLocalNow();
   const range = resolveManagerDateRange(params.range, params.month, now);
 
-  const adoption = await adoptionReadinessPromise;
+  const [adoption, rosterAvatars] = await Promise.all([adoptionReadinessPromise, rosterAvatarsPromise]);
 
   const model = timedSyncStage("manager.readModel.build", () =>
     buildManagerOverviewReadModel({
@@ -137,6 +149,7 @@ async function loadManagerOverviewReadModelInner(
       range,
       selectedPersonId: params.personId,
       adoption,
+      rosterAvatars,
     }),
   );
 
@@ -182,6 +195,55 @@ async function loadAdoptionReadiness(
     return { status: "ok", results };
   } catch {
     console.error("[manager-overview] adoption readiness query failed");
+    return { status: "unavailable" };
+  }
+}
+
+/**
+ * The Personnel category's ("כוח אדם") own privileged lookup -- deliberately
+ * NARROWER than `loadAdoptionReadiness` above: it decorates the roster with
+ * real Google profile photos, so it only needs one bulk
+ * `fetchAllUserIdsByEmail()` account-directory call (the SAME Supabase Admin
+ * API primitive `recipients.ts`/`readiness.ts` already share), never the
+ * full `computeNotificationReadiness()` -- which would additionally run a
+ * bulk `push_subscriptions` query this category has no use for. This is the
+ * PR #96 performance fix's boundary made explicit for Personnel: switching
+ * to Personnel must cost exactly one extra Admin API call, never a second
+ * DB query on top of it.
+ *
+ * Every roster person's avatar is resolved via the EXISTING, pure
+ * `resolvePersonIdentity()` (no new email-matching logic, no per-person
+ * Admin API call, no fuzzy/display-name guessing) against the ONE already-
+ * fetched account directory -- an `unmapped`/`ambiguous`/`no_email` identity,
+ * or a mapped account with no photo, is simply never added to `avatars`
+ * (never a `null` placeholder entry either) -- `ManagerRosterSection` reads
+ * "absent from the map" as "show initials".
+ *
+ * Same two independent skip conditions as `loadAdoptionReadiness`: a
+ * selected person never renders `ManagerRosterSection` at all, and every
+ * non-Personnel category has no use for this either. Same fail-soft
+ * contract too -- an Admin API failure degrades to `unavailable` (a fixed,
+ * PII-safe log line only, never the raw Supabase error/any name or email),
+ * never a thrown exception that would take down the whole Personnel page;
+ * the roster still renders normally, just on initials.
+ */
+async function loadRosterAvatarLookup(
+  people: readonly Person[],
+  personId: string | null,
+  needsRosterAvatars: boolean,
+): Promise<RosterAvatarLookup> {
+  if (personId !== null || !needsRosterAvatars) return { status: "skipped" };
+
+  try {
+    const emailToAccount = await timedStage("manager.rosterAvatars", () => fetchAllUserIdsByEmail());
+    const avatars = new Map<string, string>();
+    for (const person of people) {
+      const identity = resolvePersonIdentity(person, people, emailToAccount);
+      if (identity.status === "mapped" && identity.avatarUrl) avatars.set(person.id, identity.avatarUrl);
+    }
+    return { status: "ok", avatars };
+  } catch {
+    console.error("[manager-overview] roster avatar lookup failed");
     return { status: "unavailable" };
   }
 }
