@@ -20,7 +20,8 @@ import {
 } from "./logisticsCoordination";
 import { isLogisticsWithdrawalEvent } from "./logisticsWithdrawal";
 import { resolveNonPermanentConstraintsRecipients, type RecipientResolution } from "./recipients";
-import type { NotificationRuleConfig, SystemRuleConfig } from "./ruleConfig";
+import { isSystemRulePersonAllowed, type NotificationRuleConfig, type SystemRuleConfig } from "./ruleConfig";
+import { applySystemRuleCopy } from "./systemRuleCopy";
 import {
   cancelPendingSystemReminderJob,
   listPendingJobDedupeKeysByPrefix,
@@ -140,12 +141,13 @@ async function runTomorrowShiftReminders(input: RemindersInput): Promise<{ creat
 
   const validJobs: NewNotificationJob[] = [];
   for (const event of tomorrowShiftEvents) {
+    if (!isSystemRulePersonAllowed(rule, event.personId)) continue;
     const recipient = input.recipientResolution.resolved.get(event.personId);
     if (!recipient) continue;
 
     const resolution = resolveEventShiftInterval(event, input.shiftSchedule);
     const label = periodLabel(event.period);
-    const body =
+    const details =
       resolution.status === "resolved"
         ? label
           ? `מחר ב־${formatMinuteAsClock(resolution.interval.startMinute)} מתחילה משמרת ${label} שלך`
@@ -153,11 +155,12 @@ async function runTomorrowShiftReminders(input: RemindersInput): Promise<{ creat
         : label
           ? `מחר יש לך משמרת ${label}`
           : "מחר יש לך משמרת";
+    const { title, body } = applySystemRuleCopy("tomorrow_shift", rule, { title: "⏰ המשמרת שלך מחר", body: details });
 
     validJobs.push({
       category: "tomorrow_shift",
       recipientUserId: recipient.userId,
-      title: "⏰ המשמרת שלך מחר",
+      title,
       body,
       path: "/",
       // Includes `event.period`, same as `dedupeKey` below -- a person
@@ -195,15 +198,20 @@ async function runTomorrowDutyReminders(input: RemindersInput): Promise<{ create
   const validJobs: NewNotificationJob[] = [];
   for (const event of tomorrowDutyEvents) {
     if (event.dutyFamily === null) continue;
+    if (!isSystemRulePersonAllowed(rule, event.personId)) continue;
     const recipient = input.recipientResolution.resolved.get(event.personId);
     if (!recipient) continue;
 
     const label = dutyFamilyLabel(event.dutyFamily);
+    const { title, body } = applySystemRuleCopy("tomorrow_duty", rule, {
+      title: "🪖 תורנות מתקרבת",
+      body: `מחר אתה ${label} — כדאי לבדוק את הפרטים`,
+    });
     validJobs.push({
       category: "tomorrow_duty",
       recipientUserId: recipient.userId,
-      title: "🪖 תורנות מתקרבת",
-      body: `מחר אתה ${label} — כדאי לבדוק את הפרטים`,
+      title,
+      body,
       path: "/duties",
       // Includes dutyFamily/slot, same as `dedupeKey` -- confirmed the
       // same tag-collision class PR #62 found for almash_check_in: a
@@ -248,17 +256,22 @@ async function runTomorrowLogisticsWithdrawalReminders(
 
   const validJobs: NewNotificationJob[] = [];
   for (const event of tomorrowLogisticsWithdrawalEvents) {
+    if (!isSystemRulePersonAllowed(rule, event.personId)) continue;
     const recipient = input.recipientResolution.resolved.get(event.personId);
     if (!recipient) continue;
 
-    validJobs.push({
-      category: "tomorrow_logistics_withdrawal",
-      recipientUserId: recipient.userId,
+    const { title, body } = applySystemRuleCopy("tomorrow_logistics_withdrawal", rule, {
       title: "📦 משיכות מהלוגיסטיקה מחר",
       // Names the operational window explicitly (13:00–14:00) rather than
       // the former generic "אתה משובץ" -- part of this feature's team-
       // coordination expansion (see `logisticsCoordination.ts`).
       body: "מחר אתה עושה משיכות בין 13:00–14:00.",
+    });
+    validJobs.push({
+      category: "tomorrow_logistics_withdrawal",
+      recipientUserId: recipient.userId,
+      title,
+      body,
       // No dedicated page represents this assignment -- but it already
       // surfaces generically on the dashboard's todayEvents/upcomingEvents
       // (buildPersonalScheduleReadModel includes every category, unfiltered),
@@ -328,15 +341,17 @@ async function runTomorrowLogisticsWithdrawalSupervisorReminders(
       )
     : [];
 
-  const { title, body } = isAssigned
+  const builtIn = isAssigned
     ? { title: "📦 משיכות מחר", body: buildSupervisorAssignedInformedBody(assignees.map((a) => a.personName)) }
     : {
         title: "⚠️ לא הוגדר טכנאי למשיכות",
         body: "לא הוגדר טכנאי למשיכות מחר בין 13:00–14:00. נדרש לוודא שכל הטכנאים הזמינים יוצאים למשיכות.",
       };
+  const { title, body } = applySystemRuleCopy("tomorrow_logistics_withdrawal_supervisor", rule, builtIn);
 
   const validJobs: NewNotificationJob[] = [];
   for (const supervisor of supervisors) {
+    if (!isSystemRulePersonAllowed(rule, supervisor.personId)) continue;
     const recipient = input.recipientResolution.resolved.get(supervisor.personId);
     if (!recipient) continue;
 
@@ -398,14 +413,19 @@ async function runLogisticsWithdrawalNoonReminders(input: RemindersInput): Promi
   const assignedJobs: NewNotificationJob[] = [];
   if (assignedRule?.enabled) {
     const scheduledFor = toIso(today, assignedRule.localHour, assignedRule.localMinute);
+    const { title, body } = applySystemRuleCopy("logistics_withdrawal_noon_assigned", assignedRule, {
+      title: "📦 משיכות בעוד שעה",
+      body: "היום אתה עושה משיכות בין 13:00–14:00.",
+    });
     for (const assignee of assignees) {
+      if (!isSystemRulePersonAllowed(assignedRule, assignee.personId)) continue;
       const recipient = input.recipientResolution.resolved.get(assignee.personId);
       if (!recipient) continue;
       assignedJobs.push({
         category: "logistics_withdrawal_noon_assigned",
         recipientUserId: recipient.userId,
-        title: "📦 משיכות בעוד שעה",
-        body: "היום אתה עושה משיכות בין 13:00–14:00.",
+        title,
+        body,
         path: "/",
         tag: `logistics-withdrawal-noon-assigned-${today}-${recipient.userId}`,
         dedupeKey: `logistics_withdrawal_noon_assigned:${today}:${recipient.userId}`,
@@ -437,14 +457,19 @@ async function runLogisticsWithdrawalNoonReminders(input: RemindersInput): Promi
   const supervisorJobs: NewNotificationJob[] = [];
   if (!isAssigned && supervisorRule?.enabled) {
     const scheduledFor = toIso(today, supervisorRule.localHour, supervisorRule.localMinute);
+    const { title, body } = applySystemRuleCopy("logistics_withdrawal_noon_supervisor", supervisorRule, {
+      title: "⚠️ לא הוגדר טכנאי למשיכות",
+      body: "לא הוגדר טכנאי למשיכות היום בין 13:00–14:00. נדרש לוודא שכל הטכנאים הזמינים יוצאים למשיכות.",
+    });
     for (const supervisor of supervisorCandidates) {
+      if (!isSystemRulePersonAllowed(supervisorRule, supervisor.personId)) continue;
       const recipient = input.recipientResolution.resolved.get(supervisor.personId);
       if (!recipient) continue;
       supervisorJobs.push({
         category: "logistics_withdrawal_noon_supervisor",
         recipientUserId: recipient.userId,
-        title: "⚠️ לא הוגדר טכנאי למשיכות",
-        body: "לא הוגדר טכנאי למשיכות היום בין 13:00–14:00. נדרש לוודא שכל הטכנאים הזמינים יוצאים למשיכות.",
+        title,
+        body,
         path: "/",
         tag: `logistics-withdrawal-noon-supervisor-${today}-${recipient.userId}`,
         dedupeKey: `logistics_withdrawal_noon_supervisor:${today}:${recipient.userId}`,
@@ -472,7 +497,7 @@ async function runLogisticsWithdrawalNoonReminders(input: RemindersInput): Promi
       )
     : [];
 
-  const { title: teamTitle, body: teamBody } = isAssigned
+  const teamBuiltIn = isAssigned
     ? { title: "🤝 משיכות היום", body: buildTeamHelpAssignedBody(assignees.map((a) => a.personName)) }
     : {
         title: "📦 משיכות היום",
@@ -482,7 +507,9 @@ async function runLogisticsWithdrawalNoonReminders(input: RemindersInput): Promi
   const teamJobs: NewNotificationJob[] = [];
   if (teamRule?.enabled) {
     const scheduledFor = toIso(today, teamRule.localHour, teamRule.localMinute);
+    const { title: teamTitle, body: teamBody } = applySystemRuleCopy("logistics_withdrawal_noon_team", teamRule, teamBuiltIn);
     for (const person of eligibleTechnicians) {
+      if (!isSystemRulePersonAllowed(teamRule, person.id)) continue;
       const recipient = input.recipientResolution.resolved.get(person.id);
       if (!recipient) continue;
       teamJobs.push({
@@ -563,13 +590,15 @@ async function runAlmashCheckInReminders(input: RemindersInput): Promise<{ creat
 
   const validJobs: NewNotificationJob[] = [];
   for (const action of todayActions) {
+    if (!isSystemRulePersonAllowed(rule, action.personId)) continue;
     const recipient = input.recipientResolution.resolved.get(action.personId);
     if (!recipient) continue;
 
     const label = dutyFamilyLabel(action.dutyBlock.dutyFamily);
-    const { title, body } = isSaturday
+    const builtIn = isSaturday
       ? { title: "🫡 הגיע הזמן לעלמ״ש", body: `יש לך הערב עלמ״ש ל${label}` }
       : { title: "🫡 עלמ״ש בעוד רבע שעה", body: `יש לך היום עלמ״ש ל${label} — מתחילים ב־13:00` };
+    const { title, body } = applySystemRuleCopy("almash_check_in", rule, builtIn);
 
     const slot = action.dutyBlock.slot ?? "";
     validJobs.push({
@@ -765,20 +794,23 @@ async function buildAndApplyConstraintsJobs(
   const rule = input.ruleConfig.systemRules.get(category);
   if (!rule?.enabled) return applyReminderJobs(category, input.week.weekStart, [], input.persist, rule);
 
-  const userIds = await resolveNonPermanentConstraintsRecipients(input.people);
+  const recipients = await resolveNonPermanentConstraintsRecipients(input.people);
   const scheduledFor = toIso(input.now.date, rule.localHour, rule.localMinute);
+  const { title, body } = applySystemRuleCopy(category, rule, copy);
 
-  const validJobs: NewNotificationJob[] = userIds.map((userId) => ({
-    category,
-    recipientUserId: userId,
-    title: copy.title,
-    body: copy.body,
-    path: "/",
-    tag: `${category}-${input.week.weekStart}-${userId}`,
-    dedupeKey: `${category}:${input.week.weekStart}:${userId}`,
-    scheduledFor,
-    sourceRef: `constraints:${input.week.weekStart}`,
-  }));
+  const validJobs: NewNotificationJob[] = recipients
+    .filter((recipient) => isSystemRulePersonAllowed(rule, recipient.personId))
+    .map(({ userId }) => ({
+      category,
+      recipientUserId: userId,
+      title,
+      body,
+      path: "/",
+      tag: `${category}-${input.week.weekStart}-${userId}`,
+      dedupeKey: `${category}:${input.week.weekStart}:${userId}`,
+      scheduledFor,
+      sourceRef: `constraints:${input.week.weekStart}`,
+    }));
 
   return applyReminderJobs(category, input.week.weekStart, validJobs, input.persist, rule);
 }

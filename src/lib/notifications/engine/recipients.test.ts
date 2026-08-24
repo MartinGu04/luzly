@@ -84,7 +84,7 @@ describe("resolveNonPermanentConstraintsRecipients -- mandatory constraints audi
     const people = [person({ id: "p_reg", name: "Regular", email: "reg@example.com", personnelType: "חובה" })];
     const userIds = await resolveNonPermanentConstraintsRecipients(people);
 
-    expect(userIds).toEqual(["user-reg"]);
+    expect(userIds).toEqual([{ personId: "p_reg", userId: "user-reg" }]);
   });
 
   it("NEVER includes a permanent (קבע) person, even when mapped -- the mandatory audience-exclusion fix", async () => {
@@ -102,7 +102,7 @@ describe("resolveNonPermanentConstraintsRecipients -- mandatory constraints audi
     ];
     const userIds = await resolveNonPermanentConstraintsRecipients(people);
 
-    expect(userIds).toEqual(["user-reg"]);
+    expect(userIds).toEqual([{ personId: "p_reg", userId: "user-reg" }]);
   });
 
   it("a reserve (מילואים) mapped person is included, same as חובה", async () => {
@@ -114,7 +114,7 @@ describe("resolveNonPermanentConstraintsRecipients -- mandatory constraints audi
     const people = [person({ id: "p_res", name: "Reserve", email: "res@example.com", personnelType: "מילואים" })];
     const userIds = await resolveNonPermanentConstraintsRecipients(people);
 
-    expect(userIds).toEqual(["user-res"]);
+    expect(userIds).toEqual([{ personId: "p_res", userId: "user-res" }]);
   });
 
   it("an unclassified/null personnelType is still included -- only 'permanent' is ever excluded", async () => {
@@ -126,7 +126,7 @@ describe("resolveNonPermanentConstraintsRecipients -- mandatory constraints audi
     const people = [person({ id: "p_u", name: "Unclassified", email: "u@example.com", personnelType: null })];
     const userIds = await resolveNonPermanentConstraintsRecipients(people);
 
-    expect(userIds).toEqual(["user-u"]);
+    expect(userIds).toEqual([{ personId: "p_u", userId: "user-u" }]);
   });
 
   it("classifies via classifyPersonnelType's own normalization (trims internal/surrounding whitespace), never a raw string comparison", async () => {
@@ -182,7 +182,7 @@ describe("resolveNonPermanentConstraintsRecipients -- mandatory constraints audi
     const people = [person({ id: "p_shared", name: "Shared", email: "shared@example.com", personnelType: "חובה" })];
     const userIds = await resolveNonPermanentConstraintsRecipients(people);
 
-    expect(userIds).toEqual(["user-shared"]);
+    expect(userIds).toEqual([{ personId: "p_shared", userId: "user-shared" }]);
   });
 });
 

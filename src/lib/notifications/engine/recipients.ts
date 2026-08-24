@@ -201,11 +201,17 @@ export async function fetchAllSubscribedUserIds(): Promise<string[]> {
   return [...userIds];
 }
 
+/** One non-permanent, roster-mapped constraints-reminder recipient -- both ids are always available together, so a caller can filter by the stable `personId` (e.g. a manager's system-rule audience selection) BEFORE ever touching `userId` (the actual `notification_jobs.recipient_user_id`). */
+export interface NonPermanentConstraintsRecipient {
+  personId: string;
+  userId: string;
+}
+
 /**
  * The weekly constraints reminders' recipient source (system rules
  * `constraints_sunday`/`constraints_monday`, `reminders.ts`) -- every
  * currently-rostered person who is NOT `classifyPersonnelType(...) ===
- * "permanent"` (קבע), mapped to their real Supabase auth user id.
+ * "permanent"` (קבע), paired with their real Supabase auth user id.
  * Permanent staff never submit weekly אילוצים, so they must never
  * receive either constraints reminder -- see this codebase's own
  * `classifyPersonnelType` docstring for the exact "קבע"/"חובה"/"מילואים"
@@ -221,19 +227,32 @@ export async function fetchAllSubscribedUserIds(): Promise<string[]> {
  * to "permanent". `resolvePersonIdentity`'s existing `no_email`/
  * `not_found`/`ambiguous`/`unmapped` non-"mapped" states are all treated
  * identically here -- skip, never guess.
+ *
+ * A permanent person is never even a CANDIDATE here -- their `personId`
+ * never reaches the returned list at all. This is what makes a manager's
+ * `system_target_person_ids` selection a safe FILTER on top of this list
+ * (`isSystemRulePersonAllowed`, `ruleConfig.ts`): even if a permanent
+ * person's id somehow ended up in stored configuration, they could never
+ * receive a constraints reminder, because they are never in the base
+ * eligible set this function returns to begin with.
  */
-export async function resolveNonPermanentConstraintsRecipients(people: readonly Person[]): Promise<string[]> {
+export async function resolveNonPermanentConstraintsRecipients(
+  people: readonly Person[],
+): Promise<NonPermanentConstraintsRecipient[]> {
   const emailToAccount = await fetchAllUserIdsByEmail();
-  const userIds = new Set<string>();
+  const seenPersonIds = new Set<string>();
+  const recipients: NonPermanentConstraintsRecipient[] = [];
 
   for (const person of people) {
     if (classifyPersonnelType(person.personnelType) === "permanent") continue;
+    if (seenPersonIds.has(person.id)) continue;
 
     const identity = resolvePersonIdentity(person, people, emailToAccount);
     if (identity.status !== "mapped") continue;
 
-    userIds.add(identity.userId);
+    seenPersonIds.add(person.id);
+    recipients.push({ personId: person.id, userId: identity.userId });
   }
 
-  return [...userIds];
+  return recipients;
 }

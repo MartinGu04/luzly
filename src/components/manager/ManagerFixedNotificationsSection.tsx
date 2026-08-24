@@ -12,6 +12,7 @@ import {
   type SystemRuleView,
 } from "@/lib/notifications/ruleActions";
 import { ManagerRecurringRuleComposer } from "./ManagerRecurringRuleComposer";
+import { ManagerSystemRuleEditor } from "./ManagerSystemRuleEditor";
 import type { ManagerAdoptionPersonView, ManagerPersonSummary } from "@/lib/readModels/managerTypes";
 
 interface ManagerFixedNotificationsSectionProps {
@@ -24,6 +25,7 @@ const ERROR_LABELS: Record<string, string> = {
   unauthenticated: "יש להתחבר מחדש.",
   not_found: "הכלל לא נמצא -- ייתכן שכבר נערך/הוסר.",
   invalid_schedule: "יש לבחור שעה תקינה.",
+  conflict: "ההתראה השתנתה מאז שנטענה. הרשימה נטענת מחדש.",
 };
 
 function errorLabel(error: string): string {
@@ -34,28 +36,54 @@ function minuteOfDayToTimeValue(hour: number, minute: number): string {
   return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
-function parseTimeValue(timeValue: string): { hour: number; minute: number } | null {
-  const match = /^(\d{2}):(\d{2})$/.exec(timeValue);
-  if (!match) return null;
-  return { hour: Number(match[1]), minute: Number(match[2]) };
+function systemAudienceLabel(rule: SystemRuleView): string {
+  if (rule.audienceMode === "all_eligible") return "כל הרלוונטיים";
+  return `${rule.targetPersonIds.length} נבחרים מתוך הרלוונטיים`;
 }
 
-function SystemRuleRow({ rule, onChanged }: { rule: SystemRuleView; onChanged: (updated: SystemRuleView) => void }) {
-  const [timeValue, setTimeValue] = useState(() => minuteOfDayToTimeValue(rule.localHour, rule.localMinute));
+function SystemRuleRow({
+  rule,
+  onChanged,
+  onEdit,
+  onConflict,
+  isEditing,
+}: {
+  rule: SystemRuleView;
+  onChanged: (updated: SystemRuleView) => void;
+  onEdit: (rule: SystemRuleView) => void;
+  /** Called when the quick toggle is rejected because someone else edited this rule since it was loaded -- triggers a reload of the whole rules list so the Manager sees the newest state, rather than silently overwriting the newer edit. */
+  onConflict: () => void;
+  isEditing: boolean;
+}) {
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [isEditingTime, setIsEditingTime] = useState(false);
 
-  async function apply(next: { enabled: boolean; localHour: number; localMinute: number }) {
+  async function handleToggleEnabled() {
     setIsBusy(true);
     setError(null);
     try {
-      const outcome = await updateSystemRuleAction(rule.id, next);
+      // The update RPC always writes every configurable field together --
+      // there is no partial update -- so this quick toggle re-submits the
+      // rule's OWN current copy/audience/time unchanged, flipping only
+      // `enabled`. `expectedRevision` is this row's own loaded revision --
+      // if someone else has since edited this rule (e.g. its copy/
+      // audience), the server rejects this whole request as a "conflict"
+      // rather than letting a stale toggle silently overwrite their edit.
+      const outcome = await updateSystemRuleAction(rule.id, {
+        enabled: !rule.enabled,
+        localHour: rule.localHour,
+        localMinute: rule.localMinute,
+        titleOverride: rule.titleOverride,
+        bodyOverride: rule.bodyOverride,
+        audienceMode: rule.audienceMode,
+        targetPersonIds: rule.targetPersonIds,
+        expectedRevision: rule.revision,
+      });
       if (outcome.ok) {
         onChanged(outcome.rule);
-        setIsEditingTime(false);
       } else {
         setError(errorLabel(outcome.error));
+        if (outcome.error === "conflict") onConflict();
       }
     } catch {
       setError(errorLabel("unknown"));
@@ -64,14 +92,8 @@ function SystemRuleRow({ rule, onChanged }: { rule: SystemRuleView; onChanged: (
     }
   }
 
-  function handleSaveTime() {
-    const parsed = parseTimeValue(timeValue);
-    if (!parsed) return;
-    apply({ enabled: rule.enabled, localHour: parsed.hour, localMinute: parsed.minute });
-  }
-
   return (
-    <li className="rounded-lg bg-overlay-faint p-2.5 ring-1 ring-border">
+    <li className={`rounded-lg p-2.5 ring-1 ring-border ${isEditing ? "bg-primary/5" : "bg-overlay-faint"}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
@@ -83,64 +105,37 @@ function SystemRuleRow({ rule, onChanged }: { rule: SystemRuleView; onChanged: (
         <Badge tone={rule.enabled ? "success" : "neutral"}>{rule.enabled ? "פעיל" : "כבוי"}</Badge>
       </div>
 
-      <p className="mt-1.5 text-xs text-muted">👥 {rule.audience}</p>
+      <p className="mt-1.5 text-xs text-muted">👥 {systemAudienceLabel(rule)}</p>
       {rule.copyNote ? <p className="mt-0.5 text-[11px] text-muted-2">{rule.copyNote}</p> : null}
+      {rule.titleOverride || rule.bodyOverride ? <p className="mt-0.5 text-[11px] text-primary">✏️ הכותרת/התוכן הותאמו אישית.</p> : null}
 
-      <div className="mt-2 flex flex-wrap items-center gap-2">
-        {isEditingTime ? (
-          <>
-            <input
-              type="time"
-              value={timeValue}
-              onChange={(event) => setTimeValue(event.target.value)}
-              aria-label={`שעת שליחה עבור ${rule.name}`}
-              className="rounded-lg bg-overlay-soft px-2.5 py-1 text-xs text-foreground ring-1 ring-border focus:outline-none"
-            />
-            <button
-              type="button"
-              disabled={isBusy}
-              onClick={handleSaveTime}
-              className="rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary ring-1 ring-primary/25 hover:bg-primary/20 disabled:opacity-50"
-            >
-              שמירה
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setTimeValue(minuteOfDayToTimeValue(rule.localHour, rule.localMinute));
-                setIsEditingTime(false);
-              }}
-              className="rounded-full px-2.5 py-1 text-xs font-medium text-muted underline"
-            >
-              ביטול
-            </button>
-          </>
-        ) : (
-          <>
-            <span className="text-xs text-muted">🕒 {minuteOfDayToTimeValue(rule.localHour, rule.localMinute)}</span>
-            <button
-              type="button"
-              disabled={isBusy}
-              onClick={() => setIsEditingTime(true)}
-              className="rounded-full bg-overlay-soft px-3 py-1 text-xs font-medium text-foreground ring-1 ring-border hover:bg-overlay-strong disabled:opacity-50"
-            >
-              עריכת שעה
-            </button>
-            <button
-              type="button"
-              disabled={isBusy}
-              onClick={() => apply({ enabled: !rule.enabled, localHour: rule.localHour, localMinute: rule.localMinute })}
-              className={`rounded-full px-3 py-1 text-xs font-medium ring-1 disabled:opacity-50 ${
-                rule.enabled
-                  ? "bg-critical/10 text-critical ring-critical/25 hover:bg-critical/20"
-                  : "bg-success/10 text-success ring-success/25 hover:bg-success/20"
-              }`}
-            >
-              {isBusy ? "מעדכן/ת…" : rule.enabled ? "השבתה" : "הפעלה"}
-            </button>
-          </>
-        )}
-      </div>
+      {isEditing ? (
+        <p className="mt-2 text-xs font-medium text-primary">שמור/י או בטל/י את העריכה למעלה כדי לפעול על הכלל הזה.</p>
+      ) : (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <span className="text-xs text-muted">🕒 {minuteOfDayToTimeValue(rule.localHour, rule.localMinute)}</span>
+          <button
+            type="button"
+            disabled={isBusy}
+            onClick={() => onEdit(rule)}
+            className="rounded-full bg-overlay-soft px-3 py-1 text-xs font-medium text-foreground ring-1 ring-border hover:bg-overlay-strong disabled:opacity-50"
+          >
+            עריכה
+          </button>
+          <button
+            type="button"
+            disabled={isBusy}
+            onClick={handleToggleEnabled}
+            className={`rounded-full px-3 py-1 text-xs font-medium ring-1 disabled:opacity-50 ${
+              rule.enabled
+                ? "bg-critical/10 text-critical ring-critical/25 hover:bg-critical/20"
+                : "bg-success/10 text-success ring-success/25 hover:bg-success/20"
+            }`}
+          >
+            {isBusy ? "מעדכן/ת…" : rule.enabled ? "השבתה" : "הפעלה"}
+          </button>
+        </div>
+      )}
 
       {error ? <p className="mt-1.5 text-xs text-critical">{error}</p> : null}
     </li>
@@ -278,19 +273,21 @@ function CustomWeeklyRuleRow({
 /**
  * "📌 התראות קבועות" -- the Fixed / Recurring Notifications Center. Two
  * visually separate subsections sharing one data load: "התראות מערכת"
- * (existing fixed reminder rules, now centrally managed -- enable/disable
- * + send-time only, never their protected trigger/audience/copy) and
- * "התראות מחזוריות" (manager-authored weekly recurring broadcasts, V1).
- * Deliberately a SEPARATE data source from `ManagerScheduledBroadcastsSection`/
- * `ManagerRecentBroadcastsSection` -- one-time scheduled broadcasts and
- * their delivery history are untouched by this feature (spec: keep B and
- * C semantically distinct).
+ * (existing fixed reminder rules, now centrally managed -- enable/disable,
+ * send-time, an optional title/body override, and an audience FILTER
+ * over each rule's own protected domain-eligibility/trigger logic -- see
+ * `ManagerSystemRuleEditor`) and "התראות מחזוריות" (manager-authored
+ * weekly recurring broadcasts, V1). Deliberately a SEPARATE data source
+ * from `ManagerScheduledBroadcastsSection`/`ManagerRecentBroadcastsSection`
+ * -- one-time scheduled broadcasts and their delivery history are
+ * untouched by this feature (spec: keep B and C semantically distinct).
  */
 export function ManagerFixedNotificationsSection({ roster, adoptionPeople }: ManagerFixedNotificationsSectionProps) {
   const [systemRules, setSystemRules] = useState<SystemRuleView[] | null>(null);
   const [customWeeklyRules, setCustomWeeklyRules] = useState<CustomWeeklyRuleView[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [editingRule, setEditingRule] = useState<CustomWeeklyRuleView | null>(null);
+  const [editingSystemRule, setEditingSystemRule] = useState<SystemRuleView | null>(null);
   const [isCreating, setIsCreating] = useState(false);
 
   // A bumped token (never calling an external load function synchronously
@@ -330,6 +327,11 @@ export function ManagerFixedNotificationsSection({ roster, adoptionPeople }: Man
     setSystemRules((current) => current?.map((rule) => (rule.id === updated.id ? updated : rule)) ?? current);
   }
 
+  function handleSystemRuleSaved(updated: SystemRuleView) {
+    handleSystemRuleChanged(updated);
+    setEditingSystemRule(null);
+  }
+
   function handleCustomRuleChanged() {
     setEditingRule(null);
     setIsCreating(false);
@@ -349,6 +351,17 @@ export function ManagerFixedNotificationsSection({ roster, adoptionPeople }: Man
         <div className="mt-4 flex flex-col gap-5">
           <div>
             <h4 className="text-xs font-semibold text-muted-2">🔒 התראות מערכת</h4>
+            {editingSystemRule ? (
+              <div className="mt-2">
+                <ManagerSystemRuleEditor
+                  rule={editingSystemRule}
+                  roster={roster}
+                  adoptionPeople={adoptionPeople}
+                  onSaved={handleSystemRuleSaved}
+                  onCancel={() => setEditingSystemRule(null)}
+                />
+              </div>
+            ) : null}
             {systemRules === null ? (
               <p className="mt-2 text-xs text-muted">טוען…</p>
             ) : systemRules.length === 0 ? (
@@ -356,7 +369,18 @@ export function ManagerFixedNotificationsSection({ roster, adoptionPeople }: Man
             ) : (
               <ul className="mt-2 flex flex-col gap-2">
                 {systemRules.map((rule) => (
-                  <SystemRuleRow key={rule.id} rule={rule} onChanged={handleSystemRuleChanged} />
+                  <SystemRuleRow
+                    key={rule.id}
+                    rule={rule}
+                    onChanged={handleSystemRuleChanged}
+                    isEditing={editingSystemRule?.id === rule.id}
+                    onEdit={(item) => {
+                      setIsCreating(false);
+                      setEditingRule(null);
+                      setEditingSystemRule(item);
+                    }}
+                    onConflict={() => setReloadToken((token) => token + 1)}
+                  />
                 ))}
               </ul>
             )}
@@ -368,7 +392,10 @@ export function ManagerFixedNotificationsSection({ roster, adoptionPeople }: Man
               {!isCreating && !editingRule ? (
                 <button
                   type="button"
-                  onClick={() => setIsCreating(true)}
+                  onClick={() => {
+                    setEditingSystemRule(null);
+                    setIsCreating(true);
+                  }}
                   className="rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary ring-1 ring-primary/25 hover:bg-primary/20"
                 >
                   + התראה מחזורית
@@ -403,6 +430,7 @@ export function ManagerFixedNotificationsSection({ roster, adoptionPeople }: Man
                     rule={rule}
                     isEditing={editingRule?.id === rule.id}
                     onEdit={(item) => {
+                      setEditingSystemRule(null);
                       setIsCreating(false);
                       setEditingRule(item);
                     }}
