@@ -40,6 +40,20 @@ export interface SystemRuleConfig {
   enabled: boolean;
   localHour: number;
   localMinute: number;
+  /**
+   * Monotonic, server-incremented on every manager edit
+   * (`updateSystemRule`) -- the reminder engine's own stale-config guard.
+   * A worker that loaded this config BEFORE a manager's concurrent
+   * enable/disable/time-edit commits must never be able to materialize a
+   * `notification_jobs` row under the OLD configuration once that edit
+   * has committed; every write into a system category's pending job goes
+   * through `upsertPendingSystemReminderJob`, which re-validates this
+   * EXACT revision against the (locked) live `notification_rules` row at
+   * write time and no-ops if it no longer matches. See that function's
+   * own docstring and the migration's `upsert_pending_system_reminder_job`
+   * for the full race this closes.
+   */
+  revision: number;
 }
 
 export interface CustomWeeklyRuleConfig {
@@ -77,7 +91,14 @@ function isSystemRuleKey(value: string | null): value is SystemRuleKey {
 
 function toSystemRuleConfig(row: NotificationRuleRow): SystemRuleConfig | null {
   if (!isSystemRuleKey(row.systemKey)) return null; // unreachable for a genuine 'system' row -- see the migration's own shape check
-  return { id: row.id, systemKey: row.systemKey, enabled: row.enabled, localHour: row.localHour, localMinute: row.localMinute };
+  return {
+    id: row.id,
+    systemKey: row.systemKey,
+    enabled: row.enabled,
+    localHour: row.localHour,
+    localMinute: row.localMinute,
+    revision: row.revision,
+  };
 }
 
 function toCustomWeeklyRuleConfig(row: NotificationRuleRow): CustomWeeklyRuleConfig | null {

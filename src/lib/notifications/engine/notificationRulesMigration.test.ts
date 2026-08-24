@@ -224,4 +224,59 @@ describe("update_system_rule_and_invalidate_pending_jobs -- atomic system-rule e
   it("returns zero rows for a not-found/non-system id, never touching notification_jobs in that case", () => {
     expect(sql).toMatch(/if updated_row\.id is null then\s*\n\s*return; -- not found \/ not a system row/);
   });
+
+  it("increments revision atomically in the SAME update statement -- the stale-worker-config guard's other half", () => {
+    expect(sql).toMatch(/set enabled = p_enabled,\s*\n\s*local_hour = p_local_hour,\s*\n\s*local_minute = p_local_minute,\s*\n\s*revision = revision \+ 1,/);
+  });
+});
+
+describe("notification_rules.revision -- the stale-worker-config guard column", () => {
+  const sql = readNotificationRulesMigration();
+
+  it("is a monotonic bigint, defaulting to 1, on every row of either kind", () => {
+    expect(sql).toMatch(/revision bigint not null default 1,/);
+  });
+});
+
+describe("upsert_pending_system_reminder_job -- the guarded, revision-checked system reminder job upsert", () => {
+  const sql = readNotificationRulesMigration();
+
+  it("is revoked from public/anon/authenticated and granted only to service_role", () => {
+    expect(sql).toMatch(
+      /revoke all on function public\.upsert_pending_system_reminder_job\(uuid, text, bigint, uuid, text, text, text, text, text, timestamptz, text\)[\s\S]*?from public, anon, authenticated/i,
+    );
+    expect(sql).toMatch(
+      /grant execute on function public\.upsert_pending_system_reminder_job\(uuid, text, bigint, uuid, text, text, text, text, text, timestamptz, text\)[\s\S]*?to service_role/i,
+    );
+  });
+
+  it("locks the notification_rules row FIRST, before ever touching notification_jobs -- the same lock update_system_rule_and_invalidate_pending_jobs takes, closing the race by lock ordering", () => {
+    const fnBlock = sql.match(/create or replace function public\.upsert_pending_system_reminder_job[\s\S]*?\$\$;/);
+    expect(fnBlock).not.toBeNull();
+    const lockIndex = fnBlock![0].indexOf("select * into rule_row from public.notification_rules where id = p_rule_id for update;");
+    const insertIndex = fnBlock![0].indexOf("insert into public.notification_jobs");
+    expect(lockIndex).toBeGreaterThan(-1);
+    expect(insertIndex).toBeGreaterThan(lockIndex);
+  });
+
+  it("requires kind = 'system', system_key = p_category, enabled, AND the exact expected revision -- any mismatch is a documented no-op, never an exception", () => {
+    expect(sql).toMatch(/rule_row\.kind is distinct from 'system'/);
+    expect(sql).toMatch(/rule_row\.system_key is distinct from p_category/);
+    expect(sql).toMatch(/rule_row\.enabled is not true/);
+    expect(sql).toMatch(/rule_row\.revision is distinct from p_expected_revision/);
+    expect(sql).toMatch(/return false; -- stale config \/ disabled \/ mismatched -- documented no-op/);
+  });
+
+  it("reuses the SAME pending-only on-conflict-do-update-where-pending semantics upsert_pending_reminder_job already uses -- never revives a claimed/completed/failed/skipped/cancelled job", () => {
+    const fnBlock = sql.match(/create or replace function public\.upsert_pending_system_reminder_job[\s\S]*?\$\$;/);
+    expect(fnBlock).not.toBeNull();
+    expect(fnBlock![0]).toMatch(/on conflict \(dedupe_key\) do update set/);
+    expect(fnBlock![0]).toMatch(/where public\.notification_jobs\.status = 'pending';/);
+    expect(fnBlock![0]).not.toMatch(/status = excluded\.status/); // status is never part of the SET list
+  });
+
+  it("returns true only once authorized and the write is attempted, false for every stale/disabled/mismatched case", () => {
+    expect(sql).toMatch(/returns boolean/);
+    expect(sql).toMatch(/return true;\s*\n\s*end;/);
+  });
 });

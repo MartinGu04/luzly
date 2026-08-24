@@ -5,6 +5,7 @@ interface FakeRow {
   kind: "system" | "custom_weekly";
   system_key: string | null;
   enabled: boolean;
+  revision: number;
   weekday: number | null;
   local_hour: number;
   local_minute: number;
@@ -27,6 +28,7 @@ function systemRow(overrides: Partial<FakeRow> = {}): FakeRow {
     kind: "system",
     system_key: "tomorrow_shift",
     enabled: true,
+    revision: 1,
     weekday: null,
     local_hour: 20,
     local_minute: 0,
@@ -51,6 +53,7 @@ function customRow(overrides: Partial<FakeRow> = {}): FakeRow {
     kind: "custom_weekly",
     system_key: null,
     enabled: true,
+    revision: 1,
     weekday: 6,
     local_hour: 21,
     local_minute: 0,
@@ -128,6 +131,7 @@ function makeFakeNotificationRulesClient(initialRows: FakeRow[] = []) {
               const stored: FakeRow = {
                 id: `rule-${rows.length + 1}`,
                 system_key: null,
+                revision: 1,
                 weekday: null,
                 title: null,
                 body: null,
@@ -184,10 +188,10 @@ describe("updateSystemRule -- atomic rule update + pending-job invalidation via 
   /**
    * A stateful fake for `update_system_rule_and_invalidate_pending_jobs`
    * that mirrors the real RPC's transactional behavior: update the row
-   * only when it's a genuine `kind = 'system'` match, then delete every
-   * `pendingJobCategories` entry equal to that row's `system_key` --
-   * letting these tests actually prove the atomic invalidation, not just
-   * the row mapping.
+   * only when it's a genuine `kind = 'system'` match, INCREMENT `revision`,
+   * then delete every `pendingJobCategories` entry equal to that row's
+   * `system_key` -- letting these tests actually prove the atomic
+   * invalidation, not just the row mapping.
    */
   function makeFakeSystemRuleUpdateClient(rows: FakeRow[], pendingJobCategories: string[] = []) {
     const pendingJobs = [...pendingJobCategories];
@@ -199,6 +203,7 @@ describe("updateSystemRule -- atomic rule update + pending-job invalidation via 
       row.enabled = params.p_enabled as boolean;
       row.local_hour = params.p_local_hour as number;
       row.local_minute = params.p_local_minute as number;
+      row.revision += 1;
       row.updated_by_person_id = params.p_updated_by_person_id as string;
       row.updated_by_person_name = params.p_updated_by_person_name as string;
 
@@ -224,6 +229,17 @@ describe("updateSystemRule -- atomic rule update + pending-job invalidation via 
     });
 
     expect(updated).toMatchObject({ id: "rule-1", enabled: false, localHour: 19, localMinute: 30 });
+  });
+
+  it("increments revision on every edit -- the stale-worker-config guard `upsertPendingSystemReminderJob` checks", async () => {
+    const { client } = makeFakeSystemRuleUpdateClient([systemRow({ revision: 1 })]);
+    const { updateSystemRule } = await loadModule(client);
+
+    const first = await updateSystemRule("rule-1", { enabled: false, localHour: 19, localMinute: 30, updatedByPersonId: "p", updatedByPersonName: "n" });
+    expect(first?.revision).toBe(2);
+
+    const second = await updateSystemRule("rule-1", { enabled: true, localHour: 19, localMinute: 30, updatedByPersonId: "p", updatedByPersonName: "n" });
+    expect(second?.revision).toBe(3);
   });
 
   it("calls the RPC with the exact param names the SQL function expects", async () => {
@@ -277,6 +293,188 @@ describe("updateSystemRule -- atomic rule update + pending-job invalidation via 
     const updated = await updateSystemRule("nope", { enabled: true, localHour: 0, localMinute: 0, updatedByPersonId: "p", updatedByPersonName: "n" });
 
     expect(updated).toBeNull();
+  });
+});
+
+describe("upsertPendingSystemReminderJob + updateSystemRule -- the stale-revision race (FINAL BLOCKER mandatory tests)", () => {
+  interface RaceRuleState {
+    id: string;
+    kind: "system" | "custom_weekly";
+    systemKey: string | null;
+    enabled: boolean;
+    revision: number;
+  }
+
+  /**
+   * A single stateful fake spanning BOTH RPCs
+   * (`update_system_rule_and_invalidate_pending_jobs` and
+   * `upsert_pending_system_reminder_job`), sharing ONE underlying rule/
+   * pending-jobs state -- exactly like the real migration's two functions
+   * share the same `notification_rules`/`notification_jobs` tables.
+   *
+   * Lock ordering is modeled by literal call order: this fake is
+   * single-threaded JS, so "whichever transaction's row lock is granted
+   * first" is exactly "whichever function a test calls first" -- a test
+   * that calls `upsertPendingSystemReminderJob` before `updateSystemRule`
+   * models the worker-wins-first interleaving; the reverse order models
+   * the manager-wins-first interleaving. See the migration's own
+   * `upsert_pending_system_reminder_job` doc comment for the real
+   * Postgres-level proof (based on both functions locking the SAME
+   * `notification_rules` row first) this mirrors.
+   */
+  function makeFakeRaceClient(rule: RaceRuleState) {
+    const pendingJobs = new Map<string, { category: string; scheduledFor: string }>();
+    const rpc = vi.fn(async (fnName: string, params: Record<string, unknown>) => {
+      if (fnName === "update_system_rule_and_invalidate_pending_jobs") {
+        if (rule.id !== params.p_rule_id || rule.kind !== "system") return { data: [], error: null };
+        rule.enabled = params.p_enabled as boolean;
+        rule.revision += 1;
+        for (const [key, pendingJob] of pendingJobs) {
+          if (pendingJob.category === rule.systemKey) pendingJobs.delete(key);
+        }
+        return {
+          data: [
+            {
+              id: rule.id,
+              kind: rule.kind,
+              system_key: rule.systemKey,
+              enabled: rule.enabled,
+              revision: rule.revision,
+              weekday: null,
+              local_hour: params.p_local_hour,
+              local_minute: params.p_local_minute,
+              title: null,
+              body: null,
+              audience_kind: null,
+              target_person_ids: [],
+              archived_at: null,
+              created_by_person_id: null,
+              created_by_person_name: null,
+              updated_by_person_id: params.p_updated_by_person_id,
+              updated_by_person_name: params.p_updated_by_person_name,
+              created_at: "2026-08-24T00:00:00.000Z",
+              updated_at: "2026-08-24T00:00:00.000Z",
+            },
+          ],
+          error: null,
+        };
+      }
+      if (fnName === "upsert_pending_system_reminder_job") {
+        const authorized =
+          rule.id === params.p_rule_id &&
+          rule.kind === "system" &&
+          rule.systemKey === params.p_category &&
+          rule.enabled &&
+          rule.revision === params.p_expected_revision;
+        if (!authorized) return { data: false, error: null };
+        pendingJobs.set(params.p_dedupe_key as string, {
+          category: params.p_category as string,
+          scheduledFor: params.p_scheduled_for as string,
+        });
+        return { data: true, error: null };
+      }
+      throw new Error(`unexpected rpc ${fnName}`);
+    });
+    return { client: { rpc }, pendingJobs, rule };
+  }
+
+  function raceJob(overrides: Partial<import("./store").NewNotificationJob> = {}): import("./store").NewNotificationJob {
+    return {
+      category: "tomorrow_shift",
+      recipientUserId: "user-a",
+      title: "t",
+      body: "b",
+      path: "/",
+      dedupeKey: "tomorrow_shift:2026-08-24:user-a:day",
+      scheduledFor: "2026-08-24T17:00:00.000Z",
+      sourceRef: "shift:p1:2026-08-24",
+      ...overrides,
+    };
+  }
+
+  it("1. STALE WORKER AFTER DISABLE -- a worker's revision-1 upsert attempted AFTER the manager's disable+revision-2 commit is refused; no pending job is created", async () => {
+    const { client, pendingJobs } = makeFakeRaceClient({ id: "rule-1", kind: "system", systemKey: "tomorrow_shift", enabled: true, revision: 1 });
+    const { updateSystemRule, upsertPendingSystemReminderJob } = await loadModule(client);
+
+    // Manager disables -- commits FIRST, revision becomes 2, and (per its
+    // own atomic invalidation) there is nothing pending to delete yet.
+    await updateSystemRule("rule-1", { enabled: false, localHour: 20, localMinute: 0, updatedByPersonId: "p", updatedByPersonName: "n" });
+
+    // The stale worker only NOW attempts its revision-1 upsert.
+    const wrote = await upsertPendingSystemReminderJob(raceJob(), { ruleId: "rule-1", expectedRevision: 1 });
+
+    expect(wrote).toBe(false);
+    expect(pendingJobs.size).toBe(0); // delivery has nothing to claim
+  });
+
+  it("2. STALE WORKER AFTER TIME EDIT -- the stale 20:00/revision-1 attempt is refused; a fresh revision-2 tick creates the SAME logical job at 21:00, never two", async () => {
+    const { client, pendingJobs } = makeFakeRaceClient({ id: "rule-1", kind: "system", systemKey: "tomorrow_shift", enabled: true, revision: 1 });
+    const { updateSystemRule, upsertPendingSystemReminderJob } = await loadModule(client);
+    const dedupeKey = "tomorrow_shift:2026-08-24:user-a:day";
+
+    await updateSystemRule("rule-1", { enabled: true, localHour: 21, localMinute: 0, updatedByPersonId: "p", updatedByPersonName: "n" });
+
+    // Stale rev-1 worker still tries to upsert the OLD (20:00) schedule.
+    const staleWrite = await upsertPendingSystemReminderJob(
+      raceJob({ dedupeKey, scheduledFor: "2026-08-24T17:00:00.000Z" }), // 20:00 Jerusalem (UTC+3)
+      { ruleId: "rule-1", expectedRevision: 1 },
+    );
+    expect(staleWrite).toBe(false);
+    expect(pendingJobs.has(dedupeKey)).toBe(false);
+
+    // The category's own next tick reloads the CURRENT revision (2) and re-upserts at the NEW time.
+    const freshWrite = await upsertPendingSystemReminderJob(
+      raceJob({ dedupeKey, scheduledFor: "2026-08-24T18:00:00.000Z" }), // 21:00 Jerusalem
+      { ruleId: "rule-1", expectedRevision: 2 },
+    );
+    expect(freshWrite).toBe(true);
+    expect(pendingJobs.size).toBe(1); // only ONE pending logical job exists
+    expect(pendingJobs.get(dedupeKey)?.scheduledFor).toBe("2026-08-24T18:00:00.000Z"); // 20:00 can never deliver
+  });
+
+  it("3. WORKER WINS BEFORE MANAGER EDIT -- a revision-1 upsert that commits FIRST is still invalidated by the manager's own same-transaction delete", async () => {
+    const { client, pendingJobs } = makeFakeRaceClient({ id: "rule-1", kind: "system", systemKey: "tomorrow_shift", enabled: true, revision: 1 });
+    const { updateSystemRule, upsertPendingSystemReminderJob } = await loadModule(client);
+    const dedupeKey = "tomorrow_shift:2026-08-24:user-a:day";
+
+    const wrote = await upsertPendingSystemReminderJob(raceJob({ dedupeKey }), { ruleId: "rule-1", expectedRevision: 1 });
+    expect(wrote).toBe(true);
+    expect(pendingJobs.has(dedupeKey)).toBe(true);
+
+    // Manager's update commits AFTER -- its own invalidation removes the job the worker just wrote.
+    await updateSystemRule("rule-1", { enabled: false, localHour: 20, localMinute: 0, updatedByPersonId: "p", updatedByPersonName: "n" });
+
+    expect(pendingJobs.has(dedupeKey)).toBe(false);
+  });
+
+  it("4. REVISION MATCH -- an ordinary, uncontested upsert against the current revision of an enabled rule succeeds", async () => {
+    const { client, pendingJobs } = makeFakeRaceClient({ id: "rule-1", kind: "system", systemKey: "tomorrow_shift", enabled: true, revision: 1 });
+    const { upsertPendingSystemReminderJob } = await loadModule(client);
+
+    const wrote = await upsertPendingSystemReminderJob(raceJob(), { ruleId: "rule-1", expectedRevision: 1 });
+
+    expect(wrote).toBe(true);
+    expect(pendingJobs.size).toBe(1);
+  });
+
+  it("5. DISABLED CURRENT REVISION -- even an EXACT revision match is refused once the rule is disabled", async () => {
+    const { client, pendingJobs } = makeFakeRaceClient({ id: "rule-1", kind: "system", systemKey: "tomorrow_shift", enabled: false, revision: 1 });
+    const { upsertPendingSystemReminderJob } = await loadModule(client);
+
+    const wrote = await upsertPendingSystemReminderJob(raceJob(), { ruleId: "rule-1", expectedRevision: 1 });
+
+    expect(wrote).toBe(false);
+    expect(pendingJobs.size).toBe(0);
+  });
+
+  it("6. WRONG SYSTEM KEY -- a ruleId/category mismatch is refused, never silently writing a job under the wrong rule's identity", async () => {
+    const { client, pendingJobs } = makeFakeRaceClient({ id: "rule-1", kind: "system", systemKey: "tomorrow_duty", enabled: true, revision: 1 });
+    const { upsertPendingSystemReminderJob } = await loadModule(client);
+
+    const wrote = await upsertPendingSystemReminderJob(raceJob({ category: "tomorrow_shift" }), { ruleId: "rule-1", expectedRevision: 1 });
+
+    expect(wrote).toBe(false);
+    expect(pendingJobs.size).toBe(0);
   });
 });
 

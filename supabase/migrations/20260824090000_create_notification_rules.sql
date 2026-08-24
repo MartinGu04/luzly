@@ -63,6 +63,17 @@ create table if not exists public.notification_rules (
   -- created (see the trigger below).
   system_key text,
   enabled boolean not null default true,
+  -- Monotonic, incremented by `update_system_rule_and_invalidate_pending_jobs`
+  -- on every system-rule edit -- the stale-worker-config guard
+  -- `upsert_pending_system_reminder_job` re-checks at reminder-job-write
+  -- time (see that function's own doc comment below for the exact race
+  -- this closes: a reminder worker that loaded this rule's config BEFORE
+  -- a manager's concurrent enable/disable/time-edit commits, but only
+  -- attempts to materialize a job for it AFTER that edit commits).
+  -- Meaningless for a 'custom_weekly' row -- never read there, but kept
+  -- as one table-wide column rather than a nullable/system-only one, so
+  -- every row always has a well-defined value.
+  revision bigint not null default 1,
   -- 0=Sunday..6=Saturday -- required for 'custom_weekly', always null for
   -- 'system' (a system rule's own trigger dates come from domain data,
   -- never a single fixed weekday).
@@ -467,7 +478,8 @@ grant execute on function public.claim_notification_rule_occurrence(uuid, date, 
 -- reconciled").
 --
 -- Atomically, in ONE transaction:
---  1. Updates `notification_rules` (guarded to `kind = 'system'`).
+--  1. Updates `notification_rules` (guarded to `kind = 'system'`),
+--     INCLUDING incrementing `revision`.
 --  2. DELETES every still-`'pending'` `notification_jobs` row whose
 --     `category` equals that rule's `system_key` -- deliberately a hard
 --     delete, never a soft `status = 'cancelled'`, and deliberately
@@ -506,11 +518,18 @@ grant execute on function public.claim_notification_rule_occurrence(uuid, date, 
 -- category, and must never re-derive that in SQL -- see especially
 -- `almash_check_in`, whose Saturday send time is the real astronomical
 -- מוצ״ש instant, never a naive static clock time this function could
--- compute). The safety property this function guarantees is IMMEDIATE
--- (the stale pending job can no longer be delivered); rematerialization
--- at the new time/config happens on the next reminder-worker tick, up
--- to that worker's normal cadence later -- a documented, bounded delay,
--- never a correctness gap.
+-- compute). The safety property THIS function guarantees is IMMEDIATE
+-- non-deliverability of any job already materialized under the OLD
+-- configuration (via the hard delete above). The SEPARATE property that
+-- an ALREADY-IN-FLIGHT worker (one that loaded its `NotificationRuleConfig`
+-- before this transaction commits) can never re-materialize that same
+-- stale job AFTER this commits is guaranteed by the `revision` bump here
+-- together with `upsert_pending_system_reminder_job`'s own revision
+-- check below -- see that function's doc comment for the full two-sided
+-- race and its lock-ordering proof. Rematerialization at the new time/
+-- config happens on the next reminder-worker tick, up to that worker's
+-- normal cadence later -- a documented, bounded delay, never a
+-- correctness gap.
 -- -----------------------------------------------------------------------
 create or replace function public.update_system_rule_and_invalidate_pending_jobs(
   p_rule_id uuid,
@@ -530,6 +549,7 @@ begin
     set enabled = p_enabled,
         local_hour = p_local_hour,
         local_minute = p_local_minute,
+        revision = revision + 1,
         updated_by_person_id = p_updated_by_person_id,
         updated_by_person_name = p_updated_by_person_name,
         updated_at = now()
@@ -550,4 +570,115 @@ $$;
 revoke all on function public.update_system_rule_and_invalidate_pending_jobs(uuid, boolean, smallint, smallint, text, text)
   from public, anon, authenticated;
 grant execute on function public.update_system_rule_and_invalidate_pending_jobs(uuid, boolean, smallint, smallint, text, text)
+  to service_role;
+
+-- -----------------------------------------------------------------------
+-- upsert_pending_system_reminder_job -- the ONE write boundary for a
+-- SYSTEM reminder category's pending `notification_jobs` row (never the
+-- generic `upsert_pending_reminder_job` directly, for any of the 10
+-- system categories -- see `reminders.ts`'s `applyReminderJobs`, this
+-- function's one caller). Closes the SECOND half of the stale-worker
+-- race `update_system_rule_and_invalidate_pending_jobs`'s hard delete
+-- alone cannot: that delete only removes an ALREADY-materialized job; it
+-- cannot stop a worker that loaded its `NotificationRuleConfig` (and
+-- therefore this rule's `enabled`/`local_hour`/`local_minute` AS OF SOME
+-- earlier revision) before a manager's concurrent edit commits, but only
+-- calls this function AFTER that edit commits -- such a worker would
+-- otherwise re-materialize the job it just deleted, right back into
+-- existence, under the OLD (now-stale) configuration.
+--
+-- In ONE transaction:
+--  1. Locks the `notification_rules` row at `p_rule_id` FIRST (`select
+--     ... for update`) -- the SAME lock `update_system_rule_and_
+--     invalidate_pending_jobs`'s own `update` statement takes on that
+--     row, so the two functions serialize correctly against each other
+--     regardless of which one a concurrent caller happens to invoke
+--     first:
+--
+--       - THIS call's lock is granted first: it authorizes/writes
+--         normally (assuming the checks below pass); the manager's
+--         update (blocked on the same row lock) commits afterward,
+--         incrementing `revision` and deleting every pending job for
+--         this category -- including the one THIS call just created.
+--         The old configuration's job is gone either way.
+--       - The manager's update's lock is granted first: `revision` is
+--         already incremented and the row already reflects the NEW
+--         enabled/time by the time THIS call's lock is granted, so the
+--         checks below fail on the (now-stale) `p_expected_revision`
+--         this caller passed in, and this call no-ops.
+--
+--  2. Requires, against the LOCKED row, all of:
+--       - found, `kind = 'system'`
+--       - `system_key = p_category` (defense in depth against a
+--         mismatched rule id/category pair -- should be unreachable from
+--         `reminders.ts`'s own call site, which always derives both from
+--         the SAME loaded `SystemRuleConfig`)
+--       - `enabled = true`
+--       - `revision = p_expected_revision`
+--     Any mismatch is a documented, benign no-op -- returns `false`,
+--     never raises. The category's own next reminder-worker tick reloads
+--     the CURRENT revision/config and reconciles correctly; there is
+--     nothing for this caller to retry or recover from.
+--  3. Only once authorized: the SAME pending-only upsert
+--     `upsert_pending_reminder_job` already uses (`insert ... on
+--     conflict (dedupe_key) do update ... where status = 'pending'`) --
+--     never revives a claimed/completed/failed/skipped/cancelled job
+--     either, exactly like that function.
+--
+-- Returns `true` when the write was authorized and attempted, `false`
+-- for the stale/disabled/mismatched no-op case.
+-- -----------------------------------------------------------------------
+create or replace function public.upsert_pending_system_reminder_job(
+  p_rule_id uuid,
+  p_category text,
+  p_expected_revision bigint,
+  p_recipient_user_id uuid,
+  p_title text,
+  p_body text,
+  p_path text,
+  p_tag text,
+  p_dedupe_key text,
+  p_scheduled_for timestamptz,
+  p_source_ref text
+)
+returns boolean
+language plpgsql
+as $$
+declare
+  rule_row public.notification_rules;
+begin
+  select * into rule_row from public.notification_rules where id = p_rule_id for update;
+
+  if not found
+     or rule_row.kind is distinct from 'system'
+     or rule_row.system_key is distinct from p_category
+     or rule_row.enabled is not true
+     or rule_row.revision is distinct from p_expected_revision
+  then
+    return false; -- stale config / disabled / mismatched -- documented no-op
+  end if;
+
+  insert into public.notification_jobs
+    (category, recipient_user_id, title, body, path, tag, dedupe_key, scheduled_for, source_ref, status)
+  values
+    (p_category, p_recipient_user_id, p_title, p_body, p_path, p_tag, p_dedupe_key, p_scheduled_for, p_source_ref, 'pending')
+  on conflict (dedupe_key) do update set
+    category = excluded.category,
+    recipient_user_id = excluded.recipient_user_id,
+    title = excluded.title,
+    body = excluded.body,
+    path = excluded.path,
+    tag = excluded.tag,
+    scheduled_for = excluded.scheduled_for,
+    source_ref = excluded.source_ref,
+    updated_at = now()
+  where public.notification_jobs.status = 'pending';
+
+  return true;
+end;
+$$;
+
+revoke all on function public.upsert_pending_system_reminder_job(uuid, text, bigint, uuid, text, text, text, text, text, timestamptz, text)
+  from public, anon, authenticated;
+grant execute on function public.upsert_pending_system_reminder_job(uuid, text, bigint, uuid, text, text, text, text, text, timestamptz, text)
   to service_role;

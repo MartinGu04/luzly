@@ -415,6 +415,75 @@ export async function upsertPendingReminderJob(job: NewNotificationJob): Promise
   if (error) throw error;
 }
 
+export interface SystemReminderRuleGuard {
+  /** The `notification_rules.id` this job's category is materialized from. */
+  ruleId: string;
+  /** The `SystemRuleConfig.revision` the caller's `NotificationRuleConfig` was loaded with -- the exact revision this job's content/schedule was computed against. */
+  expectedRevision: number;
+}
+
+/**
+ * The ONLY write path for a SYSTEM reminder category's pending job (never
+ * `upsertPendingReminderJob` directly -- see this function's own migration
+ * counterpart, `upsert_pending_system_reminder_job`, for why). On top of
+ * that function's existing `WHERE status = 'pending'` guard (never revives
+ * a claimed/completed/failed/skipped/cancelled job), this ALSO locks
+ * `notification_rules` at `guard.ruleId` FIRST and requires, all against
+ * the row it just locked:
+ *
+ *  - it is still `kind = 'system'` with `system_key = job.category`
+ *    (defense in depth against a caller ever passing a mismatched
+ *    ruleId/category pair)
+ *  - it is still `enabled`
+ *  - its CURRENT `revision` still equals `guard.expectedRevision`
+ *
+ * Closes the stale-worker race a hard-delete-on-edit alone cannot: a
+ * worker that loaded its `NotificationRuleConfig` BEFORE a manager's
+ * concurrent `updateSystemRule` commits (disable, or a time change) but
+ * only calls this function AFTER that commit would otherwise
+ * re-materialize the job under the OLD configuration -- exactly
+ * recreating what `update_system_rule_and_invalidate_pending_jobs` just
+ * deleted. `updateSystemRule` increments `revision` in that SAME
+ * transaction, so by the time this function's lock is granted, either:
+ *
+ *  - this call's lock is granted FIRST -- it authorizes/writes normally,
+ *    and the manager's update (blocked on the same row lock) commits
+ *    afterward, deleting the job this call just created (its own
+ *    invalidation sweep is unconditional on category, not revision-aware
+ *    -- it doesn't need to be, since it always runs strictly after).
+ *  - the manager's update's lock is granted FIRST -- `revision` is
+ *    already incremented by the time this call's lock is granted, so the
+ *    revision check fails and this call no-ops, returning `false`.
+ *
+ * Either interleaving lands on the SAME safe outcome: the old
+ * configuration can never produce a job that outlives the manager's edit.
+ * Returns `false` for the no-op case (never throws) -- this is an
+ * EXPECTED, benign outcome of losing a race, not an error; the category's
+ * own next reminder-worker tick reloads the current revision and
+ * re-materializes correctly.
+ */
+export async function upsertPendingSystemReminderJob(
+  job: NewNotificationJob,
+  guard: SystemReminderRuleGuard,
+): Promise<boolean> {
+  const supabase = getNotificationServiceClient();
+  const { data, error } = await supabase.rpc("upsert_pending_system_reminder_job", {
+    p_rule_id: guard.ruleId,
+    p_category: job.category,
+    p_expected_revision: guard.expectedRevision,
+    p_recipient_user_id: job.recipientUserId,
+    p_title: job.title,
+    p_body: job.body,
+    p_path: job.path,
+    p_tag: job.tag ?? null,
+    p_dedupe_key: job.dedupeKey,
+    p_scheduled_for: job.scheduledFor,
+    p_source_ref: job.sourceRef ?? null,
+  });
+  if (error) throw error;
+  return data === true;
+}
+
 /** Cancels a still-pending reminder job (e.g. the underlying shift/duty disappeared before send) -- never touches a claimed/completed job. */
 /** Every still-`pending` job's dedupe_key starting with `prefix` -- used to find stale reminder jobs (an assignment that no longer exists) that need cancelling. */
 export async function listPendingJobDedupeKeysByPrefix(prefix: string): Promise<string[]> {
@@ -1630,6 +1699,8 @@ export interface NotificationRuleRow {
   weekday: number | null;
   localHour: number;
   localMinute: number;
+  /** Monotonic, server-incremented on every `updateSystemRule` edit -- see `SystemRuleConfig.revision`'s own docstring (ruleConfig.ts) for the stale-worker race this guards against. Meaningless for a `custom_weekly` row (never read there), always present (table-wide column, default 1). */
+  revision: number;
   title: string | null;
   body: string | null;
   audienceKind: BroadcastAudienceKind | null;
@@ -1644,7 +1715,7 @@ export interface NotificationRuleRow {
 }
 
 const NOTIFICATION_RULE_COLUMNS =
-  "id, kind, system_key, enabled, weekday, local_hour, local_minute, title, body, audience_kind, target_person_ids, archived_at, created_by_person_id, created_by_person_name, updated_by_person_id, updated_by_person_name, created_at, updated_at";
+  "id, kind, system_key, enabled, weekday, local_hour, local_minute, revision, title, body, audience_kind, target_person_ids, archived_at, created_by_person_id, created_by_person_name, updated_by_person_id, updated_by_person_name, created_at, updated_at";
 
 function toNotificationRuleRow(row: Record<string, unknown>): NotificationRuleRow {
   return {
@@ -1655,6 +1726,11 @@ function toNotificationRuleRow(row: Record<string, unknown>): NotificationRuleRo
     weekday: (row.weekday as number | null) ?? null,
     localHour: row.local_hour as number,
     localMinute: row.local_minute as number,
+    // PostgREST serializes `bigint` as a JSON number when it's within the
+    // safe integer range (true for any realistic edit count) -- `Number(...)`
+    // is still the defensive normalization in case a driver ever hands
+    // this back as a numeric string.
+    revision: Number(row.revision),
     title: (row.title as string | null) ?? null,
     body: (row.body as string | null) ?? null,
     audienceKind: (row.audience_kind as BroadcastAudienceKind | null) ?? null,
@@ -1719,6 +1795,15 @@ export interface SystemRuleEdit {
  * this is a hard delete rather than a soft cancel, and for the
  * documented (bounded, safe) rematerialization delay this leaves for
  * `reminders.ts`'s next tick.
+ *
+ * ALSO increments `revision` in this SAME transaction -- the second half
+ * of the guard `upsertPendingSystemReminderJob` checks. Hard-deleting
+ * this rule's pending jobs closes the window for an ALREADY-materialized
+ * job; incrementing `revision` closes the SEPARATE window for a worker
+ * that loaded this rule's config before this edit, but only attempts to
+ * (re)materialize a job for it AFTER this edit commits -- see that
+ * function's own docstring for the full race and the migration's
+ * `upsert_pending_system_reminder_job` for its SQL-level lock ordering.
  */
 export async function updateSystemRule(id: string, edit: SystemRuleEdit): Promise<NotificationRuleRow | null> {
   const supabase = getNotificationServiceClient();

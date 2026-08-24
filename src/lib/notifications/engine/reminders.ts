@@ -20,11 +20,11 @@ import {
 } from "./logisticsCoordination";
 import { isLogisticsWithdrawalEvent } from "./logisticsWithdrawal";
 import { resolveNonPermanentConstraintsRecipients, type RecipientResolution } from "./recipients";
-import type { NotificationRuleConfig } from "./ruleConfig";
+import type { NotificationRuleConfig, SystemRuleConfig } from "./ruleConfig";
 import {
   cancelPendingReminderJob,
   listPendingJobDedupeKeysByPrefix,
-  upsertPendingReminderJob,
+  upsertPendingSystemReminderJob,
   type NewNotificationJob,
 } from "./store";
 
@@ -131,7 +131,7 @@ async function runTomorrowShiftReminders(input: RemindersInput): Promise<{ creat
   if (!tomorrowDate) return { created: 0, cancelled: 0 };
 
   const rule = input.ruleConfig.systemRules.get("tomorrow_shift");
-  if (!rule?.enabled) return applyReminderJobs("tomorrow_shift", tomorrowDate, [], input.persist);
+  if (!rule?.enabled) return applyReminderJobs("tomorrow_shift", tomorrowDate, [], input.persist, rule);
 
   const scheduledFor = toIso(input.now.date, rule.localHour, rule.localMinute);
   const tomorrowShiftEvents = input.events.filter(
@@ -173,7 +173,7 @@ async function runTomorrowShiftReminders(input: RemindersInput): Promise<{ creat
     });
   }
 
-  return applyReminderJobs("tomorrow_shift", tomorrowDate, validJobs, input.persist);
+  return applyReminderJobs("tomorrow_shift", tomorrowDate, validJobs, input.persist, rule);
 }
 
 // ---------------------------------------------------------------------------
@@ -185,7 +185,7 @@ async function runTomorrowDutyReminders(input: RemindersInput): Promise<{ create
   if (!tomorrowDate) return { created: 0, cancelled: 0 };
 
   const rule = input.ruleConfig.systemRules.get("tomorrow_duty");
-  if (!rule?.enabled) return applyReminderJobs("tomorrow_duty", tomorrowDate, [], input.persist);
+  if (!rule?.enabled) return applyReminderJobs("tomorrow_duty", tomorrowDate, [], input.persist, rule);
 
   const scheduledFor = toIso(input.now.date, rule.localHour, rule.localMinute);
   const tomorrowDutyEvents = input.events.filter(
@@ -217,7 +217,7 @@ async function runTomorrowDutyReminders(input: RemindersInput): Promise<{ create
     });
   }
 
-  return applyReminderJobs("tomorrow_duty", tomorrowDate, validJobs, input.persist);
+  return applyReminderJobs("tomorrow_duty", tomorrowDate, validJobs, input.persist, rule);
 }
 
 // ---------------------------------------------------------------------------
@@ -239,7 +239,7 @@ async function runTomorrowLogisticsWithdrawalReminders(
   if (!tomorrowDate) return { created: 0, cancelled: 0 };
 
   const rule = input.ruleConfig.systemRules.get("tomorrow_logistics_withdrawal");
-  if (!rule?.enabled) return applyReminderJobs("tomorrow_logistics_withdrawal", tomorrowDate, [], input.persist);
+  if (!rule?.enabled) return applyReminderJobs("tomorrow_logistics_withdrawal", tomorrowDate, [], input.persist, rule);
 
   const scheduledFor = toIso(input.now.date, rule.localHour, rule.localMinute);
   const tomorrowLogisticsWithdrawalEvents = input.events.filter(
@@ -272,7 +272,7 @@ async function runTomorrowLogisticsWithdrawalReminders(
     });
   }
 
-  return applyReminderJobs("tomorrow_logistics_withdrawal", tomorrowDate, validJobs, input.persist);
+  return applyReminderJobs("tomorrow_logistics_withdrawal", tomorrowDate, validJobs, input.persist, rule);
 }
 
 // ---------------------------------------------------------------------------
@@ -313,7 +313,7 @@ async function runTomorrowLogisticsWithdrawalSupervisorReminders(
 
   const rule = input.ruleConfig.systemRules.get("tomorrow_logistics_withdrawal_supervisor");
   if (!rule?.enabled) {
-    return applyReminderJobs("tomorrow_logistics_withdrawal_supervisor", tomorrowDate, [], input.persist);
+    return applyReminderJobs("tomorrow_logistics_withdrawal_supervisor", tomorrowDate, [], input.persist, rule);
   }
 
   const scheduledFor = toIso(input.now.date, rule.localHour, rule.localMinute);
@@ -353,7 +353,7 @@ async function runTomorrowLogisticsWithdrawalSupervisorReminders(
     });
   }
 
-  return applyReminderJobs("tomorrow_logistics_withdrawal_supervisor", tomorrowDate, validJobs, input.persist);
+  return applyReminderJobs("tomorrow_logistics_withdrawal_supervisor", tomorrowDate, validJobs, input.persist, rule);
 }
 
 // ---------------------------------------------------------------------------
@@ -419,6 +419,7 @@ async function runLogisticsWithdrawalNoonReminders(input: RemindersInput): Promi
     today,
     assignedJobs,
     input.persist,
+    assignedRule,
   );
 
   // Supervisor fallback: ONLY when still unassigned at this tick (spec
@@ -457,6 +458,7 @@ async function runLogisticsWithdrawalNoonReminders(input: RemindersInput): Promi
     today,
     supervisorJobs,
     input.persist,
+    supervisorRule,
   );
 
   // Eligible teammates, excluding anyone already reached above (precedence).
@@ -496,7 +498,7 @@ async function runLogisticsWithdrawalNoonReminders(input: RemindersInput): Promi
       });
     }
   }
-  const teamResult = await applyReminderJobs("logistics_withdrawal_noon_team", today, teamJobs, input.persist);
+  const teamResult = await applyReminderJobs("logistics_withdrawal_noon_team", today, teamJobs, input.persist, teamRule);
 
   return { assigned: assignedResult, supervisor: supervisorResult, team: teamResult };
 }
@@ -542,7 +544,7 @@ async function runAlmashCheckInReminders(input: RemindersInput): Promise<{ creat
   if (!todayParsed) return { created: 0, cancelled: 0 };
 
   const rule = input.ruleConfig.systemRules.get("almash_check_in");
-  if (!rule?.enabled) return applyReminderJobs("almash_check_in", today, [], input.persist);
+  if (!rule?.enabled) return applyReminderJobs("almash_check_in", today, [], input.persist, rule);
 
   const isSaturday = dayOfWeek(todayParsed) === 6;
   // Saturday always uses the real astronomical מוצ״ש instant -- protected
@@ -591,7 +593,7 @@ async function runAlmashCheckInReminders(input: RemindersInput): Promise<{ creat
     });
   }
 
-  return applyReminderJobs("almash_check_in", today, validJobs, input.persist);
+  return applyReminderJobs("almash_check_in", today, validJobs, input.persist, rule);
 }
 
 /** Every dedupe-key prefix any reminder category above ever uses -- kept as a union so `applyReminderJobs` can't be called with a typo'd/unrelated category string. */
@@ -620,19 +622,44 @@ type ReminderCategory =
  * calendar date the category's own dedupe-key scheme uses (tomorrow's
  * date for the 20:00 categories, today's date for the noon ones) -- never
  * assumed to be "tomorrow" specifically.
+ *
+ * `rule` is THIS tick's own loaded `SystemRuleConfig` for `category` --
+ * required whenever `validJobs` is non-empty (every call site's own
+ * `if (!rule?.enabled) return applyReminderJobs(category, dateKey, [], persist, rule)`
+ * early-return guarantees `rule` is defined and enabled by the time a
+ * non-empty `validJobs` is ever built, so the loop below can safely
+ * assume it; `undefined` is only ever accepted so the SAME call shape
+ * works for that empty-array early-return branch too). Every upsert goes
+ * through `upsertPendingSystemReminderJob`'s stale-revision guard --
+ * never the generic `upsertPendingReminderJob` -- so a worker whose
+ * config a manager's concurrent `updateSystemRule` edit has since
+ * invalidated can never re-materialize a job under the OLD configuration
+ * (see that store function's own docstring for the exact race and lock-
+ * ordering proof this closes). A guard rejection is a documented, benign
+ * no-op -- logged, never thrown -- since the category's own next tick
+ * reloads the current revision and reconciles correctly on its own.
  */
 async function applyReminderJobs(
   category: ReminderCategory,
   dateKey: string,
   validJobs: readonly NewNotificationJob[],
   persist: boolean,
+  rule: SystemRuleConfig | undefined,
 ): Promise<{ created: number; cancelled: number }> {
   if (!persist) {
     return { created: validJobs.length, cancelled: 0 };
   }
 
   for (const job of validJobs) {
-    await upsertPendingReminderJob(job);
+    if (!rule) {
+      throw new Error(`applyReminderJobs: missing system rule config for category "${category}" despite non-empty validJobs`);
+    }
+    const wrote = await upsertPendingSystemReminderJob(job, { ruleId: rule.id, expectedRevision: rule.revision });
+    if (!wrote) {
+      console.warn(
+        `[notifications] stale rule revision for category=${category} ruleId=${rule.id} expectedRevision=${rule.revision} dedupeKey=${job.dedupeKey} -- upsert skipped (a concurrent manager edit is now authoritative; reconciles on this category's own next tick)`,
+      );
+    }
   }
 
   const prefix = `${category}:${dateKey}:`;
@@ -699,7 +726,7 @@ async function buildAndApplyConstraintsJobs(
   copy: { title: string; body: string },
 ): Promise<{ created: number; cancelled: number }> {
   const rule = input.ruleConfig.systemRules.get(category);
-  if (!rule?.enabled) return applyReminderJobs(category, input.week.weekStart, [], input.persist);
+  if (!rule?.enabled) return applyReminderJobs(category, input.week.weekStart, [], input.persist, rule);
 
   const userIds = await resolveNonPermanentConstraintsRecipients(input.people);
   const scheduledFor = toIso(input.now.date, rule.localHour, rule.localMinute);
@@ -716,5 +743,5 @@ async function buildAndApplyConstraintsJobs(
     sourceRef: `constraints:${input.week.weekStart}`,
   }));
 
-  return applyReminderJobs(category, input.week.weekStart, validJobs, input.persist);
+  return applyReminderJobs(category, input.week.weekStart, validJobs, input.persist, rule);
 }

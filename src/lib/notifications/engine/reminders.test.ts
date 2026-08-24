@@ -32,7 +32,9 @@ function event(overrides: Partial<Event> & Pick<Event, "personId" | "date" | "ca
 const schedule = buildShiftSchedule("07:00");
 
 const store = {
-  upsertPendingReminderJob: vi.fn<(job: import("./store").NewNotificationJob) => Promise<void>>(async () => {}),
+  upsertPendingSystemReminderJob: vi.fn<
+    (job: import("./store").NewNotificationJob, guard: { ruleId: string; expectedRevision: number }) => Promise<boolean>
+  >(async () => true),
   cancelPendingReminderJob: vi.fn(async () => {}),
   listPendingJobDedupeKeysByPrefix: vi.fn<(prefix: string) => Promise<string[]>>(async () => []),
   insertNotificationJobIfAbsent: vi.fn(async () => true),
@@ -67,14 +69,15 @@ function defaultRuleConfig(
   customWeeklyRules: NotificationRuleConfig["customWeeklyRules"] = [],
 ): NotificationRuleConfig {
   const base: Record<SystemRuleKey, SystemRuleConfig> = {
-    tomorrow_shift: { id: "rule-tomorrow_shift", systemKey: "tomorrow_shift", enabled: true, localHour: 20, localMinute: 0 },
-    tomorrow_duty: { id: "rule-tomorrow_duty", systemKey: "tomorrow_duty", enabled: true, localHour: 20, localMinute: 0 },
+    tomorrow_shift: { id: "rule-tomorrow_shift", systemKey: "tomorrow_shift", enabled: true, localHour: 20, localMinute: 0, revision: 1 },
+    tomorrow_duty: { id: "rule-tomorrow_duty", systemKey: "tomorrow_duty", enabled: true, localHour: 20, localMinute: 0, revision: 1 },
     tomorrow_logistics_withdrawal: {
       id: "rule-tomorrow_logistics_withdrawal",
       systemKey: "tomorrow_logistics_withdrawal",
       enabled: true,
       localHour: 20,
       localMinute: 0,
+      revision: 1,
     },
     tomorrow_logistics_withdrawal_supervisor: {
       id: "rule-tomorrow_logistics_withdrawal_supervisor",
@@ -82,6 +85,7 @@ function defaultRuleConfig(
       enabled: true,
       localHour: 20,
       localMinute: 0,
+      revision: 1,
     },
     logistics_withdrawal_noon_assigned: {
       id: "rule-logistics_withdrawal_noon_assigned",
@@ -89,6 +93,7 @@ function defaultRuleConfig(
       enabled: true,
       localHour: 12,
       localMinute: 0,
+      revision: 1,
     },
     logistics_withdrawal_noon_supervisor: {
       id: "rule-logistics_withdrawal_noon_supervisor",
@@ -96,6 +101,7 @@ function defaultRuleConfig(
       enabled: true,
       localHour: 12,
       localMinute: 0,
+      revision: 1,
     },
     logistics_withdrawal_noon_team: {
       id: "rule-logistics_withdrawal_noon_team",
@@ -103,10 +109,32 @@ function defaultRuleConfig(
       enabled: true,
       localHour: 12,
       localMinute: 0,
+      revision: 1,
     },
-    almash_check_in: { id: "rule-almash_check_in", systemKey: "almash_check_in", enabled: true, localHour: 12, localMinute: 45 },
-    constraints_sunday: { id: "rule-constraints_sunday", systemKey: "constraints_sunday", enabled: true, localHour: 18, localMinute: 0 },
-    constraints_monday: { id: "rule-constraints_monday", systemKey: "constraints_monday", enabled: true, localHour: 9, localMinute: 0 },
+    almash_check_in: {
+      id: "rule-almash_check_in",
+      systemKey: "almash_check_in",
+      enabled: true,
+      localHour: 12,
+      localMinute: 45,
+      revision: 1,
+    },
+    constraints_sunday: {
+      id: "rule-constraints_sunday",
+      systemKey: "constraints_sunday",
+      enabled: true,
+      localHour: 18,
+      localMinute: 0,
+      revision: 1,
+    },
+    constraints_monday: {
+      id: "rule-constraints_monday",
+      systemKey: "constraints_monday",
+      enabled: true,
+      localHour: 9,
+      localMinute: 0,
+      revision: 1,
+    },
   };
 
   for (const [key, patch] of Object.entries(overrides)) {
@@ -161,12 +189,12 @@ describe("runReminders -- tomorrow shift reminder", () => {
       recipientResolution: resolutionWith("p1", "user-p1"),
     });
 
-    expect(store.upsertPendingReminderJob).toHaveBeenCalledWith(
+    expect(store.upsertPendingSystemReminderJob).toHaveBeenCalledWith(
       expect.objectContaining({
         category: "tomorrow_shift",
         recipientUserId: "user-p1",
         dedupeKey: "tomorrow_shift:2026-08-23:user-p1:day",
-      }),
+      }), expect.anything()
     );
   });
 
@@ -185,8 +213,8 @@ describe("runReminders -- tomorrow shift reminder", () => {
       recipientResolution: resolutionWith("p1", "user-p1"),
     });
 
-    expect(store.upsertPendingReminderJob).toHaveBeenCalledWith(
-      expect.objectContaining({ body: expect.stringContaining("07:00") }),
+    expect(store.upsertPendingSystemReminderJob).toHaveBeenCalledWith(
+      expect.objectContaining({ body: expect.stringContaining("07:00") }), expect.anything()
     );
   });
 
@@ -205,7 +233,7 @@ describe("runReminders -- tomorrow shift reminder", () => {
       recipientResolution: resolutionWith("p1", "user-p1"),
     });
 
-    const call = store.upsertPendingReminderJob.mock.calls[0][0];
+    const call = store.upsertPendingSystemReminderJob.mock.calls[0][0];
     expect(call.body).not.toMatch(/\d{2}:\d{2}/);
   });
 
@@ -246,7 +274,7 @@ describe("runReminders -- tomorrow shift reminder", () => {
       recipientResolution: resolutionWith("p1", "user-p1"),
     });
 
-    const jobs = store.upsertPendingReminderJob.mock.calls.map((call) => call[0]);
+    const jobs = store.upsertPendingSystemReminderJob.mock.calls.map((call) => call[0]);
     expect(jobs).toHaveLength(2);
     expect(new Set(jobs.map((job) => job.dedupeKey)).size).toBe(2);
     expect(new Set(jobs.map((job) => job.tag)).size).toBe(2);
@@ -269,8 +297,8 @@ describe("runReminders -- tomorrow duty reminder", () => {
       recipientResolution: resolutionWith("p1", "user-p1"),
     });
 
-    expect(store.upsertPendingReminderJob).toHaveBeenCalledWith(
-      expect.objectContaining({ category: "tomorrow_duty", body: expect.stringContaining("כונן פינויים") }),
+    expect(store.upsertPendingSystemReminderJob).toHaveBeenCalledWith(
+      expect.objectContaining({ category: "tomorrow_duty", body: expect.stringContaining("כונן פינויים") }), expect.anything()
     );
   });
 
@@ -292,7 +320,7 @@ describe("runReminders -- tomorrow duty reminder", () => {
       recipientResolution: resolutionWith("p1", "user-p1"),
     });
 
-    const jobs = store.upsertPendingReminderJob.mock.calls
+    const jobs = store.upsertPendingSystemReminderJob.mock.calls
       .map((call) => call[0])
       .filter((job) => job.category === "tomorrow_duty");
     expect(jobs).toHaveLength(2);
@@ -317,8 +345,8 @@ describe("runReminders -- tomorrow logistics-withdrawal reminder (משיכות �
       recipientResolution: resolutionWith("p1", "user-p1"),
     });
 
-    expect(store.upsertPendingReminderJob).toHaveBeenCalledTimes(1);
-    expect(store.upsertPendingReminderJob).toHaveBeenCalledWith({
+    expect(store.upsertPendingSystemReminderJob).toHaveBeenCalledTimes(1);
+    expect(store.upsertPendingSystemReminderJob).toHaveBeenCalledWith({
       category: "tomorrow_logistics_withdrawal",
       recipientUserId: "user-p1",
       title: "📦 משיכות מהלוגיסטיקה מחר",
@@ -328,7 +356,7 @@ describe("runReminders -- tomorrow logistics-withdrawal reminder (משיכות �
       dedupeKey: "tomorrow_logistics_withdrawal:2026-08-19:user-p1",
       scheduledFor: expect.any(String),
       sourceRef: "logistics_withdrawal:p1:2026-08-19",
-    });
+    }, expect.anything());
   });
 
   it("other users (not assigned) never get a reminder", async () => {
@@ -356,9 +384,9 @@ describe("runReminders -- tomorrow logistics-withdrawal reminder (משיכות �
       recipientResolution: resolution,
     });
 
-    expect(store.upsertPendingReminderJob).toHaveBeenCalledTimes(1);
-    expect(store.upsertPendingReminderJob).not.toHaveBeenCalledWith(
-      expect.objectContaining({ recipientUserId: "user-p2" }),
+    expect(store.upsertPendingSystemReminderJob).toHaveBeenCalledTimes(1);
+    expect(store.upsertPendingSystemReminderJob).not.toHaveBeenCalledWith(
+      expect.objectContaining({ recipientUserId: "user-p2" }), expect.anything()
     );
   });
 
@@ -377,7 +405,7 @@ describe("runReminders -- tomorrow logistics-withdrawal reminder (משיכות �
       recipientResolution: resolutionWith("p1", "user-p1"),
     });
 
-    const call = store.upsertPendingReminderJob.mock.calls[0][0];
+    const call = store.upsertPendingSystemReminderJob.mock.calls[0][0];
     expect(call.scheduledFor).toBe("2026-08-18T17:00:00.000Z"); // 20:00 Asia/Jerusalem (UTC+3 in August) on 2026-08-18
   });
 
@@ -398,7 +426,7 @@ describe("runReminders -- tomorrow logistics-withdrawal reminder (משיכות �
     });
 
     expect(store.cancelPendingReminderJob).toHaveBeenCalledWith("tomorrow_logistics_withdrawal:2026-08-19:user-p1");
-    expect(store.upsertPendingReminderJob).not.toHaveBeenCalled();
+    expect(store.upsertPendingSystemReminderJob).not.toHaveBeenCalled();
   });
 
   it("moving the assignment from person A to person B cancels A's pending reminder and creates B's", async () => {
@@ -429,8 +457,8 @@ describe("runReminders -- tomorrow logistics-withdrawal reminder (משיכות �
     });
 
     expect(store.cancelPendingReminderJob).toHaveBeenCalledWith("tomorrow_logistics_withdrawal:2026-08-19:user-a");
-    expect(store.upsertPendingReminderJob).toHaveBeenCalledWith(
-      expect.objectContaining({ recipientUserId: "user-b", dedupeKey: "tomorrow_logistics_withdrawal:2026-08-19:user-b" }),
+    expect(store.upsertPendingSystemReminderJob).toHaveBeenCalledWith(
+      expect.objectContaining({ recipientUserId: "user-b", dedupeKey: "tomorrow_logistics_withdrawal:2026-08-19:user-b" }), expect.anything()
     );
   });
 
@@ -451,9 +479,9 @@ describe("runReminders -- tomorrow logistics-withdrawal reminder (משיכות �
     await runReminders(input); // tick 1
     await runReminders(input); // tick 2, 5 minutes later in reality -- same assignment, same tomorrow date
 
-    expect(store.upsertPendingReminderJob).toHaveBeenCalledTimes(2);
-    const firstDedupeKey = store.upsertPendingReminderJob.mock.calls[0][0].dedupeKey;
-    const secondDedupeKey = store.upsertPendingReminderJob.mock.calls[1][0].dedupeKey;
+    expect(store.upsertPendingSystemReminderJob).toHaveBeenCalledTimes(2);
+    const firstDedupeKey = store.upsertPendingSystemReminderJob.mock.calls[0][0].dedupeKey;
+    const secondDedupeKey = store.upsertPendingSystemReminderJob.mock.calls[1][0].dedupeKey;
     expect(firstDedupeKey).toBe(secondDedupeKey); // identical key both times -- the real store's ON CONFLICT (dedupe_key) upsert (see store.ts) collapses these into one row, never two
   });
 
@@ -472,12 +500,12 @@ describe("runReminders -- tomorrow logistics-withdrawal reminder (משיכות �
       recipientResolution: resolutionWith("p1", "user-p1"),
     });
 
-    expect(store.upsertPendingReminderJob).toHaveBeenCalledWith(
+    expect(store.upsertPendingSystemReminderJob).toHaveBeenCalledWith(
       expect.objectContaining({
         category: "tomorrow_logistics_withdrawal",
         recipientUserId: "user-p1",
         dedupeKey: "tomorrow_logistics_withdrawal:2026-08-23:user-p1",
-      }),
+      }), expect.anything()
     );
   });
 });
@@ -507,8 +535,8 @@ describe("runReminders -- weekly constraints reminders", () => {
     });
 
     expect(summary.constraintsJobs).toBe(2);
-    expect(store.upsertPendingReminderJob).toHaveBeenCalledWith(
-      expect.objectContaining({ category: "constraints_sunday", dedupeKey: `constraints_sunday:${week.weekStart}:user-a` }),
+    expect(store.upsertPendingSystemReminderJob).toHaveBeenCalledWith(
+      expect.objectContaining({ category: "constraints_sunday", dedupeKey: `constraints_sunday:${week.weekStart}:user-a` }), expect.anything()
     );
   });
 
@@ -567,16 +595,16 @@ describe("runReminders -- weekly constraints reminders", () => {
       recipientResolution: emptyRecipientResolution,
     });
 
-    expect(store.upsertPendingReminderJob).toHaveBeenCalledWith(
+    expect(store.upsertPendingSystemReminderJob).toHaveBeenCalledWith(
       expect.objectContaining({
         title: "📌 תזכורת לאילוצים",
         body: "יש אילוץ לשבוע הבא? אפשר לשלוח עד מחר.",
         path: "/",
         scheduledFor: jerusalemLocalTimeToInstant("2026-08-16", 18, 0).toISOString(),
-      }),
+      }), expect.anything()
     );
 
-    store.upsertPendingReminderJob.mockClear();
+    store.upsertPendingSystemReminderJob.mockClear();
     resolveNonPermanentConstraintsRecipients.mockResolvedValue(["user-a"]);
     ({ runReminders } = await loadModule());
     now = { date: "2026-08-17", minuteOfDay: 600 }; // Monday
@@ -592,13 +620,13 @@ describe("runReminders -- weekly constraints reminders", () => {
       recipientResolution: emptyRecipientResolution,
     });
 
-    expect(store.upsertPendingReminderJob).toHaveBeenCalledWith(
+    expect(store.upsertPendingSystemReminderJob).toHaveBeenCalledWith(
       expect.objectContaining({
         title: "⏳ היום האחרון לאילוצים",
         body: "אפשר לשלוח אילוצים לשבוע הבא עד סוף היום.",
         path: "/",
         scheduledFor: jerusalemLocalTimeToInstant("2026-08-17", 9, 0).toISOString(),
-      }),
+      }), expect.anything()
     );
   });
 
@@ -661,7 +689,7 @@ describe("runReminders -- system rule config (Fixed Notifications Center)", () =
     });
 
     expect(summary.tomorrowShiftJobs).toBe(0);
-    expect(store.upsertPendingReminderJob).not.toHaveBeenCalled();
+    expect(store.upsertPendingSystemReminderJob).not.toHaveBeenCalled();
     expect(store.cancelPendingReminderJob).toHaveBeenCalledWith("tomorrow_shift:2026-08-19:user-p1:day");
   });
 
@@ -683,8 +711,8 @@ describe("runReminders -- system rule config (Fixed Notifications Center)", () =
     });
 
     expect(summary.tomorrowShiftJobs).toBe(1);
-    expect(store.upsertPendingReminderJob).toHaveBeenCalledWith(
-      expect.objectContaining({ category: "tomorrow_shift", dedupeKey: "tomorrow_shift:2026-08-19:user-p1:day" }),
+    expect(store.upsertPendingSystemReminderJob).toHaveBeenCalledWith(
+      expect.objectContaining({ category: "tomorrow_shift", dedupeKey: "tomorrow_shift:2026-08-19:user-p1:day" }), expect.anything()
     );
   });
 
@@ -712,11 +740,11 @@ describe("runReminders -- system rule config (Fixed Notifications Center)", () =
       ruleConfig: defaultRuleConfig({ tomorrow_shift: { localHour: 19, localMinute: 30 } }),
     });
 
-    expect(store.upsertPendingReminderJob).toHaveBeenCalledWith(
+    expect(store.upsertPendingSystemReminderJob).toHaveBeenCalledWith(
       expect.objectContaining({
         dedupeKey: "tomorrow_shift:2026-08-19:user-p1:day",
         scheduledFor: jerusalemLocalTimeToInstant("2026-08-18", 19, 30).toISOString(),
-      }),
+      }), expect.anything()
     );
     // The SAME dedupe key, not a second job -- `cancelPendingReminderJob`
     // is never called for it (the still-pending row was upserted in
@@ -743,7 +771,7 @@ describe("runReminders -- system rule config (Fixed Notifications Center)", () =
     });
 
     expect(summary.tomorrowShiftJobs).toBe(0);
-    expect(store.upsertPendingReminderJob).not.toHaveBeenCalled();
+    expect(store.upsertPendingSystemReminderJob).not.toHaveBeenCalled();
   });
 
   it("disabling constraints_sunday cancels its own pending unsent job", async () => {
@@ -763,8 +791,8 @@ describe("runReminders -- system rule config (Fixed Notifications Center)", () =
       persist: true,
       recipientResolution: emptyRecipientResolution,
     });
-    expect(store.upsertPendingReminderJob).toHaveBeenCalledWith(
-      expect.objectContaining({ dedupeKey: `constraints_sunday:${week.weekStart}:user-a` }),
+    expect(store.upsertPendingSystemReminderJob).toHaveBeenCalledWith(
+      expect.objectContaining({ dedupeKey: `constraints_sunday:${week.weekStart}:user-a` }), expect.anything()
     );
 
     // Second tick (same Sunday), manager disables the rule -- the
@@ -814,7 +842,7 @@ function resolutionFor(pairs: readonly [string, string][]): RecipientResolution 
 }
 
 function upsertedFor(category: string) {
-  return store.upsertPendingReminderJob.mock.calls.map((call) => call[0]).filter((job) => job.category === category);
+  return store.upsertPendingSystemReminderJob.mock.calls.map((call) => call[0]).filter((job) => job.category === category);
 }
 
 function person(id: string, overrides: Partial<import("@/lib/domain/types").Person> = {}) {
@@ -1028,8 +1056,8 @@ describe("runReminders -- same-day noon (12:00) logistics-withdrawal team coordi
       body: "p_ethan עושה משיכות היום בין 13:00–14:00. נדרש לעזור לו.",
     });
     // Ethan himself never receives the generic help message about his own assignment.
-    expect(store.upsertPendingReminderJob).not.toHaveBeenCalledWith(
-      expect.objectContaining({ category: "logistics_withdrawal_noon_team", recipientUserId: "user-ethan" }),
+    expect(store.upsertPendingSystemReminderJob).not.toHaveBeenCalledWith(
+      expect.objectContaining({ category: "logistics_withdrawal_noon_team", recipientUserId: "user-ethan" }), expect.anything()
     );
   });
 
@@ -1088,7 +1116,7 @@ describe("runReminders -- same-day noon (12:00) logistics-withdrawal team coordi
 
     // 09:00 -- Ethan gets assigned. Next tick's stale-key sweep reports the
     // previously-upserted fallback jobs as still pending.
-    store.upsertPendingReminderJob.mockClear();
+    store.upsertPendingSystemReminderJob.mockClear();
     store.listPendingJobDedupeKeysByPrefix.mockImplementation(async (prefix: string) => {
       if (prefix === "logistics_withdrawal_noon_supervisor:2026-08-17:") return ["logistics_withdrawal_noon_supervisor:2026-08-17:user-sup"];
       if (prefix === "logistics_withdrawal_noon_team:2026-08-17:") return ["logistics_withdrawal_noon_team:2026-08-17:user-tech"];
@@ -1135,7 +1163,7 @@ describe("runReminders -- same-day noon (12:00) logistics-withdrawal team coordi
     });
     expect(upsertedFor("logistics_withdrawal_noon_assigned")).toHaveLength(1);
 
-    store.upsertPendingReminderJob.mockClear();
+    store.upsertPendingSystemReminderJob.mockClear();
     store.listPendingJobDedupeKeysByPrefix.mockImplementation(async (prefix: string) => {
       if (prefix === "logistics_withdrawal_noon_assigned:2026-08-19:") return ["logistics_withdrawal_noon_assigned:2026-08-19:user-ethan"];
       return [];
@@ -1208,7 +1236,7 @@ describe("runReminders -- same-day noon (12:00) logistics-withdrawal team coordi
     });
     expect(upsertedFor("logistics_withdrawal_noon_team")).toHaveLength(1);
 
-    store.upsertPendingReminderJob.mockClear();
+    store.upsertPendingSystemReminderJob.mockClear();
     store.listPendingJobDedupeKeysByPrefix.mockImplementation(async (prefix: string) => {
       if (prefix === "logistics_withdrawal_noon_team:2026-08-19:") return ["logistics_withdrawal_noon_team:2026-08-19:user-helper"];
       return [];
@@ -1303,7 +1331,7 @@ describe("runReminders -- same-day noon (12:00) logistics-withdrawal team coordi
     });
 
     expect(summary.logisticsWithdrawalNoonAssignedJobs).toBe(1);
-    expect(store.upsertPendingReminderJob).not.toHaveBeenCalled();
+    expect(store.upsertPendingSystemReminderJob).not.toHaveBeenCalled();
     expect(store.cancelPendingReminderJob).not.toHaveBeenCalled();
   });
 
@@ -1354,7 +1382,7 @@ describe("runReminders -- logistics-withdrawal fallback only ever exists for Mon
 
   it("no fallback job of any kind is created for an unassigned NON-Monday date, noon", async () => {
     for (const date of NON_MONDAY_DATES) {
-      store.upsertPendingReminderJob.mockClear();
+      store.upsertPendingSystemReminderJob.mockClear();
       store.listPendingJobDedupeKeysByPrefix.mockResolvedValue([]);
       const { runReminders } = await loadModule();
       const now: LocalNow = { date, minuteOfDay: 600 };
@@ -1513,7 +1541,7 @@ describe("runReminders -- עלמ״ש check-in reminder (שמירה / עתודה 
       ["2026-08-20", true],
       ["2026-08-21", false],
     ] as const) {
-      store.upsertPendingReminderJob.mockClear();
+      store.upsertPendingSystemReminderJob.mockClear();
       const { runReminders } = await loadModule();
       const now: LocalNow = { date: today, minuteOfDay: 600 };
       const week = getOperationalWeek(now);
