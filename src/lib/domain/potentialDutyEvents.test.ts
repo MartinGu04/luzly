@@ -526,6 +526,96 @@ describe("buildPotentialDutyEvents — one-to-one guard/reserve reconciliation (
   });
 });
 
+describe("buildPotentialDutyEvents — same-week fuzzy matching is conservative: it only ever fires for a mutually unique leftover pair, never an arbitrary/first-sorted guess among several candidates", () => {
+  const ITAY = person({ id: "p_itay", name: "איתן בדיקה" });
+  const PERSONNEL_WITH_ITAY = [ITAY];
+
+  // All within the same Sun-Sat week (06-12 Sep 2026).
+  const SUN = "2026-09-06";
+  const TUE = "2026-09-08";
+  const WED = "2026-09-09";
+  const THU = "2026-09-10";
+  const FRI = "2026-09-11";
+  const SAT = "2026-09-12";
+
+  function guardAllocation(date: string, overrides: Partial<PotentialAllocation> = {}): PotentialAllocation {
+    return allocation({
+      date,
+      dutyFamily: "guard",
+      slot: 4,
+      columnLabel: "שומר 4",
+      sourceAllocationLabel: ITAY.name,
+      ...overrides,
+    });
+  }
+
+  function realGuardDuty(date: string, overrides: Partial<Event> = {}): Event {
+    return dutyEvent({ personId: ITAY.id, personName: ITAY.name, date, dutyFamily: "guard", slot: 4, ...overrides });
+  }
+
+  it("1. Itay-shaped case: exactly ONE unmatched Potential entry and ONE unmatched same-week block, no exact date -- unambiguous, fuzzy reconciliation succeeds", () => {
+    const events = buildPotentialDutyEvents([guardAllocation(SUN)], ITAY, PERSONNEL_WITH_ITAY, [
+      realGuardDuty(TUE),
+      realGuardDuty(WED),
+      realGuardDuty(THU),
+    ]);
+    expect(events).toHaveLength(0);
+  });
+
+  it("2. TWO unmatched Potential allocations competing for ONE unmatched same-week block, neither exact-matches -- never arbitrarily pick one, both stay tentative", () => {
+    const sunAllocation = guardAllocation(SUN);
+    const wedAllocation = guardAllocation(WED);
+    // The single confirmed block sits on Fri-Sat -- same week as both
+    // allocations, but an exact-date match for neither.
+    const events = buildPotentialDutyEvents([sunAllocation, wedAllocation], ITAY, PERSONNEL_WITH_ITAY, [
+      realGuardDuty(FRI),
+      realGuardDuty(SAT),
+    ]);
+    expect(events).toHaveLength(2);
+    expect(events.map((e) => e.date).sort()).toEqual([SUN, WED].sort());
+    expect(events.every((e) => e.certainty === "tentative")).toBe(true);
+  });
+
+  it("3. ONE unmatched Potential entry with TWO possible unmatched same-week blocks, no exact match -- also ambiguous, stays tentative", () => {
+    const events = buildPotentialDutyEvents(
+      [guardAllocation(WED)],
+      ITAY,
+      PERSONNEL_WITH_ITAY,
+      [
+        realGuardDuty(SUN), // block A -- single day, same week, not an exact match for WED
+        realGuardDuty(FRI), // block B -- a SEPARATE single day (not contiguous with SUN), same week, also not exact
+      ],
+    );
+    expect(events).toEqual([expect.objectContaining({ date: WED, certainty: "tentative" })]);
+  });
+
+  it("4. exact-date matches are resolved FIRST to reduce ambiguity, then the remaining unique pair is fuzzy-matched", () => {
+    // TUE has a real exact-date match (consumed in pass 1); that leaves
+    // exactly ONE unmatched allocation (SUN) and exactly ONE unmatched
+    // block (THU) -- now unambiguous, so pass 2 reconciles them too.
+    const events = buildPotentialDutyEvents(
+      [guardAllocation(SUN), guardAllocation(TUE)],
+      ITAY,
+      PERSONNEL_WITH_ITAY,
+      [
+        realGuardDuty(TUE), // exact match for the TUE allocation
+        realGuardDuty(THU), // a separate single-day block, only candidate left for SUN after pass 1
+      ],
+    );
+    expect(events).toHaveLength(0);
+  });
+
+  it("a real internal duty parsed as tentative (e.g. a trailing '?') still counts as covering evidence -- unchanged, pre-existing behavior: the internal source is authoritative regardless of its OWN certainty marker", () => {
+    const events = buildPotentialDutyEvents(
+      [guardAllocation(SUN)],
+      ITAY,
+      PERSONNEL_WITH_ITAY,
+      [realGuardDuty(SUN, { certainty: "tentative" })], // exact-date match, but the real Event itself is only tentative
+    );
+    expect(events).toHaveLength(0);
+  });
+});
+
 describe("buildPotentialDutyEventsForRoster — the same per-person conversion, run across a whole roster", () => {
   it("produces one synthetic Event per person whose allocation resolves and isn't already covered", () => {
     const events = buildPotentialDutyEventsForRoster(
