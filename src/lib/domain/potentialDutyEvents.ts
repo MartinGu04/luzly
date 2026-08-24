@@ -93,13 +93,49 @@ export function buildPotentialDutyEvents(
   personnel: readonly Person[],
   personDutyEvents: readonly Event[],
 ): Event[] {
+  return buildPotentialDutyEventsFromPersonAllocations(
+    resolvePersonAllocations(allocations, person.id, personnel),
+    person,
+    personDutyEvents,
+  );
+}
+
+/**
+ * The person-scoping half of `buildPotentialDutyEvents` above, split out so
+ * `buildPotentialDutyEventsForRoster` can run it ONCE for the whole roster
+ * instead of once per person -- see that function's own docs for why this
+ * split exists and what it fixes. Behavior is byte-for-byte identical to
+ * the original inline loop: `scopeManagerPotentialAllocation`'s result
+ * depends only on the allocation's own `sourceAllocationLabel` + the full
+ * `personnel` list, never on which person is asking, so computing it once
+ * per allocation (here) rather than once per `(allocation, person)` pair
+ * changes nothing about which allocations end up attributed to whom.
+ */
+function resolvePersonAllocations(
+  allocations: readonly PotentialAllocation[],
+  personId: string,
+  personnel: readonly Person[],
+): PotentialAllocation[] {
   const personAllocations: PotentialAllocation[] = [];
   for (const allocation of allocations) {
     const scoped = scopeManagerPotentialAllocation(allocation, personnel);
-    if (!scoped || scoped.resolvedSourcePersonId !== person.id) continue;
+    if (!scoped || scoped.resolvedSourcePersonId !== personId) continue;
     personAllocations.push(allocation);
   }
+  return personAllocations;
+}
 
+/**
+ * The rest of `buildPotentialDutyEvents` above, operating on an ALREADY
+ * person-scoped `personAllocations` list (see `resolvePersonAllocations`) --
+ * dedup against real duty Events, then synthesize the still-uncovered ones
+ * into `Event`s. Never re-resolves scoping itself.
+ */
+function buildPotentialDutyEventsFromPersonAllocations(
+  personAllocations: readonly PotentialAllocation[],
+  person: Person,
+  personDutyEvents: readonly Event[],
+): Event[] {
   const covered = resolveCoveredPersonalAllocations(personAllocations, personDutyEvents);
 
   const events: Event[] = [];
@@ -318,14 +354,31 @@ function isSameCalendarWeek(dateA: string, dateB: string): boolean {
 }
 
 /**
- * The same conversion as `buildPotentialDutyEvents`, run once per person in
- * `people` and concatenated -- for a manager-facing, roster-wide projection
- * (e.g. `buildManagerDutyEntries`) that needs every attributed תקשא"ס duty
- * across the whole team, not just one person's own. Deliberately a thin
- * loop over the EXISTING per-person function -- resolution and dedup are
- * never re-implemented here, so a roster-wide caller and a single-person
- * caller (`buildPersonalScheduleReadModel.ts`) can never drift into two
- * different definitions of "attributed" or "already covered."
+ * The same conversion as `buildPotentialDutyEvents`, for EVERY person in
+ * `people` -- for a manager-facing, roster-wide projection (e.g.
+ * `buildManagerDutyEntries`) that needs every attributed תקשא"ס duty across
+ * the whole team, not just one person's own. Dedup (`resolveCoveredPersonalAllocations`)
+ * is still delegated outright, per person, to the EXACT SAME function
+ * `buildPotentialDutyEvents` uses -- never a second/parallel dedup
+ * implementation, so a roster-wide caller and a single-person caller
+ * (`buildPersonalScheduleReadModel.ts`) can never drift into two different
+ * definitions of "already covered."
+ *
+ * Person-SCOPING is the one part that deliberately does NOT loop over
+ * `buildPotentialDutyEvents` per person (an earlier version did, and it was
+ * a real O(roster x allocations) cost -- `scopeManagerPotentialAllocation`
+ * was re-run for every `(allocation, person)` pair, even though its result
+ * depends only on the allocation's own `sourceAllocationLabel` + `people`,
+ * never on which roster member is currently being iterated; verified
+ * against a synthetic ~45-person/~240-allocation dataset, this was ~550ms
+ * of a ~570ms `buildManagerOverviewReadModel` call -- by far its dominant
+ * cost, on every category equally). Instead, every allocation is scoped
+ * exactly ONCE here, in a single pass, grouped by its resolved person id --
+ * `resolvePersonAllocations`'s per-person filtering step is applied here
+ * inline (same condition, same fail-closed `null`/no-match handling), not
+ * re-invoked per person. Each person then only looks up their own
+ * already-resolved bucket before running `buildPotentialDutyEventsFromPersonAllocations`
+ * (the shared post-scoping half) exactly once.
  */
 export function buildPotentialDutyEventsForRoster(
   allocations: readonly PotentialAllocation[],
@@ -339,7 +392,20 @@ export function buildPotentialDutyEventsForRoster(
     else eventsByPerson.set(event.personId, [event]);
   }
 
+  const allocationsByPersonId = new Map<string, PotentialAllocation[]>();
+  for (const allocation of allocations) {
+    const scoped = scopeManagerPotentialAllocation(allocation, people);
+    if (!scoped || scoped.resolvedSourcePersonId === null) continue;
+    const bucket = allocationsByPersonId.get(scoped.resolvedSourcePersonId);
+    if (bucket) bucket.push(allocation);
+    else allocationsByPersonId.set(scoped.resolvedSourcePersonId, [allocation]);
+  }
+
   return people.flatMap((person) =>
-    buildPotentialDutyEvents(allocations, person, people, eventsByPerson.get(person.id) ?? []),
+    buildPotentialDutyEventsFromPersonAllocations(
+      allocationsByPersonId.get(person.id) ?? [],
+      person,
+      eventsByPerson.get(person.id) ?? [],
+    ),
   );
 }
