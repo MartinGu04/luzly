@@ -2,6 +2,7 @@ import "server-only";
 import type { Person } from "@/lib/domain/types";
 import { extractAvatarUrl } from "@/lib/auth/currentUser";
 import { findPersonByEmail } from "@/lib/auth/resolveCurrentPerson";
+import { classifyPersonnelType } from "@/lib/domain/personnelType";
 import { getNotificationServiceClient } from "./serviceClient";
 
 export interface ResolvedRecipient {
@@ -221,5 +222,41 @@ export async function fetchAllAuthUserIds(): Promise<string[]> {
   for (const account of emailToAccount.values()) {
     userIds.add(account.userId);
   }
+  return [...userIds];
+}
+
+/**
+ * The weekly constraints reminders' recipient source (system rules
+ * `constraints_sunday`/`constraints_monday`, `reminders.ts`) -- every
+ * currently-rostered person who is NOT `classifyPersonnelType(...) ===
+ * "permanent"` (קבע), mapped to their real Supabase auth user id.
+ * Permanent staff never submit weekly אילוצים, so they must never
+ * receive either constraints reminder -- see this codebase's own
+ * `classifyPersonnelType` docstring for the exact "קבע"/"חובה"/"מילואים"
+ * classification this reuses (never a raw Hebrew string comparison here).
+ *
+ * Deliberately narrower than the OLD `fetchAllAuthUserIds` source this
+ * replaces in two ways at once: (1) roster-derived, not "every real auth
+ * account" -- an auth account with no כ"א mapping at all can never be
+ * proven non-permanent, so it is correctly excluded (fails CONSERVATIVE,
+ * never accidentally includes an unmappable account); (2) even a mapped,
+ * roster-derived person is excluded when their OWN personnelType resolves
+ * to "permanent". `resolvePersonIdentity`'s existing `no_email`/
+ * `not_found`/`ambiguous`/`unmapped` non-"mapped" states are all treated
+ * identically here -- skip, never guess.
+ */
+export async function resolveNonPermanentConstraintsRecipients(people: readonly Person[]): Promise<string[]> {
+  const emailToAccount = await fetchAllUserIdsByEmail();
+  const userIds = new Set<string>();
+
+  for (const person of people) {
+    if (classifyPersonnelType(person.personnelType) === "permanent") continue;
+
+    const identity = resolvePersonIdentity(person, people, emailToAccount);
+    if (identity.status !== "mapped") continue;
+
+    userIds.add(identity.userId);
+  }
+
   return [...userIds];
 }

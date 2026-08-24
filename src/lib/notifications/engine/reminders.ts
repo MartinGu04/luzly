@@ -11,16 +11,6 @@ import { dutyFamilyLabel, periodLabel } from "@/lib/presentation/labels";
 import { jerusalemLocalTimeToInstant } from "@/lib/time/jerusalemClock";
 import { resolveMotzashShabbatInstant } from "@/lib/time/motzashShabbat";
 import {
-  ALMASH_CHECKIN_REMINDER_TIME,
-  CONSTRAINTS_MONDAY_REMINDER_TIME,
-  CONSTRAINTS_SUNDAY_REMINDER_TIME,
-  LOGISTICS_WITHDRAWAL_NOON_REMINDER_TIME,
-  TOMORROW_DUTY_REMINDER_TIME,
-  TOMORROW_LOGISTICS_WITHDRAWAL_REMINDER_TIME,
-  TOMORROW_SHIFT_REMINDER_TIME,
-  type LocalClockTime,
-} from "@/lib/config/notificationTiming";
-import {
   buildSupervisorAssignedInformedBody,
   buildTeamHelpAssignedBody,
   findLogisticsWithdrawalAssignees,
@@ -29,10 +19,10 @@ import {
   resolveRelevantSupervisors,
 } from "./logisticsCoordination";
 import { isLogisticsWithdrawalEvent } from "./logisticsWithdrawal";
-import { fetchAllAuthUserIds, type RecipientResolution } from "./recipients";
+import { resolveNonPermanentConstraintsRecipients, type RecipientResolution } from "./recipients";
+import type { NotificationRuleConfig } from "./ruleConfig";
 import {
   cancelPendingReminderJob,
-  insertNotificationJobIfAbsent,
   listPendingJobDedupeKeysByPrefix,
   upsertPendingReminderJob,
   type NewNotificationJob,
@@ -56,17 +46,30 @@ export interface RemindersSummary {
   logisticsWithdrawalNoonTeamCancelled: number;
   almashCheckInCancelled: number;
   constraintsJobs: number;
+  constraintsCancelled: number;
 }
 
 export interface RemindersInput {
   events: readonly Event[];
-  /** Needed only by the logistics-withdrawal team-coordination reminders (`isTechnician` eligibility) -- every other reminder in this file is Event-driven alone. */
+  /** Needed only by the logistics-withdrawal team-coordination reminders (`isTechnician` eligibility) and the weekly constraints reminders' own non-permanent recipient resolution -- every other reminder in this file is Event-driven alone. */
   people: readonly Person[];
   shiftSchedule: ShiftSchedule;
   week: OperationalWeek;
   now: LocalNow;
   persist: boolean;
   recipientResolution: RecipientResolution;
+  /**
+   * The Fixed / Recurring Notifications Center's managed configuration --
+   * loaded ONCE per worker tick by the caller (`pipeline.ts`) and passed
+   * down, never re-queried per reminder here. This is the RUNTIME source
+   * of truth for every system rule's enabled/disabled state and local
+   * send time -- `lib/config/notificationTiming.ts`'s constants remain
+   * only as this table's own migration seed values, never consulted here
+   * again. A system rule missing from `ruleConfig.systemRules` (should be
+   * unreachable once the seed migration has run) is treated as disabled
+   * -- fail safe, never fall back to a hardcoded time.
+   */
+  ruleConfig: NotificationRuleConfig;
 }
 
 function formatMinuteAsClock(minute: number): string {
@@ -76,8 +79,8 @@ function formatMinuteAsClock(minute: number): string {
   return `${String(hour).padStart(2, "0")}:${String(remaining).padStart(2, "0")}`;
 }
 
-function toIso(dateStr: string, time: LocalClockTime): string {
-  return jerusalemLocalTimeToInstant(dateStr, time.hour, time.minute).toISOString();
+function toIso(dateStr: string, hour: number, minute: number): string {
+  return jerusalemLocalTimeToInstant(dateStr, hour, minute).toISOString();
 }
 
 /**
@@ -114,7 +117,8 @@ export async function runReminders(input: RemindersInput): Promise<RemindersSumm
     logisticsWithdrawalNoonSupervisorCancelled: logisticsWithdrawalNoon.supervisor.cancelled,
     logisticsWithdrawalNoonTeamCancelled: logisticsWithdrawalNoon.team.cancelled,
     almashCheckInCancelled: almashCheckIn.cancelled,
-    constraintsJobs,
+    constraintsJobs: constraintsJobs.created,
+    constraintsCancelled: constraintsJobs.cancelled,
   };
 }
 
@@ -126,7 +130,10 @@ async function runTomorrowShiftReminders(input: RemindersInput): Promise<{ creat
   const tomorrowDate = nextCalendarDateString(input.now.date);
   if (!tomorrowDate) return { created: 0, cancelled: 0 };
 
-  const scheduledFor = toIso(input.now.date, TOMORROW_SHIFT_REMINDER_TIME);
+  const rule = input.ruleConfig.systemRules.get("tomorrow_shift");
+  if (!rule?.enabled) return applyReminderJobs("tomorrow_shift", tomorrowDate, [], input.persist);
+
+  const scheduledFor = toIso(input.now.date, rule.localHour, rule.localMinute);
   const tomorrowShiftEvents = input.events.filter(
     (event) => event.category === "shift" && event.date === tomorrowDate && !event.shadow,
   );
@@ -177,7 +184,10 @@ async function runTomorrowDutyReminders(input: RemindersInput): Promise<{ create
   const tomorrowDate = nextCalendarDateString(input.now.date);
   if (!tomorrowDate) return { created: 0, cancelled: 0 };
 
-  const scheduledFor = toIso(input.now.date, TOMORROW_DUTY_REMINDER_TIME);
+  const rule = input.ruleConfig.systemRules.get("tomorrow_duty");
+  if (!rule?.enabled) return applyReminderJobs("tomorrow_duty", tomorrowDate, [], input.persist);
+
+  const scheduledFor = toIso(input.now.date, rule.localHour, rule.localMinute);
   const tomorrowDutyEvents = input.events.filter(
     (event) => event.category === "duty" && event.date === tomorrowDate && event.dutyFamily !== null,
   );
@@ -228,7 +238,10 @@ async function runTomorrowLogisticsWithdrawalReminders(
   const tomorrowDate = nextCalendarDateString(input.now.date);
   if (!tomorrowDate) return { created: 0, cancelled: 0 };
 
-  const scheduledFor = toIso(input.now.date, TOMORROW_LOGISTICS_WITHDRAWAL_REMINDER_TIME);
+  const rule = input.ruleConfig.systemRules.get("tomorrow_logistics_withdrawal");
+  if (!rule?.enabled) return applyReminderJobs("tomorrow_logistics_withdrawal", tomorrowDate, [], input.persist);
+
+  const scheduledFor = toIso(input.now.date, rule.localHour, rule.localMinute);
   const tomorrowLogisticsWithdrawalEvents = input.events.filter(
     (event) => event.date === tomorrowDate && isLogisticsWithdrawalEvent(event),
   );
@@ -298,7 +311,12 @@ async function runTomorrowLogisticsWithdrawalSupervisorReminders(
   const tomorrowDate = nextCalendarDateString(input.now.date);
   if (!tomorrowDate) return { created: 0, cancelled: 0 };
 
-  const scheduledFor = toIso(input.now.date, TOMORROW_LOGISTICS_WITHDRAWAL_REMINDER_TIME);
+  const rule = input.ruleConfig.systemRules.get("tomorrow_logistics_withdrawal_supervisor");
+  if (!rule?.enabled) {
+    return applyReminderJobs("tomorrow_logistics_withdrawal_supervisor", tomorrowDate, [], input.persist);
+  }
+
+  const scheduledFor = toIso(input.now.date, rule.localHour, rule.localMinute);
   const assignees = findLogisticsWithdrawalAssignees(input.events, tomorrowDate);
   const assignedPersonIds = new Set(assignees.map((assignee) => assignee.personId));
   const isAssigned = assignees.length > 0;
@@ -364,7 +382,9 @@ interface NoonReminderCategorySummary {
  */
 async function runLogisticsWithdrawalNoonReminders(input: RemindersInput): Promise<NoonReminderCategorySummary> {
   const today = input.now.date;
-  const scheduledFor = toIso(today, LOGISTICS_WITHDRAWAL_NOON_REMINDER_TIME);
+  const assignedRule = input.ruleConfig.systemRules.get("logistics_withdrawal_noon_assigned");
+  const supervisorRule = input.ruleConfig.systemRules.get("logistics_withdrawal_noon_supervisor");
+  const teamRule = input.ruleConfig.systemRules.get("logistics_withdrawal_noon_team");
 
   const assignees = findLogisticsWithdrawalAssignees(input.events, today);
   const assignedPersonIds = new Set(assignees.map((assignee) => assignee.personId));
@@ -376,20 +396,23 @@ async function runLogisticsWithdrawalNoonReminders(input: RemindersInput): Promi
   const participatesToday = isAssigned || isLogisticsWithdrawalFallbackDate(today);
 
   const assignedJobs: NewNotificationJob[] = [];
-  for (const assignee of assignees) {
-    const recipient = input.recipientResolution.resolved.get(assignee.personId);
-    if (!recipient) continue;
-    assignedJobs.push({
-      category: "logistics_withdrawal_noon_assigned",
-      recipientUserId: recipient.userId,
-      title: "📦 משיכות בעוד שעה",
-      body: "היום אתה עושה משיכות בין 13:00–14:00.",
-      path: "/",
-      tag: `logistics-withdrawal-noon-assigned-${today}-${recipient.userId}`,
-      dedupeKey: `logistics_withdrawal_noon_assigned:${today}:${recipient.userId}`,
-      scheduledFor,
-      sourceRef: `logistics_withdrawal:${assignee.personId}:${today}`,
-    });
+  if (assignedRule?.enabled) {
+    const scheduledFor = toIso(today, assignedRule.localHour, assignedRule.localMinute);
+    for (const assignee of assignees) {
+      const recipient = input.recipientResolution.resolved.get(assignee.personId);
+      if (!recipient) continue;
+      assignedJobs.push({
+        category: "logistics_withdrawal_noon_assigned",
+        recipientUserId: recipient.userId,
+        title: "📦 משיכות בעוד שעה",
+        body: "היום אתה עושה משיכות בין 13:00–14:00.",
+        path: "/",
+        tag: `logistics-withdrawal-noon-assigned-${today}-${recipient.userId}`,
+        dedupeKey: `logistics_withdrawal_noon_assigned:${today}:${recipient.userId}`,
+        scheduledFor,
+        sourceRef: `logistics_withdrawal:${assignee.personId}:${today}`,
+      });
+    }
   }
   const assignedResult = await applyReminderJobs(
     "logistics_withdrawal_noon_assigned",
@@ -411,7 +434,8 @@ async function runLogisticsWithdrawalNoonReminders(input: RemindersInput): Promi
       )
     : [];
   const supervisorJobs: NewNotificationJob[] = [];
-  if (!isAssigned) {
+  if (!isAssigned && supervisorRule?.enabled) {
+    const scheduledFor = toIso(today, supervisorRule.localHour, supervisorRule.localMinute);
     for (const supervisor of supervisorCandidates) {
       const recipient = input.recipientResolution.resolved.get(supervisor.personId);
       if (!recipient) continue;
@@ -454,20 +478,23 @@ async function runLogisticsWithdrawalNoonReminders(input: RemindersInput): Promi
       };
 
   const teamJobs: NewNotificationJob[] = [];
-  for (const person of eligibleTechnicians) {
-    const recipient = input.recipientResolution.resolved.get(person.id);
-    if (!recipient) continue;
-    teamJobs.push({
-      category: "logistics_withdrawal_noon_team",
-      recipientUserId: recipient.userId,
-      title: teamTitle,
-      body: teamBody,
-      path: "/",
-      tag: `logistics-withdrawal-noon-team-${today}-${recipient.userId}`,
-      dedupeKey: `logistics_withdrawal_noon_team:${today}:${recipient.userId}`,
-      scheduledFor,
-      sourceRef: `logistics_withdrawal_team:${person.id}:${today}`,
-    });
+  if (teamRule?.enabled) {
+    const scheduledFor = toIso(today, teamRule.localHour, teamRule.localMinute);
+    for (const person of eligibleTechnicians) {
+      const recipient = input.recipientResolution.resolved.get(person.id);
+      if (!recipient) continue;
+      teamJobs.push({
+        category: "logistics_withdrawal_noon_team",
+        recipientUserId: recipient.userId,
+        title: teamTitle,
+        body: teamBody,
+        path: "/",
+        tag: `logistics-withdrawal-noon-team-${today}-${recipient.userId}`,
+        dedupeKey: `logistics_withdrawal_noon_team:${today}:${recipient.userId}`,
+        scheduledFor,
+        sourceRef: `logistics_withdrawal_team:${person.id}:${today}`,
+      });
+    }
   }
   const teamResult = await applyReminderJobs("logistics_withdrawal_noon_team", today, teamJobs, input.persist);
 
@@ -514,10 +541,17 @@ async function runAlmashCheckInReminders(input: RemindersInput): Promise<{ creat
   const todayParsed = parseCalendarDate(today);
   if (!todayParsed) return { created: 0, cancelled: 0 };
 
+  const rule = input.ruleConfig.systemRules.get("almash_check_in");
+  if (!rule?.enabled) return applyReminderJobs("almash_check_in", today, [], input.persist);
+
   const isSaturday = dayOfWeek(todayParsed) === 6;
+  // Saturday always uses the real astronomical מוצ״ש instant -- protected
+  // domain behavior, never the manager-configured hour/minute (13:00/12:45
+  // are never reachable/relevant on a Saturday). Sunday-Friday uses the
+  // rule's own configured local send time.
   const scheduledFor = isSaturday
     ? resolveMotzashShabbatInstant(today)?.toISOString()
-    : toIso(today, ALMASH_CHECKIN_REMINDER_TIME);
+    : toIso(today, rule.localHour, rule.localMinute);
   if (!scheduledFor) return { created: 0, cancelled: 0 };
 
   const dutyBlocks = buildDutyBlocks(input.events);
@@ -569,7 +603,9 @@ type ReminderCategory =
   | "logistics_withdrawal_noon_assigned"
   | "logistics_withdrawal_noon_supervisor"
   | "logistics_withdrawal_noon_team"
-  | "almash_check_in";
+  | "almash_check_in"
+  | "constraints_sunday"
+  | "constraints_monday";
 
 /**
  * Shared upsert-or-cancel application for every time-based reminder
@@ -615,59 +651,60 @@ async function applyReminderJobs(
 // Weekly constraints reminders (spec section 18)
 // ---------------------------------------------------------------------------
 
-async function runConstraintsReminders(input: RemindersInput): Promise<number> {
+async function runConstraintsReminders(input: RemindersInput): Promise<{ created: number; cancelled: number }> {
   const today = parseCalendarDate(input.now.date);
-  if (!today) return 0;
+  if (!today) return { created: 0, cancelled: 0 };
 
   const weekday = dayOfWeek(today);
-  let jobs: NewNotificationJob[] = [];
 
   if (weekday === 0) {
-    jobs = await buildConstraintsJobs(input, "constraints_sunday", CONSTRAINTS_SUNDAY_REMINDER_TIME, {
+    return buildAndApplyConstraintsJobs(input, "constraints_sunday", {
       title: "📌 תזכורת לאילוצים",
       body: "יש אילוץ לשבוע הבא? אפשר לשלוח עד מחר.",
     });
-  } else if (weekday === 1) {
-    jobs = await buildConstraintsJobs(input, "constraints_monday", CONSTRAINTS_MONDAY_REMINDER_TIME, {
+  }
+  if (weekday === 1) {
+    return buildAndApplyConstraintsJobs(input, "constraints_monday", {
       title: "⏳ היום האחרון לאילוצים",
       body: "אפשר לשלוח אילוצים לשבוע הבא עד סוף היום.",
     });
-  } else {
-    return 0;
   }
 
-  if (!input.persist) return jobs.length;
-
-  let created = 0;
-  for (const job of jobs) {
-    const inserted = await insertNotificationJobIfAbsent(job);
-    if (inserted) created++;
-  }
-  return created;
+  return { created: 0, cancelled: 0 };
 }
 
 /**
- * Recipient source is EVERY real auth account (`fetchAllAuthUserIds`) --
- * account-wide by product intent, same as before, but no longer gated on
- * push-subscription state (that was the constraints-reminder exception
- * to the "Push is a delivery channel, not inbox eligibility" invariant
- * every other category already follows -- a user with Push disabled must
- * still see this in their Notification Center; `runDelivery` already
- * correctly no-ops Push for a recipient with zero subscriptions without
- * affecting the job/inbox item itself). Deliberately still NEVER filtered
- * through כ"א/roster/email mapping -- that would narrow the audience,
- * not just its delivery channel, which is a different, unrequested change.
+ * Recipient source is every CURRENTLY-ROSTERED person who is NOT
+ * `classifyPersonnelType(...) === "permanent"` (קבע), mapped to their
+ * real Supabase auth user id (`resolveNonPermanentConstraintsRecipients`)
+ * -- permanent staff never submit weekly אילוצים and must never receive
+ * either constraints reminder. This REPLACES the previous "every real
+ * auth account" source: an auth account that cannot be proven non-
+ * permanent (no כ"א mapping at all) is correctly excluded, never
+ * accidentally included (fail conservative, see that function's own
+ * docstring). Deliberately still not gated on push-subscription state --
+ * a user with Push disabled must still see this in their Notification
+ * Center; `runDelivery` already correctly no-ops Push for a recipient
+ * with zero subscriptions without affecting the job/inbox item itself.
+ *
+ * Uses the SAME upsert-or-cancel-by-prefix model (`applyReminderJobs`)
+ * every other system rule uses -- so disabling the rule mid-day cancels
+ * an already-upserted pending job, and changing its send time before
+ * send safely re-upserts the SAME job at the new time rather than
+ * creating a duplicate.
  */
-async function buildConstraintsJobs(
+async function buildAndApplyConstraintsJobs(
   input: RemindersInput,
   category: "constraints_sunday" | "constraints_monday",
-  time: LocalClockTime,
   copy: { title: string; body: string },
-): Promise<NewNotificationJob[]> {
-  const userIds = await fetchAllAuthUserIds();
-  const scheduledFor = toIso(input.now.date, time);
+): Promise<{ created: number; cancelled: number }> {
+  const rule = input.ruleConfig.systemRules.get(category);
+  if (!rule?.enabled) return applyReminderJobs(category, input.week.weekStart, [], input.persist);
 
-  return userIds.map((userId) => ({
+  const userIds = await resolveNonPermanentConstraintsRecipients(input.people);
+  const scheduledFor = toIso(input.now.date, rule.localHour, rule.localMinute);
+
+  const validJobs: NewNotificationJob[] = userIds.map((userId) => ({
     category,
     recipientUserId: userId,
     title: copy.title,
@@ -678,4 +715,6 @@ async function buildConstraintsJobs(
     scheduledFor,
     sourceRef: `constraints:${input.week.weekStart}`,
   }));
+
+  return applyReminderJobs(category, input.week.weekStart, validJobs, input.persist);
 }

@@ -6,6 +6,7 @@ import type { LocalNow } from "@/lib/domain/localNow";
 import { jerusalemLocalTimeToInstant } from "@/lib/time/jerusalemClock";
 import { resolveMotzashShabbatInstant } from "@/lib/time/motzashShabbat";
 import type { RecipientResolution } from "./recipients";
+import type { NotificationRuleConfig, SystemRuleConfig, SystemRuleKey } from "./ruleConfig";
 
 function event(overrides: Partial<Event> & Pick<Event, "personId" | "date" | "category">): Event {
   return {
@@ -38,20 +39,101 @@ const store = {
 };
 
 const fetchAllSubscribedUserIds = vi.fn(async () => [] as string[]);
-const fetchAllAuthUserIds = vi.fn(async () => [] as string[]);
+// `resolveNonPermanentConstraintsRecipients` is the mock boundary here
+// (not its own internal `fetchAllUserIdsByEmail` dependency) -- both are
+// defined in the SAME `./recipients` module, and a same-module internal
+// call is bound to the real function at module-evaluation time
+// regardless of any `vi.doMock` override of the exported reference (a
+// plain JS/ESM closure fact, not a mocking bug). See `recipients.test.ts`
+// for `resolveNonPermanentConstraintsRecipients`'s own real-classification
+// tests (mocked at the `./serviceClient` I/O boundary instead, where
+// interception genuinely works).
+const resolveNonPermanentConstraintsRecipients = vi.fn(async () => [] as string[]);
 
 afterEach(() => {
   vi.clearAllMocks();
   vi.resetModules();
 });
 
+/**
+ * Every system rule enabled, at its CURRENT production seed time
+ * (`notificationTiming.ts`'s former constants, now this table's own
+ * migration seed values) -- the default a test gets unless it explicitly
+ * overrides a specific rule. `overrides` merges shallowly per system key
+ * (e.g. `{ tomorrow_shift: { enabled: false } }`).
+ */
+function defaultRuleConfig(
+  overrides: Partial<Record<SystemRuleKey, Partial<SystemRuleConfig>>> = {},
+  customWeeklyRules: NotificationRuleConfig["customWeeklyRules"] = [],
+): NotificationRuleConfig {
+  const base: Record<SystemRuleKey, SystemRuleConfig> = {
+    tomorrow_shift: { id: "rule-tomorrow_shift", systemKey: "tomorrow_shift", enabled: true, localHour: 20, localMinute: 0 },
+    tomorrow_duty: { id: "rule-tomorrow_duty", systemKey: "tomorrow_duty", enabled: true, localHour: 20, localMinute: 0 },
+    tomorrow_logistics_withdrawal: {
+      id: "rule-tomorrow_logistics_withdrawal",
+      systemKey: "tomorrow_logistics_withdrawal",
+      enabled: true,
+      localHour: 20,
+      localMinute: 0,
+    },
+    tomorrow_logistics_withdrawal_supervisor: {
+      id: "rule-tomorrow_logistics_withdrawal_supervisor",
+      systemKey: "tomorrow_logistics_withdrawal_supervisor",
+      enabled: true,
+      localHour: 20,
+      localMinute: 0,
+    },
+    logistics_withdrawal_noon_assigned: {
+      id: "rule-logistics_withdrawal_noon_assigned",
+      systemKey: "logistics_withdrawal_noon_assigned",
+      enabled: true,
+      localHour: 12,
+      localMinute: 0,
+    },
+    logistics_withdrawal_noon_supervisor: {
+      id: "rule-logistics_withdrawal_noon_supervisor",
+      systemKey: "logistics_withdrawal_noon_supervisor",
+      enabled: true,
+      localHour: 12,
+      localMinute: 0,
+    },
+    logistics_withdrawal_noon_team: {
+      id: "rule-logistics_withdrawal_noon_team",
+      systemKey: "logistics_withdrawal_noon_team",
+      enabled: true,
+      localHour: 12,
+      localMinute: 0,
+    },
+    almash_check_in: { id: "rule-almash_check_in", systemKey: "almash_check_in", enabled: true, localHour: 12, localMinute: 45 },
+    constraints_sunday: { id: "rule-constraints_sunday", systemKey: "constraints_sunday", enabled: true, localHour: 18, localMinute: 0 },
+    constraints_monday: { id: "rule-constraints_monday", systemKey: "constraints_monday", enabled: true, localHour: 9, localMinute: 0 },
+  };
+
+  for (const [key, patch] of Object.entries(overrides)) {
+    base[key as SystemRuleKey] = { ...base[key as SystemRuleKey], ...patch };
+  }
+
+  return { systemRules: new Map(Object.entries(base)) as Map<SystemRuleKey, SystemRuleConfig>, customWeeklyRules };
+}
+
 async function loadModule() {
   vi.doMock("./store", () => store);
   vi.doMock("./recipients", async (importOriginal) => {
     const actual = await importOriginal<typeof import("./recipients")>();
-    return { ...actual, fetchAllSubscribedUserIds, fetchAllAuthUserIds };
+    return { ...actual, fetchAllSubscribedUserIds, resolveNonPermanentConstraintsRecipients };
   });
-  return import("./reminders");
+  const mod = await import("./reminders");
+
+  // Every pre-existing call site in this file omits `ruleConfig` -- this
+  // wrapper injects the default (all system rules enabled, seed times)
+  // unless the test explicitly passes its own `ruleConfig`, so the huge
+  // majority of tests below (unrelated to the Fixed Notifications Center
+  // itself) never had to be touched by that feature's addition.
+  return {
+    ...mod,
+    runReminders: (input: Omit<Parameters<typeof mod.runReminders>[0], "ruleConfig"> & { ruleConfig?: NotificationRuleConfig }) =>
+      mod.runReminders({ ruleConfig: defaultRuleConfig(), ...input }),
+  };
 }
 
 function resolutionWith(personId: string, userId: string): RecipientResolution {
@@ -400,9 +482,16 @@ describe("runReminders -- tomorrow logistics-withdrawal reminder (משיכות �
   });
 });
 
+const emptyRecipientResolution: RecipientResolution = {
+  resolved: new Map(),
+  unmappedCount: 0,
+  ambiguousEmailCount: 0,
+  noEmailCount: 0,
+};
+
 describe("runReminders -- weekly constraints reminders", () => {
-  it("creates a Sunday reminder for every real auth account, only on Sunday", async () => {
-    fetchAllAuthUserIds.mockResolvedValue(["user-a", "user-b"]);
+  it("creates a Sunday reminder for every id resolveNonPermanentConstraintsRecipients returns, only on Sunday", async () => {
+    resolveNonPermanentConstraintsRecipients.mockResolvedValue(["user-a", "user-b"]);
     const { runReminders } = await loadModule();
     const now: LocalNow = { date: "2026-08-16", minuteOfDay: 1080 }; // Sunday
     const week = getOperationalWeek(now);
@@ -414,17 +503,17 @@ describe("runReminders -- weekly constraints reminders", () => {
       week,
       now,
       persist: true,
-      recipientResolution: { resolved: new Map(), unmappedCount: 0, ambiguousEmailCount: 0, noEmailCount: 0 },
+      recipientResolution: emptyRecipientResolution,
     });
 
     expect(summary.constraintsJobs).toBe(2);
-    expect(store.insertNotificationJobIfAbsent).toHaveBeenCalledWith(
+    expect(store.upsertPendingReminderJob).toHaveBeenCalledWith(
       expect.objectContaining({ category: "constraints_sunday", dedupeKey: `constraints_sunday:${week.weekStart}:user-a` }),
     );
   });
 
   it("creates a Monday reminder, and never on any other weekday", async () => {
-    fetchAllAuthUserIds.mockResolvedValue(["user-a"]);
+    resolveNonPermanentConstraintsRecipients.mockResolvedValue(["user-a"]);
     const { runReminders } = await loadModule();
     const now: LocalNow = { date: "2026-08-17", minuteOfDay: 600 }; // Monday
     const week = getOperationalWeek(now);
@@ -436,14 +525,14 @@ describe("runReminders -- weekly constraints reminders", () => {
       week,
       now,
       persist: true,
-      recipientResolution: { resolved: new Map(), unmappedCount: 0, ambiguousEmailCount: 0, noEmailCount: 0 },
+      recipientResolution: emptyRecipientResolution,
     });
 
     expect(summary.constraintsJobs).toBe(1);
   });
 
   it("creates no constraints jobs on a Tuesday", async () => {
-    fetchAllAuthUserIds.mockResolvedValue(["user-a"]);
+    resolveNonPermanentConstraintsRecipients.mockResolvedValue(["user-a"]);
     const { runReminders } = await loadModule();
     const now: LocalNow = { date: "2026-08-18", minuteOfDay: 600 }; // Tuesday
     const week = getOperationalWeek(now);
@@ -455,15 +544,15 @@ describe("runReminders -- weekly constraints reminders", () => {
       week,
       now,
       persist: true,
-      recipientResolution: { resolved: new Map(), unmappedCount: 0, ambiguousEmailCount: 0, noEmailCount: 0 },
+      recipientResolution: emptyRecipientResolution,
     });
 
     expect(summary.constraintsJobs).toBe(0);
-    expect(fetchAllAuthUserIds).not.toHaveBeenCalled();
+    expect(resolveNonPermanentConstraintsRecipients).not.toHaveBeenCalled();
   });
 
   it("Sunday/Monday titles, bodies, timing, and path are unchanged by the audience-source fix", async () => {
-    fetchAllAuthUserIds.mockResolvedValue(["user-a"]);
+    resolveNonPermanentConstraintsRecipients.mockResolvedValue(["user-a"]);
     let { runReminders } = await loadModule();
     let now: LocalNow = { date: "2026-08-16", minuteOfDay: 1080 }; // Sunday
     let week = getOperationalWeek(now);
@@ -475,10 +564,10 @@ describe("runReminders -- weekly constraints reminders", () => {
       week,
       now,
       persist: true,
-      recipientResolution: { resolved: new Map(), unmappedCount: 0, ambiguousEmailCount: 0, noEmailCount: 0 },
+      recipientResolution: emptyRecipientResolution,
     });
 
-    expect(store.insertNotificationJobIfAbsent).toHaveBeenCalledWith(
+    expect(store.upsertPendingReminderJob).toHaveBeenCalledWith(
       expect.objectContaining({
         title: "📌 תזכורת לאילוצים",
         body: "יש אילוץ לשבוע הבא? אפשר לשלוח עד מחר.",
@@ -487,8 +576,8 @@ describe("runReminders -- weekly constraints reminders", () => {
       }),
     );
 
-    store.insertNotificationJobIfAbsent.mockClear();
-    fetchAllAuthUserIds.mockResolvedValue(["user-a"]);
+    store.upsertPendingReminderJob.mockClear();
+    resolveNonPermanentConstraintsRecipients.mockResolvedValue(["user-a"]);
     ({ runReminders } = await loadModule());
     now = { date: "2026-08-17", minuteOfDay: 600 }; // Monday
     week = getOperationalWeek(now);
@@ -500,10 +589,10 @@ describe("runReminders -- weekly constraints reminders", () => {
       week,
       now,
       persist: true,
-      recipientResolution: { resolved: new Map(), unmappedCount: 0, ambiguousEmailCount: 0, noEmailCount: 0 },
+      recipientResolution: emptyRecipientResolution,
     });
 
-    expect(store.insertNotificationJobIfAbsent).toHaveBeenCalledWith(
+    expect(store.upsertPendingReminderJob).toHaveBeenCalledWith(
       expect.objectContaining({
         title: "⏳ היום האחרון לאילוצים",
         body: "אפשר לשלוח אילוצים לשבוע הבא עד סוף היום.",
@@ -514,7 +603,7 @@ describe("runReminders -- weekly constraints reminders", () => {
   });
 
   it("never queries push-subscription state for recipient targeting -- fetchAllSubscribedUserIds is untouched by this category", async () => {
-    fetchAllAuthUserIds.mockResolvedValue(["user-a"]);
+    resolveNonPermanentConstraintsRecipients.mockResolvedValue(["user-a"]);
     const { runReminders } = await loadModule();
     const now: LocalNow = { date: "2026-08-16", minuteOfDay: 1080 }; // Sunday
     const week = getOperationalWeek(now);
@@ -526,10 +615,176 @@ describe("runReminders -- weekly constraints reminders", () => {
       week,
       now,
       persist: true,
-      recipientResolution: { resolved: new Map(), unmappedCount: 0, ambiguousEmailCount: 0, noEmailCount: 0 },
+      recipientResolution: emptyRecipientResolution,
     });
 
     expect(fetchAllSubscribedUserIds).not.toHaveBeenCalled();
+  });
+
+  it("passes the reminder's OWN `people` roster through to resolveNonPermanentConstraintsRecipients -- the recipient source the mandatory permanent-exclusion fix depends on (see recipients.test.ts for the real classification behavior)", async () => {
+    resolveNonPermanentConstraintsRecipients.mockResolvedValue([]);
+    const { runReminders } = await loadModule();
+    const now: LocalNow = { date: "2026-08-16", minuteOfDay: 1080 }; // Sunday
+    const week = getOperationalWeek(now);
+    const people = [person("p_a", { personnelType: "חובה" })];
+
+    await runReminders({
+      events: [],
+      people,
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: emptyRecipientResolution,
+    });
+
+    expect(resolveNonPermanentConstraintsRecipients).toHaveBeenCalledWith(people);
+  });
+});
+
+describe("runReminders -- system rule config (Fixed Notifications Center)", () => {
+  it("a disabled system rule creates no new jobs and cancels its pending unsent job", async () => {
+    store.listPendingJobDedupeKeysByPrefix.mockResolvedValue(["tomorrow_shift:2026-08-19:user-p1:day"]);
+    const { runReminders } = await loadModule();
+    const now: LocalNow = { date: "2026-08-18", minuteOfDay: 1200 };
+    const week = getOperationalWeek(now);
+
+    const summary = await runReminders({
+      events: [event({ personId: "p1", date: "2026-08-19", category: "shift", period: "day" })],
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: resolutionWith("p1", "user-p1"),
+      ruleConfig: defaultRuleConfig({ tomorrow_shift: { enabled: false } }),
+    });
+
+    expect(summary.tomorrowShiftJobs).toBe(0);
+    expect(store.upsertPendingReminderJob).not.toHaveBeenCalled();
+    expect(store.cancelPendingReminderJob).toHaveBeenCalledWith("tomorrow_shift:2026-08-19:user-p1:day");
+  });
+
+  it("re-enabling a system rule resumes normal dispatch", async () => {
+    store.listPendingJobDedupeKeysByPrefix.mockResolvedValue([]);
+    const { runReminders } = await loadModule();
+    const now: LocalNow = { date: "2026-08-18", minuteOfDay: 1200 };
+    const week = getOperationalWeek(now);
+
+    const summary = await runReminders({
+      events: [event({ personId: "p1", date: "2026-08-19", category: "shift", period: "day" })],
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: resolutionWith("p1", "user-p1"),
+      ruleConfig: defaultRuleConfig({ tomorrow_shift: { enabled: true } }),
+    });
+
+    expect(summary.tomorrowShiftJobs).toBe(1);
+    expect(store.upsertPendingReminderJob).toHaveBeenCalledWith(
+      expect.objectContaining({ category: "tomorrow_shift", dedupeKey: "tomorrow_shift:2026-08-19:user-p1:day" }),
+    );
+  });
+
+  it("a changed send time re-upserts the SAME pending job at the new time -- never a duplicate", async () => {
+    // Only tomorrow_shift's own prefix has a stale key -- every OTHER
+    // category's own `listPendingJobDedupeKeysByPrefix` call (this single
+    // `runReminders` invocation runs every category) must see none of
+    // its own, or this test's `.not.toHaveBeenCalledWith` assertion below
+    // would trip on an unrelated category's cancellation instead.
+    store.listPendingJobDedupeKeysByPrefix.mockImplementation(async (prefix: string) =>
+      prefix === "tomorrow_shift:2026-08-19:" ? ["tomorrow_shift:2026-08-19:user-p1:day"] : [],
+    );
+    const { runReminders } = await loadModule();
+    const now: LocalNow = { date: "2026-08-18", minuteOfDay: 1200 };
+    const week = getOperationalWeek(now);
+
+    await runReminders({
+      events: [event({ personId: "p1", date: "2026-08-19", category: "shift", period: "day" })],
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: resolutionWith("p1", "user-p1"),
+      ruleConfig: defaultRuleConfig({ tomorrow_shift: { localHour: 19, localMinute: 30 } }),
+    });
+
+    expect(store.upsertPendingReminderJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dedupeKey: "tomorrow_shift:2026-08-19:user-p1:day",
+        scheduledFor: jerusalemLocalTimeToInstant("2026-08-18", 19, 30).toISOString(),
+      }),
+    );
+    // The SAME dedupe key, not a second job -- `cancelPendingReminderJob`
+    // is never called for it (the still-pending row was upserted in
+    // place, not cancelled-and-recreated).
+    expect(store.cancelPendingReminderJob).not.toHaveBeenCalledWith("tomorrow_shift:2026-08-19:user-p1:day");
+  });
+
+  it("a system rule missing from the loaded config is treated as disabled -- fail safe, never a hardcoded fallback time", async () => {
+    store.listPendingJobDedupeKeysByPrefix.mockResolvedValue([]);
+    const { runReminders } = await loadModule();
+    const now: LocalNow = { date: "2026-08-18", minuteOfDay: 1200 };
+    const week = getOperationalWeek(now);
+
+    const emptyConfig: NotificationRuleConfig = { systemRules: new Map(), customWeeklyRules: [] };
+    const summary = await runReminders({
+      events: [event({ personId: "p1", date: "2026-08-19", category: "shift", period: "day" })],
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: resolutionWith("p1", "user-p1"),
+      ruleConfig: emptyConfig,
+    });
+
+    expect(summary.tomorrowShiftJobs).toBe(0);
+    expect(store.upsertPendingReminderJob).not.toHaveBeenCalled();
+  });
+
+  it("disabling constraints_sunday cancels its own pending unsent job", async () => {
+    store.listPendingJobDedupeKeysByPrefix.mockResolvedValue([]);
+    resolveNonPermanentConstraintsRecipients.mockResolvedValue(["user-a"]);
+    const now: LocalNow = { date: "2026-08-16", minuteOfDay: 1080 }; // Sunday
+    const week = getOperationalWeek(now);
+
+    // First tick: rule enabled, job upserted (pending).
+    let { runReminders } = await loadModule();
+    await runReminders({
+      events: [],
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: emptyRecipientResolution,
+    });
+    expect(store.upsertPendingReminderJob).toHaveBeenCalledWith(
+      expect.objectContaining({ dedupeKey: `constraints_sunday:${week.weekStart}:user-a` }),
+    );
+
+    // Second tick (same Sunday), manager disables the rule -- the
+    // still-pending job for this week must now be cancelled.
+    store.listPendingJobDedupeKeysByPrefix.mockResolvedValue([`constraints_sunday:${week.weekStart}:user-a`]);
+    resolveNonPermanentConstraintsRecipients.mockResolvedValue(["user-a"]);
+    ({ runReminders } = await loadModule());
+    const summary = await runReminders({
+      events: [],
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: emptyRecipientResolution,
+      ruleConfig: defaultRuleConfig({ constraints_sunday: { enabled: false } }),
+    });
+
+    expect(summary.constraintsJobs).toBe(0);
+    expect(store.cancelPendingReminderJob).toHaveBeenCalledWith(`constraints_sunday:${week.weekStart}:user-a`);
   });
 });
 

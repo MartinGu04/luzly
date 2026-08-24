@@ -61,13 +61,48 @@ implements; this file is the module map.
   handles.
 - `changeDetection.ts` -- baseline init/rollover (silent, spec section
   9), diff, debounce settle, and manager-only coverage-gap gating.
+- `ruleConfig.ts` -- the Fixed / Recurring Notifications Center's typed
+  read boundary. `loadNotificationRuleConfig()` loads every active
+  `notification_rules` row ONCE per worker tick and shapes it into
+  `NotificationRuleConfig` (a `SystemRuleKey`-keyed map of system rules'
+  own enabled/local-time config, plus the list of active custom weekly
+  rules) -- never queried per reminder/person. Throws on failure rather
+  than silently falling back to a hardcoded default; see `pipeline.ts`/
+  `scheduledWorker.ts` for how each worker isolates that failure.
+- `recurringRuleDispatch.ts` -- manager-created weekly recurring rules
+  (`kind = 'custom_weekly'`, V1: one weekday + one local time per rule).
+  `findDueCustomWeeklyOccurrences` is a cheap, read-only due-check
+  (today's weekday/time match, not already dispatched); `runDueCustomWeeklyRuleDispatch`
+  resolves the audience FRESH against the CURRENT roster on every
+  occurrence (never a frozen one-time-broadcast-style snapshot) and
+  dispatches through the EXACT SAME `manager_notification_batches`/
+  `notification_jobs` pipeline `manualBroadcast.ts`/`scheduledBroadcast.ts`
+  already use -- never a second delivery mechanism. Occurrence identity
+  (and therefore at-most-once dispatch, safe under overlapping workers)
+  is the batch's own `idempotency_key = "recurring:<ruleId>:<localDate>"`,
+  reusing the SAME idempotent-insert + idempotent-job-creation machinery
+  every other manager broadcast already relies on -- no separate
+  occurrence table. Piggybacks on the SAME once-a-minute worker that
+  already dispatches one-time scheduled broadcasts (`scheduledWorker.ts`),
+  never a second cron; `pipeline.ts`'s 5-minute tick is the same kind of
+  deliberate fallback it already is for scheduled broadcasts.
 - `reminders.ts` -- tomorrow shift/duty/logistics-withdrawal reminders
   (cross week boundaries, upsert-or-cancel semantics -- a moved
   assignment cancels the old recipient's job and creates the new
   recipient's, since dedupe_key includes the resolved user id) and
-  weekly constraints reminders (every real auth account, account-wide by
-  product intent -- `fetchAllAuthUserIds`, never gated on push-
-  subscription state or כ"א/roster mapping -- Sunday/Monday only). Also
+  weekly constraints reminders (Sunday/Monday only, recipient source is
+  every CURRENTLY-ROSTERED person who is NOT
+  `classifyPersonnelType(...) === "permanent"`, mapped to a real auth
+  user id via `resolveNonPermanentConstraintsRecipients` -- permanent
+  (קבע) staff never receive either constraints reminder; an account that
+  can't be proven non-permanent is excluded, never accidentally
+  included). Every one of these ten categories' enabled/disabled state
+  and local send time now comes from `ruleConfig.ts`'s
+  `NotificationRuleConfig` (the Fixed Notifications Center's own managed
+  configuration, loaded once per tick and passed in as `RemindersInput.ruleConfig`)
+  -- never a hardcoded constant; a disabled rule upserts zero jobs this
+  tick, which lets the SAME upsert-or-cancel-by-prefix sweep below
+  cancel its own already-pending job. Also
   the logistics-withdrawal team-coordination reminders built
   on `logisticsCoordination.ts`: a day-before (20:00) supervisor
   notification (informed of the assignee, or an anti-spam-only warning
@@ -94,36 +129,50 @@ implements; this file is the module map.
 - `pipeline.ts` -- the top-level orchestrator
   (`runNotificationWorkerTick(mode)`). `mode: "dry_run"` computes the
   same summary shape while skipping every mutating store call and the
-  entire delivery phase; `mode: "send"` is the real path. Also runs
-  manager scheduled-broadcast dispatch as a FALLBACK -- see below.
+  entire delivery phase; `mode: "send"` is the real path. Loads
+  `ruleConfig.ts`'s rule config and runs `reminders.ts` inside their own
+  isolated try/catch -- a rule-config/reminders failure never blocks
+  scheduled-broadcast or recurring-rule dispatch/delivery below in the
+  SAME tick. Also runs manager scheduled-broadcast dispatch AND custom
+  weekly recurring rule dispatch as FALLBACKs -- see below.
 - `scheduledWorker.ts` -- the minute-level-precision follow-up's own
   orchestrator (`runScheduledBroadcastWorkerTick()`), driving
   `POST /internal/notifications/scheduled`, Supabase Cron's once-a-minute
-  job. Has TWO jobs: dispatching due scheduled broadcasts, AND acting as
-  the <=1-minute fallback for any already-due `notification_job` that
+  job. Has THREE jobs: dispatching due scheduled broadcasts, dispatching
+  due custom weekly recurring rules (`recurringRuleDispatch.ts` -- the
+  Fixed Notifications Center's own manager-created rules, reusing this
+  SAME minute worker rather than a second cron), AND acting as the
+  <=1-minute fallback for any already-due `notification_job` that
   wasn't picked up yet (chiefly a manual "Send Now" broadcast whose own
   best-effort immediate `after()` delivery kick -- see
   `manualBroadcastActions.ts` -- never ran or failed). A cheap Supabase
-  pre-check first, considering BOTH kinds of work in parallel
-  (`peekAnyManagerScheduledBroadcastWorkDue` and `peekDueJobsCount`, both
-  in `store.ts`) -- on a genuinely quiet minute (both zero) this returns
-  immediately with NO Google/workbook read, no dispatch, no delivery at
-  all. When there are due jobs but no due/recoverable scheduled
-  broadcast, it skips the personnel read and dispatch entirely and calls
-  `runDelivery()` directly. Only when a due/recoverable scheduled
-  broadcast exists does it do a personnel-ONLY fresh read (`freshRead.ts`'s
+  pre-check first, considering ALL THREE kinds of work in parallel
+  (`peekAnyManagerScheduledBroadcastWorkDue`, `peekDueJobsCount`, and a
+  rule-config load + `findDueCustomWeeklyOccurrences`, the last pair
+  isolated in its own try/catch so a rule-config failure can never take
+  down this worker's scheduled-broadcast/due-job responsibilities) -- on
+  a genuinely quiet minute (all three empty) this returns immediately
+  with NO Google/workbook read, no dispatch, no delivery at all. When
+  there are due jobs but no due/recoverable scheduled broadcast or
+  recurring occurrence, it skips the personnel read and dispatch
+  entirely and calls `runDelivery()` directly. Only when a due/
+  recoverable scheduled broadcast or recurring occurrence exists does it
+  do a personnel-ONLY fresh read (`freshRead.ts`'s
   `fetchFreshPersonnelRead`), then the EXACT SAME
   `runDueScheduledBroadcastDispatch`/`dispatchScheduledBroadcast`
-  (`scheduledBroadcast.ts`) PR #79 built, then `runDelivery()` in the
-  SAME invocation so a freshly-dispatched job doesn't wait for a separate
+  (`scheduledBroadcast.ts`) PR #79 built and/or `runDueCustomWeeklyRuleDispatch`
+  (`recurringRuleDispatch.ts`), then `runDelivery()` in the SAME
+  invocation so a freshly-dispatched job doesn't wait for a separate
   delivery pass. This is the PRIMARY, minute-precision owner of
-  scheduled-broadcast dispatch AND the primary <=1-minute fallback for
-  stranded due jobs; `pipeline.ts`'s main 5-minute tick ALSO still calls
-  `runDueScheduledBroadcastDispatch`/`runDelivery()`, as a deliberate
-  final fallback in case this worker's manually-configured Cron job is
-  ever missing, disabled, or broken -- two independently-scheduled
-  callers of the same claim functions are safe by construction (see
-  `runDueScheduledBroadcastDispatch`'s own doc comment: it claims and
+  scheduled-broadcast dispatch, custom weekly recurring rule dispatch,
+  AND the primary <=1-minute fallback for stranded due jobs;
+  `pipeline.ts`'s main 5-minute tick ALSO still calls
+  `runDueScheduledBroadcastDispatch`/`runDueCustomWeeklyRuleDispatch`/
+  `runDelivery()`, as a deliberate final fallback in case this worker's
+  manually-configured Cron job is ever missing, disabled, or broken --
+  independently-scheduled callers of the same claim functions are safe
+  by construction (see `runDueScheduledBroadcastDispatch`'s own doc
+  comment: it claims and
   dispatches ONE row at a time, so `claim_due_manager_scheduled_broadcasts`'s
   uniform `claimed_at`-vs-90-second-lease eligibility is always what a
   row's lease is actually measured against, never a stale bulk-claim

@@ -5,6 +5,9 @@ const peekDueJobsCount = vi.fn();
 const fetchFreshPersonnelRead = vi.fn();
 const runDueScheduledBroadcastDispatch = vi.fn();
 const runDelivery = vi.fn();
+const loadNotificationRuleConfig = vi.fn();
+const findDueCustomWeeklyOccurrences = vi.fn();
+const runDueCustomWeeklyRuleDispatch = vi.fn();
 
 vi.mock("./store", () => ({
   peekAnyManagerScheduledBroadcastWorkDue: (...args: unknown[]) => peekAnyManagerScheduledBroadcastWorkDue(...args),
@@ -17,6 +20,11 @@ vi.mock("./scheduledBroadcast", () => ({
   runDueScheduledBroadcastDispatch: (...args: unknown[]) => runDueScheduledBroadcastDispatch(...args),
 }));
 vi.mock("./delivery", () => ({ runDelivery: (...args: unknown[]) => runDelivery(...args) }));
+vi.mock("./ruleConfig", () => ({ loadNotificationRuleConfig: (...args: unknown[]) => loadNotificationRuleConfig(...args) }));
+vi.mock("./recurringRuleDispatch", () => ({
+  findDueCustomWeeklyOccurrences: (...args: unknown[]) => findDueCustomWeeklyOccurrences(...args),
+  runDueCustomWeeklyRuleDispatch: (...args: unknown[]) => runDueCustomWeeklyRuleDispatch(...args),
+}));
 
 async function loadModule() {
   return import("./scheduledWorker");
@@ -36,13 +44,21 @@ const ZERO_DELIVERY_SUMMARY = {
   jobsPending: 0,
 };
 
+/** Every test gets an empty rule config / zero due recurring occurrences unless it explicitly overrides one -- keeps the pre-existing scheduled-broadcast-only tests below untouched by this feature's addition. */
+function setupRuleConfigDefaults() {
+  loadNotificationRuleConfig.mockResolvedValue({ systemRules: new Map(), customWeeklyRules: [] });
+  findDueCustomWeeklyOccurrences.mockResolvedValue([]);
+  runDueCustomWeeklyRuleDispatch.mockResolvedValue({ dispatched: 0, failed: 0 });
+}
+
 afterEach(() => {
   vi.clearAllMocks();
   vi.resetModules();
 });
 
 describe("runScheduledBroadcastWorkerTick -- zero due/recoverable work", () => {
-  it("performs NO personnel read, NO dispatch, and NO delivery when BOTH pre-checks find nothing (true no-op)", async () => {
+  it("performs NO personnel read, NO dispatch, and NO delivery when ALL THREE pre-checks find nothing (true no-op)", async () => {
+    setupRuleConfigDefaults();
     peekAnyManagerScheduledBroadcastWorkDue.mockResolvedValue(0);
     peekDueJobsCount.mockResolvedValue(0);
 
@@ -53,15 +69,19 @@ describe("runScheduledBroadcastWorkerTick -- zero due/recoverable work", () => {
     expect(summary.scheduledBroadcastsDue).toBe(0);
     expect(summary.scheduledBroadcastsDispatched).toBe(0);
     expect(summary.scheduledBroadcastsFailed).toBe(0);
+    expect(summary.recurringRulesDispatched).toBe(0);
+    expect(summary.recurringRulesFailed).toBe(0);
     expect(summary.jobsClaimed).toBe(0);
     expect(fetchFreshPersonnelRead).not.toHaveBeenCalled();
     expect(runDueScheduledBroadcastDispatch).not.toHaveBeenCalled();
+    expect(runDueCustomWeeklyRuleDispatch).not.toHaveBeenCalled();
     expect(runDelivery).not.toHaveBeenCalled();
   });
 });
 
 describe("runScheduledBroadcastWorkerTick -- due/recoverable scheduled broadcast exists", () => {
   it("fetches personnel ONLY (never schedule/settings), dispatches, then runs delivery in the SAME invocation", async () => {
+    setupRuleConfigDefaults();
     peekAnyManagerScheduledBroadcastWorkDue.mockResolvedValue(1);
     peekDueJobsCount.mockResolvedValue(0);
     fetchFreshPersonnelRead.mockResolvedValue({ people: PEOPLE, fetchedAt: "2026-08-21T17:32:00.000Z" });
@@ -87,12 +107,15 @@ describe("runScheduledBroadcastWorkerTick -- due/recoverable scheduled broadcast
       scheduledBroadcastsDue: 2,
       scheduledBroadcastsDispatched: 1,
       scheduledBroadcastsFailed: 1,
+      recurringRulesDispatched: 0,
+      recurringRulesFailed: 0,
       jobsClaimed: 4,
       durationMs: expect.any(Number),
     });
   });
 
   it("never calls runDelivery before dispatch has been claimed -- freshly-created jobs must exist before delivery tries to claim them", async () => {
+    setupRuleConfigDefaults();
     peekAnyManagerScheduledBroadcastWorkDue.mockResolvedValue(1);
     peekDueJobsCount.mockResolvedValue(0);
     fetchFreshPersonnelRead.mockResolvedValue({ people: PEOPLE, fetchedAt: "2026-08-21T17:32:00.000Z" });
@@ -108,6 +131,7 @@ describe("runScheduledBroadcastWorkerTick -- due/recoverable scheduled broadcast
   });
 
   it("still fetches personnel/dispatches/delivers even when due notification jobs ALSO exist alongside the scheduled broadcast", async () => {
+    setupRuleConfigDefaults();
     peekAnyManagerScheduledBroadcastWorkDue.mockResolvedValue(1);
     peekDueJobsCount.mockResolvedValue(3);
     fetchFreshPersonnelRead.mockResolvedValue({ people: PEOPLE, fetchedAt: "2026-08-21T17:32:00.000Z" });
@@ -125,8 +149,90 @@ describe("runScheduledBroadcastWorkerTick -- due/recoverable scheduled broadcast
   });
 });
 
-describe("runScheduledBroadcastWorkerTick -- NO scheduled broadcast but due notification jobs exist (stranded-job recovery)", () => {
-  it("skips the personnel read and scheduled-broadcast dispatch entirely, and calls runDelivery() directly", async () => {
+describe("runScheduledBroadcastWorkerTick -- due custom weekly recurring rule occurrence exists", () => {
+  it("fetches personnel, dispatches the recurring rule (no scheduled-broadcast dispatch), then runs delivery", async () => {
+    peekAnyManagerScheduledBroadcastWorkDue.mockResolvedValue(0);
+    peekDueJobsCount.mockResolvedValue(0);
+    loadNotificationRuleConfig.mockResolvedValue({ systemRules: new Map(), customWeeklyRules: [{ id: "rule-1" }] });
+    const occurrence = { rule: { id: "rule-1" }, occurrenceDate: "2026-08-22", idempotencyKey: "recurring:rule-1:2026-08-22" };
+    findDueCustomWeeklyOccurrences.mockResolvedValue([occurrence]);
+    fetchFreshPersonnelRead.mockResolvedValue({ people: PEOPLE, fetchedAt: "2026-08-22T18:00:00.000Z" });
+
+    const callOrder: string[] = [];
+    runDueCustomWeeklyRuleDispatch.mockImplementation(async () => {
+      callOrder.push("recurring");
+      return { dispatched: 1, failed: 0 };
+    });
+    runDelivery.mockImplementation(async () => {
+      callOrder.push("delivery");
+      return { ...ZERO_DELIVERY_SUMMARY, jobsClaimed: 3 };
+    });
+
+    const { runScheduledBroadcastWorkerTick } = await loadModule();
+    const summary = await runScheduledBroadcastWorkerTick();
+
+    expect(fetchFreshPersonnelRead).toHaveBeenCalledTimes(1);
+    expect(runDueScheduledBroadcastDispatch).not.toHaveBeenCalled();
+    expect(runDueCustomWeeklyRuleDispatch).toHaveBeenCalledWith([occurrence], PEOPLE);
+    expect(callOrder).toEqual(["recurring", "delivery"]);
+    expect(summary).toEqual({
+      skipped: false,
+      scheduledBroadcastsDue: 0,
+      scheduledBroadcastsDispatched: 0,
+      scheduledBroadcastsFailed: 0,
+      recurringRulesDispatched: 1,
+      recurringRulesFailed: 0,
+      jobsClaimed: 3,
+      durationMs: expect.any(Number),
+    });
+  });
+
+  it("dispatches BOTH a due scheduled broadcast and a due recurring-rule occurrence in the same tick", async () => {
+    peekAnyManagerScheduledBroadcastWorkDue.mockResolvedValue(1);
+    peekDueJobsCount.mockResolvedValue(0);
+    loadNotificationRuleConfig.mockResolvedValue({ systemRules: new Map(), customWeeklyRules: [{ id: "rule-1" }] });
+    findDueCustomWeeklyOccurrences.mockResolvedValue([{ rule: { id: "rule-1" }, occurrenceDate: "2026-08-22", idempotencyKey: "k" }]);
+    fetchFreshPersonnelRead.mockResolvedValue({ people: PEOPLE, fetchedAt: "2026-08-22T18:00:00.000Z" });
+    runDueScheduledBroadcastDispatch.mockResolvedValue({ claimed: 1, dispatched: 1, failed: 0 });
+    runDueCustomWeeklyRuleDispatch.mockResolvedValue({ dispatched: 1, failed: 0 });
+    runDelivery.mockResolvedValue(ZERO_DELIVERY_SUMMARY);
+
+    const { runScheduledBroadcastWorkerTick } = await loadModule();
+    const summary = await runScheduledBroadcastWorkerTick();
+
+    expect(fetchFreshPersonnelRead).toHaveBeenCalledTimes(1);
+    expect(runDueScheduledBroadcastDispatch).toHaveBeenCalledTimes(1);
+    expect(runDueCustomWeeklyRuleDispatch).toHaveBeenCalledTimes(1);
+    expect(summary.scheduledBroadcastsDispatched).toBe(1);
+    expect(summary.recurringRulesDispatched).toBe(1);
+  });
+
+  it("a rule-config/lookup failure for recurring rules never blocks scheduled-broadcast dispatch or delivery -- isolated, fail-safe, logged", async () => {
+    peekAnyManagerScheduledBroadcastWorkDue.mockResolvedValue(1);
+    peekDueJobsCount.mockResolvedValue(0);
+    loadNotificationRuleConfig.mockRejectedValue(new Error("boom"));
+    fetchFreshPersonnelRead.mockResolvedValue({ people: PEOPLE, fetchedAt: "2026-08-22T18:00:00.000Z" });
+    runDueScheduledBroadcastDispatch.mockResolvedValue({ claimed: 1, dispatched: 1, failed: 0 });
+    runDelivery.mockResolvedValue(ZERO_DELIVERY_SUMMARY);
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { runScheduledBroadcastWorkerTick } = await loadModule();
+    const summary = await runScheduledBroadcastWorkerTick();
+
+    expect(runDueScheduledBroadcastDispatch).toHaveBeenCalledTimes(1);
+    expect(runDelivery).toHaveBeenCalledTimes(1);
+    expect(summary.scheduledBroadcastsDispatched).toBe(1);
+    expect(summary.recurringRulesDispatched).toBe(0);
+    expect(runDueCustomWeeklyRuleDispatch).not.toHaveBeenCalled();
+    expect(consoleErrorSpy).toHaveBeenCalled();
+
+    consoleErrorSpy.mockRestore();
+  });
+});
+
+describe("runScheduledBroadcastWorkerTick -- NO scheduled broadcast/recurring occurrence but due notification jobs exist (stranded-job recovery)", () => {
+  it("skips the personnel read and scheduled-broadcast/recurring dispatch entirely, and calls runDelivery() directly", async () => {
+    setupRuleConfigDefaults();
     peekAnyManagerScheduledBroadcastWorkDue.mockResolvedValue(0);
     peekDueJobsCount.mockResolvedValue(13);
     runDelivery.mockResolvedValue({ ...ZERO_DELIVERY_SUMMARY, jobsClaimed: 13 });
@@ -136,20 +242,42 @@ describe("runScheduledBroadcastWorkerTick -- NO scheduled broadcast but due noti
 
     expect(fetchFreshPersonnelRead).not.toHaveBeenCalled();
     expect(runDueScheduledBroadcastDispatch).not.toHaveBeenCalled();
+    expect(runDueCustomWeeklyRuleDispatch).not.toHaveBeenCalled();
     expect(runDelivery).toHaveBeenCalledTimes(1);
     expect(summary).toEqual({
       skipped: false,
       scheduledBroadcastsDue: 0,
       scheduledBroadcastsDispatched: 0,
       scheduledBroadcastsFailed: 0,
+      recurringRulesDispatched: 0,
+      recurringRulesFailed: 0,
       jobsClaimed: 13,
       durationMs: expect.any(Number),
     });
+  });
+
+  it("a due recurring-rule occurrence ALSO counts as recoverable work -- does NOT take the stranded-job-only shortcut", async () => {
+    peekAnyManagerScheduledBroadcastWorkDue.mockResolvedValue(0);
+    peekDueJobsCount.mockResolvedValue(0);
+    loadNotificationRuleConfig.mockResolvedValue({ systemRules: new Map(), customWeeklyRules: [{ id: "rule-1" }] });
+    findDueCustomWeeklyOccurrences.mockResolvedValue([{ rule: { id: "rule-1" }, occurrenceDate: "2026-08-22", idempotencyKey: "k" }]);
+    fetchFreshPersonnelRead.mockResolvedValue({ people: PEOPLE, fetchedAt: "2026-08-22T18:00:00.000Z" });
+    runDueCustomWeeklyRuleDispatch.mockResolvedValue({ dispatched: 1, failed: 0 });
+    runDelivery.mockResolvedValue(ZERO_DELIVERY_SUMMARY);
+
+    const { runScheduledBroadcastWorkerTick } = await loadModule();
+    const summary = await runScheduledBroadcastWorkerTick();
+
+    expect(summary.skipped).toBe(false);
+    expect(fetchFreshPersonnelRead).toHaveBeenCalledTimes(1);
+    expect(runDueScheduledBroadcastDispatch).not.toHaveBeenCalled();
+    expect(runDueCustomWeeklyRuleDispatch).toHaveBeenCalledTimes(1);
   });
 });
 
 describe("runScheduledBroadcastWorkerTick -- concurrency/idempotency assumptions remain delegated", () => {
   it("never claims jobs itself -- delegates entirely to runDelivery()'s own claim_due_notification_jobs call, both in the dispatch path and the stranded-job recovery path", async () => {
+    setupRuleConfigDefaults();
     peekAnyManagerScheduledBroadcastWorkDue.mockResolvedValue(0);
     peekDueJobsCount.mockResolvedValue(1);
     runDelivery.mockResolvedValue(ZERO_DELIVERY_SUMMARY);
@@ -165,6 +293,7 @@ describe("runScheduledBroadcastWorkerTick -- concurrency/idempotency assumptions
 
 describe("runScheduledBroadcastWorkerTick -- PII-safe summary shape", () => {
   it("the returned summary is counts/booleans/duration only -- no name, email, title, or body field", async () => {
+    setupRuleConfigDefaults();
     peekAnyManagerScheduledBroadcastWorkDue.mockResolvedValue(1);
     peekDueJobsCount.mockResolvedValue(0);
     fetchFreshPersonnelRead.mockResolvedValue({ people: PEOPLE, fetchedAt: "2026-08-21T17:32:00.000Z" });

@@ -1,10 +1,23 @@
 /**
- * PR #30's single source of truth for every notification-engine timing
- * value -- the spec explicitly requires these centralized rather than
- * scattered across components/SQL/routes. Every value here is either a
- * plain duration (minutes) or an explicit `{ hour, minute }` in the
- * OPERATIONAL timezone (Asia/Jerusalem) -- never the deployment server's
- * implicit timezone. Consumers convert an `{ hour, minute }` against a
+ * PR #30's original single source of truth for notification-engine timing
+ * has narrowed: every MANAGER-CONFIGURABLE reminder send time (tomorrow
+ * shift/duty/logistics-withdrawal, the logistics noon/supervisor
+ * variants, עלמ״ש check-in, weekly constraints) moved to the Fixed /
+ * Recurring Notifications Center's persisted `notification_rules` table
+ * (see `supabase/migrations/*_create_notification_rules.sql` and
+ * `lib/notifications/engine/ruleConfig.ts`) -- that table is the runtime
+ * source of truth for those times from that migration onward, seeded
+ * once from what used to live here. This file is no longer consulted by
+ * `reminders.ts` at all.
+ *
+ * What remains here are genuinely NON-manager-configurable operational
+ * constants -- values a manager must never be able to edit through the
+ * notification center, because they describe real-world operational
+ * facts (when logistics withdrawals physically happen) or worker
+ * cadence, not a notification's send time. Every value is either a plain
+ * duration (minutes) or an explicit `{ hour, minute }` in the OPERATIONAL
+ * timezone (Asia/Jerusalem) -- never the deployment server's implicit
+ * timezone. Consumers convert an `{ hour, minute }` against a
  * `LocalNow`/`getJerusalemLocalNow()` reading, exactly like every other
  * timezone-safe computation in this codebase (see `lib/time/jerusalemClock.ts`).
  *
@@ -23,41 +36,17 @@ export interface LocalClockTime {
   minute: number;
 }
 
-/** 20:00 Asia/Jerusalem, the day before the shift. */
-export const TOMORROW_SHIFT_REMINDER_TIME: LocalClockTime = { hour: 20, minute: 0 };
-
-/** 20:00 Asia/Jerusalem, the day before the duty. */
-export const TOMORROW_DUTY_REMINDER_TIME: LocalClockTime = { hour: 20, minute: 0 };
-
-/** 20:00 Asia/Jerusalem, the day before a logistics-withdrawal (משיכות מהלוגיסטיקה) assignment. Also the time the day-before SUPERVISOR coordination notification fires (see `logisticsCoordination.ts`). */
-export const TOMORROW_LOGISTICS_WITHDRAWAL_REMINDER_TIME: LocalClockTime = { hour: 20, minute: 0 };
-
 /**
  * Logistics withdrawals (משיכות מהלוגיסטיקה) actually happen 13:00–14:00
  * Asia/Jerusalem -- the operational window every logistics-coordination
  * eligibility/overlap check (`logisticsCoordination.ts`) resolves against,
  * via the existing shift-interval resolver. Centralized here, never a
- * literal `780`/`840` scattered elsewhere.
+ * literal `780`/`840` scattered elsewhere. This is an OPERATIONAL fact
+ * (when the work itself happens), not a notification send time -- never
+ * exposed as a manager-editable Fixed Notifications Center field.
  */
 export const LOGISTICS_WITHDRAWAL_WINDOW_START: LocalClockTime = { hour: 13, minute: 0 };
 export const LOGISTICS_WITHDRAWAL_WINDOW_END: LocalClockTime = { hour: 14, minute: 0 };
-
-/** 12:00 Asia/Jerusalem, the SAME day as the withdrawal -- the team-coordination reminder (assigned technician, relevant supervisor if still unassigned, and eligible teammates). */
-export const LOGISTICS_WITHDRAWAL_NOON_REMINDER_TIME: LocalClockTime = { hour: 12, minute: 0 };
-
-/** 18:00 Asia/Jerusalem, Sunday. */
-export const CONSTRAINTS_SUNDAY_REMINDER_TIME: LocalClockTime = { hour: 18, minute: 0 };
-
-/** 09:00 Asia/Jerusalem, Monday. */
-export const CONSTRAINTS_MONDAY_REMINDER_TIME: LocalClockTime = { hour: 9, minute: 0 };
-
-/**
- * 12:45 Asia/Jerusalem, the SAME day as the עלמ״ש check-in itself (13:00) --
- * Sunday-Friday only. Saturday never uses this: the check-in is pushed
- * out to מוצ״ש instead (see `lib/time/motzashShabbat.ts`), so 13:00 is
- * never actually reachable/relevant on a Saturday.
- */
-export const ALMASH_CHECKIN_REMINDER_TIME: LocalClockTime = { hour: 12, minute: 45 };
 
 export function clockTimeToMinuteOfDay(time: LocalClockTime): number {
   return time.hour * 60 + time.minute;

@@ -937,9 +937,43 @@ export async function insertManagerNotificationBatchIfAbsent(
   return { row: toBatchRow(data as Record<string, unknown>), created: true };
 }
 
+/**
+ * Which of `idempotencyKeys` already have a `manager_notification_batches`
+ * row -- one bulk `.in()` query, never one lookup per key. Used by the
+ * custom-recurring-rule dispatch's own due-occurrence check
+ * (`recurringRuleDispatch.ts`) to cheaply skip an occurrence that some
+ * earlier tick (or a concurrently-overlapping one) already dispatched,
+ * without needing a second table just to track "already sent" per
+ * occurrence -- see that module's own docstring for why the batch's own
+ * `idempotency_key` (`recurring:<ruleId>:<localDate>`) already serves as
+ * the occurrence's at-most-once boundary.
+ */
+export async function listExistingManagerNotificationBatchIdempotencyKeys(
+  idempotencyKeys: readonly string[],
+): Promise<Set<string>> {
+  if (idempotencyKeys.length === 0) return new Set();
+  const supabase = getNotificationServiceClient();
+  const { data, error } = await supabase
+    .from("manager_notification_batches")
+    .select("idempotency_key")
+    .in("idempotency_key", idempotencyKeys);
+  if (error) throw error;
+  return new Set(((data ?? []) as { idempotency_key: string }[]).map((row) => row.idempotency_key));
+}
+
 /** A bounded recent-history read for the composer's own small audit list -- never a full archive. */
 export const RECENT_MANAGER_BROADCASTS_LIMIT = 10;
 
+/**
+ * Excludes recurring-rule occurrence batches (`idempotency_key` prefixed
+ * `recurring:`, see `recurringRuleDispatch.ts`) -- this list is the
+ * "נשלחו לאחרונה" immediate/scheduled-broadcast history, unchanged by
+ * this feature (spec: "recent broadcasts stay functional", meaning
+ * behaviorally UNCHANGED, not "also absorbs every weekly recurring
+ * send"). A weekly recurring rule's own dispatch history is a Fixed
+ * Notifications Center concern (its "next send" summary), never mixed
+ * into this unrelated list.
+ */
 export async function listRecentManagerNotificationBatches(
   limit: number = RECENT_MANAGER_BROADCASTS_LIMIT,
 ): Promise<ManagerNotificationBatchRow[]> {
@@ -947,6 +981,7 @@ export async function listRecentManagerNotificationBatches(
   const { data, error } = await supabase
     .from("manager_notification_batches")
     .select(MANAGER_NOTIFICATION_BATCH_COLUMNS)
+    .not("idempotency_key", "like", "recurring:%")
     .order("created_at", { ascending: false })
     .limit(limit);
   if (error) throw error;
@@ -1435,6 +1470,238 @@ export async function markManagerScheduledBroadcastDispatched(id: string): Promi
     .eq("id", id)
     .eq("status", "claimed");
   if (error) throw error;
+}
+
+// ---------------------------------------------------------------------------
+// notification_rules -- the Fixed / Recurring Notifications Center's own
+// managed configuration. See `supabase/migrations/*_create_notification_rules.sql`
+// for the full schema doc comment and `engine/ruleConfig.ts` for the typed
+// loader `reminders.ts`/`pipeline.ts` actually consume -- this section is
+// purely the raw row <-> DB mapping, same convention as every other table
+// in this file.
+// ---------------------------------------------------------------------------
+
+export type NotificationRuleKind = "system" | "custom_weekly";
+
+export interface NotificationRuleRow {
+  id: string;
+  kind: NotificationRuleKind;
+  systemKey: string | null;
+  enabled: boolean;
+  weekday: number | null;
+  localHour: number;
+  localMinute: number;
+  title: string | null;
+  body: string | null;
+  audienceKind: BroadcastAudienceKind | null;
+  targetPersonIds: string[];
+  archivedAt: string | null;
+  createdByPersonId: string | null;
+  createdByPersonName: string | null;
+  updatedByPersonId: string | null;
+  updatedByPersonName: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+const NOTIFICATION_RULE_COLUMNS =
+  "id, kind, system_key, enabled, weekday, local_hour, local_minute, title, body, audience_kind, target_person_ids, archived_at, created_by_person_id, created_by_person_name, updated_by_person_id, updated_by_person_name, created_at, updated_at";
+
+function toNotificationRuleRow(row: Record<string, unknown>): NotificationRuleRow {
+  return {
+    id: row.id as string,
+    kind: row.kind as NotificationRuleKind,
+    systemKey: (row.system_key as string | null) ?? null,
+    enabled: row.enabled as boolean,
+    weekday: (row.weekday as number | null) ?? null,
+    localHour: row.local_hour as number,
+    localMinute: row.local_minute as number,
+    title: (row.title as string | null) ?? null,
+    body: (row.body as string | null) ?? null,
+    audienceKind: (row.audience_kind as BroadcastAudienceKind | null) ?? null,
+    targetPersonIds: (row.target_person_ids as string[] | null) ?? [],
+    archivedAt: (row.archived_at as string | null) ?? null,
+    createdByPersonId: (row.created_by_person_id as string | null) ?? null,
+    createdByPersonName: (row.created_by_person_name as string | null) ?? null,
+    updatedByPersonId: (row.updated_by_person_id as string | null) ?? null,
+    updatedByPersonName: (row.updated_by_person_name as string | null) ?? null,
+    createdAt: row.created_at as string,
+    updatedAt: row.updated_at as string,
+  };
+}
+
+/** Every non-archived rule of either kind -- the worker's own once-per-tick load, and the Manager Fixed Notifications Center's default listing. Archived custom rules are deliberately excluded (see `listArchivedCustomWeeklyRules` for the rare case a caller needs them). */
+export async function listActiveNotificationRules(): Promise<NotificationRuleRow[]> {
+  const supabase = getNotificationServiceClient();
+  const { data, error } = await supabase
+    .from("notification_rules")
+    .select(NOTIFICATION_RULE_COLUMNS)
+    .is("archived_at", null)
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return ((data ?? []) as Record<string, unknown>[]).map(toNotificationRuleRow);
+}
+
+export async function getNotificationRuleById(id: string): Promise<NotificationRuleRow | null> {
+  const supabase = getNotificationServiceClient();
+  const { data, error } = await supabase
+    .from("notification_rules")
+    .select(NOTIFICATION_RULE_COLUMNS)
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? toNotificationRuleRow(data as Record<string, unknown>) : null;
+}
+
+export interface SystemRuleEdit {
+  enabled: boolean;
+  localHour: number;
+  localMinute: number;
+  updatedByPersonId: string;
+  updatedByPersonName: string;
+}
+
+/** The ONLY write path for a system rule -- guarded to `kind = 'system'` at the query level (defense in depth on top of the migration's own identity-protection trigger, which additionally forbids `kind`/`system_key` from ever appearing in the SET list here in the first place). `null` means the id doesn't exist or isn't a system rule. */
+export async function updateSystemRule(id: string, edit: SystemRuleEdit): Promise<NotificationRuleRow | null> {
+  const supabase = getNotificationServiceClient();
+  const { data, error } = await supabase
+    .from("notification_rules")
+    .update({
+      enabled: edit.enabled,
+      local_hour: edit.localHour,
+      local_minute: edit.localMinute,
+      updated_by_person_id: edit.updatedByPersonId,
+      updated_by_person_name: edit.updatedByPersonName,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .eq("kind", "system")
+    .select(NOTIFICATION_RULE_COLUMNS)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? toNotificationRuleRow(data as Record<string, unknown>) : null;
+}
+
+export interface NewCustomWeeklyRule {
+  weekday: number;
+  localHour: number;
+  localMinute: number;
+  title: string;
+  body: string;
+  audienceKind: BroadcastAudienceKind;
+  targetPersonIds: readonly string[];
+  createdByPersonId: string;
+  createdByPersonName: string;
+}
+
+export async function insertCustomWeeklyRule(rule: NewCustomWeeklyRule): Promise<NotificationRuleRow> {
+  const supabase = getNotificationServiceClient();
+  const { data, error } = await supabase
+    .from("notification_rules")
+    .insert({
+      kind: "custom_weekly",
+      enabled: true,
+      weekday: rule.weekday,
+      local_hour: rule.localHour,
+      local_minute: rule.localMinute,
+      title: rule.title,
+      body: rule.body,
+      audience_kind: rule.audienceKind,
+      target_person_ids: rule.targetPersonIds,
+      created_by_person_id: rule.createdByPersonId,
+      created_by_person_name: rule.createdByPersonName,
+    })
+    .select(NOTIFICATION_RULE_COLUMNS)
+    .single();
+  if (error) throw error;
+  return toNotificationRuleRow(data as Record<string, unknown>);
+}
+
+export interface CustomWeeklyRuleEdit {
+  weekday: number;
+  localHour: number;
+  localMinute: number;
+  title: string;
+  body: string;
+  audienceKind: BroadcastAudienceKind;
+  targetPersonIds: readonly string[];
+  updatedByPersonId: string;
+  updatedByPersonName: string;
+}
+
+/** Guarded to `kind = 'custom_weekly'` and not archived -- an archived rule must be un-archived (there is none in V1; archive is terminal) rather than silently edited back to life. `null` means not found / not a still-active custom rule. */
+export async function updateCustomWeeklyRule(id: string, edit: CustomWeeklyRuleEdit): Promise<NotificationRuleRow | null> {
+  const supabase = getNotificationServiceClient();
+  const { data, error } = await supabase
+    .from("notification_rules")
+    .update({
+      weekday: edit.weekday,
+      local_hour: edit.localHour,
+      local_minute: edit.localMinute,
+      title: edit.title,
+      body: edit.body,
+      audience_kind: edit.audienceKind,
+      target_person_ids: edit.targetPersonIds,
+      updated_by_person_id: edit.updatedByPersonId,
+      updated_by_person_name: edit.updatedByPersonName,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .eq("kind", "custom_weekly")
+    .is("archived_at", null)
+    .select(NOTIFICATION_RULE_COLUMNS)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? toNotificationRuleRow(data as Record<string, unknown>) : null;
+}
+
+/** Toggles a still-active custom rule's `enabled` flag -- same guard shape as `updateCustomWeeklyRule`. */
+export async function setCustomWeeklyRuleEnabled(
+  id: string,
+  enabled: boolean,
+  updatedByPersonId: string,
+  updatedByPersonName: string,
+): Promise<NotificationRuleRow | null> {
+  const supabase = getNotificationServiceClient();
+  const { data, error } = await supabase
+    .from("notification_rules")
+    .update({
+      enabled,
+      updated_by_person_id: updatedByPersonId,
+      updated_by_person_name: updatedByPersonName,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .eq("kind", "custom_weekly")
+    .is("archived_at", null)
+    .select(NOTIFICATION_RULE_COLUMNS)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? toNotificationRuleRow(data as Record<string, unknown>) : null;
+}
+
+/** Terminal -- an archived custom rule never appears in `listActiveNotificationRules` / worker dispatch again, but its row (and every `notification_jobs`/`manager_notification_batches` row it ever produced) is never deleted. There is no un-archive path in V1 (matches the spec's "archive/delete safely" scope -- a genuine hard-delete-and-recreate is always available to a manager who wants a fresh rule). */
+export async function archiveCustomWeeklyRule(
+  id: string,
+  updatedByPersonId: string,
+  updatedByPersonName: string,
+): Promise<NotificationRuleRow | null> {
+  const supabase = getNotificationServiceClient();
+  const { data, error } = await supabase
+    .from("notification_rules")
+    .update({
+      archived_at: new Date().toISOString(),
+      updated_by_person_id: updatedByPersonId,
+      updated_by_person_name: updatedByPersonName,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .eq("kind", "custom_weekly")
+    .is("archived_at", null)
+    .select(NOTIFICATION_RULE_COLUMNS)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? toNotificationRuleRow(data as Record<string, unknown>) : null;
 }
 
 /** Read-only count of scheduled broadcasts already due -- dry-run mode's estimate; never claims/mutates, mirroring `peekDueJobsCount`. */

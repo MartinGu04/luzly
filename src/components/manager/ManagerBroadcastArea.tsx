@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { ManagerBroadcastComposer } from "./ManagerBroadcastComposer";
+import { ManagerFixedNotificationsSection } from "./ManagerFixedNotificationsSection";
 import { ManagerRecentBroadcastsSection } from "./ManagerRecentBroadcastsSection";
 import { ManagerScheduledBroadcastsSection } from "./ManagerScheduledBroadcastsSection";
 import type { ScheduledBroadcastView } from "@/lib/notifications/scheduledBroadcastActions";
@@ -49,6 +50,7 @@ export function ManagerBroadcastArea({ roster, adoptionPeople }: ManagerBroadcas
         onActiveChange={setHasActiveScheduledBroadcasts}
       />
       <ManagerRecentBroadcastsSection reloadToken={recentReloadToken} pollWhileActive={hasActiveScheduledBroadcasts} />
+      <ManagerFixedNotificationsSection roster={roster} adoptionPeople={adoptionPeople} />
     </div>
   );
 }

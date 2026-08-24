@@ -930,6 +930,14 @@ function makeBatchesFakeSupabase(initialRows: FakeBatchRow[] = []) {
           eq: (_column: string, value: string) => ({
             maybeSingle: async () => ({ data: byIdempotencyKey.get(value) ?? null, error: null }),
           }),
+          not: () => ({
+            order: () => ({
+              limit: async (limit: number) => ({
+                data: [...byIdempotencyKey.values()].slice(0, limit),
+                error: null,
+              }),
+            }),
+          }),
           order: () => ({
             limit: async (limit: number) => ({
               data: [...byIdempotencyKey.values()].slice(0, limit),
