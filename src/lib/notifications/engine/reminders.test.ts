@@ -35,7 +35,9 @@ const store = {
   upsertPendingSystemReminderJob: vi.fn<
     (job: import("./store").NewNotificationJob, guard: { ruleId: string; expectedRevision: number }) => Promise<boolean>
   >(async () => true),
-  cancelPendingReminderJob: vi.fn(async () => {}),
+  cancelPendingSystemReminderJob: vi.fn<
+    (dedupeKey: string, guard: { ruleId: string; category: string; expectedRevision: number }) => Promise<boolean>
+  >(async () => true),
   listPendingJobDedupeKeysByPrefix: vi.fn<(prefix: string) => Promise<string[]>>(async () => []),
   insertNotificationJobIfAbsent: vi.fn(async () => true),
 };
@@ -253,7 +255,7 @@ describe("runReminders -- tomorrow shift reminder", () => {
       recipientResolution: resolutionWith("p1", "user-p1"),
     });
 
-    expect(store.cancelPendingReminderJob).toHaveBeenCalledWith("tomorrow_shift:2026-08-19:user-p1:day");
+    expect(store.cancelPendingSystemReminderJob).toHaveBeenCalledWith("tomorrow_shift:2026-08-19:user-p1:day", expect.anything());
   });
 
   it("two same-day shifts for one person (different periods) get distinct dedupe keys AND distinct Push tags", async () => {
@@ -425,7 +427,7 @@ describe("runReminders -- tomorrow logistics-withdrawal reminder (משיכות �
       recipientResolution: resolutionWith("p1", "user-p1"),
     });
 
-    expect(store.cancelPendingReminderJob).toHaveBeenCalledWith("tomorrow_logistics_withdrawal:2026-08-19:user-p1");
+    expect(store.cancelPendingSystemReminderJob).toHaveBeenCalledWith("tomorrow_logistics_withdrawal:2026-08-19:user-p1", expect.anything());
     expect(store.upsertPendingSystemReminderJob).not.toHaveBeenCalled();
   });
 
@@ -456,7 +458,7 @@ describe("runReminders -- tomorrow logistics-withdrawal reminder (משיכות �
       recipientResolution: resolution,
     });
 
-    expect(store.cancelPendingReminderJob).toHaveBeenCalledWith("tomorrow_logistics_withdrawal:2026-08-19:user-a");
+    expect(store.cancelPendingSystemReminderJob).toHaveBeenCalledWith("tomorrow_logistics_withdrawal:2026-08-19:user-a", expect.anything());
     expect(store.upsertPendingSystemReminderJob).toHaveBeenCalledWith(
       expect.objectContaining({ recipientUserId: "user-b", dedupeKey: "tomorrow_logistics_withdrawal:2026-08-19:user-b" }), expect.anything()
     );
@@ -690,7 +692,7 @@ describe("runReminders -- system rule config (Fixed Notifications Center)", () =
 
     expect(summary.tomorrowShiftJobs).toBe(0);
     expect(store.upsertPendingSystemReminderJob).not.toHaveBeenCalled();
-    expect(store.cancelPendingReminderJob).toHaveBeenCalledWith("tomorrow_shift:2026-08-19:user-p1:day");
+    expect(store.cancelPendingSystemReminderJob).toHaveBeenCalledWith("tomorrow_shift:2026-08-19:user-p1:day", expect.anything());
   });
 
   it("re-enabling a system rule resumes normal dispatch", async () => {
@@ -746,14 +748,13 @@ describe("runReminders -- system rule config (Fixed Notifications Center)", () =
         scheduledFor: jerusalemLocalTimeToInstant("2026-08-18", 19, 30).toISOString(),
       }), expect.anything()
     );
-    // The SAME dedupe key, not a second job -- `cancelPendingReminderJob`
+    // The SAME dedupe key, not a second job -- `cancelPendingSystemReminderJob`
     // is never called for it (the still-pending row was upserted in
     // place, not cancelled-and-recreated).
-    expect(store.cancelPendingReminderJob).not.toHaveBeenCalledWith("tomorrow_shift:2026-08-19:user-p1:day");
+    expect(store.cancelPendingSystemReminderJob).not.toHaveBeenCalledWith("tomorrow_shift:2026-08-19:user-p1:day", expect.anything());
   });
 
-  it("a system rule missing from the loaded config is treated as disabled -- fail safe, never a hardcoded fallback time", async () => {
-    store.listPendingJobDedupeKeysByPrefix.mockResolvedValue([]);
+  it("a system rule missing from the loaded config is treated as disabled -- fail safe, never a hardcoded fallback time, and NEVER an unguarded cancellation (no rule identity/revision to authorize one with)", async () => {
     const { runReminders } = await loadModule();
     const now: LocalNow = { date: "2026-08-18", minuteOfDay: 1200 };
     const week = getOperationalWeek(now);
@@ -771,7 +772,13 @@ describe("runReminders -- system rule config (Fixed Notifications Center)", () =
     });
 
     expect(summary.tomorrowShiftJobs).toBe(0);
+    expect(summary.tomorrowShiftCancelled).toBe(0);
     expect(store.upsertPendingSystemReminderJob).not.toHaveBeenCalled();
+    // No rule identity/revision exists to authorize a cancellation with --
+    // this category's existing pending jobs (if any) are left completely
+    // untouched this tick, never mutated via an unguarded fallback path.
+    expect(store.cancelPendingSystemReminderJob).not.toHaveBeenCalled();
+    expect(store.listPendingJobDedupeKeysByPrefix).not.toHaveBeenCalled();
   });
 
   it("disabling constraints_sunday cancels its own pending unsent job", async () => {
@@ -812,7 +819,72 @@ describe("runReminders -- system rule config (Fixed Notifications Center)", () =
     });
 
     expect(summary.constraintsJobs).toBe(0);
-    expect(store.cancelPendingReminderJob).toHaveBeenCalledWith(`constraints_sunday:${week.weekStart}:user-a`);
+    expect(store.cancelPendingSystemReminderJob).toHaveBeenCalledWith(`constraints_sunday:${week.weekStart}:user-a`, expect.anything());
+  });
+
+  it("passes the exact ruleId/category/expectedRevision guard to BOTH the upsert and the cancellation call for the same category", async () => {
+    store.listPendingJobDedupeKeysByPrefix.mockResolvedValue(["tomorrow_shift:2026-08-19:user-stale:day"]);
+    const { runReminders } = await loadModule();
+    const now: LocalNow = { date: "2026-08-18", minuteOfDay: 1200 };
+    const week = getOperationalWeek(now);
+
+    await runReminders({
+      events: [event({ personId: "p1", date: "2026-08-19", category: "shift", period: "day" })],
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: resolutionWith("p1", "user-p1"),
+      ruleConfig: defaultRuleConfig({ tomorrow_shift: { id: "rule-tomorrow_shift", revision: 7 } }),
+    });
+
+    expect(store.upsertPendingSystemReminderJob).toHaveBeenCalledWith(
+      expect.objectContaining({ category: "tomorrow_shift" }),
+      { ruleId: "rule-tomorrow_shift", expectedRevision: 7 },
+    );
+    expect(store.cancelPendingSystemReminderJob).toHaveBeenCalledWith("tomorrow_shift:2026-08-19:user-stale:day", {
+      ruleId: "rule-tomorrow_shift",
+      category: "tomorrow_shift",
+      expectedRevision: 7,
+    });
+  });
+
+  it("truthfully reports created/cancelled counts as GUARDED WRITES the RPCs actually authorized -- never a raw candidate/stale-key count", async () => {
+    // Only tomorrow_shift's own prefix has a stale key -- every OTHER
+    // category's own `listPendingJobDedupeKeysByPrefix` call must see
+    // none of its own, or this test's exact call-count assertions below
+    // would trip on an unrelated category's cancellation sweep instead.
+    store.listPendingJobDedupeKeysByPrefix.mockImplementation(async (prefix: string) =>
+      prefix === "tomorrow_shift:2026-08-19:" ? ["tomorrow_shift:2026-08-19:user-stale:day"] : [],
+    );
+    store.upsertPendingSystemReminderJob.mockResolvedValue(false); // a concurrent manager edit is now authoritative
+    store.cancelPendingSystemReminderJob.mockResolvedValue(false); // ditto for the cancellation sweep
+    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { runReminders } = await loadModule();
+    const now: LocalNow = { date: "2026-08-18", minuteOfDay: 1200 };
+    const week = getOperationalWeek(now);
+
+    const summary = await runReminders({
+      events: [event({ personId: "p1", date: "2026-08-19", category: "shift", period: "day" })],
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: resolutionWith("p1", "user-p1"),
+    });
+
+    // The upsert/cancel calls were still ATTEMPTED (one candidate, one
+    // stale key) -- but since the guarded RPC rejected both as stale, the
+    // summary must report zero, never the raw candidate/stale-key count.
+    expect(store.upsertPendingSystemReminderJob).toHaveBeenCalledTimes(1);
+    expect(store.cancelPendingSystemReminderJob).toHaveBeenCalledTimes(1);
+    expect(summary.tomorrowShiftJobs).toBe(0);
+    expect(summary.tomorrowShiftCancelled).toBe(0);
+    expect(consoleWarnSpy).toHaveBeenCalled();
+
+    consoleWarnSpy.mockRestore();
   });
 });
 
@@ -1135,10 +1207,10 @@ describe("runReminders -- same-day noon (12:00) logistics-withdrawal team coordi
 
     // The supervisor's fallback warning is no longer valid -- cancelled.
     expect(upsertedFor("logistics_withdrawal_noon_supervisor")).toHaveLength(0);
-    expect(store.cancelPendingReminderJob).toHaveBeenCalledWith("logistics_withdrawal_noon_supervisor:2026-08-17:user-sup");
+    expect(store.cancelPendingSystemReminderJob).toHaveBeenCalledWith("logistics_withdrawal_noon_supervisor:2026-08-17:user-sup", expect.anything());
     // p_tech is STILL a valid team recipient (still eligible) -- their job
     // is re-upserted with fresh "help Ethan" content, never cancelled.
-    expect(store.cancelPendingReminderJob).not.toHaveBeenCalledWith("logistics_withdrawal_noon_team:2026-08-17:user-tech");
+    expect(store.cancelPendingSystemReminderJob).not.toHaveBeenCalledWith("logistics_withdrawal_noon_team:2026-08-17:user-tech", expect.anything());
     expect(upsertedFor("logistics_withdrawal_noon_assigned")).toHaveLength(1);
     const teamJobs = upsertedFor("logistics_withdrawal_noon_team");
     expect(teamJobs).toHaveLength(1);
@@ -1180,7 +1252,7 @@ describe("runReminders -- same-day noon (12:00) logistics-withdrawal team coordi
     });
 
     expect(upsertedFor("logistics_withdrawal_noon_assigned")).toHaveLength(0);
-    expect(store.cancelPendingReminderJob).toHaveBeenCalledWith("logistics_withdrawal_noon_assigned:2026-08-19:user-ethan");
+    expect(store.cancelPendingSystemReminderJob).toHaveBeenCalledWith("logistics_withdrawal_noon_assigned:2026-08-19:user-ethan", expect.anything());
   });
 
   it("reassignment from A to B cancels A's stale noon-assigned job and creates B's", async () => {
@@ -1207,7 +1279,7 @@ describe("runReminders -- same-day noon (12:00) logistics-withdrawal team coordi
       recipientResolution,
     });
 
-    expect(store.cancelPendingReminderJob).toHaveBeenCalledWith("logistics_withdrawal_noon_assigned:2026-08-19:user-a");
+    expect(store.cancelPendingSystemReminderJob).toHaveBeenCalledWith("logistics_withdrawal_noon_assigned:2026-08-19:user-a", expect.anything());
     expect(upsertedFor("logistics_withdrawal_noon_assigned")).toEqual([
       expect.objectContaining({ recipientUserId: "user-b", dedupeKey: "logistics_withdrawal_noon_assigned:2026-08-19:user-b" }),
     ]);
@@ -1257,7 +1329,7 @@ describe("runReminders -- same-day noon (12:00) logistics-withdrawal team coordi
     });
 
     expect(upsertedFor("logistics_withdrawal_noon_team")).toHaveLength(0);
-    expect(store.cancelPendingReminderJob).toHaveBeenCalledWith("logistics_withdrawal_noon_team:2026-08-19:user-helper");
+    expect(store.cancelPendingSystemReminderJob).toHaveBeenCalledWith("logistics_withdrawal_noon_team:2026-08-19:user-helper", expect.anything());
   });
 
   it("multiple assignees consolidate into ONE team job per eligible technician, not one per assignee", async () => {
@@ -1332,7 +1404,7 @@ describe("runReminders -- same-day noon (12:00) logistics-withdrawal team coordi
 
     expect(summary.logisticsWithdrawalNoonAssignedJobs).toBe(1);
     expect(store.upsertPendingSystemReminderJob).not.toHaveBeenCalled();
-    expect(store.cancelPendingReminderJob).not.toHaveBeenCalled();
+    expect(store.cancelPendingSystemReminderJob).not.toHaveBeenCalled();
   });
 
   it("a person not resolvable to a Supabase account is skipped, never guessed (fails closed)", async () => {
@@ -1677,7 +1749,7 @@ describe("runReminders -- עלמ״ש check-in reminder (שמירה / עתודה 
       recipientResolution: resolutionWith("p1", "user-p1"),
     });
 
-    expect(store.cancelPendingReminderJob).toHaveBeenCalledWith(staleKey);
+    expect(store.cancelPendingSystemReminderJob).toHaveBeenCalledWith(staleKey, expect.anything());
   });
 
   it("never creates a job for a person who cannot be resolved to an auth user -- same recipient-resolution rule as every other reminder", async () => {

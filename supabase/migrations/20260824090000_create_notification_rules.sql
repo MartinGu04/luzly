@@ -682,3 +682,109 @@ revoke all on function public.upsert_pending_system_reminder_job(uuid, text, big
   from public, anon, authenticated;
 grant execute on function public.upsert_pending_system_reminder_job(uuid, text, bigint, uuid, text, text, text, text, text, timestamptz, text)
   to service_role;
+
+-- -----------------------------------------------------------------------
+-- cancel_pending_system_reminder_job -- the ONE write boundary for
+-- cancelling a SYSTEM reminder category's own stale pending job (never
+-- the generic `cancel_pending_reminder_job`-shaped plain update directly,
+-- for any of the 10 system categories -- see `reminders.ts`'s
+-- `applyReminderJobs`, this function's one caller). Closes the MIRROR-
+-- IMAGE race to `upsert_pending_system_reminder_job`'s own guard: that
+-- function stops a STALE worker from re-CREATING a job under an old
+-- configuration; this one stops a STALE worker from CANCELLING a job a
+-- FRESHER worker (or the manager's own reconciliation) has since created
+-- under the CURRENT configuration.
+--
+-- Real failure this closes: a worker that loaded revision 1 of a
+-- currently-DISABLED rule computes zero valid jobs for it. A manager
+-- RE-ENABLES the rule (revision becomes 2). A fresh worker, loaded with
+-- revision 2, correctly creates the now-valid pending job. If the STALE
+-- (revision-1) worker's own stale-key cancellation sweep were still
+-- unguarded, it would see that freshly-created job (its own `validKeys`
+-- is empty, since it computed zero jobs under the disabled revision-1
+-- config) and cancel it -- destroying a job that is not only valid, but
+-- was created AFTER this worker's own snapshot went stale. Worse:
+-- `upsert_pending_reminder_job`'s (and this function's own) pending-only
+-- guard means a `'cancelled'` job can NEVER be revived by a later
+-- upsert for the SAME dedupe_key -- so this would not just delay the
+-- reminder, it would permanently lose it.
+--
+-- In ONE transaction:
+--  1. Locks the `notification_rules` row at `p_rule_id` FIRST (`select
+--     ... for update`) -- the SAME lock `upsert_pending_system_reminder_job`
+--     and `update_system_rule_and_invalidate_pending_jobs` both take on
+--     that row, so all three functions serialize correctly against each
+--     other regardless of call order:
+--
+--       - THIS call's lock is granted first: it authorizes/cancels
+--         normally (assuming the checks below pass); a concurrent
+--         manager update (blocked on the same row lock) commits
+--         afterward, on its own unrelated revision.
+--       - A manager update's lock is granted first: `revision` is
+--         already incremented by the time THIS call's lock is granted,
+--         so the revision check below fails against this caller's
+--         (now-stale) `p_expected_revision`, and this call no-ops --
+--         leaving whatever THAT commit did (including any job a
+--         concurrently-fresher worker created under the NEW revision)
+--         completely untouched.
+--
+--  2. Requires, against the LOCKED row: found, `kind = 'system'`,
+--     `system_key = p_category` (same defense-in-depth
+--     `upsert_pending_system_reminder_job` applies), and
+--     `revision = p_expected_revision`.
+--
+--     Deliberately DOES NOT require `enabled = true` (unlike the upsert
+--     guard) -- a worker that genuinely loaded the CURRENT revision of a
+--     now-DISABLED rule must still be able to clean up THAT revision's
+--     own still-pending jobs (e.g. an assignment that disappeared before
+--     the rule was disabled). The authority here is rule IDENTITY +
+--     exact REVISION match, never enabled state -- `enabled` is exactly
+--     the one column the upsert guard checks that this one deliberately
+--     does not.
+--
+--  3. Only once authorized: cancels the matching `notification_jobs` row
+--     ONLY if it is still `status = 'pending'` -- the exact same
+--     terminal-status protection the existing plain
+--     `.eq('dedupe_key', ...).eq('status', 'pending')` update already
+--     has; a claimed/completed/failed/skipped/already-cancelled row is
+--     left completely untouched either way.
+--
+-- Returns `true` once authorized/attempted (regardless of whether a
+-- `'pending'` row actually existed to cancel -- mirroring
+-- `upsert_pending_system_reminder_job`'s own "authorized and attempted"
+-- semantics), `false` for the stale-revision/mismatched no-op case.
+-- -----------------------------------------------------------------------
+create or replace function public.cancel_pending_system_reminder_job(
+  p_rule_id uuid,
+  p_category text,
+  p_expected_revision bigint,
+  p_dedupe_key text
+)
+returns boolean
+language plpgsql
+as $$
+declare
+  rule_row public.notification_rules;
+begin
+  select * into rule_row from public.notification_rules where id = p_rule_id for update;
+
+  if not found
+     or rule_row.kind is distinct from 'system'
+     or rule_row.system_key is distinct from p_category
+     or rule_row.revision is distinct from p_expected_revision
+  then
+    return false; -- stale revision / mismatched -- documented no-op, never touches notification_jobs
+  end if;
+
+  update public.notification_jobs
+    set status = 'cancelled'
+    where dedupe_key = p_dedupe_key and status = 'pending';
+
+  return true;
+end;
+$$;
+
+revoke all on function public.cancel_pending_system_reminder_job(uuid, text, bigint, text)
+  from public, anon, authenticated;
+grant execute on function public.cancel_pending_system_reminder_job(uuid, text, bigint, text)
+  to service_role;

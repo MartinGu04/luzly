@@ -507,6 +507,57 @@ export async function cancelPendingReminderJob(dedupeKey: string): Promise<void>
   if (error) throw error;
 }
 
+export interface SystemReminderCancelGuard extends SystemReminderRuleGuard {
+  /** The system category this dedupe key belongs to -- `cancel_pending_system_reminder_job` verifies this against the locked rule's own `system_key`, the same defense-in-depth `upsertPendingSystemReminderJob` applies. */
+  category: string;
+}
+
+/**
+ * The ONLY cancellation path for a SYSTEM reminder category's stale
+ * pending job (never the generic `cancelPendingReminderJob` directly, for
+ * any of the 10 system categories -- see `reminders.ts`'s
+ * `applyReminderJobs`, this function's one caller). Closes the MIRROR-
+ * IMAGE race to `upsertPendingSystemReminderJob`'s own guard: that
+ * function stops a stale worker from re-CREATING a job under an old
+ * configuration; this one stops a stale worker from CANCELLING a job a
+ * FRESHER worker (or the manager's own reconciliation) has since created
+ * under the CURRENT revision -- e.g. a worker that loaded a disabled
+ * revision-1 config (computing zero valid jobs) whose own stale-key
+ * sweep would otherwise treat a revision-2 re-enable's freshly-created
+ * job as "not in my valid set" and cancel it, permanently (a cancelled
+ * job can never be revived by a later upsert -- see
+ * `upsertPendingSystemReminderJob`'s own docstring).
+ *
+ * Locks the SAME `notification_rules` row `upsertPendingSystemReminderJob`
+ * and `updateSystemRule` both lock, and only proceeds when that row is
+ * still `kind = 'system'`, `system_key = guard.category`, and its CURRENT
+ * `revision` still equals `guard.expectedRevision`.
+ *
+ * Deliberately does NOT require `enabled = true` (unlike the upsert
+ * guard) -- a worker that genuinely loaded the CURRENT revision of a
+ * now-DISABLED rule must still be able to clean up that revision's own
+ * still-pending jobs. The authority here is rule IDENTITY + exact
+ * REVISION, never enabled state.
+ *
+ * Only ever cancels a still-`'pending'` job (same terminal-status
+ * protection `cancelPendingReminderJob` already has). Returns `true` once
+ * authorized/attempted (regardless of whether a `'pending'` row actually
+ * existed to cancel -- mirroring `upsertPendingSystemReminderJob`'s own
+ * "authorized and attempted" semantics), `false` for the stale-revision/
+ * mismatched no-op case.
+ */
+export async function cancelPendingSystemReminderJob(dedupeKey: string, guard: SystemReminderCancelGuard): Promise<boolean> {
+  const supabase = getNotificationServiceClient();
+  const { data, error } = await supabase.rpc("cancel_pending_system_reminder_job", {
+    p_rule_id: guard.ruleId,
+    p_category: guard.category,
+    p_expected_revision: guard.expectedRevision,
+    p_dedupe_key: dedupeKey,
+  });
+  if (error) throw error;
+  return data === true;
+}
+
 export interface ClaimedNotificationJob {
   id: string;
   category: string;

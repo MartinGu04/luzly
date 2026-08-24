@@ -22,7 +22,7 @@ import { isLogisticsWithdrawalEvent } from "./logisticsWithdrawal";
 import { resolveNonPermanentConstraintsRecipients, type RecipientResolution } from "./recipients";
 import type { NotificationRuleConfig, SystemRuleConfig } from "./ruleConfig";
 import {
-  cancelPendingReminderJob,
+  cancelPendingSystemReminderJob,
   listPendingJobDedupeKeysByPrefix,
   upsertPendingSystemReminderJob,
   type NewNotificationJob,
@@ -624,20 +624,39 @@ type ReminderCategory =
  * assumed to be "tomorrow" specifically.
  *
  * `rule` is THIS tick's own loaded `SystemRuleConfig` for `category` --
- * required whenever `validJobs` is non-empty (every call site's own
- * `if (!rule?.enabled) return applyReminderJobs(category, dateKey, [], persist, rule)`
- * early-return guarantees `rule` is defined and enabled by the time a
- * non-empty `validJobs` is ever built, so the loop below can safely
- * assume it; `undefined` is only ever accepted so the SAME call shape
- * works for that empty-array early-return branch too). Every upsert goes
- * through `upsertPendingSystemReminderJob`'s stale-revision guard --
- * never the generic `upsertPendingReminderJob` -- so a worker whose
- * config a manager's concurrent `updateSystemRule` edit has since
- * invalidated can never re-materialize a job under the OLD configuration
- * (see that store function's own docstring for the exact race and lock-
- * ordering proof this closes). A guard rejection is a documented, benign
- * no-op -- logged, never thrown -- since the category's own next tick
- * reloads the current revision and reconciles correctly on its own.
+ * every call site's own `if (!rule?.enabled) return applyReminderJobs(category, dateKey, [], persist, rule)`
+ * early-return guarantees `rule` is defined AND enabled whenever
+ * `validJobs` is non-empty. `rule` being `undefined` here (missing from
+ * this tick's loaded config entirely -- should be unreachable once the
+ * seed migration has run) is handled as its own case below: fail-safe
+ * means "create nothing" (already guaranteed by every call site, since
+ * `validJobs` is always `[]` in that branch), but there is no rule
+ * identity/revision to AUTHORIZE a cancellation with either -- so this
+ * tick does NOT touch this category's existing pending jobs at all
+ * rather than fall back to an unguarded mutation (see below).
+ *
+ * Both the upsert AND the cancellation sweep go through a revision-
+ * guarded RPC -- never the generic `upsertPendingReminderJob`/
+ * `cancelPendingReminderJob` -- closing two MIRROR-IMAGE races a worker's
+ * own possibly-stale `NotificationRuleConfig` snapshot could otherwise
+ * cause against a manager's concurrent `updateSystemRule` edit:
+ *
+ *  - `upsertPendingSystemReminderJob` stops a stale worker from
+ *    re-CREATING a job under an OLD (superseded) configuration.
+ *  - `cancelPendingSystemReminderJob` stops a stale worker from
+ *    CANCELLING a job a FRESHER worker (or the manager's own
+ *    reconciliation) has since created under the CURRENT revision --
+ *    e.g. a worker that loaded a disabled revision, computed zero valid
+ *    jobs, and would otherwise treat a concurrent re-enable's freshly-
+ *    created job as "not in my valid set" and destroy it. See that
+ *    function's own docstring for why it deliberately does NOT require
+ *    `enabled = true` the way the upsert guard does.
+ *
+ * Either guard rejecting is a documented, benign no-op -- logged, never
+ * thrown -- since the category's own next tick reloads the current
+ * revision and reconciles correctly on its own. `created`/`cancelled`
+ * reflect only WRITES the guarded RPCs actually authorized, never a raw
+ * candidate/stale-key count.
  */
 async function applyReminderJobs(
   category: ReminderCategory,
@@ -650,12 +669,22 @@ async function applyReminderJobs(
     return { created: validJobs.length, cancelled: 0 };
   }
 
-  for (const job of validJobs) {
-    if (!rule) {
+  if (!rule) {
+    if (validJobs.length > 0) {
       throw new Error(`applyReminderJobs: missing system rule config for category "${category}" despite non-empty validJobs`);
     }
+    console.warn(
+      `[notifications] no rule config loaded for system category=${category} -- skipping this tick's job materialization/cancellation for it entirely (fail-safe: no rule identity/revision to authorize a mutation with)`,
+    );
+    return { created: 0, cancelled: 0 };
+  }
+
+  let created = 0;
+  for (const job of validJobs) {
     const wrote = await upsertPendingSystemReminderJob(job, { ruleId: rule.id, expectedRevision: rule.revision });
-    if (!wrote) {
+    if (wrote) {
+      created++;
+    } else {
       console.warn(
         `[notifications] stale rule revision for category=${category} ruleId=${rule.id} expectedRevision=${rule.revision} dedupeKey=${job.dedupeKey} -- upsert skipped (a concurrent manager edit is now authoritative; reconciles on this category's own next tick)`,
       );
@@ -667,11 +696,19 @@ async function applyReminderJobs(
   const validKeys = new Set(validJobs.map((job) => job.dedupeKey));
   const staleKeys = existingKeys.filter((key) => !validKeys.has(key));
 
+  let cancelled = 0;
   for (const key of staleKeys) {
-    await cancelPendingReminderJob(key);
+    const cancelledOk = await cancelPendingSystemReminderJob(key, { ruleId: rule.id, category, expectedRevision: rule.revision });
+    if (cancelledOk) {
+      cancelled++;
+    } else {
+      console.warn(
+        `[notifications] stale rule revision for category=${category} ruleId=${rule.id} expectedRevision=${rule.revision} dedupeKey=${key} -- cancellation skipped (a concurrent manager edit is now authoritative; a newer job under the current revision is left untouched)`,
+      );
+    }
   }
 
-  return { created: validJobs.length, cancelled: staleKeys.length };
+  return { created, cancelled };
 }
 
 // ---------------------------------------------------------------------------

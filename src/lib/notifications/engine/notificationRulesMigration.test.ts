@@ -280,3 +280,53 @@ describe("upsert_pending_system_reminder_job -- the guarded, revision-checked sy
     expect(sql).toMatch(/return true;\s*\n\s*end;/);
   });
 });
+
+describe("cancel_pending_system_reminder_job -- the MIRROR-IMAGE guarded cancellation (never let a stale worker cancel a NEWER revision's job)", () => {
+  const sql = readNotificationRulesMigration();
+
+  it("is revoked from public/anon/authenticated and granted only to service_role", () => {
+    expect(sql).toMatch(
+      /revoke all on function public\.cancel_pending_system_reminder_job\(uuid, text, bigint, text\)[\s\S]*?from public, anon, authenticated/i,
+    );
+    expect(sql).toMatch(
+      /grant execute on function public\.cancel_pending_system_reminder_job\(uuid, text, bigint, text\)[\s\S]*?to service_role/i,
+    );
+  });
+
+  it("locks the notification_rules row FIRST, before ever touching notification_jobs -- the SAME lock upsert_pending_system_reminder_job and update_system_rule_and_invalidate_pending_jobs both take, closing the race by lock ordering", () => {
+    const fnBlock = sql.match(/create or replace function public\.cancel_pending_system_reminder_job[\s\S]*?\$\$;/);
+    expect(fnBlock).not.toBeNull();
+    const lockIndex = fnBlock![0].indexOf("select * into rule_row from public.notification_rules where id = p_rule_id for update;");
+    const updateIndex = fnBlock![0].indexOf("update public.notification_jobs");
+    expect(lockIndex).toBeGreaterThan(-1);
+    expect(updateIndex).toBeGreaterThan(lockIndex);
+  });
+
+  it("requires kind = 'system', system_key = p_category, AND the exact expected revision -- but deliberately NEVER requires enabled = true", () => {
+    const fnBlock = sql.match(/create or replace function public\.cancel_pending_system_reminder_job[\s\S]*?\$\$;/);
+    expect(fnBlock).not.toBeNull();
+    expect(fnBlock![0]).toMatch(/rule_row\.kind is distinct from 'system'/);
+    expect(fnBlock![0]).toMatch(/rule_row\.system_key is distinct from p_category/);
+    expect(fnBlock![0]).toMatch(/rule_row\.revision is distinct from p_expected_revision/);
+    expect(fnBlock![0]).not.toMatch(/rule_row\.enabled/); // the ONE check the upsert guard has that this one deliberately omits
+  });
+
+  it("documents WHY the enabled check must differ from the upsert guard -- identity + exact revision is the cancellation authority, never enabled state", () => {
+    expect(sql).toMatch(/Deliberately DOES NOT require `enabled = true`/);
+    expect(sql).toMatch(/must still be able to clean up THAT revision's\s*\n--\s*own still-pending jobs/);
+  });
+
+  it("only cancels a still-'pending' row -- a claimed/completed/failed/skipped/already-cancelled row is left untouched", () => {
+    const fnBlock = sql.match(/create or replace function public\.cancel_pending_system_reminder_job[\s\S]*?\$\$;/);
+    expect(fnBlock).not.toBeNull();
+    expect(fnBlock![0]).toMatch(/set status = 'cancelled'\s*\n\s*where dedupe_key = p_dedupe_key and status = 'pending';/);
+  });
+
+  it("returns true once authorized/attempted, false for the stale-revision/mismatched no-op case", () => {
+    const fnBlock = sql.match(/create or replace function public\.cancel_pending_system_reminder_job[\s\S]*?\$\$;/);
+    expect(fnBlock).not.toBeNull();
+    expect(fnBlock![0]).toMatch(/returns boolean/);
+    expect(fnBlock![0]).toMatch(/return false; -- stale revision \/ mismatched -- documented no-op, never touches notification_jobs/);
+    expect(fnBlock![0]).toMatch(/return true;\s*\n\s*end;/);
+  });
+});
