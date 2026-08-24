@@ -1756,6 +1756,14 @@ export interface NotificationRuleRow {
   body: string | null;
   audienceKind: BroadcastAudienceKind | null;
   targetPersonIds: string[];
+  /** System rule only (null override = the built-in title unchanged). Always null for a `custom_weekly` row -- see the migration's own shape check. */
+  systemTitleOverride: string | null;
+  /** System rule only -- for a static-body category, a full replacement; for a dynamic-body category, a `{details}` template. Always null for a `custom_weekly` row. */
+  systemBodyOverride: string | null;
+  /** System rule only -- `'all_eligible'` or `'selected'`, a FILTER over the rule's own domain-eligible recipients. Always `'all_eligible'` for a `custom_weekly` row. */
+  systemAudienceMode: "all_eligible" | "selected";
+  /** System rule only -- stable roster person ids, meaningful only when `systemAudienceMode === 'selected'`. Always empty for a `custom_weekly` row. */
+  systemTargetPersonIds: string[];
   archivedAt: string | null;
   createdByPersonId: string | null;
   createdByPersonName: string | null;
@@ -1766,7 +1774,7 @@ export interface NotificationRuleRow {
 }
 
 const NOTIFICATION_RULE_COLUMNS =
-  "id, kind, system_key, enabled, weekday, local_hour, local_minute, revision, title, body, audience_kind, target_person_ids, archived_at, created_by_person_id, created_by_person_name, updated_by_person_id, updated_by_person_name, created_at, updated_at";
+  "id, kind, system_key, enabled, weekday, local_hour, local_minute, revision, title, body, audience_kind, target_person_ids, system_title_override, system_body_override, system_audience_mode, system_target_person_ids, archived_at, created_by_person_id, created_by_person_name, updated_by_person_id, updated_by_person_name, created_at, updated_at";
 
 function toNotificationRuleRow(row: Record<string, unknown>): NotificationRuleRow {
   return {
@@ -1786,6 +1794,10 @@ function toNotificationRuleRow(row: Record<string, unknown>): NotificationRuleRo
     body: (row.body as string | null) ?? null,
     audienceKind: (row.audience_kind as BroadcastAudienceKind | null) ?? null,
     targetPersonIds: (row.target_person_ids as string[] | null) ?? [],
+    systemTitleOverride: (row.system_title_override as string | null) ?? null,
+    systemBodyOverride: (row.system_body_override as string | null) ?? null,
+    systemAudienceMode: (row.system_audience_mode as "all_eligible" | "selected" | null) ?? "all_eligible",
+    systemTargetPersonIds: (row.system_target_person_ids as string[] | null) ?? [],
     archivedAt: (row.archived_at as string | null) ?? null,
     createdByPersonId: (row.created_by_person_id as string | null) ?? null,
     createdByPersonName: (row.created_by_person_name as string | null) ?? null,
@@ -1823,52 +1835,106 @@ export interface SystemRuleEdit {
   enabled: boolean;
   localHour: number;
   localMinute: number;
+  /** `null` = clear the override, use the built-in title unchanged. */
+  titleOverride: string | null;
+  /** `null` = clear the override, use the built-in body unchanged. Server-side callers must already have validated the `{details}` placeholder requirement for a dynamic-body category before reaching here -- this function does not re-derive that classification. */
+  bodyOverride: string | null;
+  audienceMode: "all_eligible" | "selected";
+  /** Stable roster person ids -- meaningful only when `audienceMode === 'selected'`; callers must already have revalidated these against a fresh roster (`ruleActions.ts`) before reaching here. */
+  targetPersonIds: readonly string[];
+  /**
+   * The `revision` this edit's caller loaded the rule at (`SystemRuleView.revision`)
+   * -- the OPTIMISTIC CONCURRENCY TOKEN for the Manager's OWN write path
+   * (a separate concern from the worker-side `SystemRuleConfig.revision`
+   * guard `upsertPendingSystemReminderJob`/`cancelPendingSystemReminderJob`
+   * already enforce). The RPC only applies this edit when the row's
+   * CURRENT revision still equals this value -- otherwise a stale Manager
+   * page (or a quick enable/disable toggle firing after someone else's
+   * concurrent edit) could silently overwrite a newer edit with its own
+   * stale copy/audience/time, a classic lost-update race. See the RPC's
+   * own migration doc comment for the full race and lock ordering.
+   */
+  expectedRevision: number;
   updatedByPersonId: string;
   updatedByPersonName: string;
 }
 
+export type UpdateSystemRuleOutcome =
+  | { status: "ok"; rule: NotificationRuleRow }
+  | { status: "conflict" }
+  | { status: "not_found" };
+
 /**
- * The ONLY write path for a system rule -- via the
- * `update_system_rule_and_invalidate_pending_jobs` RPC, guarded to
- * `kind = 'system'` at the SQL level (defense in depth on top of the
- * migration's own identity-protection trigger, which additionally
+ * The ONLY write path for a system rule -- via the enhanced
+ * `update_system_rule_configuration_and_invalidate_pending_jobs` RPC
+ * (added by the editable-copy/audience-filtering follow-up migration),
+ * guarded to `kind = 'system'` at the SQL level (defense in depth on top
+ * of the migration's own identity-protection trigger, which additionally
  * forbids `kind`/`system_key` from ever appearing in the SET list here
- * in the first place). `null` means the id doesn't exist or isn't a
- * system rule -- nothing else was touched.
+ * in the first place).
  *
  * Deliberately an RPC, not a plain `.update()`: the rule update and
  * invalidating that category's still-`pending` (never-claimed)
  * `notification_jobs` rows must happen in ONE atomic transaction --
- * otherwise a disable/time-edit could commit while an already-
- * materialized pending job (system reminders are upserted ahead of
- * their own send time) is still deliverable for up to the next
- * reminder-worker tick. See the RPC's own migration doc comment for why
- * this is a hard delete rather than a soft cancel, and for the
- * documented (bounded, safe) rematerialization delay this leaves for
- * `reminders.ts`'s next tick.
+ * otherwise a disable/time/copy/audience edit could commit while an
+ * already-materialized pending job (system reminders are upserted ahead
+ * of their own send time) is still deliverable, under the OLD
+ * configuration, for up to the next reminder-worker tick. See the RPC's
+ * own migration doc comment for why this is a hard delete rather than a
+ * soft cancel, and for the documented (bounded, safe) rematerialization
+ * delay this leaves for `reminders.ts`'s next tick.
  *
- * ALSO increments `revision` in this SAME transaction -- the second half
- * of the guard `upsertPendingSystemReminderJob` checks. Hard-deleting
- * this rule's pending jobs closes the window for an ALREADY-materialized
- * job; incrementing `revision` closes the SEPARATE window for a worker
- * that loaded this rule's config before this edit, but only attempts to
- * (re)materialize a job for it AFTER this edit commits -- see that
- * function's own docstring for the full race and the migration's
- * `upsert_pending_system_reminder_job` for its SQL-level lock ordering.
+ * ALSO increments `revision` in this SAME transaction, for EVERY field
+ * this function can change (not just enabled/time) -- the second half of
+ * the guard `upsertPendingSystemReminderJob`/`cancelPendingSystemReminderJob`
+ * check. Hard-deleting this rule's pending jobs closes the window for an
+ * ALREADY-materialized job; incrementing `revision` closes the SEPARATE
+ * window for a worker that loaded this rule's config before this edit,
+ * but only attempts to (re)materialize/cancel a job for it AFTER this
+ * edit commits -- see those functions' own docstrings for the full race
+ * and the migration for the SQL-level lock ordering.
+ *
+ * The RPC returns ZERO rows both when the id doesn't exist/isn't a
+ * system row AND when `edit.expectedRevision` is stale (the row moved on
+ * under a concurrent edit) -- at the SQL level these are indistinguishable
+ * from a single atomic statement on purpose (see the RPC's own doc
+ * comment). This function distinguishes them for the caller with a
+ * best-effort follow-up plain read: if the row still exists as a system
+ * rule, the zero-rows result must have been the revision check failing,
+ * so `"conflict"`; otherwise `"not_found"`. This follow-up read is NOT
+ * part of the same transaction (a purely informational lookup for a
+ * user-facing error message), but that's fine -- the RPC's own atomic
+ * revision check already fully protects the actual write; this can only
+ * ever affect which error STRING a caller sees, never whether a lost
+ * update can occur.
+ *
+ * The PR #93 predecessor RPC (`update_system_rule_and_invalidate_pending_jobs`,
+ * enabled/time only, no revision check on the Manager's own write path)
+ * remains defined in the database, untouched, for rollout compatibility
+ * with an already-deployed old app instance -- this function never calls it.
  */
-export async function updateSystemRule(id: string, edit: SystemRuleEdit): Promise<NotificationRuleRow | null> {
+export async function updateSystemRule(id: string, edit: SystemRuleEdit): Promise<UpdateSystemRuleOutcome> {
   const supabase = getNotificationServiceClient();
-  const { data, error } = await supabase.rpc("update_system_rule_and_invalidate_pending_jobs", {
+  const { data, error } = await supabase.rpc("update_system_rule_configuration_and_invalidate_pending_jobs", {
     p_rule_id: id,
+    p_expected_revision: edit.expectedRevision,
     p_enabled: edit.enabled,
     p_local_hour: edit.localHour,
     p_local_minute: edit.localMinute,
+    p_title_override: edit.titleOverride,
+    p_body_override: edit.bodyOverride,
+    p_audience_mode: edit.audienceMode,
+    p_target_person_ids: edit.targetPersonIds,
     p_updated_by_person_id: edit.updatedByPersonId,
     p_updated_by_person_name: edit.updatedByPersonName,
   });
   if (error) throw error;
   const rows = (data ?? []) as Record<string, unknown>[];
-  return rows.length > 0 ? toNotificationRuleRow(rows[0]) : null;
+  if (rows.length > 0) return { status: "ok", rule: toNotificationRuleRow(rows[0]) };
+
+  const existing = await getNotificationRuleById(id);
+  if (existing && existing.kind === "system") return { status: "conflict" };
+  return { status: "not_found" };
 }
 
 export interface NewCustomWeeklyRule {

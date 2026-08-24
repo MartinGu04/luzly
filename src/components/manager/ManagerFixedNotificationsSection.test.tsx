@@ -32,6 +32,26 @@ vi.mock("./ManagerRecurringRuleComposer", () => ({
   },
 }));
 
+const systemEditorCalls = vi.fn();
+vi.mock("./ManagerSystemRuleEditor", () => ({
+  ManagerSystemRuleEditor: (props: Record<string, unknown>) => {
+    systemEditorCalls(props);
+    return (
+      <div data-testid="system-editor-stub">
+        <button
+          type="button"
+          onClick={() => (props.onSaved as (updated: SystemRuleView) => void)((props.rule as SystemRuleView & { enabled: boolean }))}
+        >
+          fake-saved
+        </button>
+        <button type="button" onClick={() => (props.onCancel as () => void)()}>
+          fake-cancel
+        </button>
+      </div>
+    );
+  },
+}));
+
 const { ManagerFixedNotificationsSection } = await import("./ManagerFixedNotificationsSection");
 
 const ROSTER: ManagerPersonSummary[] = [];
@@ -49,6 +69,15 @@ function systemRule(overrides: Partial<SystemRuleView> = {}): SystemRuleView {
     trigger: "היום לפני משמרת -- מי שמשובץ למשמרת מחר",
     audience: "מי שמשובץ למשמרת למחר",
     copyNote: "",
+    revision: 1,
+    titleOverride: null,
+    bodyOverride: null,
+    audienceMode: "all_eligible",
+    targetPersonIds: [],
+    bodyKind: "dynamic_details_required",
+    defaultTitle: "⏰ המשמרת שלך מחר",
+    defaultBody: null,
+    audienceFilterNote: "ההתראה עדיין תישלח רק למי שיש לו משמרת מחר בפועל.",
     ...overrides,
   };
 }
@@ -111,9 +140,10 @@ describe("ManagerFixedNotificationsSection -- loading + display", () => {
 });
 
 describe("ManagerFixedNotificationsSection -- system rule row actions", () => {
-  it("disabling a system rule calls the action and reflects the new state without a full reload", async () => {
-    listNotificationRulesAction.mockResolvedValue({ ok: true, systemRules: [systemRule()], customWeeklyRules: [] });
-    updateSystemRuleAction.mockResolvedValue({ ok: true, rule: systemRule({ enabled: false }) });
+  it("disabling a system rule via the quick toggle resubmits its OWN current copy/audience/time unchanged (the RPC has no partial update), and reflects the new state without a full reload", async () => {
+    const rule = systemRule({ titleOverride: "כותרת מותאמת", audienceMode: "selected", targetPersonIds: ["p_1"] });
+    listNotificationRulesAction.mockResolvedValue({ ok: true, systemRules: [rule], customWeeklyRules: [] });
+    updateSystemRuleAction.mockResolvedValue({ ok: true, rule: { ...rule, enabled: false } });
 
     render(<ManagerFixedNotificationsSection roster={ROSTER} adoptionPeople={ADOPTION} />);
     await waitFor(() => expect(screen.getByText("תזכורת למשמרת מחר")).toBeTruthy());
@@ -121,12 +151,55 @@ describe("ManagerFixedNotificationsSection -- system rule row actions", () => {
     fireEvent.click(screen.getByText("השבתה"));
 
     await waitFor(() =>
-      expect(updateSystemRuleAction).toHaveBeenCalledWith("rule-1", { enabled: false, localHour: 20, localMinute: 0 }),
+      expect(updateSystemRuleAction).toHaveBeenCalledWith("rule-1", {
+        enabled: false,
+        localHour: 20,
+        localMinute: 0,
+        titleOverride: "כותרת מותאמת",
+        bodyOverride: null,
+        audienceMode: "selected",
+        targetPersonIds: ["p_1"],
+        expectedRevision: 1,
+      }),
     );
     await waitFor(() => expect(screen.getByText("הפעלה")).toBeTruthy());
   });
 
-  it("never offers a delete action for a system rule -- only disable", async () => {
+  it("[mandatory 8] the quick toggle submits the row's OWN loaded revision, not a hardcoded value", async () => {
+    const rule = systemRule({ revision: 9 });
+    listNotificationRulesAction.mockResolvedValue({ ok: true, systemRules: [rule], customWeeklyRules: [] });
+    updateSystemRuleAction.mockResolvedValue({ ok: true, rule: { ...rule, enabled: false } });
+
+    render(<ManagerFixedNotificationsSection roster={ROSTER} adoptionPeople={ADOPTION} />);
+    await waitFor(() => expect(screen.getByText("תזכורת למשמרת מחר")).toBeTruthy());
+
+    fireEvent.click(screen.getByText("השבתה"));
+
+    await waitFor(() =>
+      expect(updateSystemRuleAction).toHaveBeenCalledWith("rule-1", expect.objectContaining({ expectedRevision: 9 })),
+    );
+  });
+
+  it("a stale quick toggle (conflict -- someone else edited this rule since it loaded) shows a truthful error and triggers a full reload instead of silently overwriting the newer edit", async () => {
+    const rule = systemRule();
+    const refreshedRule = systemRule({ titleOverride: "כותרת של מנהל אחר", revision: 2 });
+    listNotificationRulesAction
+      .mockResolvedValueOnce({ ok: true, systemRules: [rule], customWeeklyRules: [] })
+      .mockResolvedValueOnce({ ok: true, systemRules: [refreshedRule], customWeeklyRules: [] });
+    updateSystemRuleAction.mockResolvedValue({ ok: false, error: "conflict" });
+
+    render(<ManagerFixedNotificationsSection roster={ROSTER} adoptionPeople={ADOPTION} />);
+    await waitFor(() => expect(screen.getByText("תזכורת למשמרת מחר")).toBeTruthy());
+
+    fireEvent.click(screen.getByText("השבתה"));
+
+    // The rejected toggle never applies -- the row stays enabled/"פעיל" --
+    // and the list reloads instead, surfacing the OTHER manager's newer edit.
+    await waitFor(() => expect(listNotificationRulesAction).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByText("✏️ הכותרת/התוכן הותאמו אישית.")).toBeTruthy());
+  });
+
+  it("never offers a delete action for a system rule -- only disable/enable and עריכה", async () => {
     listNotificationRulesAction.mockResolvedValue({ ok: true, systemRules: [systemRule()], customWeeklyRules: [] });
 
     render(<ManagerFixedNotificationsSection roster={ROSTER} adoptionPeople={ADOPTION} />);
@@ -135,21 +208,72 @@ describe("ManagerFixedNotificationsSection -- system rule row actions", () => {
     expect(screen.queryByText("הסרה")).toBeNull();
   });
 
-  it("editing a system rule's time submits only enabled/localHour/localMinute", async () => {
+  it("shows an audience summary reflecting the saved mode -- 'כל הרלוונטיים' for all_eligible, a count for selected", async () => {
+    listNotificationRulesAction.mockResolvedValue({
+      ok: true,
+      systemRules: [systemRule({ audienceMode: "selected", targetPersonIds: ["p_1", "p_2"] })],
+      customWeeklyRules: [],
+    });
+
+    render(<ManagerFixedNotificationsSection roster={ROSTER} adoptionPeople={ADOPTION} />);
+
+    await waitFor(() => expect(screen.getByText(/2 נבחרים/)).toBeTruthy());
+  });
+
+  it("clicking עריכה opens ManagerSystemRuleEditor for that rule, hiding its own row actions while editing", async () => {
     listNotificationRulesAction.mockResolvedValue({ ok: true, systemRules: [systemRule()], customWeeklyRules: [] });
-    updateSystemRuleAction.mockResolvedValue({ ok: true, rule: systemRule({ localHour: 19, localMinute: 15 }) });
 
     render(<ManagerFixedNotificationsSection roster={ROSTER} adoptionPeople={ADOPTION} />);
     await waitFor(() => expect(screen.getByText("תזכורת למשמרת מחר")).toBeTruthy());
 
-    fireEvent.click(screen.getByText("עריכת שעה"));
-    const timeInput = screen.getByLabelText("שעת שליחה עבור תזכורת למשמרת מחר");
-    fireEvent.change(timeInput, { target: { value: "19:15" } });
-    fireEvent.click(screen.getByText("שמירה"));
+    fireEvent.click(screen.getByText("עריכה"));
 
-    await waitFor(() =>
-      expect(updateSystemRuleAction).toHaveBeenCalledWith("rule-1", { enabled: true, localHour: 19, localMinute: 15 }),
-    );
+    expect(screen.getByTestId("system-editor-stub")).toBeTruthy();
+    expect(systemEditorCalls.mock.calls.at(-1)?.[0].rule).toMatchObject({ id: "rule-1" });
+    expect(screen.queryByText("השבתה")).toBeNull(); // row actions hidden while this rule is being edited
+  });
+
+  it("saving in the editor updates the row and closes the editor, without a full reload", async () => {
+    listNotificationRulesAction.mockResolvedValue({ ok: true, systemRules: [systemRule({ enabled: true })], customWeeklyRules: [] });
+
+    render(<ManagerFixedNotificationsSection roster={ROSTER} adoptionPeople={ADOPTION} />);
+    await waitFor(() => expect(screen.getByText("תזכורת למשמרת מחר")).toBeTruthy());
+
+    fireEvent.click(screen.getByText("עריכה"));
+    expect(screen.getByTestId("system-editor-stub")).toBeTruthy();
+
+    fireEvent.click(screen.getByText("fake-saved"));
+
+    await waitFor(() => expect(screen.queryByTestId("system-editor-stub")).toBeNull());
+    expect(listNotificationRulesAction).toHaveBeenCalledTimes(1); // no full reload -- the returned rule is applied directly
+  });
+
+  it("cancelling the editor closes it without calling updateSystemRuleAction", async () => {
+    listNotificationRulesAction.mockResolvedValue({ ok: true, systemRules: [systemRule()], customWeeklyRules: [] });
+
+    render(<ManagerFixedNotificationsSection roster={ROSTER} adoptionPeople={ADOPTION} />);
+    await waitFor(() => expect(screen.getByText("תזכורת למשמרת מחר")).toBeTruthy());
+
+    fireEvent.click(screen.getByText("עריכה"));
+    fireEvent.click(screen.getByText("fake-cancel"));
+
+    expect(screen.queryByTestId("system-editor-stub")).toBeNull();
+    expect(updateSystemRuleAction).not.toHaveBeenCalled();
+  });
+
+  it("opening the custom-weekly composer closes any open system-rule editor -- only one editor at a time", async () => {
+    listNotificationRulesAction.mockResolvedValue({ ok: true, systemRules: [systemRule()], customWeeklyRules: [] });
+
+    render(<ManagerFixedNotificationsSection roster={ROSTER} adoptionPeople={ADOPTION} />);
+    await waitFor(() => expect(screen.getByText("תזכורת למשמרת מחר")).toBeTruthy());
+
+    fireEvent.click(screen.getByText("עריכה"));
+    expect(screen.getByTestId("system-editor-stub")).toBeTruthy();
+
+    fireEvent.click(screen.getByText("+ התראה מחזורית"));
+
+    expect(screen.queryByTestId("system-editor-stub")).toBeNull();
+    expect(screen.getByTestId("composer-stub")).toBeTruthy();
   });
 });
 

@@ -52,7 +52,7 @@ const fetchAllSubscribedUserIds = vi.fn(async () => [] as string[]);
 // for `resolveNonPermanentConstraintsRecipients`'s own real-classification
 // tests (mocked at the `./serviceClient` I/O boundary instead, where
 // interception genuinely works).
-const resolveNonPermanentConstraintsRecipients = vi.fn(async () => [] as string[]);
+const resolveNonPermanentConstraintsRecipients = vi.fn(async () => [] as { personId: string; userId: string }[]);
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -71,8 +71,30 @@ function defaultRuleConfig(
   customWeeklyRules: NotificationRuleConfig["customWeeklyRules"] = [],
 ): NotificationRuleConfig {
   const base: Record<SystemRuleKey, SystemRuleConfig> = {
-    tomorrow_shift: { id: "rule-tomorrow_shift", systemKey: "tomorrow_shift", enabled: true, localHour: 20, localMinute: 0, revision: 1 },
-    tomorrow_duty: { id: "rule-tomorrow_duty", systemKey: "tomorrow_duty", enabled: true, localHour: 20, localMinute: 0, revision: 1 },
+    tomorrow_shift: {
+      id: "rule-tomorrow_shift",
+      systemKey: "tomorrow_shift",
+      enabled: true,
+      localHour: 20,
+      localMinute: 0,
+      revision: 1,
+      titleOverride: null,
+      bodyOverride: null,
+      audienceMode: "all_eligible" as const,
+      targetPersonIds: [],
+    },
+    tomorrow_duty: {
+      id: "rule-tomorrow_duty",
+      systemKey: "tomorrow_duty",
+      enabled: true,
+      localHour: 20,
+      localMinute: 0,
+      revision: 1,
+      titleOverride: null,
+      bodyOverride: null,
+      audienceMode: "all_eligible" as const,
+      targetPersonIds: [],
+    },
     tomorrow_logistics_withdrawal: {
       id: "rule-tomorrow_logistics_withdrawal",
       systemKey: "tomorrow_logistics_withdrawal",
@@ -80,6 +102,10 @@ function defaultRuleConfig(
       localHour: 20,
       localMinute: 0,
       revision: 1,
+      titleOverride: null,
+      bodyOverride: null,
+      audienceMode: "all_eligible" as const,
+      targetPersonIds: [],
     },
     tomorrow_logistics_withdrawal_supervisor: {
       id: "rule-tomorrow_logistics_withdrawal_supervisor",
@@ -88,6 +114,10 @@ function defaultRuleConfig(
       localHour: 20,
       localMinute: 0,
       revision: 1,
+      titleOverride: null,
+      bodyOverride: null,
+      audienceMode: "all_eligible" as const,
+      targetPersonIds: [],
     },
     logistics_withdrawal_noon_assigned: {
       id: "rule-logistics_withdrawal_noon_assigned",
@@ -96,6 +126,10 @@ function defaultRuleConfig(
       localHour: 12,
       localMinute: 0,
       revision: 1,
+      titleOverride: null,
+      bodyOverride: null,
+      audienceMode: "all_eligible" as const,
+      targetPersonIds: [],
     },
     logistics_withdrawal_noon_supervisor: {
       id: "rule-logistics_withdrawal_noon_supervisor",
@@ -104,6 +138,10 @@ function defaultRuleConfig(
       localHour: 12,
       localMinute: 0,
       revision: 1,
+      titleOverride: null,
+      bodyOverride: null,
+      audienceMode: "all_eligible" as const,
+      targetPersonIds: [],
     },
     logistics_withdrawal_noon_team: {
       id: "rule-logistics_withdrawal_noon_team",
@@ -112,6 +150,10 @@ function defaultRuleConfig(
       localHour: 12,
       localMinute: 0,
       revision: 1,
+      titleOverride: null,
+      bodyOverride: null,
+      audienceMode: "all_eligible" as const,
+      targetPersonIds: [],
     },
     almash_check_in: {
       id: "rule-almash_check_in",
@@ -120,6 +162,10 @@ function defaultRuleConfig(
       localHour: 12,
       localMinute: 45,
       revision: 1,
+      titleOverride: null,
+      bodyOverride: null,
+      audienceMode: "all_eligible" as const,
+      targetPersonIds: [],
     },
     constraints_sunday: {
       id: "rule-constraints_sunday",
@@ -128,6 +174,10 @@ function defaultRuleConfig(
       localHour: 18,
       localMinute: 0,
       revision: 1,
+      titleOverride: null,
+      bodyOverride: null,
+      audienceMode: "all_eligible" as const,
+      targetPersonIds: [],
     },
     constraints_monday: {
       id: "rule-constraints_monday",
@@ -136,6 +186,10 @@ function defaultRuleConfig(
       localHour: 9,
       localMinute: 0,
       revision: 1,
+      titleOverride: null,
+      bodyOverride: null,
+      audienceMode: "all_eligible" as const,
+      targetPersonIds: [],
     },
   };
 
@@ -521,7 +575,10 @@ const emptyRecipientResolution: RecipientResolution = {
 
 describe("runReminders -- weekly constraints reminders", () => {
   it("creates a Sunday reminder for every id resolveNonPermanentConstraintsRecipients returns, only on Sunday", async () => {
-    resolveNonPermanentConstraintsRecipients.mockResolvedValue(["user-a", "user-b"]);
+    resolveNonPermanentConstraintsRecipients.mockResolvedValue([
+      { personId: "p_a", userId: "user-a" },
+      { personId: "p_b", userId: "user-b" },
+    ]);
     const { runReminders } = await loadModule();
     const now: LocalNow = { date: "2026-08-16", minuteOfDay: 1080 }; // Sunday
     const week = getOperationalWeek(now);
@@ -543,7 +600,7 @@ describe("runReminders -- weekly constraints reminders", () => {
   });
 
   it("creates a Monday reminder, and never on any other weekday", async () => {
-    resolveNonPermanentConstraintsRecipients.mockResolvedValue(["user-a"]);
+    resolveNonPermanentConstraintsRecipients.mockResolvedValue([{ personId: "p_a", userId: "user-a" }]);
     const { runReminders } = await loadModule();
     const now: LocalNow = { date: "2026-08-17", minuteOfDay: 600 }; // Monday
     const week = getOperationalWeek(now);
@@ -562,7 +619,7 @@ describe("runReminders -- weekly constraints reminders", () => {
   });
 
   it("creates no constraints jobs on a Tuesday", async () => {
-    resolveNonPermanentConstraintsRecipients.mockResolvedValue(["user-a"]);
+    resolveNonPermanentConstraintsRecipients.mockResolvedValue([{ personId: "p_a", userId: "user-a" }]);
     const { runReminders } = await loadModule();
     const now: LocalNow = { date: "2026-08-18", minuteOfDay: 600 }; // Tuesday
     const week = getOperationalWeek(now);
@@ -582,7 +639,7 @@ describe("runReminders -- weekly constraints reminders", () => {
   });
 
   it("Sunday/Monday titles, bodies, timing, and path are unchanged by the audience-source fix", async () => {
-    resolveNonPermanentConstraintsRecipients.mockResolvedValue(["user-a"]);
+    resolveNonPermanentConstraintsRecipients.mockResolvedValue([{ personId: "p_a", userId: "user-a" }]);
     let { runReminders } = await loadModule();
     let now: LocalNow = { date: "2026-08-16", minuteOfDay: 1080 }; // Sunday
     let week = getOperationalWeek(now);
@@ -607,7 +664,7 @@ describe("runReminders -- weekly constraints reminders", () => {
     );
 
     store.upsertPendingSystemReminderJob.mockClear();
-    resolveNonPermanentConstraintsRecipients.mockResolvedValue(["user-a"]);
+    resolveNonPermanentConstraintsRecipients.mockResolvedValue([{ personId: "p_a", userId: "user-a" }]);
     ({ runReminders } = await loadModule());
     now = { date: "2026-08-17", minuteOfDay: 600 }; // Monday
     week = getOperationalWeek(now);
@@ -633,7 +690,7 @@ describe("runReminders -- weekly constraints reminders", () => {
   });
 
   it("never queries push-subscription state for recipient targeting -- fetchAllSubscribedUserIds is untouched by this category", async () => {
-    resolveNonPermanentConstraintsRecipients.mockResolvedValue(["user-a"]);
+    resolveNonPermanentConstraintsRecipients.mockResolvedValue([{ personId: "p_a", userId: "user-a" }]);
     const { runReminders } = await loadModule();
     const now: LocalNow = { date: "2026-08-16", minuteOfDay: 1080 }; // Sunday
     const week = getOperationalWeek(now);
@@ -783,7 +840,7 @@ describe("runReminders -- system rule config (Fixed Notifications Center)", () =
 
   it("disabling constraints_sunday cancels its own pending unsent job", async () => {
     store.listPendingJobDedupeKeysByPrefix.mockResolvedValue([]);
-    resolveNonPermanentConstraintsRecipients.mockResolvedValue(["user-a"]);
+    resolveNonPermanentConstraintsRecipients.mockResolvedValue([{ personId: "p_a", userId: "user-a" }]);
     const now: LocalNow = { date: "2026-08-16", minuteOfDay: 1080 }; // Sunday
     const week = getOperationalWeek(now);
 
@@ -805,7 +862,7 @@ describe("runReminders -- system rule config (Fixed Notifications Center)", () =
     // Second tick (same Sunday), manager disables the rule -- the
     // still-pending job for this week must now be cancelled.
     store.listPendingJobDedupeKeysByPrefix.mockResolvedValue([`constraints_sunday:${week.weekStart}:user-a`]);
-    resolveNonPermanentConstraintsRecipients.mockResolvedValue(["user-a"]);
+    resolveNonPermanentConstraintsRecipients.mockResolvedValue([{ personId: "p_a", userId: "user-a" }]);
     ({ runReminders } = await loadModule());
     const summary = await runReminders({
       events: [],
@@ -885,6 +942,12 @@ describe("runReminders -- system rule config (Fixed Notifications Center)", () =
     expect(consoleWarnSpy).toHaveBeenCalled();
 
     consoleWarnSpy.mockRestore();
+    // `vi.clearAllMocks()` (this file's own `afterEach`) clears call
+    // history but never undoes a persistent `mockResolvedValue` override
+    // -- restore the default true-returning behavior explicitly so later
+    // tests never inherit this test's stale-revision simulation.
+    store.upsertPendingSystemReminderJob.mockResolvedValue(true);
+    store.cancelPendingSystemReminderJob.mockResolvedValue(true);
   });
 });
 
@@ -1796,5 +1859,504 @@ describe("runReminders -- עלמ״ש check-in reminder (שמירה / עתודה 
     const tags = jobs.map((job) => job.tag);
     expect(new Set(dedupeKeys).size).toBe(2);
     expect(new Set(tags).size).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Editable SYSTEM notification copy + audience filtering (follow-up to the
+// Fixed / Recurring Notifications Center). Two invariants, proven per
+// category below: (1) a "selected" audience is a FILTER that still
+// delivers to a person who IS in `targetPersonIds` AND domain-eligible --
+// proving each category passes the correct STABLE ROSTER PERSON ID (never
+// an auth user id) into `isSystemRulePersonAllowed`; (2) selecting a
+// person who is NOT domain-eligible delivers NOTHING for that category,
+// even though someone else genuinely is eligible -- proving the filter can
+// only narrow, never expand, a category's own protected domain-eligibility
+// logic (spec: "can never expand eligibility").
+// ---------------------------------------------------------------------------
+describe("audience filtering -- system_target_person_ids FILTERS domain eligibility, never expands it (all 10 categories)", () => {
+  it("tomorrow_shift: selecting the actually-scheduled person still delivers; selecting someone without a shift tomorrow delivers nothing", async () => {
+    const now: LocalNow = { date: "2026-08-18", minuteOfDay: 1200 };
+    const week = getOperationalWeek(now);
+    const events = [event({ personId: "p1", date: "2026-08-19", category: "shift", period: "day" })];
+    const recipientResolution = resolutionWith("p1", "user-p1");
+
+    let { runReminders } = await loadModule();
+    await runReminders({
+      events,
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution,
+      ruleConfig: defaultRuleConfig({ tomorrow_shift: { audienceMode: "selected", targetPersonIds: ["p1"] } }),
+    });
+    expect(upsertedFor("tomorrow_shift")).toHaveLength(1);
+
+    store.upsertPendingSystemReminderJob.mockClear();
+    ({ runReminders } = await loadModule());
+    const summary = await runReminders({
+      events,
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution,
+      ruleConfig: defaultRuleConfig({ tomorrow_shift: { audienceMode: "selected", targetPersonIds: ["p_not_scheduled"] } }),
+    });
+    expect(summary.tomorrowShiftJobs).toBe(0);
+    expect(upsertedFor("tomorrow_shift")).toHaveLength(0);
+  });
+
+  it("tomorrow_duty: selecting the actually-scheduled person still delivers; selecting someone without a duty tomorrow delivers nothing", async () => {
+    const now: LocalNow = { date: "2026-08-18", minuteOfDay: 1200 };
+    const week = getOperationalWeek(now);
+    const events = [event({ personId: "p1", date: "2026-08-19", category: "duty", dutyFamily: "guard" })];
+    const recipientResolution = resolutionWith("p1", "user-p1");
+
+    let { runReminders } = await loadModule();
+    await runReminders({
+      events,
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution,
+      ruleConfig: defaultRuleConfig({ tomorrow_duty: { audienceMode: "selected", targetPersonIds: ["p1"] } }),
+    });
+    expect(upsertedFor("tomorrow_duty")).toHaveLength(1);
+
+    store.upsertPendingSystemReminderJob.mockClear();
+    ({ runReminders } = await loadModule());
+    const summary = await runReminders({
+      events,
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution,
+      ruleConfig: defaultRuleConfig({ tomorrow_duty: { audienceMode: "selected", targetPersonIds: ["p_not_scheduled"] } }),
+    });
+    expect(summary.tomorrowDutyJobs).toBe(0);
+    expect(upsertedFor("tomorrow_duty")).toHaveLength(0);
+  });
+
+  it("tomorrow_logistics_withdrawal: selecting the actually-assigned person still delivers; selecting someone else delivers nothing", async () => {
+    const now: LocalNow = { date: "2026-08-18", minuteOfDay: 1200 };
+    const week = getOperationalWeek(now);
+    const events = [event({ personId: "p1", date: "2026-08-19", category: "other", title: "משיכות מהלוגיסטיקה" })];
+    const recipientResolution = resolutionWith("p1", "user-p1");
+
+    let { runReminders } = await loadModule();
+    await runReminders({
+      events,
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution,
+      ruleConfig: defaultRuleConfig({ tomorrow_logistics_withdrawal: { audienceMode: "selected", targetPersonIds: ["p1"] } }),
+    });
+    expect(upsertedFor("tomorrow_logistics_withdrawal")).toHaveLength(1);
+
+    store.upsertPendingSystemReminderJob.mockClear();
+    ({ runReminders } = await loadModule());
+    const summary = await runReminders({
+      events,
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution,
+      ruleConfig: defaultRuleConfig({ tomorrow_logistics_withdrawal: { audienceMode: "selected", targetPersonIds: ["p_not_assigned"] } }),
+    });
+    expect(summary.tomorrowLogisticsWithdrawalJobs).toBe(0);
+    expect(upsertedFor("tomorrow_logistics_withdrawal")).toHaveLength(0);
+  });
+
+  it("tomorrow_logistics_withdrawal_supervisor: selecting the actually-relevant supervisor still delivers; selecting someone else delivers nothing", async () => {
+    store.listPendingJobDedupeKeysByPrefix.mockResolvedValue([]);
+    const now: LocalNow = { date: "2026-08-18", minuteOfDay: 1200 };
+    const week = getOperationalWeek(now);
+    const events = [withdrawalAssignment("p_ethan", "2026-08-19"), daySupervisorShift("p_sup", { date: "2026-08-19" })];
+    const recipientResolution = resolutionFor([
+      ["p_ethan", "user-ethan"],
+      ["p_sup", "user-sup"],
+    ]);
+
+    let { runReminders } = await loadModule();
+    await runReminders({
+      events,
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution,
+      ruleConfig: defaultRuleConfig({ tomorrow_logistics_withdrawal_supervisor: { audienceMode: "selected", targetPersonIds: ["p_sup"] } }),
+    });
+    expect(upsertedFor("tomorrow_logistics_withdrawal_supervisor")).toHaveLength(1);
+
+    store.upsertPendingSystemReminderJob.mockClear();
+    ({ runReminders } = await loadModule());
+    const summary = await runReminders({
+      events,
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution,
+      ruleConfig: defaultRuleConfig({ tomorrow_logistics_withdrawal_supervisor: { audienceMode: "selected", targetPersonIds: ["p_not_a_supervisor"] } }),
+    });
+    expect(summary.tomorrowLogisticsWithdrawalSupervisorJobs).toBe(0);
+    expect(upsertedFor("tomorrow_logistics_withdrawal_supervisor")).toHaveLength(0);
+  });
+
+  it("logistics_withdrawal_noon_assigned: selecting the actually-assigned person still delivers; selecting someone else delivers nothing", async () => {
+    store.listPendingJobDedupeKeysByPrefix.mockResolvedValue([]);
+    const now: LocalNow = { date: "2026-08-19", minuteOfDay: 600 };
+    const week = getOperationalWeek(now);
+    const events = [withdrawalAssignment("p_ethan", "2026-08-19")];
+    const recipientResolution = resolutionFor([["p_ethan", "user-ethan"]]);
+
+    let { runReminders } = await loadModule();
+    await runReminders({
+      events,
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution,
+      ruleConfig: defaultRuleConfig({ logistics_withdrawal_noon_assigned: { audienceMode: "selected", targetPersonIds: ["p_ethan"] } }),
+    });
+    expect(upsertedFor("logistics_withdrawal_noon_assigned")).toHaveLength(1);
+
+    store.upsertPendingSystemReminderJob.mockClear();
+    ({ runReminders } = await loadModule());
+    const summary = await runReminders({
+      events,
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution,
+      ruleConfig: defaultRuleConfig({ logistics_withdrawal_noon_assigned: { audienceMode: "selected", targetPersonIds: ["p_not_assigned"] } }),
+    });
+    expect(summary.logisticsWithdrawalNoonAssignedJobs).toBe(0);
+    expect(upsertedFor("logistics_withdrawal_noon_assigned")).toHaveLength(0);
+  });
+
+  it("logistics_withdrawal_noon_supervisor: selecting the actually-relevant supervisor still delivers; selecting someone else delivers nothing", async () => {
+    store.listPendingJobDedupeKeysByPrefix.mockResolvedValue([]);
+    const now: LocalNow = { date: "2026-08-17", minuteOfDay: 600 }; // Monday, unassigned
+    const week = getOperationalWeek(now);
+    const events = [daySupervisorShift("p_sup", { date: "2026-08-17" }), dayTechnicianShift("p_tech", { date: "2026-08-17" })];
+    const people = [person("p_tech", { isTechnician: true })];
+    const recipientResolution = resolutionFor([
+      ["p_sup", "user-sup"],
+      ["p_tech", "user-tech"],
+    ]);
+
+    let { runReminders } = await loadModule();
+    await runReminders({
+      events,
+      people,
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution,
+      ruleConfig: defaultRuleConfig({ logistics_withdrawal_noon_supervisor: { audienceMode: "selected", targetPersonIds: ["p_sup"] } }),
+    });
+    expect(upsertedFor("logistics_withdrawal_noon_supervisor")).toHaveLength(1);
+
+    store.upsertPendingSystemReminderJob.mockClear();
+    ({ runReminders } = await loadModule());
+    const summary = await runReminders({
+      events,
+      people,
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution,
+      ruleConfig: defaultRuleConfig({ logistics_withdrawal_noon_supervisor: { audienceMode: "selected", targetPersonIds: ["p_not_a_supervisor"] } }),
+    });
+    expect(summary.logisticsWithdrawalNoonSupervisorJobs).toBe(0);
+    expect(upsertedFor("logistics_withdrawal_noon_supervisor")).toHaveLength(0);
+  });
+
+  it("logistics_withdrawal_noon_team: selecting an actually-eligible teammate still delivers; selecting someone else delivers nothing", async () => {
+    store.listPendingJobDedupeKeysByPrefix.mockResolvedValue([]);
+    const now: LocalNow = { date: "2026-08-19", minuteOfDay: 600 };
+    const week = getOperationalWeek(now);
+    const events = [
+      withdrawalAssignment("p_ethan", "2026-08-19"),
+      dayTechnicianShift("p_ethan", { date: "2026-08-19" }),
+      dayTechnicianShift("p_helper", { date: "2026-08-19" }),
+    ];
+    const people = [person("p_ethan", { isTechnician: true }), person("p_helper", { isTechnician: true })];
+    const recipientResolution = resolutionFor([
+      ["p_ethan", "user-ethan"],
+      ["p_helper", "user-helper"],
+    ]);
+
+    let { runReminders } = await loadModule();
+    await runReminders({
+      events,
+      people,
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution,
+      ruleConfig: defaultRuleConfig({ logistics_withdrawal_noon_team: { audienceMode: "selected", targetPersonIds: ["p_helper"] } }),
+    });
+    expect(upsertedFor("logistics_withdrawal_noon_team")).toHaveLength(1);
+
+    store.upsertPendingSystemReminderJob.mockClear();
+    ({ runReminders } = await loadModule());
+    const summary = await runReminders({
+      events,
+      people,
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution,
+      ruleConfig: defaultRuleConfig({ logistics_withdrawal_noon_team: { audienceMode: "selected", targetPersonIds: ["p_not_eligible"] } }),
+    });
+    expect(summary.logisticsWithdrawalNoonTeamJobs).toBe(0);
+    expect(upsertedFor("logistics_withdrawal_noon_team")).toHaveLength(0);
+  });
+
+  it("almash_check_in: selecting the person with today's עלמ״ש still delivers; selecting someone else delivers nothing", async () => {
+    store.listPendingJobDedupeKeysByPrefix.mockResolvedValue([]);
+    const wednesday = "2026-08-19";
+    const now: LocalNow = { date: wednesday, minuteOfDay: 600 };
+    const week = getOperationalWeek(now);
+    const events = [dutyEvent("p1", wednesday, "guard")];
+    const recipientResolution = resolutionWith("p1", "user-p1");
+
+    let { runReminders } = await loadModule();
+    await runReminders({
+      events,
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution,
+      ruleConfig: defaultRuleConfig({ almash_check_in: { audienceMode: "selected", targetPersonIds: ["p1"] } }),
+    });
+    expect(upsertedFor("almash_check_in")).toHaveLength(1);
+
+    store.upsertPendingSystemReminderJob.mockClear();
+    ({ runReminders } = await loadModule());
+    const summary = await runReminders({
+      events,
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution,
+      ruleConfig: defaultRuleConfig({ almash_check_in: { audienceMode: "selected", targetPersonIds: ["p_not_on_duty"] } }),
+    });
+    expect(summary.almashCheckInJobs).toBe(0);
+    expect(upsertedFor("almash_check_in")).toHaveLength(0);
+  });
+
+  it("constraints_sunday: selecting an actually-eligible non-permanent person still delivers; selecting someone else delivers nothing", async () => {
+    resolveNonPermanentConstraintsRecipients.mockResolvedValue([{ personId: "p_a", userId: "user-a" }]);
+    const now: LocalNow = { date: "2026-08-16", minuteOfDay: 1080 }; // Sunday
+    const week = getOperationalWeek(now);
+
+    let { runReminders } = await loadModule();
+    await runReminders({
+      events: [],
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: emptyRecipientResolution,
+      ruleConfig: defaultRuleConfig({ constraints_sunday: { audienceMode: "selected", targetPersonIds: ["p_a"] } }),
+    });
+    expect(upsertedFor("constraints_sunday")).toHaveLength(1);
+
+    resolveNonPermanentConstraintsRecipients.mockResolvedValue([{ personId: "p_a", userId: "user-a" }]);
+    store.upsertPendingSystemReminderJob.mockClear();
+    ({ runReminders } = await loadModule());
+    const summary = await runReminders({
+      events: [],
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: emptyRecipientResolution,
+      ruleConfig: defaultRuleConfig({ constraints_sunday: { audienceMode: "selected", targetPersonIds: ["p_permanent_or_unrelated"] } }),
+    });
+    expect(summary.constraintsJobs).toBe(0);
+    expect(upsertedFor("constraints_sunday")).toHaveLength(0);
+  });
+
+  it("constraints_monday: selecting an actually-eligible non-permanent person still delivers; selecting someone else delivers nothing", async () => {
+    resolveNonPermanentConstraintsRecipients.mockResolvedValue([{ personId: "p_a", userId: "user-a" }]);
+    const now: LocalNow = { date: "2026-08-17", minuteOfDay: 600 }; // Monday
+    const week = getOperationalWeek(now);
+
+    let { runReminders } = await loadModule();
+    await runReminders({
+      events: [],
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: emptyRecipientResolution,
+      ruleConfig: defaultRuleConfig({ constraints_monday: { audienceMode: "selected", targetPersonIds: ["p_a"] } }),
+    });
+    expect(upsertedFor("constraints_monday")).toHaveLength(1);
+
+    resolveNonPermanentConstraintsRecipients.mockResolvedValue([{ personId: "p_a", userId: "user-a" }]);
+    store.upsertPendingSystemReminderJob.mockClear();
+    ({ runReminders } = await loadModule());
+    const summary = await runReminders({
+      events: [],
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: emptyRecipientResolution,
+      ruleConfig: defaultRuleConfig({ constraints_monday: { audienceMode: "selected", targetPersonIds: ["p_permanent_or_unrelated"] } }),
+    });
+    expect(summary.constraintsJobs).toBe(0);
+    expect(upsertedFor("constraints_monday")).toHaveLength(0);
+  });
+
+  it("constraints: a selected PERMANENT person is never a candidate at all -- resolveNonPermanentConstraintsRecipients already excludes them, so the audience filter can never reach/include them regardless of what's stored", async () => {
+    // The permanent person is never even returned as a candidate -- this is
+    // the actual safety mechanism (see recipients.ts's own docstring); the
+    // audience filter downstream never gets a chance to include them.
+    resolveNonPermanentConstraintsRecipients.mockResolvedValue([{ personId: "p_a", userId: "user-a" }]);
+    const now: LocalNow = { date: "2026-08-16", minuteOfDay: 1080 }; // Sunday
+    const week = getOperationalWeek(now);
+
+    const { runReminders } = await loadModule();
+    const summary = await runReminders({
+      events: [],
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: emptyRecipientResolution,
+      // Even selecting the id of a hypothetical permanent person "p_permanent" can never matter --
+      // resolveNonPermanentConstraintsRecipients (mocked here as it would behave in reality) never returns them.
+      ruleConfig: defaultRuleConfig({ constraints_sunday: { audienceMode: "selected", targetPersonIds: ["p_permanent"] } }),
+    });
+
+    expect(summary.constraintsJobs).toBe(0);
+    expect(upsertedFor("constraints_sunday")).toHaveLength(0);
+  });
+});
+
+describe("editable system-rule copy -- title/body overrides applied at send time (per bodyKind)", () => {
+  it("static-body category (tomorrow_logistics_withdrawal): a saved title+body override fully replaces the built-in copy", async () => {
+    const { runReminders } = await loadModule();
+    const now: LocalNow = { date: "2026-08-18", minuteOfDay: 1200 };
+    const week = getOperationalWeek(now);
+
+    await runReminders({
+      events: [event({ personId: "p1", date: "2026-08-19", category: "other", title: "משיכות מהלוגיסטיקה" })],
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: resolutionWith("p1", "user-p1"),
+      ruleConfig: defaultRuleConfig({
+        tomorrow_logistics_withdrawal: { titleOverride: "כותרת מותאמת", bodyOverride: "תוכן מותאם לגמרי" },
+      }),
+    });
+
+    expect(upsertedFor("tomorrow_logistics_withdrawal")).toEqual([
+      expect.objectContaining({ title: "כותרת מותאמת", body: "תוכן מותאם לגמרי" }),
+    ]);
+  });
+
+  it("dynamic-body category (tomorrow_shift): a saved title override replaces the title; a null body override leaves the real dynamic details untouched", async () => {
+    const { runReminders } = await loadModule();
+    const now: LocalNow = { date: "2026-08-18", minuteOfDay: 1200 };
+    const week = getOperationalWeek(now);
+
+    await runReminders({
+      events: [event({ personId: "p1", date: "2026-08-19", category: "shift", period: "day" })],
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: resolutionWith("p1", "user-p1"),
+      ruleConfig: defaultRuleConfig({ tomorrow_shift: { titleOverride: "כותרת מותאמת" } }),
+    });
+
+    expect(upsertedFor("tomorrow_shift")).toEqual([
+      expect.objectContaining({ title: "כותרת מותאמת", body: expect.stringContaining("מחר") }),
+    ]);
+  });
+
+  it("dynamic-body category (tomorrow_shift): a {details} body template is substituted with the real, per-occurrence dynamic details -- never lost", async () => {
+    const { runReminders } = await loadModule();
+    const now: LocalNow = { date: "2026-08-18", minuteOfDay: 1200 };
+    const week = getOperationalWeek(now);
+
+    await runReminders({
+      events: [event({ personId: "p1", date: "2026-08-19", category: "shift", period: "unspecified" })], // unresolvable period, no label -> the real, truthful fallback sentence
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: resolutionWith("p1", "user-p1"),
+      ruleConfig: defaultRuleConfig({ tomorrow_shift: { bodyOverride: "⚠️ תזכורת חשובה: {details}" } }),
+    });
+
+    expect(upsertedFor("tomorrow_shift")).toEqual([
+      expect.objectContaining({ title: "⏰ המשמרת שלך מחר", body: "⚠️ תזכורת חשובה: מחר יש לך משמרת" }),
+    ]);
+  });
+
+  it("null title/body overrides reproduce the exact SAME built-in copy as before this feature existed -- default compatibility", async () => {
+    const { runReminders } = await loadModule();
+    const now: LocalNow = { date: "2026-08-18", minuteOfDay: 1200 };
+    const week = getOperationalWeek(now);
+
+    await runReminders({
+      events: [event({ personId: "p1", date: "2026-08-19", category: "shift", period: "day" })],
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: resolutionWith("p1", "user-p1"),
+      // defaultRuleConfig() with no overrides -- titleOverride/bodyOverride null, audienceMode all_eligible.
+    });
+
+    expect(upsertedFor("tomorrow_shift")).toEqual([
+      expect.objectContaining({ title: "⏰ המשמרת שלך מחר", body: expect.stringContaining("מחר ב־07:00 מתחילה משמרת יום שלך") }),
+    ]);
   });
 });

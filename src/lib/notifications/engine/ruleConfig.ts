@@ -54,6 +54,14 @@ export interface SystemRuleConfig {
    * for the full race this closes.
    */
   revision: number;
+  /** `null` = use the built-in title unchanged. See `applySystemRuleCopy` (`systemRuleCopy.ts`). */
+  titleOverride: string | null;
+  /** `null` = use the built-in body unchanged. For a `dynamic_details_required` category (see the presentation-layer catalog), a non-null value is a `{details}` template -- already validated server-side at save time, never re-validated here. */
+  bodyOverride: string | null;
+  /** A FILTER over this rule's own domain-eligible recipients -- see `isSystemRulePersonAllowed` below. Can never expand who is eligible. */
+  audienceMode: "all_eligible" | "selected";
+  /** Stable roster person ids -- meaningful only when `audienceMode === 'selected'`. Re-validated against the CURRENT roster at send time by each reminder function's own recipient resolution (a stale/removed id simply never matches a currently-eligible person, so it's silently skipped, never guessed at). */
+  targetPersonIds: readonly string[];
 }
 
 export interface CustomWeeklyRuleConfig {
@@ -98,7 +106,27 @@ function toSystemRuleConfig(row: NotificationRuleRow): SystemRuleConfig | null {
     localHour: row.localHour,
     localMinute: row.localMinute,
     revision: row.revision,
+    titleOverride: row.systemTitleOverride,
+    bodyOverride: row.systemBodyOverride,
+    audienceMode: row.systemAudienceMode,
+    targetPersonIds: row.systemTargetPersonIds,
   };
+}
+
+/**
+ * Whether `personId` is allowed to receive `rule`'s notification, per the
+ * manager's own audience configuration -- a pure FILTER over whatever the
+ * caller's own domain eligibility logic already decided; this function
+ * has no domain knowledge itself and must always be applied ON TOP of
+ * (never instead of) a category's real eligible-recipient computation
+ * (see each `reminders.ts` function's own recipient loop). `'selected'`
+ * with an empty `targetPersonIds` (should be unreachable -- `ruleActions.ts`
+ * requires at least one selection to save that mode) allows no one,
+ * fail-safe rather than silently falling back to `'all_eligible'`.
+ */
+export function isSystemRulePersonAllowed(rule: SystemRuleConfig, personId: string): boolean {
+  if (rule.audienceMode === "all_eligible") return true;
+  return rule.targetPersonIds.includes(personId);
 }
 
 function toCustomWeeklyRuleConfig(row: NotificationRuleRow): CustomWeeklyRuleConfig | null {
