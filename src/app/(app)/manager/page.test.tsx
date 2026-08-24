@@ -220,16 +220,22 @@ describe("ManagerPage — authorization states", () => {
 });
 
 describe("ManagerPage — request scope", () => {
-  it("passes parsed search params through to getRequestManagerOverview (category is a page-local rendering concern, never sent to the loader)", async () => {
+  it("passes parsed search params through to getRequestManagerOverview -- the raw category string itself is never sent, only the derived needsAdoptionReadiness flag (false for a non-logins category like shifts)", async () => {
     getRequestManagerOverview.mockResolvedValue(okResult(model()));
     await renderPage({ person: "p_martin", range: "30d", category: "shifts" });
-    expect(getRequestManagerOverview).toHaveBeenCalledWith("p_martin", "30d", null);
+    expect(getRequestManagerOverview).toHaveBeenCalledWith("p_martin", "30d", null, false);
   });
 
-  it("defaults: no search params -> everyone, 7d, no month", async () => {
+  it("passes needsAdoptionReadiness=true only for category=logins", async () => {
+    getRequestManagerOverview.mockResolvedValue(okResult(model()));
+    await renderPage({ category: "logins" });
+    expect(getRequestManagerOverview).toHaveBeenCalledWith(null, "7d", null, true);
+  });
+
+  it("defaults: no search params -> everyone, 7d, no month, needsAdoptionReadiness=false (default category is overview)", async () => {
     getRequestManagerOverview.mockResolvedValue(okResult(model()));
     await renderPage();
-    expect(getRequestManagerOverview).toHaveBeenCalledWith(null, "7d", null);
+    expect(getRequestManagerOverview).toHaveBeenCalledWith(null, "7d", null, false);
   });
 });
 

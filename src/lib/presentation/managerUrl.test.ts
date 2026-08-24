@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildManagerHref, parseManagerCategoryParam } from "./managerUrl";
+import { buildManagerHref, managerCategoryNeedsAdoptionReadiness, parseManagerCategoryParam } from "./managerUrl";
 
 const BASE = { personId: null, range: "7d" as const, month: null, category: "overview" as const };
 
@@ -58,5 +58,18 @@ describe("parseManagerCategoryParam", () => {
     expect(parseManagerCategoryParam("personnel")).toBe("personnel");
     expect(parseManagerCategoryParam("duties")).toBe("duties");
     expect(parseManagerCategoryParam("logins")).toBe("logins");
+  });
+});
+
+describe("managerCategoryNeedsAdoptionReadiness", () => {
+  it("is true ONLY for logins -- the sole category that renders model.adoption", () => {
+    expect(managerCategoryNeedsAdoptionReadiness("logins")).toBe(true);
+  });
+
+  it("is false for overview, shifts, personnel, and duties", () => {
+    expect(managerCategoryNeedsAdoptionReadiness("overview")).toBe(false);
+    expect(managerCategoryNeedsAdoptionReadiness("shifts")).toBe(false);
+    expect(managerCategoryNeedsAdoptionReadiness("personnel")).toBe(false);
+    expect(managerCategoryNeedsAdoptionReadiness("duties")).toBe(false);
   });
 });

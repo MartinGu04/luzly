@@ -164,37 +164,79 @@ person's own schedule, and that broader scope is authorized, not assumed:
   problems-only filter.
 - `managerOverview.ts` — `loadManagerOverviewReadModel()`, the
   server-only orchestration layer and the security-critical piece of
-  PR #14:
-  1. Reuses `getRequestPersonalSchedule()` (the SAME request-scoped
-     result the protected layout already computed) as the first
-     authorization gate — every existing auth/config state passes
-     through unchanged.
-  2. ONLY once that's `"ok"` AND `model.person.isManager === true` does
-     this fetch the manager-only batch (`personnel` + `schedule` +
-     `settings` + `potentialH1` + `potentialH2`) — one additional Google
-     request, NEVER performed for a normal user or for a non-manager
-     hitting `/manager` (which gets `{status: "forbidden"}` immediately,
-     no manager fetch at all).
-  3. Defense in depth: re-resolves the authenticated identity against the
-     FRESH manager snapshot's own freshly-parsed personnel sheet and
-     re-checks `isManager` there too. If that second check fails for any
-     reason, this fails closed as `"forbidden"` — the already-fetched
-     manager data is discarded, never rendered. Manager authorization is
-     `person.isManager === true` ONLY; supervisor/technician/
-     personnelType/route-visibility are never treated as equivalent.
+  PR #14. Authorization itself lives in `managerWorkbookContext.ts` (see
+  below) — this file does what's Overview-specific: parsing
+  schedule/settings/Potential from the authorized snapshot, building the
+  shift schedule, resolving the requested date range, deciding whether the
+  privileged login/notification-readiness lookup is even needed (see
+  `loadAdoptionReadiness` below), and building `ManagerOverviewReadModel`.
+  Every stage is wrapped in `timedStage`/`timedSyncStage`
+  (`lib/config/timingDiagnostics.ts`) — `managerOverview.total`,
+  `manager.settings.parse`, `manager.schedule.parse`,
+  `manager.potential.parse`, `manager.fairness.parse`,
+  `manager.readModel.build`, `manager.adoptionReadiness` — so Manager-
+  specific latency is directly measurable, never guessed.
+  - **Category-scoped adoption readiness (Manager category-switch
+    latency).** `loadAdoptionReadiness(people, personId,
+    needsAdoptionReadiness)` skips `computeNotificationReadiness()` (a
+    privileged Supabase Admin API `listUsers()` + bulk `push_subscriptions`
+    query) for TWO independent reasons: a person is selected (`personId
+    !== null` — no category, including `"logins"`, renders it there), or
+    the requested category simply isn't `"logins"`
+    (`needsAdoptionReadiness === false`, decided by
+    `managerCategoryNeedsAdoptionReadiness()` in
+    `lib/presentation/managerUrl.ts` and threaded down from
+    `app/(app)/manager/page.tsx`). Overview/Shifts/Personnel/Duties never
+    pay for this I/O, even though they share the same whole-team read
+    model as Logins. `getRequestManagerOverview`'s `cache()` key includes
+    this flag, so a render that needs it and one that doesn't are never
+    accidentally treated as the same cached call.
 - `getRequestManagerOverview.ts` — `cache(loadManagerOverviewReadModel)`,
-  keyed on primitive `(personId, range, month)` args (not
-  one object literal) so React's `cache()` per-argument identity
+  keyed on primitive `(personId, range, month, needsAdoptionReadiness)`
+  args (not one object literal) so React's `cache()` per-argument identity
   comparison actually dedupes multiple Server Components on the same
   `/manager` render.
 
 **Fetch count by viewer:** a normal user (any page) → 1 Google batch
-fetch (`personnel`+`schedule`+`settings`). A non-manager hitting
-`/manager` → still 1 (the shared personal-loader fetch; forbidden before
-any manager-only fetch). A manager hitting `/manager` → 2 (the shared
-personal-loader fetch, reused via `cache()` with the layout, PLUS the one
-manager-only batch above). Security boundary matters more than
-minimizing this count further.
+fetch (`personnel`+`schedule`+`settings`+`potentialH1`+`potentialH2`, via
+`getRequestPersonalSchedule()`). A non-manager hitting `/manager` → 1
+(the manager-only 5-source batch, fetched to authorize, then discarded
+as `{status: "forbidden"}` before any manager data is parsed/returned —
+see `managerWorkbookContext.ts` below). A manager hitting `/manager` → 2
+Google batches total for the WHOLE request (the protected layout's own
+personal-loader fetch via `getRequestPersonalSchedule()`, reused with the
+dashboard/shell via `cache()`, PLUS the one manager-only batch) — but only
+ONE live Supabase `getUser()` identity check, via
+`getRequestAuthenticatedIdentity()` (see below), shared between the
+layout's personal-loader call and the manager-authorization gate. Security
+boundary matters more than minimizing the Google fetch count further —
+see `managerWorkbookContext.ts`'s own docs for what changed here and why
+it's still safe.
+
+### Request-scoped identity memoization (`lib/auth/getRequestAuthenticatedIdentity.ts`)
+
+`getRequestAuthenticatedIdentity = cache(getAuthenticatedIdentity)` —
+React's per-request `cache()`, the exact same primitive
+`getRequestPersonalSchedule`/`getRequestManagerOverview`/
+`getWorkbookSnapshot`'s own in-flight dedup layer already rely on. This is
+a genuinely THIRD kind of cache in this codebase, distinct from the other
+two, and the distinction is documented directly in that file:
+1. **This wrapper** — request-scoped, reset every new request, never
+   shared across users/requests. It only stops the SAME live `getUser()`
+   verification from being repeated several times within one render pass.
+2. **The 30-second shared raw-workbook snapshot cache**
+   (`lib/sync/workbookSnapshotCache.ts`, `unstable_cache`) — non-personal,
+   shared spreadsheet data, cached ACROSS requests/users for a short TTL.
+   Never holds identity/session/authorization state.
+3. **Any persistent cache of authenticated/personal Manager or
+   personal-schedule OUTPUT** — forbidden outright by this app's
+   engineering rules, and never introduced here either.
+
+`personalSchedule.ts` and `managerWorkbookContext.ts` (Manager Overview's
+authorization gate, see below) both call this wrapper — so a manager
+request's identity is verified live exactly once, shared between the
+protected layout's personal-schedule load and the manager-authorization
+check, instead of twice.
 
 The client only ever receives safe roster `{id, name}[]` (see
 `ManagerPersonSelector`, the one narrow Client Component this screen
@@ -210,35 +252,58 @@ to live on the same sheet tabs (`פוטנציאל תקש"אס 1-6/2026` /
 giant read model.
 
 - **Shared auth/fetch boundary.** `managerWorkbookContext.ts` extracts
-  PR #14's manager authorization + manager-wide fetch boundary out of
-  `managerOverview.ts` into `loadManagerWorkbookContext()`, reused by
-  BOTH Manager Overview and Manager Fairness. It performs the exact same
-  security sequence PR #14 established (personal-loader gate →
-  `isManager` check → the ONE manager batch fetch, personnel + schedule +
-  settings + potentialH1 + potentialH2 → fresh re-verification against
-  the snapshot's own personnel sheet → fail closed), then returns the
-  re-verified manager `Person`, the full parsed roster, and the raw
-  `RawWorkbookSnapshot` for the caller to parse further sheets from.
-  `managerOverview.ts` now only does what's Overview-specific (settings →
-  shift schedule, schedule → events, Potential reconciliation);
-  `managerFairness.ts` only picks the ONE Potential sheet the resolved
-  period needs and parses its Fairness table. Neither caller ever
-  triggers a second/third Google fetch — a manager hitting
-  `/manager/fairness` costs exactly the same 2 fetches (1 personal-loader
-  + 1 manager batch) as hitting `/manager`.
+  the manager authorization + manager-wide fetch boundary into
+  `loadManagerWorkbookContext()`, reused by Manager Overview, Manager
+  Fairness, the permanent-manager Home, Schedule's manager perspective,
+  and the broadcast/rule Server Actions.
+
+  **Manager-latency pass (category-switch performance).** This used to
+  gate on `getRequestPersonalSchedule()` — unconditionally parsing
+  schedule/settings/Potential and building the ENTIRE
+  `PersonalScheduleReadModel` (`detectOperationalIssues` included) purely
+  to read `model.person.isManager` off it — and then re-resolved identity
+  and re-parsed personnel a SECOND time anyway as "defense in depth". That
+  was two live `getUser()` calls and two personnel parses per manager
+  request, on top of a full personal-schedule build whose result was
+  otherwise discarded. It now performs the minimal sequence that's
+  actually necessary to prove the same four guarantees:
+  1. a live authenticated Supabase user
+     (`getRequestAuthenticatedIdentity()` — request-scoped `cache()`, see
+     above);
+  2. that user's email resolves unambiguously against personnel
+     (`resolveIdentityAgainstPeople`, run against a FRESH parse of the
+     manager snapshot's own personnel sheet);
+  3. that resolved `Person.isManager === true`;
+  4. only then is the manager-wide batch (the caller's own `sources`,
+     defaulting to `MANAGER_WORKBOOK_SOURCES`) returned.
+
+  This is still genuine defense in depth — identity is re-verified live
+  and personnel is freshly re-parsed from the snapshot about to be
+  returned — it just no longer duplicates a whole unrelated read-model
+  build to get there. One side effect: an invalid/missing shift-schedule
+  configuration no longer blocks this gate at all (it used to surface
+  here as an early `configuration_error`, even for a caller like the
+  broadcast-status polls that never touch `settings`) — a feature that
+  actually needs `ShiftSchedule` still builds and fails closed on it
+  itself, from `context.snapshot`, exactly like `managerOverview.ts`/
+  `permanentManagerHome.ts`/`schedule.ts` already did. `getWorkbookSnapshot`
+  is fetched with the CALLER's own `sources`, not a fixed set — a narrower
+  caller (the broadcast/rule Server Actions passing `["personnel"]`)
+  authorizes against, and only ever fetches, the sheets it actually needs.
+  Both `/manager` and `/manager/fairness` still request the identical five
+  sources, so tapping between them within the cache's short TTL reuses the
+  same snapshot instead of a fresh Google request each time.
 - **Lightweight polling boundary.** The same file's `loadManagerPersonnelContext()`
   is a deliberately NARROWER sibling for background/polling reads that
   only need "is this caller a manager" plus the roster (the Manager
   communication area's ~17s scheduled/recent-broadcast status polls --
   see `lib/notifications/scheduledBroadcastActions.ts`/
-  `manualBroadcastActions.ts`). It skips `loadManagerWorkbookContext`'s
-  `getRequestPersonalSchedule()` gate entirely (which unconditionally
-  parses Schedule/Settings/Potential just to authorize) and instead goes
-  straight to `getAuthenticatedIdentity()` + a personnel-ONLY
-  `getWorkbookSnapshot(["personnel"])` + the same
-  `resolveIdentityAgainstPeople`/`isManager` check -- no second identity
-  model, still fail-closed, still never trusts manager status from the
-  client.
+  `manualBroadcastActions.ts`). `loadManagerWorkbookContext(["personnel"])`
+  now performs the SAME lightweight identity+personnel-only sequence (see
+  above) — this sibling still exists, unmerged, purely because its
+  narrower return type (no `snapshot`/`avatarUrl`) matches what these
+  polling call sites actually need without discarding fields, not because
+  of any remaining cost difference.
 - **`lib/domain/fairnessTable.ts`** — `FairnessPersonRow` /
   `FairnessTotalsRow` / `FairnessTargets`, the domain-owned shapes
   `lib/parsers/fairness.ts` produces (same convention as

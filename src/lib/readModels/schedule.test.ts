@@ -180,10 +180,10 @@ describe("loadScheduleReadModel — manager authorization / fetch scope (PR #24 
     expect(getRequestPersonalSchedule).toHaveBeenCalledTimes(1);
   });
 
-  it("a manager's request calls getRequestPersonalSchedule from two call sites (here, and again inside loadManagerWorkbookContext) -- both share ONE real request-scoped result via React's cache() in production, this mock just can't demonstrate that dedup itself", async () => {
+  it("a manager's request calls getRequestPersonalSchedule from exactly ONE call site (this loader's own self/gate check) -- loadManagerWorkbookContext no longer depends on it at all (Manager-latency pass: it now authorizes via a lightweight identity+personnel check instead)", async () => {
     getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(true));
     await loadScheduleReadModel(DEFAULT_PARAMS);
-    expect(getRequestPersonalSchedule).toHaveBeenCalledTimes(2);
+    expect(getRequestPersonalSchedule).toHaveBeenCalledTimes(1);
   });
 
   it("a non-manager never triggers the manager-wide fetch either, even via this loader's manager branch check", async () => {

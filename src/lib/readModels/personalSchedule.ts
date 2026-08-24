@@ -1,6 +1,6 @@
 import "server-only";
 import { resolveIdentityAgainstPeople } from "@/lib/auth/resolveCurrentPerson";
-import { getAuthenticatedIdentity } from "@/lib/auth/currentUser";
+import { getRequestAuthenticatedIdentity } from "@/lib/auth/getRequestAuthenticatedIdentity";
 import { timedStage, timedSyncStage } from "@/lib/config/timingDiagnostics";
 import { ShiftConfigurationError, buildShiftSchedule, type ShiftSchedule } from "@/lib/domain/shiftSchedule";
 import { SHEET_SOURCES, type RawSheet, type RawWorkbookSnapshot, type SheetSourceKey } from "@/lib/google";
@@ -102,7 +102,12 @@ export async function loadPersonalScheduleReadModel(): Promise<PersonalScheduleL
 }
 
 async function loadPersonalScheduleReadModelInner(): Promise<PersonalScheduleLoadResult> {
-  const identity = await getAuthenticatedIdentity();
+  // Request-scoped memoized (`cache()`, see `getRequestAuthenticatedIdentity`'s
+  // own docs) -- still a genuinely live Supabase `getUser()` call every new
+  // request, just shared within THIS one if another loader on the same
+  // render (e.g. `managerWorkbookContext.ts`'s manager-authorization gate)
+  // already triggered it.
+  const identity = await getRequestAuthenticatedIdentity();
   if (identity.status === "unauthenticated") return { status: "unauthenticated" };
   if (identity.status === "missing_email") return { status: "missing_email" };
 

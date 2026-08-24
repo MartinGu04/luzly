@@ -1,18 +1,17 @@
 import "server-only";
-import { getAuthenticatedIdentity } from "@/lib/auth/currentUser";
+import { getRequestAuthenticatedIdentity } from "@/lib/auth/getRequestAuthenticatedIdentity";
 import { resolveIdentityAgainstPeople } from "@/lib/auth/resolveCurrentPerson";
+import { timedStage, timedSyncStage } from "@/lib/config/timingDiagnostics";
 import { SHEET_SOURCES, type RawSheet, type RawWorkbookSnapshot, type SheetSourceKey } from "@/lib/google";
 import type { Person } from "@/lib/domain/types";
 import { parsePersonnelSheet } from "@/lib/parsers/personnel";
 import { getWorkbookSnapshot } from "@/lib/sync";
-import { getRequestPersonalSchedule } from "./getRequestPersonalSchedule";
 
 export type ManagerWorkbookContextResult =
   | { status: "unauthenticated" }
   | { status: "missing_email" }
   | { status: "unmapped" }
   | { status: "ambiguous_identity" }
-  | { status: "configuration_error"; message: string }
   /** Authenticated + mapped, but `person.isManager !== true` -- no manager-wide fetch was ever performed. */
   | { status: "forbidden" }
   | { status: "ok"; context: ManagerWorkbookContext };
@@ -24,8 +23,8 @@ export interface ManagerWorkbookContext {
   snapshot: RawWorkbookSnapshot;
   /**
    * The manager's OWN presentation-only Google profile photo -- read
-   * straight off the `getRequestPersonalSchedule()` call this function
-   * already makes for authorization (never a second/new fetch, and never
+   * straight off the SAME `AuthIdentityResult` this function already
+   * resolves for authorization (never a second/new fetch, and never
    * looked up for anyone other than the manager themselves). See
    * `lib/auth/currentUser.ts` for where it originates.
    */
@@ -59,78 +58,90 @@ export function getManagerWorkbookSheet(snapshot: RawWorkbookSnapshot, key: Shee
  * The shared manager-authorization + workbook-fetch boundary (PR #15 §4).
  * Extracted from PR #14's `managerOverview.ts` so BOTH Manager Overview and
  * Manager Fairness reuse the exact same security behavior instead of two
- * independent (and potentially drifting) copies of it:
+ * independent (and potentially drifting) copies of it.
  *
- * 1. Reuses `getRequestPersonalSchedule()` (request-scoped, shared with the
- *    protected layout) as the FIRST authorization gate -- every existing
- *    auth/config state passes through unchanged, and a non-manager never
- *    triggers the manager-only fetch below at all.
- * 2. Only once that result is "ok" AND `model.person.isManager === true`
- *    does this fetch the manager-wide batch (personnel + schedule +
- *    settings + potentialH1 + potentialH2) -- via `getWorkbookSnapshot`
- *    (`lib/sync`), never performed for a normal user or a non-manager
- *    hitting a manager-only route. Both `/manager` and `/manager/fairness`
- *    request the exact same five sources, so a manager tapping between
- *    them within the cache's short TTL reuses the same snapshot instead
- *    of a fresh Google request each time -- see `getWorkbookSnapshot`'s
- *    own docs for why this is safe to cache (shared, non-personal data
- *    only) and how it stays isolated from the personal 3-source set.
- * 3. Defense in depth: re-resolves the authenticated identity (a live
- *    Supabase call, NEVER cached) against the (possibly cache-reused)
- *    manager snapshot's own freshly-parsed personnel sheet, and re-checks
- *    `isManager` there too. If that second check fails for any reason
- *    (personnel changed since that snapshot was fetched, a stale/edited
- *    record, anything), this fails closed as "forbidden" -- the already-
- *    fetched manager data is discarded, never returned to a caller. The
- *    cache's short TTL bounds how old "since that snapshot was fetched"
- *    can be -- this check is still genuinely re-run every single request,
- *    just possibly against data up to `SNAPSHOT_CACHE_REVALIDATE_SECONDS`
- *    old rather than an instantaneous read, the same explicit tradeoff
- *    the cache makes everywhere else.
+ * Performance follow-up (Manager category-switch latency): this used to
+ * gate on `getRequestPersonalSchedule()` -- which unconditionally parses
+ * schedule/settings/Potential and builds the ENTIRE `PersonalScheduleReadModel`
+ * (including `detectOperationalIssues` etc.) just to read
+ * `model.person.isManager` off it -- and THEN re-resolved identity and
+ * re-parsed personnel a second time below anyway ("defense in depth").
+ * That meant two live `getUser()` calls and two personnel parses per
+ * manager request, on top of a full personal-schedule build whose result
+ * was otherwise thrown away. None of that heavier work is actually
+ * necessary to prove the four things a manager-only route needs:
+ *
+ * 1. a live authenticated Supabase user (`getRequestAuthenticatedIdentity()`
+ *    -- request-scoped `cache()`-memoized, see its own docs for exactly
+ *    what that does and does not share across requests; still a genuinely
+ *    live, server-verified check every new request);
+ * 2. that user's email resolves unambiguously against personnel
+ *    (`resolveIdentityAgainstPeople`, run against a FRESH parse of the
+ *    manager snapshot's own personnel sheet -- never trusted from an
+ *    earlier/different fetch);
+ * 3. that resolved `Person.isManager === true` (never trusted from the
+ *    client, never assumed from route access alone);
+ * 4. only THEN is the manager-wide batch (personnel + schedule + settings +
+ *    potentialH1 + potentialH2, or the caller's own narrower `sources`)
+ *    returned to the caller.
+ *
+ * This is still "defense in depth" in the sense that matters: identity is
+ * re-verified live and personnel is freshly re-parsed from the ACTUAL
+ * snapshot about to be handed to the caller, so a stale/edited record can
+ * never slip through. What's gone is the SEPARATE, redundant personal-
+ * schedule build that used to exist purely to ask "is this a manager" once
+ * before asking it again -- an unrelated shift-schedule configuration
+ * problem (which `getRequestPersonalSchedule()` used to surface here as an
+ * early `configuration_error`, even for a caller like the ~17s broadcast-
+ * status polls that never touch `settings` at all) can no longer block
+ * this gate either; a feature that actually needs `ShiftSchedule` still
+ * builds and fails closed on it itself, from `context.snapshot`, exactly
+ * like `managerOverview.ts`/`permanentManagerHome.ts`/`schedule.ts`
+ * already do.
+ *
+ * `getWorkbookSnapshot` is fetched with the CALLER's own `sources` (not a
+ * fixed 5-source set) -- so a narrower caller (e.g. the broadcast/rule
+ * Server Actions passing `["personnel"]`) authorizes against, and only
+ * ever fetches, the sheets it actually needs; both `/manager` and
+ * `/manager/fairness` still request the identical five sources, so tapping
+ * between them within the cache's short TTL reuses the same snapshot
+ * instead of a fresh Google request each time -- see `getWorkbookSnapshot`'s
+ * own docs for why this is safe to cache (shared, non-personal data only).
  *
  * Callers that need more than the raw snapshot (e.g. Manager Overview's
  * shift schedule / date range / event parsing) do that parsing themselves
  * from `context.snapshot` via `getManagerWorkbookSheet` -- this helper
  * intentionally stops at the authorized raw snapshot + roster, since not
  * every manager feature needs the same downstream sheets.
- *
- * `sources` defaults to `MANAGER_WORKBOOK_SOURCES` (every existing caller's
- * behavior, unchanged) but a narrower feature -- e.g. Schedule (PR #24),
- * which never needs potentialH1/H2 -- can pass its own smaller list so it
- * never fetches sheets it has no use for, while still going through the
- * exact same fail-closed authorization sequence.
  */
 export async function loadManagerWorkbookContext(
   sources: SheetSourceKey[] = MANAGER_WORKBOOK_SOURCES,
 ): Promise<ManagerWorkbookContextResult> {
-  const personalResult = await getRequestPersonalSchedule();
+  return timedStage("manager.authContext", () => loadManagerWorkbookContextInner(sources));
+}
 
-  if (personalResult.status === "unauthenticated") return { status: "unauthenticated" };
-  if (personalResult.status === "missing_email") return { status: "missing_email" };
-  if (personalResult.status === "unmapped") return { status: "unmapped" };
-  if (personalResult.status === "ambiguous_identity") return { status: "ambiguous_identity" };
-  if (personalResult.status === "configuration_error") {
-    return { status: "configuration_error", message: personalResult.message };
-  }
-
-  if (!personalResult.model.person.isManager) {
-    return { status: "forbidden" };
-  }
+async function loadManagerWorkbookContextInner(sources: SheetSourceKey[]): Promise<ManagerWorkbookContextResult> {
+  const identity = await getRequestAuthenticatedIdentity();
+  if (identity.status === "unauthenticated") return { status: "unauthenticated" };
+  if (identity.status === "missing_email") return { status: "missing_email" };
 
   const snapshot = await getWorkbookSnapshot(sources);
 
-  // Defense in depth: re-verify identity + manager status against the FRESH snapshot, never trust the first check alone.
-  const identity = await getAuthenticatedIdentity();
-  const people = parsePersonnelSheet(getManagerWorkbookSheet(snapshot, "personnel"));
+  const people = timedSyncStage("manager.personnel.parse", () =>
+    parsePersonnelSheet(getManagerWorkbookSheet(snapshot, "personnel")),
+  );
   const identityResult = resolveIdentityAgainstPeople(identity, people);
 
+  if (identityResult.status === "unmapped" || identityResult.status === "ambiguous_identity") {
+    return { status: identityResult.status };
+  }
   if (identityResult.status !== "ok" || !identityResult.person.isManager) {
     return { status: "forbidden" };
   }
 
   return {
     status: "ok",
-    context: { manager: identityResult.person, people, snapshot, avatarUrl: personalResult.avatarUrl },
+    context: { manager: identityResult.person, people, snapshot, avatarUrl: identity.avatarUrl },
   };
 }
 
@@ -148,26 +159,21 @@ export type ManagerPersonnelContextResult =
  * reads that only ever need to know "is this caller a manager" plus the
  * roster (e.g. the Manager communication area's ~17s scheduled/recent
  * broadcast status polls -- see `scheduledBroadcastActions.ts`/
- * `manualBroadcastActions.ts`). Deliberately NOT `loadManagerWorkbookContext`
- * above: that helper's FIRST step is `getRequestPersonalSchedule()`, which
- * unconditionally loads and parses the full Personal Schedule read model
- * (personnel + schedule + settings + both Potential periods, including
- * building a `ShiftSchedule` that can itself fail closed as a
- * `configuration_error`) purely as its authorization gate, before this
- * function's caller's actual `sources` parameter is even consulted. That
- * is the right authorization path for an actual Personal Schedule/Manager
- * read-model request, but it is the WRONG one for a lightweight status
- * poll that only ever needs the roster -- repeating that full parse every
- * ~17 seconds does real CPU work on every poll (the 30-second workbook
- * cache only saves the Google round trip, not the parsing), and
- * needlessly couples an unrelated feature's polling to Schedule/Settings/
- * Potential health.
+ * `manualBroadcastActions.ts`). `loadManagerWorkbookContext(["personnel"])`
+ * above now performs the SAME lightweight identity+personnel-only sequence
+ * (its old dependency on the full Personal Schedule read model as an
+ * authorization gate was removed as part of a Manager-latency pass -- see
+ * that function's own docs) -- this sibling still exists, unmerged, purely
+ * because its narrower return type (no `snapshot`/`avatarUrl`) matches what
+ * these polling call sites actually need without them having to discard
+ * fields, not because of any remaining cost difference.
  *
  * This function needs, and fetches, ONLY:
- * 1. The authenticated Supabase identity (`getAuthenticatedIdentity`,
- *    always a live, server-verified check -- never trusts anything the
- *    client sent, and an unauthenticated/email-less caller returns
- *    immediately, before any workbook fetch or DB read of any kind).
+ * 1. The authenticated Supabase identity (request-scoped memoized via
+ *    `getRequestAuthenticatedIdentity` -- always a live, server-verified
+ *    check -- never trusts anything the client sent, and an
+ *    unauthenticated/email-less caller returns immediately, before any
+ *    workbook fetch or DB read of any kind).
  * 2. A personnel-ONLY workbook snapshot via `getWorkbookSnapshot`
  *    (`lib/sync`'s existing shared, short-TTL cache) -- NEVER the
  *    uncached `fetchRawWorkbookSnapshot`/`resolveCurrentPerson()` path,
@@ -189,7 +195,7 @@ export type ManagerPersonnelContextResult =
  * recent broadcasts) ever runs.
  */
 export async function loadManagerPersonnelContext(): Promise<ManagerPersonnelContextResult> {
-  const identity = await getAuthenticatedIdentity();
+  const identity = await getRequestAuthenticatedIdentity();
   if (identity.status === "unauthenticated") return { status: "unauthenticated" };
   if (identity.status === "missing_email") return { status: "missing_email" };
 
