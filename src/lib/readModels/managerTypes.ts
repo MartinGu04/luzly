@@ -192,8 +192,10 @@ export type ManagerAdoptionNotificationStatus = "ready" | "not_enabled";
 export type ManagerAdoptionDataIssue = "missing_email" | "ambiguous_email";
 
 /**
- * One roster person's adoption picture -- "התחברויות והתראות" (the manager
- * category this feeds). Built from `computeNotificationReadiness()`'s
+ * One roster person's adoption picture -- feeds the Manager Area's
+ * "התחברויות" category AND the standalone "מרכז התראות" Notification
+ * Center's own audience picker/estimate (`NotificationCenterContext`).
+ * Built from `computeNotificationReadiness()`'s
  * single per-person `PersonNotificationReadiness` (see
  * `buildManagerOverviewReadModel.ts`'s `toManagerAdoptionPerson`), just
  * split into the two orthogonal questions a manager actually asks --
@@ -220,7 +222,7 @@ export interface ManagerAdoptionPersonView {
 }
 
 /**
- * The only counts the "התחברויות והתראות" category surfaces -- every one
+ * The only counts the Manager Area's "התחברויות" category surfaces -- every one
  * answers a real management question (see `ManagerAdoptionPersonView`'s
  * docstring), never a decorative statistic. `totalCount` is the full
  * roster scope this was computed over; every other count is a subset of
@@ -236,7 +238,7 @@ export interface ManagerAdoptionSummary {
   dataIssueCount: number;
 }
 
-/** The full "התחברויות והתראות" category payload -- every roster person's adoption state, plus the summary counts derived from the same pass. */
+/** The full "התחברויות" category payload -- every roster person's adoption state, plus the summary counts derived from the same pass. */
 export interface ManagerAdoptionView {
   summary: ManagerAdoptionSummary;
   people: ManagerAdoptionPersonView[];
@@ -247,7 +249,7 @@ export interface ManagerAdoptionView {
  * attempted" from "it was attempted and failed", never collapse both into
  * the same silent absence a viewer could mistake for "everyone is ready":
  * - `skipped` -- a person is selected (every category, including
- *   "התחברויות והתראות", only renders in the "everyone" scope), so
+ *   "התחברויות", only renders in the "everyone" scope), so
  *   `computeNotificationReadiness()` was never called at all.
  * - `unavailable` -- it WAS called, for the "everyone" scope, and the
  *   Supabase Admin API / `push_subscriptions` lookup itself failed (see
@@ -255,8 +257,8 @@ export interface ManagerAdoptionView {
  *   silently missing category.
  * - `available` -- it succeeded; `view` is the safe projection (unlike the
  *   old מצב התראות aside, this is shown even when everyone is ready --
- *   "התחברויות והתראות" is a full category page, not an inline note that
- *   should disappear on a calm day).
+ *   "התחברויות" is a full category page, not an inline note that should
+ *   disappear on a calm day).
  */
 export type ManagerAdoptionState =
   | { status: "skipped" }
@@ -302,7 +304,7 @@ export interface ManagerOverviewReadModel {
 
   /**
    * Login + push-notification adoption across the whole roster -- feeds
-   * the "התחברויות והתראות" manager category. Always one of three explicit
+   * the "התחברויות" manager category. Always one of three explicit
    * states (`ManagerAdoptionState`) -- never a bare `null` conflating
    * "skipped" with "the lookup failed". See `managerOverview.ts`, which
    * skips the Supabase Admin API + bulk `push_subscriptions` calls

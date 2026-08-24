@@ -46,7 +46,7 @@ export function MobileIdentityBar({ name, isManager, avatarUrl, userId }: Mobile
             `usePushSubscription`) instance whenever the authenticated user
             changes -- this codebase's established idiom for "reset all
             internal state when an identity prop changes" (see
-            `ManagerBroadcastArea`'s `key={editingItem?.id ?? "new"}`) --
+            `NotificationScheduleSection`'s `key={editingItem?.id ?? "new"}`) --
             so an account switch on a shared device can never let the
             previous user's Push UI state linger, even for a single
             frame. */}

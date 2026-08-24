@@ -117,7 +117,7 @@ async function tryAutoRestore(): Promise<boolean> {
  * Callers must render their `NotificationBell` with `key={userId}` (see
  * `MobileIdentityBar`/`ShellUtilityBar`) -- this codebase's established
  * "reset all internal state when an identity prop changes" idiom (compare
- * `ManagerBroadcastArea`'s `key={editingItem?.id ?? "new"}`), and the only
+ * `NotificationScheduleSection`'s `key={editingItem?.id ?? "new"}`), and the only
  * one compatible with this project's stricter React Hooks lint rules
  * (no synchronous `setState` in an effect, no ref reads/writes during
  * render). A fresh `key` forces a genuinely new component -- and thus a

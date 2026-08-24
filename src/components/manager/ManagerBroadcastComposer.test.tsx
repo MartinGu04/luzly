@@ -26,7 +26,7 @@ const ADOPTION: ManagerAdoptionPersonView[] = [
 ];
 
 function renderComposer() {
-  return render(<ManagerBroadcastComposer roster={ROSTER} adoptionPeople={ADOPTION} />);
+  return render(<ManagerBroadcastComposer mode="now" roster={ROSTER} adoptionPeople={ADOPTION} />);
 }
 
 describe("ManagerBroadcastComposer", () => {

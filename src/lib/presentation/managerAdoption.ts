@@ -11,7 +11,7 @@ const DATA_ISSUE_LABEL: Record<ManagerAdoptionDataIssue, string> = {
   ambiguous_email: "מייל משויך ליותר מאדם אחד",
 };
 
-/** One row in a "התחברויות והתראות" group -- name/photo, plus the specific roster-data problem only when relevant (`dataIssueGroup`; `null` in every other group, whose own heading already says the status). */
+/** One row in a "התחברויות" group -- name/photo, plus the specific roster-data problem only when relevant (`dataIssueGroup`; `null` in every other group, whose own heading already says the status). */
 export interface AdoptionPersonRowView {
   personId: string;
   personName: string;
@@ -32,7 +32,7 @@ export interface AdoptionStatView {
 }
 
 /**
- * The whole "התחברויות והתראות" category's view -- unlike the old inline
+ * The whole "התחברויות" category's view -- unlike the old inline
  * מצב התראות aside (`{kind: "hidden"}` on an all-ready roster), `available`
  * always renders here, even when every count but `totalCount` is zero: this
  * is a full category page a manager navigates to on purpose, not a
@@ -89,7 +89,7 @@ function buildStats(summary: ManagerAdoptionSummary): AdoptionStatView[] {
 }
 
 /**
- * Builds the "התחברויות והתראות" category's entire view from the read
+ * Builds the "התחברויות" category's entire view from the read
  * model's own three-state `ManagerAdoptionState`. Groups by the SAME
  * `loginStatus`/`notificationStatus`/`dataIssue` split the read model
  * already computed -- this function only labels/buckets/sorts, it never

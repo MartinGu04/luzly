@@ -55,7 +55,7 @@ function QuietGroup({ group }: { group: AdoptionGroupView }) {
 }
 
 /**
- * The "התחברויות והתראות" category's per-person view -- reconciles the כ"א
+ * The "התחברויות" category's per-person view -- reconciles the כ"א
  * roster against Supabase auth + push-subscription state (see
  * `ManagerAdoptionView`), grouped into exactly the buckets a manager acts
  * on differently:

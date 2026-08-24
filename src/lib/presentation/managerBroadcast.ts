@@ -9,9 +9,10 @@ export interface AudienceSummaryView {
 
 /**
  * A client-side ESTIMATE of what a selection will resolve to -- built
- * purely from the SAME `ManagerAdoptionPersonView[]` readiness data the
- * "התחברויות והתראות" section already renders, never a second readiness
- * computation. Advisory only, before the manager clicks send: the server
+ * purely from the SAME `ManagerAdoptionPersonView[]` readiness projection
+ * "מרכז התראות" (`/notifications`) already loads for its "עכשיו"/"תזמון"/
+ * "קבועות" sections, never a second readiness computation. Advisory only,
+ * before the manager clicks send: the server
  * independently re-resolves every recipient from scratch at send time
  * (`sendManagerBroadcastNotification`), so a stale or tampered client view
  * can never change who actually gets notified -- only what the manager

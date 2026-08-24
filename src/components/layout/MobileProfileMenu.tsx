@@ -3,7 +3,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import Link from "next/link";
-import { Loader2, LogOut, Moon, Settings, Sun, UserCog } from "lucide-react";
+import { BellRing, Loader2, LogOut, Moon, Settings, Sun, UserCog } from "lucide-react";
 import { signOutAction } from "@/lib/auth/actions";
 import { Avatar } from "@/components/ui/Avatar";
 import { PushEndpointHiddenField } from "@/components/pwa/PushEndpointHiddenField";
@@ -52,6 +52,14 @@ function SignOutMenuItem() {
  * showing name/role/manager-link/theme-control/logout permanently in the
  * header -- all of that now lives behind this single Avatar button, kept
  * as a lightweight custom popover (no menu/dropdown dependency).
+ *
+ * For a manager, this is where BOTH manager-only top-level destinations
+ * surface on mobile -- "אזור מנהל" (`/manager`, operational/team
+ * management) and "מרכז התראות" (`/notifications`, sending/scheduling/
+ * history/recurring notification management) -- following the same
+ * existing pattern that already kept `/manager` out of the small,
+ * uncluttered `BottomNav` (see `nav-items.ts`'s own `managerOnly`
+ * docstring). Neither entry renders for a non-manager.
  *
  * Uses only the already-safe `name`/`isManager` passed down from the app
  * shell (the same identity the request-scoped read model already
@@ -143,6 +151,18 @@ export function MobileProfileMenu({ name, isManager, avatarUrl }: MobileProfileM
             >
               <UserCog className="h-4 w-4 text-muted" aria-hidden="true" strokeWidth={1.75} />
               אזור מנהל
+            </Link>
+          ) : null}
+
+          {isManager ? (
+            <Link
+              href="/notifications"
+              role="menuitem"
+              onClick={() => setOpen(false)}
+              className="flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-sm font-medium text-foreground transition-colors duration-150 hover:bg-overlay-soft"
+            >
+              <BellRing className="h-4 w-4 text-muted" aria-hidden="true" strokeWidth={1.75} />
+              מרכז התראות
             </Link>
           ) : null}
 

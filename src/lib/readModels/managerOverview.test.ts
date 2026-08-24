@@ -237,7 +237,7 @@ describe("loadManagerOverviewReadModel — success", () => {
   });
 });
 
-describe("loadManagerOverviewReadModel — adoption (התחברויות והתראות) readiness wiring", () => {
+describe("loadManagerOverviewReadModel — adoption (התחברויות) readiness wiring", () => {
   it("needsAdoptionReadiness=true + everyone scope: calls computeNotificationReadiness exactly once, with the full roster", async () => {
     await loadManagerOverviewReadModel(DEFAULT_PARAMS, true);
     expect(computeNotificationReadiness).toHaveBeenCalledTimes(1);

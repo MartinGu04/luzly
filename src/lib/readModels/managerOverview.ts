@@ -13,11 +13,8 @@ import { parsePotentialSheet } from "@/lib/parsers/potential";
 import { parseScheduleSheet } from "@/lib/parsers/schedule";
 import { parseSettingsSheet } from "@/lib/parsers/settings";
 import { getJerusalemLocalNow } from "@/lib/time/jerusalemClock";
-import {
-  buildManagerOverviewReadModel,
-  type AdoptionReadinessLookup,
-  type RosterAvatarLookup,
-} from "./buildManagerOverviewReadModel";
+import { buildManagerOverviewReadModel, type RosterAvatarLookup } from "./buildManagerOverviewReadModel";
+import { type AdoptionReadinessLookup } from "./managerAdoptionProjection";
 import { getManagerWorkbookSheet, loadManagerWorkbookContext } from "./managerWorkbookContext";
 import type { ManagerOverviewParams } from "./managerOverviewParams";
 import type { ManagerOverviewReadModel } from "./managerTypes";
@@ -159,8 +156,8 @@ async function loadManagerOverviewReadModelInner(
 /**
  * The manager overview's own three-way record of the privileged login/
  * notification readiness lookup -- `skipped` (either a person is selected,
- * so no category -- including "התחברויות והתראות" -- renders there; or the
- * requested category simply isn't "התחברויות והתראות", so the page is never
+ * so no category -- including "התחברויות" -- renders there; or the
+ * requested category simply isn't "התחברויות", so the page is never
  * going to render this data either way) is explicitly DIFFERENT from
  * `unavailable` (the "everyone" + "logins" scope DID attempt it, and it
  * failed) -- collapsing both into the same `null`/hidden state would let a

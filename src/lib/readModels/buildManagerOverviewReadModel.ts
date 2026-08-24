@@ -19,19 +19,18 @@ import { resolveReserveRoleParticipation, type ReserveRoleParticipationByPeriod 
 import { buildShiftCoverageRecommendation } from "@/lib/domain/shiftCoverageRecommendation";
 import type { ShiftSchedule } from "@/lib/domain/shiftSchedule";
 import type { Person } from "@/lib/domain/types";
-import type { PersonReadinessResult } from "@/lib/notifications/engine/readiness";
 import { buildPersonalScheduleReadModel } from "./buildPersonalScheduleReadModel";
+import {
+  buildManagerRoster,
+  toManagerAdoptionState,
+  type AdoptionReadinessLookup,
+} from "./managerAdoptionProjection";
 import { buildManagerAbsenceEntries, buildManagerDutyEntries, buildShiftStaffingOverview } from "./managerEventProjections";
 import { resolveShiftSnapshotTriad } from "./shiftSnapshot";
 import type {
-  ManagerAdoptionPersonView,
-  ManagerAdoptionState,
-  ManagerAdoptionSummary,
-  ManagerAdoptionView,
   ManagerIssue,
   ManagerIssueRecommendation,
   ManagerOverviewReadModel,
-  ManagerPersonSummary,
   ManagerPotentialRequirementView,
   ManagerRecommendationCandidate,
 } from "./managerTypes";
@@ -89,18 +88,6 @@ export interface BuildManagerOverviewReadModelInput {
 }
 
 /**
- * What `managerOverview.ts` actually knows about the privileged
- * login/notification readiness lookup for THIS request, before this builder
- * narrows it to the safe `ManagerAdoptionState` the read model exposes.
- * Defined here (rather than in `managerOverview.ts`) purely to avoid an
- * import cycle -- `managerOverview.ts` already imports this file.
- */
-export type AdoptionReadinessLookup =
-  | { status: "skipped" }
-  | { status: "unavailable" }
-  | { status: "ok"; results: readonly PersonReadinessResult[] };
-
-/**
  * What `managerOverview.ts` actually knows about the Personnel category's
  * privileged roster-avatar account lookup for THIS request -- the same
  * three-way shape as `AdoptionReadinessLookup` (never collapsing "never
@@ -147,7 +134,7 @@ export function buildManagerOverviewReadModel(
   const peopleById = new Map(people.map((person) => [person.id, person]));
   const rangeDates = new Set(range.dates);
 
-  const roster = [...people].map(toManagerPersonSummary).sort(compareRosterEntries);
+  const roster = buildManagerRoster(people);
 
   const resolvedSelectedPerson =
     selectedPersonId !== null ? (peopleById.get(selectedPersonId) ?? null) : null;
@@ -246,27 +233,6 @@ export function buildManagerOverviewReadModel(
     rosterAvatarByPersonId,
     managerShiftSnapshot,
   };
-}
-
-// ---------------------------------------------------------------------------
-// Roster
-// ---------------------------------------------------------------------------
-
-function toManagerPersonSummary(person: Person): ManagerPersonSummary {
-  return {
-    id: person.id,
-    name: person.name,
-    isManager: person.isManager,
-    isTechnician: person.isTechnician,
-    isSupervisor: person.isSupervisor,
-    personnelType: person.personnelType,
-  };
-}
-
-/** By name, then id as a stable tiebreak -- duplicate names stay a safe, deterministic order (the URL always selects by id, never by name). */
-function compareRosterEntries(a: ManagerPersonSummary, b: ManagerPersonSummary): number {
-  if (a.name !== b.name) return a.name < b.name ? -1 : 1;
-  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -394,82 +360,3 @@ function toManagerPotentialRequirementView(
   };
 }
 
-// ---------------------------------------------------------------------------
-// Login + notification adoption
-// ---------------------------------------------------------------------------
-
-/**
- * Turns `managerOverview.ts`'s raw `AdoptionReadinessLookup` into the exact
- * three-state `ManagerAdoptionState` the read model exposes --
- * `skipped`/`unavailable` pass straight through unchanged (never conflated
- * with each other, and never collapsed into a bare `null`); only `ok` is
- * narrowed further, via `toManagerAdoptionView`.
- */
-function toManagerAdoptionState(
-  lookup: AdoptionReadinessLookup,
-  peopleById: ReadonlyMap<string, Person>,
-): ManagerAdoptionState {
-  if (lookup.status !== "ok") return { status: lookup.status };
-  return { status: "available", view: toManagerAdoptionView(lookup.results, peopleById) };
-}
-
-/**
- * Splits `computeNotificationReadiness()`'s single per-person
- * `PersonNotificationReadiness` into the two orthogonal questions
- * "התחברויות והתראות" actually asks -- has this person logged in, and can
- * they receive notifications -- rather than exposing the collapsed
- * five-value engine enum directly. See `ManagerAdoptionPersonView`'s
- * docstring for the exact mapping; every branch here is exhaustive over
- * `PersonNotificationReadiness`, so a new engine status would fail to
- * compile rather than silently falling through.
- */
-function toManagerAdoptionPerson(result: PersonReadinessResult, personName: string): ManagerAdoptionPersonView {
-  const base = { personId: result.personId, personName, avatarUrl: result.avatarUrl };
-
-  switch (result.status) {
-    case "missing_email":
-      return { ...base, avatarUrl: null, loginStatus: null, notificationStatus: null, dataIssue: "missing_email", needsNudge: false };
-    case "ambiguous_email":
-      return { ...base, avatarUrl: null, loginStatus: null, notificationStatus: null, dataIssue: "ambiguous_email", needsNudge: false };
-    case "unmapped_account":
-      return { ...base, avatarUrl: null, loginStatus: "not_logged_in", notificationStatus: null, dataIssue: null, needsNudge: true };
-    case "no_push_subscription":
-      return { ...base, loginStatus: "logged_in", notificationStatus: "not_enabled", dataIssue: null, needsNudge: true };
-    case "ready":
-      return { ...base, loginStatus: "logged_in", notificationStatus: "ready", dataIssue: null, needsNudge: false };
-  }
-}
-
-/**
- * Narrows the raw per-person `computeNotificationReadiness()` results down
- * to the safe manager projection -- every person survives here (unlike the
- * old מצב התראות aside, which dropped every `ready` person), since
- * "התחברויות והתראות" is a full roster picture, not just a blockers list.
- * The summary counts are derived from the SAME single pass, so they can
- * never drift out of agreement with `people` by construction.
- */
-function toManagerAdoptionView(
-  results: readonly PersonReadinessResult[],
-  peopleById: ReadonlyMap<string, Person>,
-): ManagerAdoptionView {
-  const people = results
-    .map((result) => toManagerAdoptionPerson(result, peopleById.get(result.personId)?.name ?? ""))
-    .sort(compareAdoptionPeople);
-
-  const summary: ManagerAdoptionSummary = {
-    totalCount: people.length,
-    loggedInCount: people.filter((p) => p.loginStatus === "logged_in").length,
-    notLoggedInCount: people.filter((p) => p.loginStatus === "not_logged_in").length,
-    notificationReadyCount: people.filter((p) => p.notificationStatus === "ready").length,
-    loggedInNotReadyCount: people.filter((p) => p.notificationStatus === "not_enabled").length,
-    dataIssueCount: people.filter((p) => p.dataIssue !== null).length,
-  };
-
-  return { summary, people };
-}
-
-/** By name, then id as a stable tiebreak -- same convention as `compareRosterEntries`. */
-function compareAdoptionPeople(a: ManagerAdoptionPersonView, b: ManagerAdoptionPersonView): number {
-  if (a.personName !== b.personName) return a.personName < b.personName ? -1 : 1;
-  return a.personId < b.personId ? -1 : a.personId > b.personId ? 1 : 0;
-}
