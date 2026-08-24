@@ -47,6 +47,11 @@ describe("Sidebar", () => {
     expect(screen.getByRole("link", { name: /טבלת צדק/ })).toHaveAttribute("href", "/fairness");
   });
 
+  it('renders the "מטווחים" placeholder destination for any viewer (not manager-only)', () => {
+    renderWithTheme(<Sidebar />);
+    expect(screen.getByRole("link", { name: /מטווחים/ })).toHaveAttribute("href", "/shooting-ranges");
+  });
+
   it("no longer renders מי איתי or התנגשויות as standalone destinations (nav/people-selector consolidation pass)", () => {
     renderWithTheme(<Sidebar />);
     expect(screen.queryByRole("link", { name: /מי איתי/ })).toBeNull();

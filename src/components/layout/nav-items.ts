@@ -1,4 +1,4 @@
-import { BellRing, CalendarDays, LayoutDashboard, Scale, ShieldCheck, UserCog, type LucideIcon } from "lucide-react";
+import { BellRing, CalendarDays, LayoutDashboard, Scale, ShieldCheck, Target, UserCog, type LucideIcon } from "lucide-react";
 
 export interface NavItem {
   label: string;
@@ -45,6 +45,11 @@ export interface NavItem {
 // flag stays unchanged). It replaces the old manager-only
 // `/manager/fairness` sub-screen entirely -- see `ManagerSubNav` and
 // `/manager/fairness`'s own redirect for the cleanup.
+// "מטווחים" (`/shooting-ranges`) is a real, enabled, non-manager-only
+// destination like fairness -- currently a placeholder page with no
+// functionality of its own yet. `inBottomNav: false` keeps the bottom nav
+// at its existing curated four items; on mobile it's reached the same way
+// "/manager" and "/settings" already are, via `MobileProfileMenu`.
 // "מרכז התראות" (`/notifications`) -- a standalone product surface split out
 // of what used to be the Manager Area's combined "התחברויות והתראות"
 // category: notification sending/scheduling/history/recurring-rule
@@ -57,6 +62,7 @@ export const navItems: NavItem[] = [
   { label: "הלוח שלי", shortLabel: "הלוח שלי", href: "/schedule", enabled: true, icon: CalendarDays, inBottomNav: true },
   { label: "תורנויות", shortLabel: "תורנויות", href: "/duties", enabled: true, icon: ShieldCheck, inBottomNav: true },
   { label: "טבלת צדק", shortLabel: "צדק", href: "/fairness", enabled: true, icon: Scale, inBottomNav: true },
+  { label: "מטווחים", shortLabel: "מטווחים", href: "/shooting-ranges", enabled: true, icon: Target, inBottomNav: false },
   { label: "אזור מנהל", shortLabel: "מנהל", href: "/manager", enabled: true, icon: UserCog, inBottomNav: false, managerOnly: true },
   { label: "מרכז התראות", shortLabel: "התראות", href: "/notifications", enabled: true, icon: BellRing, inBottomNav: false, managerOnly: true },
 ];

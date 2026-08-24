@@ -69,6 +69,32 @@ describe("navItems — standalone Fairness experience (PR #4)", () => {
   });
 });
 
+describe("navItems — \"מטווחים\" placeholder page", () => {
+  it('"מטווחים" is a real, enabled, non-manager-only nav item pointing at /shooting-ranges', () => {
+    const shootingRanges = navItems.find((item) => item.href === "/shooting-ranges");
+    expect(shootingRanges).toBeDefined();
+    expect(shootingRanges?.enabled).toBe(true);
+    expect(shootingRanges?.managerOnly).toBeUndefined();
+    expect(shootingRanges?.label).toBe("מטווחים");
+    expect(shootingRanges?.shortLabel).toBe("מטווחים");
+  });
+
+  it("is not part of the curated bottom-nav set", () => {
+    const shootingRanges = navItems.find((item) => item.href === "/shooting-ranges");
+    expect(shootingRanges?.inBottomNav).toBe(false);
+  });
+
+  it("a non-manager sees /shooting-ranges (unlike /manager)", () => {
+    const hrefs = visibleNavItems(false).map((item) => item.href);
+    expect(hrefs).toContain("/shooting-ranges");
+  });
+
+  it("a manager also sees /shooting-ranges", () => {
+    const hrefs = visibleNavItems(true).map((item) => item.href);
+    expect(hrefs).toContain("/shooting-ranges");
+  });
+});
+
 describe("navItems — obsolete sync placeholder removed (PR #18)", () => {
   it('"סנכרון" is not in navItems anymore', () => {
     expect(navItems.some((item) => item.label === "סנכרון" || item.shortLabel === "סנכרון")).toBe(false);
@@ -78,9 +104,17 @@ describe("navItems — obsolete sync placeholder removed (PR #18)", () => {
     expect(navItems.some((item) => item.href === "/sync")).toBe(false);
   });
 
-  it("every other enabled route is unchanged (PR #4 adds /fairness before /manager; /notifications is added after /manager)", () => {
+  it("every other enabled route is unchanged (PR #4 adds /fairness; /shooting-ranges joins before /manager; /notifications is added after /manager)", () => {
     const enabledHrefs = navItems.filter((item) => item.enabled).map((item) => item.href);
-    expect(enabledHrefs).toEqual(["/", "/schedule", "/duties", "/fairness", "/manager", "/notifications"]);
+    expect(enabledHrefs).toEqual([
+      "/",
+      "/schedule",
+      "/duties",
+      "/fairness",
+      "/shooting-ranges",
+      "/manager",
+      "/notifications",
+    ]);
   });
 
   it("manager visibility rules are unchanged", () => {
