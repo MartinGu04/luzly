@@ -8,11 +8,15 @@ import { parsePersonnelSheet } from "@/lib/parsers/personnel";
 import { getWorkbookSnapshot } from "@/lib/sync";
 
 export type ManagerWorkbookContextResult =
+  /** No live authenticated Supabase user at all -- the workbook is never fetched for this caller. */
   | { status: "unauthenticated" }
+  /** Authenticated, but no usable email -- the workbook is never fetched for this caller. */
   | { status: "missing_email" }
+  /** Authenticated with a usable email, but it matches no כ"א record -- reached ONLY after the shared workbook batch was fetched and personnel parsed (that parse is how "no match" gets proven). No manager `context` is ever returned. */
   | { status: "unmapped" }
+  /** Authenticated with a usable email that matches more than one כ"א record -- same fetch timing as `unmapped` above; still fails closed, no manager `context` returned. */
   | { status: "ambiguous_identity" }
-  /** Authenticated + mapped, but `person.isManager !== true` -- no manager-wide fetch was ever performed. */
+  /** Authenticated + uniquely mapped, but `person.isManager !== true` -- the shared workbook batch WAS already fetched (needed to resolve `person` in the first place), but no manager `context` is ever returned to this caller. See `loadManagerWorkbookContext`'s own docs for why fetching before this check is safe. */
   | { status: "forbidden" }
   | { status: "ok"; context: ManagerWorkbookContext };
 
@@ -82,8 +86,11 @@ export function getManagerWorkbookSheet(snapshot: RawWorkbookSnapshot, key: Shee
  * 3. that resolved `Person.isManager === true` (never trusted from the
  *    client, never assumed from route access alone);
  * 4. only THEN is the manager-wide batch (personnel + schedule + settings +
- *    potentialH1 + potentialH2, or the caller's own narrower `sources`)
- *    returned to the caller.
+ *    potentialH1 + potentialH2, or the caller's own narrower `sources`) --
+ *    already fetched in step 2 above, to have something to parse personnel
+ *    FROM -- ever RETURNED to the caller as `context`. Fetching happens
+ *    before authorization completes; returning the fetched data never does.
+ *    See "Is fetching before the manager check safe?" below.
  *
  * This is still "defense in depth" in the sense that matters: identity is
  * re-verified live and personnel is freshly re-parsed from the ACTUAL
@@ -113,6 +120,55 @@ export function getManagerWorkbookSheet(snapshot: RawWorkbookSnapshot, key: Shee
  * from `context.snapshot` via `getManagerWorkbookSheet` -- this helper
  * intentionally stops at the authorized raw snapshot + roster, since not
  * every manager feature needs the same downstream sheets.
+ *
+ * ### Is fetching before the manager check safe?
+ *
+ * Yes -- assessed explicitly, not assumed. `getWorkbookSnapshot(sources)`
+ * (step 2) runs BEFORE `isManager` is known, for `sources` up to the
+ * 5-source manager set. Three properties make this safe under this app's
+ * existing security model, not a new exception to it:
+ *
+ * 1. **The fetched snapshot is never returned to an unauthorized caller.**
+ *    Every non-`"ok"` branch above returns a bare `{status}` object with no
+ *    `context`/`snapshot` field at all (see `ManagerWorkbookContextResult`'s
+ *    own per-branch docs) -- the in-memory snapshot is simply discarded.
+ *    Nothing parsed from it is ever serialized into a response for an
+ *    unmapped/ambiguous/non-manager caller.
+ * 2. **This is the SAME "fetch, then resolve identity from what was
+ *    fetched" pattern every identity-resolving loader in this codebase
+ *    already uses** -- `resolveCurrentPerson()`, `getRequestPersonalSchedule()`
+ *    (`personalSchedule.ts`), `loadSearchReadModel()` (`search.ts`), and
+ *    `loadFairnessWorkbookContext()` (`fairnessWorkbookContext.ts`) all
+ *    fetch their own required sources FIRST and only determine
+ *    unmapped/ambiguous/authorized AFTER parsing personnel from that same
+ *    fetch -- there is no "resolve identity, then fetch" primitive
+ *    anywhere in this app to fall back to; identity resolution has always
+ *    depended on having personnel data in hand.
+ * 3. **The 5 manager sources are not incrementally more exposed server-side
+ *    than what every authenticated request already holds in memory.**
+ *    `getRequestPersonalSchedule()`'s own `REQUIRED_SOURCES` is the
+ *    IDENTICAL 5-source set (`personnel`+`schedule`+`settings`+
+ *    `potentialH1`+`potentialH2`) as `MANAGER_WORKBOOK_SOURCES`, and the
+ *    protected `(app)/layout.tsx` calls it on EVERY route under it,
+ *    manager or not. So on `/manager`, this function's `getWorkbookSnapshot`
+ *    call resolves to the SAME canonical cache key the layout's own
+ *    request-scoped call already populated moments earlier in the SAME
+ *    request (`getWorkbookSnapshot`'s per-request `cache()` dedup, or at
+ *    worst the 30s cross-request cache) -- in practice this is a reuse of
+ *    data the request already legitimately fetched, not an incremental
+ *    fetch newly triggered by an unauthorized caller. A caller who is
+ *    unmapped/ambiguous even for THAT layout-level check would already
+ *    have had this exact snapshot in server memory before ever reaching
+ *    this function.
+ *
+ * The genuinely security-relevant boundary -- unmapped/ambiguous/non-manager
+ * callers never receive manager-projected data -- is what property 1 above
+ * guarantees, and what `managerWorkbookContext.test.ts`/`managerOverview.test.ts`
+ * assert directly ("fetched data is never rendered"/"data discarded, never
+ * returned to a caller"). If a future change ever made this function return
+ * `context` (or any field derived from `snapshot`) on a non-`"ok"` status,
+ * THAT would be the actual regression to guard against -- not the fetch
+ * timing itself.
  */
 export async function loadManagerWorkbookContext(
   sources: SheetSourceKey[] = MANAGER_WORKBOOK_SOURCES,

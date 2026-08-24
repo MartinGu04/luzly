@@ -23,7 +23,13 @@ export type ManagerOverviewLoadResult =
   | { status: "unmapped" }
   | { status: "ambiguous_identity" }
   | { status: "configuration_error"; message: string }
-  /** Authenticated + mapped, but `person.isManager !== true` -- no manager-wide fetch was ever performed. */
+  /**
+   * Authenticated + uniquely mapped, but `person.isManager !== true`.
+   * `loadManagerWorkbookContext()`'s shared workbook batch WAS already
+   * fetched (needed to resolve `person` in the first place -- see that
+   * function's own "Is fetching before the manager check safe?" section),
+   * but no `ManagerOverviewReadModel` is ever built or returned here.
+   */
   | { status: "forbidden" }
   | { status: "ok"; model: ManagerOverviewReadModel };
 

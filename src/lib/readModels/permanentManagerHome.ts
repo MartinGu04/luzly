@@ -15,7 +15,16 @@ export type PermanentManagerHomeLoadResult =
   | { status: "unmapped" }
   | { status: "ambiguous_identity" }
   | { status: "configuration_error"; message: string }
-  /** Authenticated + mapped, but not BOTH permanent AND manager -- the caller must render the normal personal Dashboard instead, never this. No manager-wide fetch was performed. */
+  /**
+   * Authenticated + mapped, but not BOTH permanent AND manager -- the
+   * caller must render the normal personal Dashboard instead, never this.
+   * The shared workbook batch may already have been fetched by this point
+   * (either to resolve `isManager` in `loadManagerWorkbookContext()`, or
+   * -- for a real manager who simply isn't permanent -- fetched AND used
+   * to read `manager.personnelType`); no `PermanentManagerHomeReadModel`
+   * is ever built or returned either way. See `managerWorkbookContext.ts`'s
+   * "Is fetching before the manager check safe?" for why that's fine.
+   */
   | { status: "forbidden" }
   | { status: "ok"; model: PermanentManagerHomeReadModel };
 
