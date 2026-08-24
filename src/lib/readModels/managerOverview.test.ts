@@ -6,11 +6,21 @@ const getRequestAuthenticatedIdentity = vi.fn();
 const getWorkbookSnapshot = vi.fn();
 const getJerusalemLocalNow = vi.fn();
 const computeNotificationReadiness = vi.fn();
+const fetchAllUserIdsByEmail = vi.fn();
 
 vi.mock("@/lib/auth/getRequestAuthenticatedIdentity", () => ({ getRequestAuthenticatedIdentity }));
 vi.mock("@/lib/sync", () => ({ getWorkbookSnapshot }));
 vi.mock("@/lib/time/jerusalemClock", () => ({ getJerusalemLocalNow }));
 vi.mock("@/lib/notifications/engine/readiness", () => ({ computeNotificationReadiness }));
+// `fetchAllUserIdsByEmail` (the bulk account-directory lookup) is mocked so
+// tests can control/count it directly; `resolvePersonIdentity` is kept REAL
+// (pure, deterministic) so the roster-avatar tests below exercise the exact
+// same identity-matching logic Personnel relies on, never a re-implemented
+// stand-in.
+vi.mock("@/lib/notifications/engine/recipients", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/notifications/engine/recipients")>();
+  return { ...actual, fetchAllUserIdsByEmail };
+});
 
 const { loadManagerOverviewReadModel } = await import("./managerOverview");
 
@@ -65,10 +75,12 @@ beforeEach(() => {
   getWorkbookSnapshot.mockReset();
   getJerusalemLocalNow.mockReset();
   computeNotificationReadiness.mockReset();
+  fetchAllUserIdsByEmail.mockReset();
   getJerusalemLocalNow.mockReturnValue({ date: "2026-08-13", minuteOfDay: 600 });
   getRequestAuthenticatedIdentity.mockResolvedValue(AUTHENTICATED_MANAGER);
   getWorkbookSnapshot.mockResolvedValue(managerSnapshot());
   computeNotificationReadiness.mockResolvedValue([]);
+  fetchAllUserIdsByEmail.mockResolvedValue(new Map());
 });
 
 describe("loadManagerOverviewReadModel — auth pass-through states", () => {
@@ -284,5 +296,88 @@ describe("loadManagerOverviewReadModel — adoption (התחברויות והתר
     if (result.status === "ok") {
       expect(result.model.adoption).toEqual({ status: "unavailable" });
     }
+  });
+});
+
+describe("loadManagerOverviewReadModel — Personnel (כוח אדם) roster-avatar lookup wiring", () => {
+  it("needsRosterAvatars=true + everyone scope: calls fetchAllUserIdsByEmail exactly once (bulk, never per-person)", async () => {
+    await loadManagerOverviewReadModel(DEFAULT_PARAMS, false, true);
+    expect(fetchAllUserIdsByEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it("needsRosterAvatars=false (every non-personnel category): never calls fetchAllUserIdsByEmail, rosterAvatarByPersonId is empty", async () => {
+    const result = await loadManagerOverviewReadModel(DEFAULT_PARAMS, false, false);
+    expect(fetchAllUserIdsByEmail).not.toHaveBeenCalled();
+    expect(result.status).toBe("ok");
+    if (result.status === "ok") {
+      expect(result.model.rosterAvatarByPersonId.size).toBe(0);
+    }
+  });
+
+  it("needsRosterAvatars omitted entirely: defaults to false, never calls fetchAllUserIdsByEmail", async () => {
+    await loadManagerOverviewReadModel(DEFAULT_PARAMS, false);
+    expect(fetchAllUserIdsByEmail).not.toHaveBeenCalled();
+  });
+
+  it("selected-person scope: never calls fetchAllUserIdsByEmail even when needsRosterAvatars=true, rosterAvatarByPersonId is empty", async () => {
+    const result = await loadManagerOverviewReadModel({ personId: "p_dani", range: "7d", month: null }, false, true);
+    expect(fetchAllUserIdsByEmail).not.toHaveBeenCalled();
+    expect(result.status).toBe("ok");
+    if (result.status === "ok") {
+      expect(result.model.rosterAvatarByPersonId.size).toBe(0);
+    }
+  });
+
+  it("logins category (needsAdoptionReadiness=true, needsRosterAvatars=false): never calls the roster-avatar lookup's fetchAllUserIdsByEmail", async () => {
+    await loadManagerOverviewReadModel(DEFAULT_PARAMS, true, false);
+    expect(fetchAllUserIdsByEmail).not.toHaveBeenCalled();
+  });
+
+  it("threads a mapped, photo-bearing account's avatar into rosterAvatarByPersonId, keyed by personId", async () => {
+    const first = await loadManagerOverviewReadModel(DEFAULT_PARAMS, false, false);
+    expect(first.status).toBe("ok");
+    if (first.status !== "ok") return;
+    const dani = first.model.roster.find((p) => p.name === "דני מנהל");
+    const noa = first.model.roster.find((p) => p.name === "נועה עובדת");
+    expect(dani).toBeDefined();
+    expect(noa).toBeDefined();
+
+    fetchAllUserIdsByEmail.mockResolvedValue(
+      new Map([
+        ["dani@example.invalid", { userId: "u_dani", avatarUrl: "https://example.invalid/dani.jpg" }],
+        ["noa@example.invalid", { userId: "u_noa", avatarUrl: null }],
+      ]),
+    );
+
+    const second = await loadManagerOverviewReadModel(DEFAULT_PARAMS, false, true);
+    expect(second.status).toBe("ok");
+    if (second.status !== "ok") return;
+    expect(second.model.rosterAvatarByPersonId.get(dani!.id)).toBe("https://example.invalid/dani.jpg");
+    // Mapped account with no photo -- falls back to initials (absent from the map), never a null placeholder entry.
+    expect(second.model.rosterAvatarByPersonId.has(noa!.id)).toBe(false);
+    expect(second.model.rosterAvatarByPersonId.size).toBe(1);
+  });
+
+  it("degrades to an empty rosterAvatarByPersonId (never throws) when the account lookup itself fails", async () => {
+    fetchAllUserIdsByEmail.mockRejectedValue(new Error("supabase unreachable"));
+
+    const result = await loadManagerOverviewReadModel(DEFAULT_PARAMS, false, true);
+
+    expect(result.status).toBe("ok");
+    if (result.status === "ok") {
+      expect(result.model.rosterAvatarByPersonId.size).toBe(0);
+    }
+  });
+
+  it("never leaks an email/auth user id into the serialized result even when avatars are resolved", async () => {
+    fetchAllUserIdsByEmail.mockResolvedValue(
+      new Map([["dani@example.invalid", { userId: "u_dani_secret", avatarUrl: "https://example.invalid/dani.jpg" }]]),
+    );
+    const result = await loadManagerOverviewReadModel(DEFAULT_PARAMS, false, true);
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    const serialized = JSON.stringify([...result.model.rosterAvatarByPersonId.entries()]);
+    expect(serialized).not.toContain("dani@example.invalid");
+    expect(serialized).not.toContain("u_dani_secret");
   });
 });

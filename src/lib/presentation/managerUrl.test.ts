@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { buildManagerHref, managerCategoryNeedsAdoptionReadiness, parseManagerCategoryParam } from "./managerUrl";
+import {
+  buildManagerHref,
+  managerCategoryNeedsAdoptionReadiness,
+  managerCategoryNeedsFilters,
+  managerCategoryNeedsRosterAvatars,
+  parseManagerCategoryParam,
+} from "./managerUrl";
 
 const BASE = { personId: null, range: "7d" as const, month: null, category: "overview" as const };
 
@@ -71,5 +77,31 @@ describe("managerCategoryNeedsAdoptionReadiness", () => {
     expect(managerCategoryNeedsAdoptionReadiness("shifts")).toBe(false);
     expect(managerCategoryNeedsAdoptionReadiness("personnel")).toBe(false);
     expect(managerCategoryNeedsAdoptionReadiness("duties")).toBe(false);
+  });
+});
+
+describe("managerCategoryNeedsFilters", () => {
+  it("is false for logins and personnel -- both unscoped, current-snapshot views", () => {
+    expect(managerCategoryNeedsFilters("logins")).toBe(false);
+    expect(managerCategoryNeedsFilters("personnel")).toBe(false);
+  });
+
+  it("is true for overview, shifts, and duties", () => {
+    expect(managerCategoryNeedsFilters("overview")).toBe(true);
+    expect(managerCategoryNeedsFilters("shifts")).toBe(true);
+    expect(managerCategoryNeedsFilters("duties")).toBe(true);
+  });
+});
+
+describe("managerCategoryNeedsRosterAvatars", () => {
+  it("is true ONLY for personnel -- the sole category that decorates the roster with real photos", () => {
+    expect(managerCategoryNeedsRosterAvatars("personnel")).toBe(true);
+  });
+
+  it("is false for overview, shifts, duties, and logins (logins has its own, broader adoption-readiness avatar source)", () => {
+    expect(managerCategoryNeedsRosterAvatars("overview")).toBe(false);
+    expect(managerCategoryNeedsRosterAvatars("shifts")).toBe(false);
+    expect(managerCategoryNeedsRosterAvatars("duties")).toBe(false);
+    expect(managerCategoryNeedsRosterAvatars("logins")).toBe(false);
   });
 });

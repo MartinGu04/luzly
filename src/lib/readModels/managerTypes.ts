@@ -312,6 +312,23 @@ export interface ManagerOverviewReadModel {
   adoption: ManagerAdoptionState;
 
   /**
+   * Presentation-only Google profile photo per roster person, for the
+   * Personnel category ("כוח אדם") only -- a person's id is present here
+   * ONLY when the roster-avatar account lookup actually ran (Personnel
+   * category, "everyone" scope) and resolved them, unambiguously, to a
+   * real Supabase auth account with a photo (see `RosterAvatarLookup`,
+   * `buildManagerOverviewReadModel.ts`). Empty for every other category,
+   * the selected-person drill-down, or if the lookup itself failed --
+   * `ManagerRosterSection` reads a missing entry the same way it reads a
+   * `null`: show initials. Sourced from the SAME bulk
+   * `fetchAllUserIdsByEmail()` + `resolvePersonIdentity()` primitives the
+   * Logins category's `adoption.view.people[].avatarUrl` already uses --
+   * never a second identity/matching implementation, and never a raw auth
+   * user id or email.
+   */
+  rosterAvatarByPersonId: ReadonlyMap<string, string>;
+
+  /**
    * The selected person's OWN full personal read model, reused as-is from
    * `buildPersonalScheduleReadModel()` -- built from the same in-memory
    * manager snapshot (no per-person Google fetch, no reimplemented

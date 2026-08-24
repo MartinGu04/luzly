@@ -76,6 +76,16 @@ export interface BuildManagerOverviewReadModelInput {
    * and "failed" into the same value.
    */
   adoption: AdoptionReadinessLookup;
+  /**
+   * The caller's own record of the Personnel category's roster-avatar
+   * account lookup -- see `managerOverview.ts`'s `RosterAvatarLookup`.
+   * Narrowed to the safe `rosterAvatarByPersonId` projection below (never a
+   * raw auth user id/email) -- both `skipped` and `unavailable` collapse to
+   * an empty map, since the UI's only reaction to either is the same
+   * initials fallback (unlike `adoption`, Personnel has no separate
+   * "lookup failed" notice to show).
+   */
+  rosterAvatars: RosterAvatarLookup;
 }
 
 /**
@@ -89,6 +99,23 @@ export type AdoptionReadinessLookup =
   | { status: "skipped" }
   | { status: "unavailable" }
   | { status: "ok"; results: readonly PersonReadinessResult[] };
+
+/**
+ * What `managerOverview.ts` actually knows about the Personnel category's
+ * privileged roster-avatar account lookup for THIS request -- the same
+ * three-way shape as `AdoptionReadinessLookup` (never collapsing "never
+ * attempted" and "attempted and failed" into the same silent absence), but
+ * for a narrower, cheaper lookup: one bulk `fetchAllUserIdsByEmail()` call,
+ * never `push_subscriptions`. `avatars` only ever contains a person whose
+ * identity resolved unambiguously to a real, photo-bearing Supabase account
+ * (see `loadRosterAvatarLookup`) -- every other roster person (no account,
+ * no photo, ambiguous/missing email) is simply absent from the map, which
+ * `ManagerRosterSection` reads as "show initials".
+ */
+export type RosterAvatarLookup =
+  | { status: "skipped" }
+  | { status: "unavailable" }
+  | { status: "ok"; avatars: ReadonlyMap<string, string> };
 
 /**
  * Pure, deterministic construction of `ManagerOverviewReadModel` from
@@ -114,6 +141,7 @@ export function buildManagerOverviewReadModel(
     range,
     selectedPersonId,
     adoption: rawAdoption,
+    rosterAvatars: rawRosterAvatars,
   } = input;
 
   const peopleById = new Map(people.map((person) => [person.id, person]));
@@ -188,6 +216,7 @@ export function buildManagerOverviewReadModel(
     : [];
 
   const adoption = toManagerAdoptionState(rawAdoption, peopleById);
+  const rosterAvatarByPersonId = rawRosterAvatars.status === "ok" ? rawRosterAvatars.avatars : new Map<string, string>();
 
   // "תמונת מצב משמרות" -- only for a manager who is themselves shift-capable
   // (isSupervisor/isTechnician, never a title-string check). Computed
@@ -214,6 +243,7 @@ export function buildManagerOverviewReadModel(
     selectedPerson,
     selectedPersonRangeAbsences,
     adoption,
+    rosterAvatarByPersonId,
     managerShiftSnapshot,
   };
 }

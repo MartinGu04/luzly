@@ -12,23 +12,35 @@ const { getRequestManagerOverview } = await import("./getRequestManagerOverview"
  * real Server Component render. This suite verifies correct delegation.
  */
 describe("getRequestManagerOverview", () => {
-  it("delegates to loadManagerOverviewReadModel with the given params and needsAdoptionReadiness", async () => {
+  it("delegates to loadManagerOverviewReadModel with the given params, needsAdoptionReadiness, and needsRosterAvatars", async () => {
     loadManagerOverviewReadModel.mockResolvedValue({ status: "forbidden" });
 
-    const result = await getRequestManagerOverview("p_1", "7d", null, false);
+    const result = await getRequestManagerOverview("p_1", "7d", null, false, false);
 
     expect(result).toEqual({ status: "forbidden" });
     expect(loadManagerOverviewReadModel).toHaveBeenCalledWith(
       { personId: "p_1", range: "7d", month: null },
       false,
+      false,
     );
   });
 
-  it("accepts distinct primitive args for person/range/month/needsAdoptionReadiness (cache-friendly, not one object literal)", async () => {
+  it("accepts distinct primitive args for person/range/month/needsAdoptionReadiness/needsRosterAvatars (cache-friendly, not one object literal)", async () => {
     loadManagerOverviewReadModel.mockResolvedValue({ status: "ok", model: {} });
-    await getRequestManagerOverview(null, "month", "2026-08", true);
+    await getRequestManagerOverview(null, "month", "2026-08", true, false);
     expect(loadManagerOverviewReadModel).toHaveBeenCalledWith(
       { personId: null, range: "month", month: "2026-08" },
+      true,
+      false,
+    );
+  });
+
+  it("needsRosterAvatars=true is threaded through independently of needsAdoptionReadiness", async () => {
+    loadManagerOverviewReadModel.mockResolvedValue({ status: "ok", model: {} });
+    await getRequestManagerOverview(null, "7d", null, false, true);
+    expect(loadManagerOverviewReadModel).toHaveBeenCalledWith(
+      { personId: null, range: "7d", month: null },
+      false,
       true,
     );
   });

@@ -174,8 +174,9 @@ person's own schedule, and that broader scope is authorized, not assumed:
   (`lib/config/timingDiagnostics.ts`) — `managerOverview.total`,
   `manager.settings.parse`, `manager.schedule.parse`,
   `manager.potential.parse`, `manager.fairness.parse`,
-  `manager.readModel.build`, `manager.adoptionReadiness` — so Manager-
-  specific latency is directly measurable, never guessed.
+  `manager.readModel.build`, `manager.adoptionReadiness`,
+  `manager.rosterAvatars` — so Manager-specific latency is directly
+  measurable, never guessed.
   - **Category-scoped adoption readiness (Manager category-switch
     latency).** `loadAdoptionReadiness(people, personId,
     needsAdoptionReadiness)` skips `computeNotificationReadiness()` (a
@@ -191,11 +192,24 @@ person's own schedule, and that broader scope is authorized, not assumed:
     model as Logins. `getRequestManagerOverview`'s `cache()` key includes
     this flag, so a render that needs it and one that doesn't are never
     accidentally treated as the same cached call.
+  - **Personnel's own, narrower roster-avatar lookup.**
+    `loadRosterAvatarLookup(people, personId, needsRosterAvatars)` decorates
+    the roster with real Google profile photos for the `"personnel"`
+    category only (`managerCategoryNeedsRosterAvatars()`), reusing the
+    SAME `fetchAllUserIdsByEmail()`/`resolvePersonIdentity()` primitives
+    `recipients.ts`/`readiness.ts` already share — one bulk Admin API
+    `listUsers()` call, and critically **never** `fetchAllSubscribedUserIds()`
+    / `push_subscriptions` (that stays exclusive to `"logins"`'s full
+    `computeNotificationReadiness()`). Same two independent skip
+    conditions and same fail-soft-to-empty-map contract as
+    `loadAdoptionReadiness` above, gated by its own
+    `RosterAvatarLookup`/`rosterAvatarByPersonId` — see
+    `buildManagerOverviewReadModel.ts`.
 - `getRequestManagerOverview.ts` — `cache(loadManagerOverviewReadModel)`,
-  keyed on primitive `(personId, range, month, needsAdoptionReadiness)`
-  args (not one object literal) so React's `cache()` per-argument identity
-  comparison actually dedupes multiple Server Components on the same
-  `/manager` render.
+  keyed on primitive `(personId, range, month, needsAdoptionReadiness,
+  needsRosterAvatars)` args (not one object literal) so React's `cache()`
+  per-argument identity comparison actually dedupes multiple Server
+  Components on the same `/manager` render.
 
 **Fetch count by viewer:** a normal user (any page) → 1 Google batch
 fetch (`personnel`+`schedule`+`settings`+`potentialH1`+`potentialH2`, via

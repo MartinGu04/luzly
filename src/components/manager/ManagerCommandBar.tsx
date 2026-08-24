@@ -12,13 +12,15 @@ interface ManagerCommandBarProps {
   fetchedAt: string;
   /**
    * Whether the person-scope + date-range controls are shown at all --
-   * `true` everywhere except the "התחברויות והתראות" category (see
-   * `page.tsx`). That category is a current adoption/readiness snapshot,
-   * not filtered by an operational date range or scoped to one person, so
-   * showing "כולם"/"היום"/"7 ימים"/"30 יום"/"החודש" there would offer
-   * controls that do nothing. `DataFreshnessStatus` (the Google Sheets
-   * source/update status + refresh control) is NEVER gated by this --
-   * data freshness is meaningful for every category, including this one.
+   * `true` everywhere except the "התחברויות והתראות" and "כוח אדם"
+   * categories (see `page.tsx`'s `managerCategoryNeedsFilters`). Both are
+   * unscoped, current-snapshot views -- "התחברויות והתראות" is an
+   * adoption/readiness snapshot, "כוח אדם" a straightforward workforce/
+   * roster page -- neither filtered by an operational date range or scoped
+   * to one person, so showing "כולם"/"היום"/"7 ימים"/"30 יום"/"החודש" there
+   * would offer controls that do nothing. `DataFreshnessStatus` (the Google
+   * Sheets source/update status + refresh control) is NEVER gated by this --
+   * data freshness is meaningful for every category, including these two.
    */
   showFilters?: boolean;
 }

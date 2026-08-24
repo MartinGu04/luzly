@@ -190,6 +190,7 @@ function model(overrides: Partial<ManagerOverviewReadModel> = {}): ManagerOvervi
     selectedPerson: null,
     selectedPersonRangeAbsences: [],
     adoption: { status: "skipped" },
+    rosterAvatarByPersonId: new Map(),
     managerShiftSnapshot: null,
     ...overrides,
   };
@@ -220,22 +221,28 @@ describe("ManagerPage — authorization states", () => {
 });
 
 describe("ManagerPage — request scope", () => {
-  it("passes parsed search params through to getRequestManagerOverview -- the raw category string itself is never sent, only the derived needsAdoptionReadiness flag (false for a non-logins category like shifts)", async () => {
+  it("passes parsed search params through to getRequestManagerOverview -- the raw category string itself is never sent, only the derived needsAdoptionReadiness/needsRosterAvatars flags (both false for a non-logins/non-personnel category like shifts)", async () => {
     getRequestManagerOverview.mockResolvedValue(okResult(model()));
     await renderPage({ person: "p_martin", range: "30d", category: "shifts" });
-    expect(getRequestManagerOverview).toHaveBeenCalledWith("p_martin", "30d", null, false);
+    expect(getRequestManagerOverview).toHaveBeenCalledWith("p_martin", "30d", null, false, false);
   });
 
-  it("passes needsAdoptionReadiness=true only for category=logins", async () => {
+  it("passes needsAdoptionReadiness=true only for category=logins, needsRosterAvatars stays false", async () => {
     getRequestManagerOverview.mockResolvedValue(okResult(model()));
     await renderPage({ category: "logins" });
-    expect(getRequestManagerOverview).toHaveBeenCalledWith(null, "7d", null, true);
+    expect(getRequestManagerOverview).toHaveBeenCalledWith(null, "7d", null, true, false);
   });
 
-  it("defaults: no search params -> everyone, 7d, no month, needsAdoptionReadiness=false (default category is overview)", async () => {
+  it("passes needsRosterAvatars=true only for category=personnel, needsAdoptionReadiness stays false", async () => {
+    getRequestManagerOverview.mockResolvedValue(okResult(model()));
+    await renderPage({ category: "personnel" });
+    expect(getRequestManagerOverview).toHaveBeenCalledWith(null, "7d", null, false, true);
+  });
+
+  it("defaults: no search params -> everyone, 7d, no month, needsAdoptionReadiness=false, needsRosterAvatars=false (default category is overview)", async () => {
     getRequestManagerOverview.mockResolvedValue(okResult(model()));
     await renderPage();
-    expect(getRequestManagerOverview).toHaveBeenCalledWith(null, "7d", null, false);
+    expect(getRequestManagerOverview).toHaveBeenCalledWith(null, "7d", null, false, false);
   });
 });
 
@@ -576,6 +583,26 @@ describe("ManagerPage — Personnel category", () => {
     );
     const { container } = await renderPage({ category: "personnel" });
     expect(container.querySelectorAll('img[data-testid="avatar-photo"]')).toHaveLength(1);
+  });
+
+  it("shows a real photo for a non-manager roster member who is logged in and has a Google avatar, wired from model.rosterAvatarByPersonId", async () => {
+    getRequestManagerOverview.mockResolvedValue(
+      okResult(
+        model({
+          rosterAvatarByPersonId: new Map([["p_eitan", "https://example.invalid/eitan.jpg"]]),
+        }),
+      ),
+    );
+    const { container } = await renderPage({ category: "personnel" });
+    const photos = container.querySelectorAll('img[data-testid="avatar-photo"]');
+    expect(photos).toHaveLength(1);
+    expect(photos[0].closest("a")).toHaveAttribute("href", expect.stringContaining("person=p_eitan"));
+  });
+
+  it("a roster member with no entry in rosterAvatarByPersonId (never logged in / unmapped / no photo) falls back to initials", async () => {
+    getRequestManagerOverview.mockResolvedValue(okResult(model({ rosterAvatarByPersonId: new Map() })));
+    const { container } = await renderPage({ category: "personnel" });
+    expect(container.querySelectorAll('img[data-testid="avatar-photo"]')).toHaveLength(0);
   });
 });
 
@@ -1050,7 +1077,7 @@ describe("ManagerPage — Logins & Notifications (התחברויות והתרא�
   });
 });
 
-describe("ManagerPage — filter controls restore when leaving Logins & Notifications", () => {
+describe("ManagerPage — filter controls restore when leaving Logins & Notifications / Personnel", () => {
   it("Overview shows the person/range filters", async () => {
     getRequestManagerOverview.mockResolvedValue(okResult(model()));
     await renderPage();
@@ -1065,18 +1092,30 @@ describe("ManagerPage — filter controls restore when leaving Logins & Notifica
     expect(screen.getByRole("navigation", { name: "טווח תאריכים" })).toBeInTheDocument();
   });
 
-  it("Personnel shows the person/range filters", async () => {
-    getRequestManagerOverview.mockResolvedValue(okResult(model()));
-    await renderPage({ category: "personnel" });
-    expect(screen.getByRole("button", { name: /כולם/ })).toBeInTheDocument();
-    expect(screen.getByRole("navigation", { name: "טווח תאריכים" })).toBeInTheDocument();
-  });
-
   it("Duties & Absences shows the person/range filters", async () => {
     getRequestManagerOverview.mockResolvedValue(okResult(model()));
     await renderPage({ category: "duties" });
     expect(screen.getByRole("button", { name: /כולם/ })).toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "טווח תאריכים" })).toBeInTheDocument();
+  });
+});
+
+describe("ManagerPage — Personnel (כוח אדם) hides person/date filters, keeps freshness status", () => {
+  it("hides the person/range filter controls -- Personnel is a straightforward workforce/roster page, not scoped by a date range or a person", async () => {
+    getRequestManagerOverview.mockResolvedValue(okResult(model()));
+    await renderPage({ category: "personnel" });
+    expect(screen.queryByRole("button", { name: /כולם/ })).toBeNull();
+    expect(screen.queryByRole("navigation", { name: "טווח תאריכים" })).toBeNull();
+    expect(screen.queryByText("היום")).toBeNull();
+    expect(screen.queryByText("7 ימים")).toBeNull();
+    expect(screen.queryByText("30 יום")).toBeNull();
+    expect(screen.queryByText("החודש")).toBeNull();
+  });
+
+  it("still shows the Google Sheets freshness status and refresh control", async () => {
+    getRequestManagerOverview.mockResolvedValue(okResult(model()));
+    await renderPage({ category: "personnel" });
+    expect(screen.getByTestId("freshness")).toBeInTheDocument();
   });
 });
 
