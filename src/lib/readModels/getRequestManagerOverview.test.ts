@@ -12,26 +12,24 @@ const { getRequestManagerOverview } = await import("./getRequestManagerOverview"
  * real Server Component render. This suite verifies correct delegation.
  */
 describe("getRequestManagerOverview", () => {
-  it("delegates to loadManagerOverviewReadModel with the given params", async () => {
+  it("delegates to loadManagerOverviewReadModel with the given params and needsAdoptionReadiness", async () => {
     loadManagerOverviewReadModel.mockResolvedValue({ status: "forbidden" });
 
-    const result = await getRequestManagerOverview("p_1", "7d", null);
+    const result = await getRequestManagerOverview("p_1", "7d", null, false);
 
     expect(result).toEqual({ status: "forbidden" });
-    expect(loadManagerOverviewReadModel).toHaveBeenCalledWith({
-      personId: "p_1",
-      range: "7d",
-      month: null,
-    });
+    expect(loadManagerOverviewReadModel).toHaveBeenCalledWith(
+      { personId: "p_1", range: "7d", month: null },
+      false,
+    );
   });
 
-  it("accepts distinct primitive args for person/range/month (cache-friendly, not one object literal)", async () => {
+  it("accepts distinct primitive args for person/range/month/needsAdoptionReadiness (cache-friendly, not one object literal)", async () => {
     loadManagerOverviewReadModel.mockResolvedValue({ status: "ok", model: {} });
-    await getRequestManagerOverview(null, "month", "2026-08");
-    expect(loadManagerOverviewReadModel).toHaveBeenCalledWith({
-      personId: null,
-      range: "month",
-      month: "2026-08",
-    });
+    await getRequestManagerOverview(null, "month", "2026-08", true);
+    expect(loadManagerOverviewReadModel).toHaveBeenCalledWith(
+      { personId: null, range: "month", month: "2026-08" },
+      true,
+    );
   });
 });

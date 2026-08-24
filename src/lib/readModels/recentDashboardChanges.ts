@@ -1,5 +1,5 @@
 import "server-only";
-import { getAuthenticatedIdentity } from "@/lib/auth/currentUser";
+import { getRequestAuthenticatedIdentity } from "@/lib/auth/getRequestAuthenticatedIdentity";
 import { parseCalendarDate } from "@/lib/domain/dutyBlocks";
 import { getRecentSettledJobsForRecipient, type RecentSettledJobRow } from "@/lib/notifications/engine/store";
 import type { RecentDashboardChange, RecentDashboardChangeCategory } from "./recentDashboardChangesTypes";
@@ -115,7 +115,11 @@ function toRecentDashboardChange(row: RecentSettledJobRow): RecentDashboardChang
  */
 export async function loadRecentDashboardChanges(now: Date = new Date()): Promise<RecentDashboardChange[]> {
   try {
-    const identity = await getAuthenticatedIdentity();
+    // Request-scoped memoized (`getRequestAuthenticatedIdentity`) -- this
+    // runs on the SAME dashboard-page render as the protected layout's own
+    // `getRequestPersonalSchedule()`, so it shares that one live Supabase
+    // `getUser()` check instead of triggering a second one.
+    const identity = await getRequestAuthenticatedIdentity();
     if (identity.status !== "authenticated") return [];
 
     const sinceIso = new Date(now.getTime() - RECENT_DASHBOARD_CHANGES_HORIZON_HOURS * 60 * 60_000).toISOString();

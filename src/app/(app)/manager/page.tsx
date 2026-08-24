@@ -46,7 +46,11 @@ import {
   periodLabel,
   roleLabel,
 } from "@/lib/presentation/labels";
-import { parseManagerCategoryParam, type ManagerHrefParams } from "@/lib/presentation/managerUrl";
+import {
+  managerCategoryNeedsAdoptionReadiness,
+  parseManagerCategoryParam,
+  type ManagerHrefParams,
+} from "@/lib/presentation/managerUrl";
 import { buildManagerAdoptionSectionView } from "@/lib/presentation/managerAdoption";
 import { managerIssueCoverageReasonLabel } from "@/lib/presentation/managerIssueCoverage";
 import { managerSummaryLabel } from "@/lib/presentation/managerSummary";
@@ -299,9 +303,17 @@ function toHrefParams(model: ManagerOverviewReadModel, category: ManagerHrefPara
  * never fetches Google itself, never re-runs `detectOperationalIssues()`,
  * and never receives more than safe roster ids/names on the client (see
  * `ManagerPersonSelector`). The category switch is a pure presentation
- * concern: every section below reads from the SAME already-loaded model,
- * just organized differently -- switching category never triggers a
- * second fetch or a different server call.
+ * concern for WORKBOOK data specifically: every section below reads from
+ * the SAME already-loaded model, just organized differently -- switching
+ * category never changes which Google workbook sources are requested, and
+ * never triggers a second Google fetch. The one exception is the
+ * privileged Supabase login/notification-readiness lookup
+ * (`computeNotificationReadiness`, behind `model.adoption`) -- that's
+ * genuinely unnecessary I/O for every category except "logins", so this
+ * page derives `needsAdoptionReadiness` from `category` below and threads
+ * it into the read-model call, letting the loader skip it entirely for
+ * Overview/Shifts/Personnel/Duties and for the selected-person drill-down
+ * (see `loadAdoptionReadiness` in `managerOverview.ts`).
  */
 export default async function ManagerPage({ searchParams }: ManagerPageProps) {
   const rawParams = await searchParams;
@@ -309,8 +321,16 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
   const category = parseManagerCategoryParam(
     Array.isArray(rawParams.category) ? rawParams.category[0] : rawParams.category,
   );
+  // The ONLY category that actually renders login/adoption data -- passed
+  // through so the read-model loader can skip the privileged Supabase
+  // Admin API + bulk `push_subscriptions` readiness lookup entirely for
+  // every other category (see `loadAdoptionReadiness`'s own docs). This is
+  // the one place category influences what gets FETCHED -- it never
+  // changes which Google workbook sources are requested (see this
+  // component's own docstring below).
+  const needsAdoptionReadiness = managerCategoryNeedsAdoptionReadiness(category);
 
-  const result = await getRequestManagerOverview(params.personId, params.range, params.month);
+  const result = await getRequestManagerOverview(params.personId, params.range, params.month, needsAdoptionReadiness);
 
   if (result.status === "forbidden") {
     return <ManagerForbiddenState />;

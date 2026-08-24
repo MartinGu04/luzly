@@ -1,8 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Event } from "./event";
 import type { PotentialAllocation } from "./potentialAllocation";
-import { buildPotentialDutyEvents, buildPotentialDutyEventsForRoster } from "./potentialDutyEvents";
 import type { Person } from "./types";
+
+const scopeManagerPotentialAllocation = vi.fn();
+vi.mock("./potentialSourceOwnership", async () => {
+  const actual = await vi.importActual<typeof import("./potentialSourceOwnership")>("./potentialSourceOwnership");
+  scopeManagerPotentialAllocation.mockImplementation(actual.scopeManagerPotentialAllocation);
+  return { ...actual, scopeManagerPotentialAllocation };
+});
+
+const { buildPotentialDutyEvents, buildPotentialDutyEventsForRoster } = await import("./potentialDutyEvents");
 
 function person(overrides: Partial<Person> = {}): Person {
   return {
@@ -673,5 +681,48 @@ describe("buildPotentialDutyEventsForRoster — the same per-person conversion, 
   it("never mutates the input events array", () => {
     const events = Object.freeze([Object.freeze(dutyEvent({ personId: YUVAL.id, date: "2026-01-01" }))]);
     expect(() => buildPotentialDutyEventsForRoster([allocation()], PERSONNEL, events)).not.toThrow();
+  });
+
+  it("scopes each allocation ONCE regardless of roster size -- not once per (allocation, person) pair (Manager-latency regression guard: an earlier version re-ran scopeManagerPotentialAllocation for every person, an O(roster x allocations) cost that dominated buildManagerOverviewReadModel)", () => {
+    scopeManagerPotentialAllocation.mockClear();
+    const bigRoster = Array.from({ length: 50 }, (_, i) => person({ id: `p_${i}`, name: `עובד ${i}` }));
+    const allocations = [
+      allocation({ date: "2026-08-20", dutyFamily: "guard", slot: 1, sourceAllocationLabel: "נדב דוגמה" }),
+      allocation({ date: "2026-08-21", dutyFamily: "oxid", slot: null, sourceAllocationLabel: "יובל דוגמה" }),
+      allocation({ date: "2026-08-22", dutyFamily: "guard", slot: 2, sourceAllocationLabel: "unresolvable stranger" }),
+    ];
+
+    buildPotentialDutyEventsForRoster(allocations, [...PERSONNEL, ...bigRoster], []);
+
+    // Exactly once per allocation -- NOT once per (allocation, roster member): a
+    // 54-person roster (50 + PERSONNEL's 4) must never turn 3 allocations into
+    // 3 * 54 = 162 calls.
+    expect(scopeManagerPotentialAllocation).toHaveBeenCalledTimes(allocations.length);
+  });
+
+  it("matches calling buildPotentialDutyEvents once per person and concatenating -- the roster-wide fast path is behaviorally identical to the (slower) per-person composition, not just faster", () => {
+    const roster = [NADAV, YUVAL, DANIEL_A, DANIEL_B, person({ id: "p_extra", name: "עודף בדיקה" })];
+    const allocations = [
+      allocation({ date: "2026-08-20", dutyFamily: "guard", slot: 1, sourceAllocationLabel: "נדב דוגמה" }),
+      allocation({ date: "2026-08-21", dutyFamily: "oxid", slot: null, sourceAllocationLabel: "יובל דוגמה" }),
+      allocation({ date: "2026-08-22", dutyFamily: "daily_kitchen", slot: null, sourceAllocationLabel: "עודף בדיקה" }),
+      allocation({ date: "2026-08-23", dutyFamily: "guard", slot: 2, sourceAllocationLabel: "unresolvable stranger" }),
+    ];
+    const events = [dutyEvent({ personId: DANIEL_A.id, personName: DANIEL_A.name, date: "2026-01-01" })];
+
+    const rosterResult = buildPotentialDutyEventsForRoster(allocations, roster, events);
+
+    const eventsByPerson = new Map<string, Event[]>();
+    for (const event of events) {
+      const bucket = eventsByPerson.get(event.personId) ?? [];
+      bucket.push(event);
+      eventsByPerson.set(event.personId, bucket);
+    }
+    const perPersonResult = roster.flatMap((p) =>
+      buildPotentialDutyEvents(allocations, p, roster, eventsByPerson.get(p.id) ?? []),
+    );
+
+    const sortByCell = (a: Event, b: Event) => a.sourceCell.localeCompare(b.sourceCell);
+    expect([...rosterResult].sort(sortByCell)).toEqual([...perPersonResult].sort(sortByCell));
   });
 });

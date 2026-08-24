@@ -23,6 +23,22 @@ export function parseManagerCategoryParam(raw: string | null | undefined): Manag
   return "overview";
 }
 
+/**
+ * `"logins"` ("התחברויות והתראות") is the ONLY category whose UI actually
+ * renders `model.adoption` -- every other category (including the
+ * selected-person drill-down, which never routes through a
+ * `ManagerCategory` at all) has no use for the privileged Supabase Admin
+ * API + bulk `push_subscriptions` readiness lookup that produces it. The
+ * page threads this straight into `getRequestManagerOverview`'s
+ * `needsAdoptionReadiness` argument so the read-model loader can skip that
+ * lookup entirely for every other category -- see
+ * `loadAdoptionReadiness` (`managerOverview.ts`) for the other, independent
+ * skip condition (a person is selected).
+ */
+export function managerCategoryNeedsAdoptionReadiness(category: ManagerCategory): boolean {
+  return category === "logins";
+}
+
 export interface ManagerHrefParams {
   personId: string | null;
   range: ManagerRangeKey;

@@ -1,6 +1,6 @@
 import "server-only";
 import { resolveIdentityAgainstPeople } from "@/lib/auth/resolveCurrentPerson";
-import { getAuthenticatedIdentity } from "@/lib/auth/currentUser";
+import { getRequestAuthenticatedIdentity } from "@/lib/auth/getRequestAuthenticatedIdentity";
 import { ShiftConfigurationError, buildShiftSchedule, type ShiftSchedule } from "@/lib/domain/shiftSchedule";
 import { SHEET_SOURCES, type RawSheet, type RawWorkbookSnapshot, type SheetSourceKey } from "@/lib/google";
 import { parseEvent } from "@/lib/parsers/event";
@@ -51,9 +51,17 @@ function getSheetByKey(snapshot: RawWorkbookSnapshot, key: SheetSourceKey): RawS
  * coverage-issue analysis is), see this read model's own `README.md`
  * entry. Still never email, sourceSheet/sourceCell, or any manager-only
  * operational field -- see `buildSearchReadModel`/`SearchReadModel`.
+ *
+ * Identity resolution uses `getRequestAuthenticatedIdentity()` -- the SAME
+ * request-scoped `cache()` memoization `personalSchedule.ts`/
+ * `managerWorkbookContext.ts` use -- so on `(app)/layout.tsx`'s render
+ * (which runs this concurrently with `getRequestPersonalSchedule()`, see
+ * that layout's own docs), the live Supabase `getUser()` check is shared
+ * rather than performed a second time just for search. Never a second
+ * identity primitive, never a persistent cache of the result.
  */
 export async function loadSearchReadModel(): Promise<SearchReadModelLoadResult> {
-  const identity = await getAuthenticatedIdentity();
+  const identity = await getRequestAuthenticatedIdentity();
   if (identity.status === "unauthenticated") return { status: "unauthenticated" };
   if (identity.status === "missing_email") return { status: "missing_email" };
 

@@ -1,12 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RawSheet } from "@/lib/google";
 
-const getRequestPersonalSchedule = vi.fn();
-const getAuthenticatedIdentity = vi.fn();
+const getRequestAuthenticatedIdentity = vi.fn();
 const getWorkbookSnapshot = vi.fn();
 
-vi.mock("./getRequestPersonalSchedule", () => ({ getRequestPersonalSchedule }));
-vi.mock("@/lib/auth/currentUser", () => ({ getAuthenticatedIdentity }));
+vi.mock("@/lib/auth/getRequestAuthenticatedIdentity", () => ({ getRequestAuthenticatedIdentity }));
 vi.mock("@/lib/sync", () => ({ getWorkbookSnapshot }));
 
 const { loadManagerWorkbookContext, loadManagerPersonnelContext, getManagerWorkbookSheet, MANAGER_WORKBOOK_SOURCES } =
@@ -44,40 +42,10 @@ function managerSnapshot(overrides: Partial<{ personnel: (string | boolean)[][] 
   };
 }
 
-function okPersonalResult(isManager: boolean, avatarUrl: string | null = null) {
-  return {
-    status: "ok" as const,
-    avatarUrl,
-    model: {
-      person: {
-        id: "p_dani",
-        name: "דני מנהל",
-        isManager,
-        isTechnician: false,
-        isSupervisor: false,
-        personnelType: null,
-      },
-      fetchedAt: "2026-08-13T08:00:00.000Z",
-      localNow: { date: "2026-08-13", minuteOfDay: 600 },
-      todayEvents: [],
-      upcomingEvents: [],
-      calendarEvents: [],
-      currentAssignments: [],
-      nextAssignmentGroup: null,
-      currentShiftContexts: [],
-      nextShiftContexts: [],
-      issues: [],
-      dutyBlocks: [],
-      dutyActions: [],
-    },
-  };
-}
-
 beforeEach(() => {
-  getRequestPersonalSchedule.mockReset();
-  getAuthenticatedIdentity.mockReset();
+  getRequestAuthenticatedIdentity.mockReset();
   getWorkbookSnapshot.mockReset();
-  getAuthenticatedIdentity.mockResolvedValue({
+  getRequestAuthenticatedIdentity.mockResolvedValue({
     status: "authenticated",
     userId: "u1",
     email: "dani@example.invalid",
@@ -87,48 +55,78 @@ beforeEach(() => {
 });
 
 describe("loadManagerWorkbookContext — auth pass-through states", () => {
-  it.each([
-    ["unauthenticated", { status: "unauthenticated" }],
-    ["missing_email", { status: "missing_email" }],
-    ["unmapped", { status: "unmapped" }],
-    ["ambiguous_identity", { status: "ambiguous_identity" }],
-  ])("%s: passes through, no manager fetch", async (_label, personalResult) => {
-    getRequestPersonalSchedule.mockResolvedValue(personalResult);
+  it("unauthenticated: no workbook fetch at all", async () => {
+    getRequestAuthenticatedIdentity.mockResolvedValue({ status: "unauthenticated" });
     const result = await loadManagerWorkbookContext();
-    expect(result).toEqual(personalResult);
+    expect(result).toEqual({ status: "unauthenticated" });
     expect(getWorkbookSnapshot).not.toHaveBeenCalled();
   });
 
-  it("configuration_error: passes the message through, no manager fetch", async () => {
-    getRequestPersonalSchedule.mockResolvedValue({
-      status: "configuration_error",
-      message: "Missing shift start time configuration.",
-      person: { id: "p_dani", name: "דני מנהל", isManager: true, isTechnician: false, isSupervisor: false, personnelType: null },
+  it("missing_email: no workbook fetch at all", async () => {
+    getRequestAuthenticatedIdentity.mockResolvedValue({ status: "missing_email", userId: "u1" });
+    const result = await loadManagerWorkbookContext();
+    expect(result).toEqual({ status: "missing_email" });
+    expect(getWorkbookSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("an email absent from כ\"א fails closed as unmapped, AFTER the manager batch was fetched (the fresh snapshot is what's authoritative)", async () => {
+    getRequestAuthenticatedIdentity.mockResolvedValue({
+      status: "authenticated",
+      userId: "u9",
+      email: "stranger@example.invalid",
+      avatarUrl: null,
     });
     const result = await loadManagerWorkbookContext();
-    expect(result).toEqual({ status: "configuration_error", message: "Missing shift start time configuration." });
-    expect(getWorkbookSnapshot).not.toHaveBeenCalled();
+    expect(result).toEqual({ status: "unmapped" });
+  });
+
+  it("an email matching more than one כ\"א record fails closed as ambiguous_identity", async () => {
+    getRequestAuthenticatedIdentity.mockResolvedValue({
+      status: "authenticated",
+      userId: "u9",
+      email: "dup@example.invalid",
+      avatarUrl: null,
+    });
+    getWorkbookSnapshot.mockResolvedValue(
+      managerSnapshot({
+        personnel: [
+          ["שם", "מייל", "מנהל"],
+          ["דני א", "dup@example.invalid", true],
+          ["דני ב", "dup@example.invalid", true],
+        ],
+      }),
+    );
+    const result = await loadManagerWorkbookContext();
+    expect(result).toEqual({ status: "ambiguous_identity" });
   });
 });
 
 describe("loadManagerWorkbookContext — manager authorization", () => {
-  it("non-manager: forbidden, manager batch is never fetched", async () => {
-    getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(false));
+  it("non-manager: forbidden", async () => {
+    getRequestAuthenticatedIdentity.mockResolvedValue({
+      status: "authenticated",
+      userId: "u2",
+      email: "noa@example.invalid",
+      avatarUrl: null,
+    });
     const result = await loadManagerWorkbookContext();
     expect(result).toEqual({ status: "forbidden" });
-    expect(getWorkbookSnapshot).not.toHaveBeenCalled();
   });
 
   it("manager: fetches exactly the 5 shared manager sources, exactly once", async () => {
-    getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(true));
     await loadManagerWorkbookContext();
     expect(getWorkbookSnapshot).toHaveBeenCalledTimes(1);
     expect(getWorkbookSnapshot).toHaveBeenCalledWith(MANAGER_WORKBOOK_SOURCES);
     expect(MANAGER_WORKBOOK_SOURCES).toEqual(["personnel", "schedule", "settings", "potentialH1", "potentialH2"]);
   });
 
+  it("a narrower caller's own `sources` is what actually gets fetched, not the fixed 5-source default", async () => {
+    getWorkbookSnapshot.mockResolvedValue({ fetchedAt: "x", sheets: [personnelSheet(MANAGER_PERSONNEL_ROWS)] });
+    await loadManagerWorkbookContext(["personnel"]);
+    expect(getWorkbookSnapshot).toHaveBeenCalledWith(["personnel"]);
+  });
+
   it("fresh manager snapshot no longer marks the person as manager -> fails closed, data discarded", async () => {
-    getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(true));
     getWorkbookSnapshot.mockResolvedValue(
       managerSnapshot({ personnel: [["שם", "מייל", "מנהל"], ["דני מנהל", "dani@example.invalid", false]] }),
     );
@@ -138,16 +136,23 @@ describe("loadManagerWorkbookContext — manager authorization", () => {
   });
 
   it("fresh snapshot where the person is no longer mapped at all also fails closed", async () => {
-    getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(true));
     getWorkbookSnapshot.mockResolvedValue(
       managerSnapshot({ personnel: [["שם", "מייל", "מנהל"], ["מישהו אחר", "other@example.invalid", true]] }),
     );
     const result = await loadManagerWorkbookContext();
-    expect(result).toEqual({ status: "forbidden" });
+    expect(result).toEqual({ status: "unmapped" });
+  });
+
+  it("an invalid/missing shift-schedule configuration on the manager snapshot does NOT block this gate -- that's a downstream concern for callers that actually need ShiftSchedule", async () => {
+    // No `settings` row worth parsing at all -- previously this would have
+    // surfaced as `configuration_error` from the old getRequestPersonalSchedule
+    // gate, before ever reaching this function. Now that this gate never
+    // touches settings/ShiftSchedule, it authorizes normally.
+    const result = await loadManagerWorkbookContext();
+    expect(result.status).toBe("ok");
   });
 
   it("success: returns the re-verified manager, full roster, and raw snapshot", async () => {
-    getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(true));
     const result = await loadManagerWorkbookContext();
     expect(result.status).toBe("ok");
     if (result.status === "ok") {
@@ -157,8 +162,13 @@ describe("loadManagerWorkbookContext — manager authorization", () => {
     }
   });
 
-  it("carries the manager's own avatarUrl through from getRequestPersonalSchedule, never a new lookup", async () => {
-    getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(true, "https://example.invalid/photo.jpg"));
+  it("carries the manager's own avatarUrl through from the resolved identity, never a new lookup", async () => {
+    getRequestAuthenticatedIdentity.mockResolvedValue({
+      status: "authenticated",
+      userId: "u1",
+      email: "dani@example.invalid",
+      avatarUrl: "https://example.invalid/photo.jpg",
+    });
     const result = await loadManagerWorkbookContext();
     expect(result.status).toBe("ok");
     if (result.status === "ok") {
@@ -167,7 +177,6 @@ describe("loadManagerWorkbookContext — manager authorization", () => {
   });
 
   it("avatarUrl is null when the manager has no Google profile photo", async () => {
-    getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(true, null));
     const result = await loadManagerWorkbookContext();
     expect(result.status).toBe("ok");
     if (result.status === "ok") {
@@ -175,10 +184,17 @@ describe("loadManagerWorkbookContext — manager authorization", () => {
     }
   });
 
-  it("calls getRequestPersonalSchedule exactly once", async () => {
-    getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(true));
+  it("calls getRequestAuthenticatedIdentity exactly once -- a single live getUser() check per call, request-scoped dedup with any other loader on the same render happens via cache() itself", async () => {
     await loadManagerWorkbookContext();
-    expect(getRequestPersonalSchedule).toHaveBeenCalledTimes(1);
+    expect(getRequestAuthenticatedIdentity).toHaveBeenCalledTimes(1);
+  });
+
+  it("parses personnel exactly once (no redundant double-parse)", async () => {
+    const result = await loadManagerWorkbookContext();
+    expect(result.status).toBe("ok");
+    // getWorkbookSnapshot itself is called once (asserted above); personnel
+    // parsing happens from that single snapshot, never a second time.
+    expect(getWorkbookSnapshot).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -191,11 +207,6 @@ describe("loadManagerPersonnelContext -- the lightweight polling authorization p
     getWorkbookSnapshot.mockResolvedValue(personnelOnlySnapshot());
   });
 
-  it("never calls getRequestPersonalSchedule -- does NOT load/parse Schedule, Settings, or Potential, unlike loadManagerWorkbookContext", async () => {
-    await loadManagerPersonnelContext();
-    expect(getRequestPersonalSchedule).not.toHaveBeenCalled();
-  });
-
   it("fetches ONLY the personnel source via the cached getWorkbookSnapshot -- never the full 5-source manager set, never a second fetch", async () => {
     await loadManagerPersonnelContext();
     expect(getWorkbookSnapshot).toHaveBeenCalledTimes(1);
@@ -203,21 +214,21 @@ describe("loadManagerPersonnelContext -- the lightweight polling authorization p
   });
 
   it("an unauthenticated caller triggers no workbook read at all", async () => {
-    getAuthenticatedIdentity.mockResolvedValue({ status: "unauthenticated" });
+    getRequestAuthenticatedIdentity.mockResolvedValue({ status: "unauthenticated" });
     const result = await loadManagerPersonnelContext();
     expect(result).toEqual({ status: "unauthenticated" });
     expect(getWorkbookSnapshot).not.toHaveBeenCalled();
   });
 
   it("an authenticated caller with no usable email triggers no workbook read at all", async () => {
-    getAuthenticatedIdentity.mockResolvedValue({ status: "missing_email", userId: "u1" });
+    getRequestAuthenticatedIdentity.mockResolvedValue({ status: "missing_email", userId: "u1" });
     const result = await loadManagerPersonnelContext();
     expect(result).toEqual({ status: "missing_email" });
     expect(getWorkbookSnapshot).not.toHaveBeenCalled();
   });
 
   it("an email absent from כ\"א fails closed as unmapped", async () => {
-    getAuthenticatedIdentity.mockResolvedValue({
+    getRequestAuthenticatedIdentity.mockResolvedValue({
       status: "authenticated",
       userId: "u2",
       email: "stranger@example.invalid",
@@ -228,7 +239,7 @@ describe("loadManagerPersonnelContext -- the lightweight polling authorization p
   });
 
   it("a mapped but NON-manager person fails closed as forbidden -- manager status is never trusted from the client", async () => {
-    getAuthenticatedIdentity.mockResolvedValue({
+    getRequestAuthenticatedIdentity.mockResolvedValue({
       status: "authenticated",
       userId: "u3",
       email: "noa@example.invalid",

@@ -13,12 +13,18 @@ import { loadManagerOverviewReadModel, type ManagerOverviewLoadResult } from "./
  * `cache()`'s per-argument identity comparison actually dedupes multiple
  * Server Components on the same `/manager` render that need the same
  * scope -- an object literal built separately at each call site would
- * never compare equal even with identical field values.
+ * never compare equal even with identical field values. `needsAdoptionReadiness`
+ * is part of that same cache key (a `boolean` is just as valid a `cache()`
+ * argument as a string) -- so a render that needs it and one that doesn't
+ * are correctly treated as different requests, never accidentally sharing
+ * a memoized result across categories.
  */
 export const getRequestManagerOverview = cache(
   (
     personId: string | null,
     range: Parameters<typeof loadManagerOverviewReadModel>[0]["range"],
     month: string | null,
-  ): Promise<ManagerOverviewLoadResult> => loadManagerOverviewReadModel({ personId, range, month }),
+    needsAdoptionReadiness: boolean,
+  ): Promise<ManagerOverviewLoadResult> =>
+    loadManagerOverviewReadModel({ personId, range, month }, needsAdoptionReadiness),
 );
