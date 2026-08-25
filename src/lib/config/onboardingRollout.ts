@@ -37,20 +37,21 @@
  *
  * Deliberately NOT set to this PR's authoring date: at authoring time
  * (2026-08-25) this feature had not shipped yet -- the PR was still open,
- * unmerged -- so the exact merge/deploy instant is not knowable in advance.
- * A cutoff equal to (or before) the authoring date would misclassify any
- * account created later that same day, still before the real rollout, as
- * "new"/onboarding-eligible. Set one full day past the authoring date
- * instead, as a safety buffer past any realistic merge time -- every
- * account that already existed before מי-מה-מו ever had a setup card must
- * never suddenly see one just because the feature shipped. The one-sided
- * cost of this buffer is a handful of genuinely-new accounts created in
- * that same narrow window not seeing the card immediately, which is safe
- * (never shown = never wrong) and correctable by moving this value earlier
- * once the real rollout instant is known -- never move it earlier than
- * that actual instant.
+ * unmerged -- so the exact merge/deploy instant is not knowable in advance,
+ * and this file cannot know it either. A cutoff too close to (or before)
+ * the actual rollout would misclassify an account created shortly before
+ * it, still pre-rollout, as "new"/onboarding-eligible. Set with a generous
+ * multi-day buffer past the authoring date instead, comfortably past any
+ * realistic merge/deploy time for this PR -- every account that already
+ * existed before מי-מה-מו ever had a setup card must never suddenly see one
+ * just because the feature shipped. This intentionally favors
+ * grandfathering: the one-sided cost is that genuinely-new accounts
+ * created during that short post-release buffer may not see the card
+ * immediately, which is safe (never shown = never wrong), unlike the
+ * reverse. Correctable by moving this value earlier once the real rollout
+ * instant is known -- never move it earlier than that actual instant.
  */
-export const ONBOARDING_ROLLOUT_CUTOFF = "2026-08-26T00:00:00.000Z";
+export const ONBOARDING_ROLLOUT_CUTOFF = "2026-08-27T00:00:00.000Z";
 
 /**
  * Pure account-level eligibility check. Fails closed on anything that
