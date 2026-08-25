@@ -18,6 +18,22 @@ vi.mock("@/lib/readModels/getRequestReportOneTomorrow", () => ({ getRequestRepor
 const recordDashboardVisitAction = vi.fn().mockResolvedValue({ ok: true });
 vi.mock("@/lib/dashboardVisit/actions", () => ({ recordDashboardVisitAction }));
 
+const getCalendarFeedForCurrentUser = vi.fn();
+vi.mock("@/lib/calendar/feedStore", () => ({ getCalendarFeedForCurrentUser: (...args: unknown[]) => getCalendarFeedForCurrentUser(...args) }));
+
+// SetupSection (nav redesign pass, rendered by both Dashboard and
+// PermanentManagerHome) mounts usePushSubscription, which imports these
+// "use server" actions -- mocked defensively so a real (unmocked)
+// server-action module is never evaluated in this jsdom test environment,
+// same as NotificationBell.test.tsx already does for the same hook.
+vi.mock("@/lib/notifications/actions", () => ({
+  enablePushNotificationsAction: vi.fn(),
+  disablePushNotificationsAction: vi.fn(),
+  getPushSubscriptionStatusAction: vi.fn(),
+  sendTestNotificationAction: vi.fn(),
+}));
+vi.mock("@/lib/push/publicConfig", () => ({ getVapidPublicKey: () => "test-public-key" }));
+
 vi.mock("@/lib/reportOne/actions", () => ({ setReserveInclusionPreferenceAction: vi.fn().mockResolvedValue({ ok: true }) }));
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
@@ -39,6 +55,8 @@ beforeEach(() => {
   getRequestReportOneTomorrow.mockReset();
   getRequestReportOneTomorrow.mockResolvedValue({ status: "forbidden" });
   recordDashboardVisitAction.mockClear();
+  getCalendarFeedForCurrentUser.mockReset();
+  getCalendarFeedForCurrentUser.mockResolvedValue({ enabled: false, token: null });
 });
 
 function model(overrides: Partial<PersonalScheduleReadModel> = {}): PersonalScheduleReadModel {
@@ -419,5 +437,95 @@ describe("DashboardPage — 'דוח 1 למחר' Home quick action reaches every 
     render(element);
 
     expect(screen.queryByText("🛰️ דוח 1 למחר")).toBeNull();
+  });
+});
+
+describe("DashboardPage — onboarding eligibility wiring (pre-merge correction)", () => {
+  it("a veteran account (created before the rollout cutoff) never sees the setup card, even with nothing set up on this device", async () => {
+    getRequestPersonalSchedule.mockResolvedValue({
+      status: "ok",
+      model: model({ person: { id: "p_1", name: "עובד ותיק", isManager: false, isTechnician: true, isSupervisor: false, personnelType: "חובה" } }),
+      userId: "veteran-user-1",
+      avatarUrl: null,
+      accountCreatedAt: "2020-01-01T00:00:00.000Z",
+    });
+    getCalendarFeedForCurrentUser.mockResolvedValue({ enabled: false, token: null });
+
+    const element = await DashboardPage();
+    render(element);
+
+    expect(screen.queryByText("השלמת הגדרה")).toBeNull();
+  });
+
+  it("an account created on a brand-new device still resolves as veteran from accountCreatedAt alone -- device state is irrelevant", async () => {
+    // No PWA/Push/localStorage state set up in this test at all (a genuinely
+    // fresh jsdom environment) -- the only thing distinguishing this from a
+    // new account is the (pre-cutoff) accountCreatedAt itself.
+    getRequestPersonalSchedule.mockResolvedValue({
+      status: "ok",
+      model: model({ person: { id: "p_1", name: "עובד ותיק", isManager: false, isTechnician: true, isSupervisor: false, personnelType: "חובה" } }),
+      userId: "veteran-user-2",
+      avatarUrl: null,
+      accountCreatedAt: "2019-06-15T00:00:00.000Z",
+    });
+
+    const element = await DashboardPage();
+    render(element);
+
+    expect(screen.queryByText("השלמת הגדרה")).toBeNull();
+  });
+
+  it("a new account (created at/after the rollout cutoff) sees the setup card when setup is still incomplete", async () => {
+    getRequestPersonalSchedule.mockResolvedValue({
+      status: "ok",
+      model: model({ person: { id: "p_1", name: "עובד חדש", isManager: false, isTechnician: true, isSupervisor: false, personnelType: "חובה" } }),
+      userId: "new-user-1",
+      avatarUrl: null,
+      accountCreatedAt: "2026-09-01T00:00:00.000Z",
+    });
+    getCalendarFeedForCurrentUser.mockResolvedValue({ enabled: false, token: null });
+
+    const element = await DashboardPage();
+    render(element);
+
+    expect(screen.getByText("השלמת הגדרה")).toBeInTheDocument();
+  });
+
+  it("a new permanent manager (created at/after the rollout cutoff) sees the setup card on PermanentManagerHome too", async () => {
+    getRequestPersonalSchedule.mockResolvedValue({
+      status: "ok",
+      model: model({
+        person: { id: "p_mgr", name: "מנהל חדש", isManager: true, isTechnician: false, isSupervisor: false, personnelType: "קבע" },
+      }),
+      userId: "new-manager-1",
+      avatarUrl: null,
+      accountCreatedAt: "2026-09-01T00:00:00.000Z",
+    });
+    getRequestPermanentManagerHome.mockResolvedValue({ status: "ok", model: permanentManagerHomeModel() });
+    getCalendarFeedForCurrentUser.mockResolvedValue({ enabled: false, token: null });
+
+    const element = await DashboardPage();
+    render(element);
+
+    expect(screen.getByText("השלמת הגדרה")).toBeInTheDocument();
+  });
+
+  it("a veteran permanent manager never sees the setup card on PermanentManagerHome", async () => {
+    getRequestPersonalSchedule.mockResolvedValue({
+      status: "ok",
+      model: model({
+        person: { id: "p_mgr", name: "מנהל ותיק", isManager: true, isTechnician: false, isSupervisor: false, personnelType: "קבע" },
+      }),
+      userId: "veteran-manager-1",
+      avatarUrl: null,
+      accountCreatedAt: "2021-01-01T00:00:00.000Z",
+    });
+    getRequestPermanentManagerHome.mockResolvedValue({ status: "ok", model: permanentManagerHomeModel() });
+    getCalendarFeedForCurrentUser.mockResolvedValue({ enabled: false, token: null });
+
+    const element = await DashboardPage();
+    render(element);
+
+    expect(screen.queryByText("השלמת הגדרה")).toBeNull();
   });
 });

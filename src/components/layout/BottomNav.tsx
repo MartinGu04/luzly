@@ -3,9 +3,10 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Loader2 } from "lucide-react";
+import { Loader2, MoreHorizontal } from "lucide-react";
 import { LinkPendingWatcher } from "@/components/ui/LinkPendingWatcher";
 import { navItems, type NavItem } from "./nav-items";
+import { MoreSheet } from "./MoreSheet";
 
 interface BottomNavLinkProps {
   item: NavItem;
@@ -63,15 +64,54 @@ function BottomNavLink({ item, isActive }: BottomNavLinkProps) {
   );
 }
 
+interface MoreNavButtonProps {
+  open: boolean;
+  onToggle: () => void;
+}
+
+/**
+ * The 5th tab, "עוד" (nav redesign pass) -- not a `NavItem`/real route (it
+ * opens `MoreSheet` instead of navigating), so it renders its own button
+ * rather than going through `BottomNavLink`. Styled to match every other
+ * tab exactly (same size/spacing/label treatment) so it reads as part of
+ * the same navigation, never a visually distinct "extra" control -- the
+ * active-route underline dot is the one thing it never shows, since it
+ * never itself becomes the current page.
+ */
+function MoreNavButton({ open, onToggle }: MoreNavButtonProps) {
+  return (
+    <button
+      type="button"
+      aria-haspopup="dialog"
+      aria-expanded={open}
+      onClick={onToggle}
+      className="relative flex min-h-[56px] flex-1 flex-col items-center justify-center gap-1 px-1 py-2 text-sidebar-muted transition-colors duration-200 active:scale-95 active:opacity-80"
+    >
+      <MoreHorizontal className="h-[21px] w-[21px]" aria-hidden="true" strokeWidth={1.75} />
+      <span className="text-[11px] font-medium leading-none">עוד</span>
+    </button>
+  );
+}
+
+interface BottomNavProps {
+  /** Same "isManager only" boundary `MoreSheet` itself checks -- see there. `undefined` (no authenticated identity known yet) hides every manager-only entry, same as `visibleNavItems(false)`. */
+  isManager?: boolean;
+}
+
 /**
  * Premium bottom navigation for mobile/tablet, replacing the old
  * hamburger/drawer pattern entirely. Only a small curated set of routes
  * appears here (`inBottomNav`) to stay uncluttered; disabled items are
- * visibly present but genuinely non-interactive -- never a dead link.
+ * visibly present but genuinely non-interactive -- never a dead link. A
+ * 5th tab, "עוד" (nav redesign pass), opens `MoreSheet` -- a real
+ * navigation destination list (מטווחים, and for a manager אזור
+ * מנהל/מרכז התראות), never the account/profile menu (`MobileProfileMenu`
+ * covers that separately).
  */
-export function BottomNav() {
+export function BottomNav({ isManager = false }: BottomNavProps) {
   const pathname = usePathname();
   const items = navItems.filter((item) => item.inBottomNav);
+  const [moreOpen, setMoreOpen] = useState(false);
 
   return (
     <nav
@@ -104,7 +144,12 @@ export function BottomNav() {
             </li>
           );
         })}
+        <li className="flex flex-1">
+          <MoreNavButton open={moreOpen} onToggle={() => setMoreOpen((prev) => !prev)} />
+        </li>
       </ul>
+
+      <MoreSheet open={moreOpen} onClose={() => setMoreOpen(false)} isManager={isManager} />
     </nav>
   );
 }

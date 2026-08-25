@@ -139,10 +139,15 @@ describe("IdentityFooter — footer hierarchy (PR #38 desktop shell polish)", ()
   });
 });
 
-describe("IdentityFooter — settings link", () => {
-  it("links to /settings", () => {
+describe("IdentityFooter — calendar sync link (renamed from הגדרות, nav redesign pass)", () => {
+  it('links to /settings, labeled "סנכרון יומן"', () => {
     renderWithTheme(<IdentityFooter name="דני בדיקה" isManager={false} avatarUrl={null} />);
-    expect(screen.getByRole("link", { name: "הגדרות" })).toHaveAttribute("href", "/settings");
+    expect(screen.getByRole("link", { name: "סנכרון יומן" })).toHaveAttribute("href", "/settings");
+  });
+
+  it('no longer exposes the old "הגדרות" label', () => {
+    renderWithTheme(<IdentityFooter name="דני בדיקה" isManager={false} avatarUrl={null} />);
+    expect(screen.queryByRole("link", { name: "הגדרות" })).toBeNull();
   });
 });
 

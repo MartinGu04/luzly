@@ -16,6 +16,17 @@ vi.mock("@/components/ui/DataFreshnessStatus", () => ({
 const recordDashboardVisitAction = vi.hoisted(() => vi.fn().mockResolvedValue({ ok: true }));
 vi.mock("@/lib/dashboardVisit/actions", () => ({ recordDashboardVisitAction }));
 vi.mock("@/lib/reportOne/actions", () => ({ setReserveInclusionPreferenceAction: vi.fn().mockResolvedValue({ ok: true }) }));
+// SetupSection (nav redesign pass) mounts usePushSubscription, which imports
+// these "use server" actions -- mocked defensively so a real (unmocked)
+// server-action module is never evaluated in this jsdom test environment,
+// same as NotificationBell.test.tsx already does for the same hook.
+vi.mock("@/lib/notifications/actions", () => ({
+  enablePushNotificationsAction: vi.fn(),
+  disablePushNotificationsAction: vi.fn(),
+  getPushSubscriptionStatusAction: vi.fn(),
+  sendTestNotificationAction: vi.fn(),
+}));
+vi.mock("@/lib/push/publicConfig", () => ({ getVapidPublicKey: () => "test-public-key" }));
 
 beforeEach(() => {
   recordDashboardVisitAction.mockClear();

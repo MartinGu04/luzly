@@ -7,8 +7,12 @@ import { resolveRequestOrigin } from "@/lib/calendar/requestOrigin";
 import { getRequestPersonalSchedule } from "@/lib/readModels/getRequestPersonalSchedule";
 
 /**
- * "הגדרות" -- currently just calendar sync (PR: personal calendar
- * subscription), the app's first genuine settings/profile destination.
+ * "סנכרון יומן" (formerly labeled "הגדרות") -- currently just calendar sync
+ * (PR: personal calendar subscription), the app's first genuine
+ * settings/profile destination. Renamed (nav redesign pass) since this
+ * destination has never been anything but calendar sync -- "הגדרות" implied
+ * a broader settings surface that never existed. Route unchanged (/settings),
+ * wording-only.
  * Re-verifies identity the same way every other protected page does
  * (`getRequestPersonalSchedule()`, request-scoped cached -- reuses the
  * SAME call the protected layout already made, no second Google read),
@@ -32,7 +36,7 @@ export default async function SettingsPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <h1 className="text-xl font-semibold text-foreground">הגדרות</h1>
+      <h1 className="text-xl font-semibold text-foreground">סנכרון יומן</h1>
       <CalendarSyncSection initialEnabled={feed.enabled} initialLinks={initialLinks} />
     </div>
   );

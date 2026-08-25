@@ -61,3 +61,18 @@ describe("MobileIdentityBar", () => {
     expect(container.textContent).not.toMatch(/luzly/i);
   });
 });
+
+describe("MobileIdentityBar — theme toggle (nav redesign pass)", () => {
+  it("offers a dedicated light/dark icon toggle next to search", async () => {
+    await renderWithTheme(<MobileIdentityBar name="דני בדיקה" isManager={false} avatarUrl={null} userId="user-test-1" />);
+    // The global matchMedia stub (vitest.setup.ts) resolves to light, so the action offers to switch to dark.
+    expect(screen.getByRole("button", { name: "מצב כהה" })).toBeInTheDocument();
+  });
+
+  it("toggling it flips the shared theme state (same ThemeProvider every other control uses)", async () => {
+    await renderWithTheme(<MobileIdentityBar name="דני בדיקה" isManager={false} avatarUrl={null} userId="user-test-1" />);
+    fireEvent.click(screen.getByRole("button", { name: "מצב כהה" }));
+    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+    expect(screen.getByRole("button", { name: "מצב בהיר" })).toBeInTheDocument();
+  });
+});

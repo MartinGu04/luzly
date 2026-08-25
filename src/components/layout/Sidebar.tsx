@@ -14,6 +14,17 @@ interface SidebarProps {
   person?: { name: string; isManager: boolean; avatarUrl: string | null };
 }
 
+/**
+ * "Main navigation" group hrefs, in `navItems`' own order (nav redesign
+ * pass) -- everything else `visibleNavItems` returns (מטווחים and, for a
+ * manager, אזור מנהל/מרכז התראות) renders below a visual separator as
+ * "Work tools" instead. Kept as a small fixed set rather than a new
+ * `NavItem` field: `navItems`' existing order already happens to match this
+ * exact split, so this is purely a rendering-time grouping, no change to
+ * the shared nav-items data model or its filtering logic.
+ */
+const MAIN_NAV_HREFS = new Set(["/", "/schedule", "/duties", "/fairness"]);
+
 interface SidebarLinkProps {
   item: NavItem;
   isActive: boolean;
@@ -92,6 +103,31 @@ function SidebarLink({ item, isActive }: SidebarLinkProps) {
 export function Sidebar({ person }: SidebarProps) {
   const pathname = usePathname();
   const items = visibleNavItems(person?.isManager ?? false);
+  const mainItems = items.filter((item) => MAIN_NAV_HREFS.has(item.href));
+  const workToolItems = items.filter((item) => !MAIN_NAV_HREFS.has(item.href));
+
+  function renderItem(item: NavItem) {
+    const Icon = item.icon;
+    const isActive = item.enabled && pathname === item.href;
+
+    if (!item.enabled) {
+      return (
+        <div
+          key={item.href}
+          aria-disabled="true"
+          className="flex min-h-[48px] items-center justify-between gap-2 rounded-xl px-3.5 py-3 text-[15px] font-medium text-sidebar-muted opacity-70"
+        >
+          <span className="flex items-center gap-3">
+            <Icon className="h-[20px] w-[20px] opacity-70" aria-hidden="true" strokeWidth={1.75} />
+            {item.label}
+          </span>
+          <span className="rounded-full bg-sidebar-hover px-2 py-0.5 text-[10px] text-sidebar-muted">בקרוב</span>
+        </div>
+      );
+    }
+
+    return <SidebarLink key={item.href} item={item} isActive={isActive} />;
+  }
 
   return (
     <aside className="sticky top-0 hidden h-dvh w-[320px] shrink-0 flex-col border-e border-sidebar-border bg-sidebar text-sidebar-foreground lg:flex">
@@ -104,28 +140,11 @@ export function Sidebar({ person }: SidebarProps) {
       </div>
 
       <nav className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto px-4 py-2" aria-label="ניווט ראשי">
-        {items.map((item) => {
-          const Icon = item.icon;
-          const isActive = item.enabled && pathname === item.href;
-
-          if (!item.enabled) {
-            return (
-              <div
-                key={item.href}
-                aria-disabled="true"
-                className="flex min-h-[48px] items-center justify-between gap-2 rounded-xl px-3.5 py-3 text-[15px] font-medium text-sidebar-muted opacity-70"
-              >
-                <span className="flex items-center gap-3">
-                  <Icon className="h-[20px] w-[20px] opacity-70" aria-hidden="true" strokeWidth={1.75} />
-                  {item.label}
-                </span>
-                <span className="rounded-full bg-sidebar-hover px-2 py-0.5 text-[10px] text-sidebar-muted">בקרוב</span>
-              </div>
-            );
-          }
-
-          return <SidebarLink key={item.href} item={item} isActive={isActive} />;
-        })}
+        {mainItems.map(renderItem)}
+        {workToolItems.length > 0 ? (
+          <div role="separator" aria-hidden="true" className="my-2 h-px shrink-0 bg-sidebar-border" />
+        ) : null}
+        {workToolItems.map(renderItem)}
       </nav>
 
       {person ? (

@@ -17,11 +17,20 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
  * used for identity matching/authorization — email remains the only
  * personnel identity key — and the raw `user_metadata` object this is
  * extracted from is never itself exposed to any caller.
+ *
+ * `createdAt` is Supabase's own server-verified account-creation timestamp
+ * (`auth.users.created_at`, ISO 8601) -- the ONE authoritative source for
+ * "how old is this account", never derived from any client-side signal
+ * (device state, localStorage, current browser capabilities). Introduced
+ * for the onboarding-eligibility gate (`lib/config/onboardingRollout.ts`):
+ * a veteran account must read as veteran regardless of which new browser/
+ * device it next signs in from, which rules out any device-local proxy for
+ * account age.
  */
 export type AuthIdentityResult =
   | { status: "unauthenticated" }
   | { status: "missing_email"; userId: string }
-  | { status: "authenticated"; userId: string; email: string; avatarUrl: string | null };
+  | { status: "authenticated"; userId: string; email: string; avatarUrl: string | null; createdAt: string };
 
 /**
  * Picks a usable profile-photo URL out of the already-fetched Supabase
@@ -81,5 +90,6 @@ export async function getAuthenticatedIdentity(): Promise<AuthIdentityResult> {
     userId: data.user.id,
     email: email.trim(),
     avatarUrl: extractAvatarUrl(data.user),
+    createdAt: data.user.created_at,
   };
 }

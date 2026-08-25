@@ -42,9 +42,23 @@ export type PersonalScheduleLoadResult =
    * `PersonalProfile`/`PersonalScheduleReadModel`: personnel/domain
    * identity stays email-keyed, and this auth id must never become a
    * second identity concept the domain layer could read back.
+   *
+   * `accountCreatedAt` (both here and on "ok" below) is the same kind of
+   * auth-only sibling -- Supabase's server-verified account-creation
+   * timestamp (`AuthIdentityResult.createdAt`), threaded through untouched
+   * for exactly one purpose: `lib/config/onboardingRollout.ts`'s
+   * account-level "is this user eligible for the setup card" gate. Never a
+   * personnel/domain field, and never derived from anything device-local.
    */
-  | { status: "configuration_error"; message: string; person: PersonalProfile; avatarUrl: string | null; userId: string }
-  | { status: "ok"; model: PersonalScheduleReadModel; avatarUrl: string | null; userId: string };
+  | {
+      status: "configuration_error";
+      message: string;
+      person: PersonalProfile;
+      avatarUrl: string | null;
+      userId: string;
+      accountCreatedAt: string;
+    }
+  | { status: "ok"; model: PersonalScheduleReadModel; avatarUrl: string | null; userId: string; accountCreatedAt: string };
 
 /**
  * Everything this read model needs from the workbook. `potentialH1`/
@@ -133,6 +147,7 @@ async function loadPersonalScheduleReadModelInner(): Promise<PersonalScheduleLoa
         person: toPersonalProfile(identityResult.person),
         avatarUrl: identity.avatarUrl,
         userId: identity.userId,
+        accountCreatedAt: identity.createdAt,
       };
     }
     throw error;
@@ -160,5 +175,5 @@ async function loadPersonalScheduleReadModelInner(): Promise<PersonalScheduleLoa
     }),
   );
 
-  return { status: "ok", model, avatarUrl: identity.avatarUrl, userId: identity.userId };
+  return { status: "ok", model, avatarUrl: identity.avatarUrl, userId: identity.userId, accountCreatedAt: identity.createdAt };
 }

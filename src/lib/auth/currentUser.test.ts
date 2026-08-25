@@ -177,7 +177,7 @@ describe("getAuthenticatedIdentity — avatarUrl (presentation-only, no extra Go
     const result = await getAuthenticatedIdentity();
     expect(result).not.toHaveProperty("user_metadata");
     expect(result).not.toHaveProperty("full_name");
-    expect(Object.keys(result).sort()).toEqual(["avatarUrl", "email", "status", "userId"]);
+    expect(Object.keys(result).sort()).toEqual(["avatarUrl", "createdAt", "email", "status", "userId"]);
   });
 
   it("missing_email never carries an avatarUrl field either -- it's only meaningful once truly authenticated", async () => {
@@ -187,5 +187,25 @@ describe("getAuthenticatedIdentity — avatarUrl (presentation-only, no extra Go
     });
     const result = await getAuthenticatedIdentity();
     expect(result).not.toHaveProperty("avatarUrl");
+  });
+});
+
+describe("getAuthenticatedIdentity — createdAt (account-age onboarding eligibility signal)", () => {
+  it("passes through Supabase's own server-verified account-creation timestamp", async () => {
+    getUser.mockResolvedValue({
+      data: { user: { id: "u1", email: "dani@example.invalid", created_at: "2024-03-01T12:00:00.000Z" } },
+      error: null,
+    });
+    const result = await getAuthenticatedIdentity();
+    expect(result).toMatchObject({ createdAt: "2024-03-01T12:00:00.000Z" });
+  });
+
+  it("missing_email never carries a createdAt field either -- it's only meaningful once truly authenticated", async () => {
+    getUser.mockResolvedValue({
+      data: { user: { id: "u1", email: undefined, created_at: "2024-03-01T12:00:00.000Z" } },
+      error: null,
+    });
+    const result = await getAuthenticatedIdentity();
+    expect(result).not.toHaveProperty("createdAt");
   });
 });

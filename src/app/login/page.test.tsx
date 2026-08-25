@@ -79,7 +79,7 @@ describe("LoginPage", () => {
     renderWithTheme(element);
 
     expect(screen.queryByRole("navigation", { name: "ניווט ראשי" })).toBeNull();
-    expect(screen.queryByRole("link", { name: /לוח בקרה/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: /^סקירה$/ })).toBeNull();
   });
 
   it("renders no theme toggle -- the login canvas is fixed regardless of the app's light/dark preference", async () => {

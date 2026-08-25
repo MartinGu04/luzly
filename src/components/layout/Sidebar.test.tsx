@@ -29,7 +29,7 @@ describe("Sidebar", () => {
     renderWithTheme(<Sidebar />);
     expect(screen.getByRole("link", { name: /תורנויות/ })).toHaveAttribute("href", "/duties");
     expect(screen.getByRole("link", { name: /הלוח שלי/ })).toHaveAttribute("href", "/schedule");
-    expect(screen.getByRole("link", { name: /לוח בקרה/ })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: /^סקירה$/ })).toHaveAttribute("href", "/");
   });
 
   it("renders the standalone Fairness destination for a viewer with no person prop (not manager-only)", () => {
@@ -179,6 +179,26 @@ describe("Sidebar — pending navigation feedback (PR #38 desktop nav performanc
     expect(notPrevented).toBe(false);
   });
 
+});
+
+describe("Sidebar — main nav / work tools grouping (nav redesign pass)", () => {
+  it("renders a visual separator between the main nav group and the work-tools group", () => {
+    const { container } = renderWithTheme(<Sidebar />);
+    expect(container.querySelector('[role="separator"]')).toBeInTheDocument();
+  });
+
+  it("main nav items appear before the separator, work-tools items after it", () => {
+    const { container } = renderWithTheme(<Sidebar person={{ name: "דני מנהל", isManager: true, avatarUrl: null }} />);
+    const nav = screen.getByRole("navigation", { name: "ניווט ראשי" });
+    const separator = container.querySelector('[role="separator"]');
+    expect(separator).toBeInTheDocument();
+
+    const fairnessLink = screen.getByRole("link", { name: /טבלת צדק/ });
+    const shootingRangesLink = screen.getByRole("link", { name: /מטווחים/ });
+    expect(nav.compareDocumentPosition(fairnessLink) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(separator!.compareDocumentPosition(fairnessLink) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+    expect(separator!.compareDocumentPosition(shootingRangesLink) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
 });
 
 describe("Sidebar — width and layout", () => {

@@ -3,12 +3,11 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import Link from "next/link";
-import { BellRing, Loader2, LogOut, Moon, Settings, Sun, Target, UserCog } from "lucide-react";
+import { CalendarSync, Loader2, LogOut } from "lucide-react";
 import { signOutAction } from "@/lib/auth/actions";
 import { Avatar } from "@/components/ui/Avatar";
 import { PushEndpointHiddenField } from "@/components/pwa/PushEndpointHiddenField";
 import { unsubscribeCurrentPushSubscription } from "@/lib/push/browserSubscription";
-import { useEffectiveTheme, useTheme } from "@/lib/theme/ThemeProvider";
 
 interface MobileProfileMenuProps {
   name: string;
@@ -48,33 +47,30 @@ function SignOutMenuItem() {
 
 /**
  * The mobile header's profile trigger + dropdown (Design Pass PR #22
- * "mobile header polish"). Replaces the old `MobileIdentityBar` pattern of
- * showing name/role/manager-link/theme-control/logout permanently in the
- * header -- all of that now lives behind this single Avatar button, kept
- * as a lightweight custom popover (no menu/dropdown dependency).
+ * "mobile header polish", stripped down to account-only content in the nav
+ * redesign pass). Replaces the old `MobileIdentityBar` pattern of showing
+ * name/role/manager-link/theme-control/logout permanently in the header --
+ * all of that now lives behind this single Avatar button, kept as a
+ * lightweight custom popover (no menu/dropdown dependency).
  *
- * For a manager, this is where BOTH manager-only top-level destinations
- * surface on mobile -- "אזור מנהל" (`/manager`, operational/team
- * management) and "מרכז התראות" (`/notifications`, sending/scheduling/
- * history/recurring notification management) -- following the same
- * existing pattern that already kept `/manager` out of the small,
- * uncluttered `BottomNav` (see `nav-items.ts`'s own `managerOnly`
- * docstring). Neither entry renders for a non-manager.
+ * Account-only by design (nav redesign pass): current identity/role,
+ * "סנכרון יומן" (`/settings`), and sign-out -- nothing else. App navigation
+ * (מטווחים, and for a manager אזור מנהל/מרכז התראות) moved to `MoreSheet`
+ * (`BottomNav`'s "עוד" tab); the theme control moved to
+ * `MobileTopBarThemeAction` in the mobile top bar itself. This menu must
+ * never again grow back into a secondary navigation surface -- it is
+ * account controls only, mirroring what `IdentityFooter` is for desktop.
  *
  * Uses only the already-safe `name`/`isManager` passed down from the app
  * shell (the same identity the request-scoped read model already
  * resolved) -- no email, no new fetch. Sign-out is still the plain
- * `signOutAction` form (works with no client JS); everything else here is
- * presentation-only, same as `ThemeToggle`/`IdentityFooter`.
+ * `signOutAction` form (works with no client JS).
  */
 export function MobileProfileMenu({ name, isManager, avatarUrl }: MobileProfileMenuProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuId = useId();
-
-  const { setTheme } = useTheme();
-  const effectiveTheme = useEffectiveTheme();
 
   useEffect(() => {
     if (!open) return;
@@ -99,10 +95,6 @@ export function MobileProfileMenu({ name, isManager, avatarUrl }: MobileProfileM
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, [open]);
-
-  function toggleTheme() {
-    setTheme(effectiveTheme === "dark" ? "light" : "dark");
-  }
 
   return (
     <div ref={containerRef} className="relative">
@@ -142,63 +134,15 @@ export function MobileProfileMenu({ name, isManager, avatarUrl }: MobileProfileM
 
           <div className="my-1 h-px bg-border" />
 
-          {isManager ? (
-            <Link
-              href="/manager"
-              role="menuitem"
-              onClick={() => setOpen(false)}
-              className="flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-sm font-medium text-foreground transition-colors duration-150 hover:bg-overlay-soft"
-            >
-              <UserCog className="h-4 w-4 text-muted" aria-hidden="true" strokeWidth={1.75} />
-              אזור מנהל
-            </Link>
-          ) : null}
-
-          {isManager ? (
-            <Link
-              href="/notifications"
-              role="menuitem"
-              onClick={() => setOpen(false)}
-              className="flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-sm font-medium text-foreground transition-colors duration-150 hover:bg-overlay-soft"
-            >
-              <BellRing className="h-4 w-4 text-muted" aria-hidden="true" strokeWidth={1.75} />
-              מרכז התראות
-            </Link>
-          ) : null}
-
-          <Link
-            href="/shooting-ranges"
-            role="menuitem"
-            onClick={() => setOpen(false)}
-            className="flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-sm font-medium text-foreground transition-colors duration-150 hover:bg-overlay-soft"
-          >
-            <Target className="h-4 w-4 text-muted" aria-hidden="true" strokeWidth={1.75} />
-            מטווחים
-          </Link>
-
           <Link
             href="/settings"
             role="menuitem"
             onClick={() => setOpen(false)}
             className="flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-sm font-medium text-foreground transition-colors duration-150 hover:bg-overlay-soft"
           >
-            <Settings className="h-4 w-4 text-muted" aria-hidden="true" strokeWidth={1.75} />
-            הגדרות
+            <CalendarSync className="h-4 w-4 text-muted" aria-hidden="true" strokeWidth={1.75} />
+            סנכרון יומן
           </Link>
-
-          <button
-            type="button"
-            role="menuitem"
-            onClick={toggleTheme}
-            className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-start text-sm font-medium text-foreground transition-colors duration-150 hover:bg-overlay-soft"
-          >
-            {effectiveTheme === "dark" ? (
-              <Sun className="h-4 w-4 text-muted" aria-hidden="true" strokeWidth={1.75} />
-            ) : (
-              <Moon className="h-4 w-4 text-muted" aria-hidden="true" strokeWidth={1.75} />
-            )}
-            {effectiveTheme === "dark" ? "עבור למצב בהיר" : "עבור למצב כהה"}
-          </button>
 
           <div className="my-1 h-px bg-border" />
 
