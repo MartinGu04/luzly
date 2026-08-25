@@ -40,3 +40,24 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# graphify (knowledge graph tool) - machine-local / regenerable pieces only.
+# graph.json / GRAPH_REPORT.md / manifest.json / the label sidecars stay
+# tracked (portable, relative-path, no secrets) so fresh sessions inherit
+# the graph; everything below is local state or a regenerable artifact.
+graphify-out/cache/
+graphify-out/cost.json
+graphify-out/graph.html
+
+# dated protected-graph backups and memory/reflection state - local recovery
+# artifacts, never portable/shared.
+graphify-out/????-??-??/
+graphify-out/memory/
+graphify-out/reflections/
+
+# hidden graphify runtime metadata (interpreter path, scan root, bootstrap
+# marker, etc.) - all machine-local - except the two label sidecars, which
+# are shared/portable graph state and stay tracked.
+graphify-out/.graphify_*
+!graphify-out/.graphify_labels.json
+!graphify-out/.graphify_labels.json.sig
