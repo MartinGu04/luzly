@@ -35,6 +35,7 @@ export default async function ShootingRangeManagerPage() {
         pendingSelfReports={model.pendingSelfReports}
         roster={model.rows.map((row) => ({ id: row.personId, name: row.personName }))}
         unresolvedSheetRowCount={model.unresolvedSheetRowCount}
+        unresolvedSheetRowNames={model.unresolvedSheetRowNames}
       />
     </div>
   );

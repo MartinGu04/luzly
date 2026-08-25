@@ -299,5 +299,60 @@ describe("loadShootingRangeManagerOverview", () => {
       if (result.status !== "ok") throw new Error("unreachable");
       expect(result.model.unresolvedSheetRowCount).toBe(1);
     });
+
+    it("carries the RAW unresolved sourceName text verbatim, so a manager can visually compare it against כ״א themselves", async () => {
+      const alice = person({ id: "p_alice", name: "אליס בדיקה" });
+      loadManagerWorkbookContext.mockResolvedValue(
+        okContext([alice], [
+          ["שם", "תאריך ביצוע מטווח"],
+          ["אליס בדיקה", "29/06/2026"],
+          ["אליס בדיקה 2", "01/01/2026"],
+        ]),
+      );
+
+      const result = await loadShootingRangeManagerOverview();
+
+      expect(result.status).toBe("ok");
+      if (result.status !== "ok") throw new Error("unreachable");
+      expect(result.model.unresolvedSheetRowNames).toEqual(["אליס בדיקה 2"]);
+    });
+  });
+
+  describe("role grouping (canonical classifyRoleGroup, passed through to buildShootingRangeManagerReadModel)", () => {
+    it("passes each eligible person's real isSupervisor/isTechnician flags through, never re-derived", async () => {
+      const supervisor = person({ id: "p_sup", isSupervisor: true, isTechnician: false });
+      const technician = person({ id: "p_tech", isSupervisor: false, isTechnician: true });
+      loadManagerWorkbookContext.mockResolvedValue(okContext([supervisor, technician]));
+
+      const result = await loadShootingRangeManagerOverview();
+
+      expect(result.status).toBe("ok");
+      if (result.status !== "ok") throw new Error("unreachable");
+      expect(result.model.rows.find((r) => r.personId === "p_sup")?.roleGroup).toBe("supervisor");
+      expect(result.model.rows.find((r) => r.personId === "p_tech")?.roleGroup).toBe("technician");
+    });
+  });
+
+  describe("end-to-end real-shaped scenario (reproduces a reported case: an eligible person with a genuine מטווחים completion)", () => {
+    it("a technician with an exact-matching name and a real DD/MM/YYYY completion date resolves to the correct baseline and expiry -- the full fetch -> parse -> resolve -> baseline chain", async () => {
+      const lev = person({ id: "p_lev", name: "לב סינייצקי", isSupervisor: false, isTechnician: true, personnelType: "חובה" });
+      loadManagerWorkbookContext.mockResolvedValue(
+        okContext([lev], [
+          ["שם", "תאריך ביצוע מטווח", "תאריך תפוגה", "סטטוס"],
+          ["לב סינייצקי", "29/06/2026", "29/12/2026", "תקף"],
+        ]),
+      );
+      getJerusalemLocalNow.mockReturnValue({ date: "2026-08-25", minuteOfDay: 600 });
+
+      const result = await loadShootingRangeManagerOverview();
+
+      expect(result.status).toBe("ok");
+      if (result.status !== "ok") throw new Error("unreachable");
+      const row = result.model.rows.find((r) => r.personId === "p_lev");
+      expect(row?.baselineDate).toBe("2026-06-29");
+      expect(row?.expiryDate).toBe("2026-12-29");
+      expect(row?.status).not.toBe("none");
+      expect(result.model.unresolvedSheetRowCount).toBe(0);
+    });
   });
 });

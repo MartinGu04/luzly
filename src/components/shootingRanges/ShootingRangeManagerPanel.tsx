@@ -21,13 +21,23 @@ export interface ShootingRangeManagerPanelProps {
   roster: { id: string; name: string }[];
   /** Count of "מטווחים" sheet rows that never resolved to exactly one eligible person (a name mismatch or ambiguity) -- see `buildShootingRangeManagerReadModel`'s own docs. `0` renders nothing. */
   unresolvedSheetRowCount: number;
+  /** The raw `sourceName` text of each row counted in `unresolvedSheetRowCount`, verbatim -- rendered so a manager can visually compare it against כ"א themselves. */
+  unresolvedSheetRowNames: string[];
 }
 
-function UnresolvedSheetRowsNotice({ count }: { count: number }) {
+function UnresolvedSheetRowsNotice({ count, names }: { count: number; names: string[] }) {
   if (count === 0) return null;
   return (
-    <Panel variant="inline" className="text-sm text-warning">
-      ⚠️ {count} {count === 1 ? "שורה בגיליון" : "שורות בגיליון"} &quot;מטווחים&quot; לא שויכ{count === 1 ? "ה" : "ו"} לאיש/אנשי צוות מוכר/ים -- ייתכן שהשם בגיליון שונה מהשם ברשימת כ&quot;א.
+    <Panel variant="inline" className="flex flex-col gap-1 text-sm text-warning">
+      <span>
+        ⚠️ {count} {count === 1 ? "שורה בגיליון" : "שורות בגיליון"} &quot;מטווחים&quot; לא שויכ{count === 1 ? "ה" : "ו"} לאיש/אנשי
+        צוות מוכר/ים -- ייתכן שהשם בגיליון שונה מהשם ברשימת כ&quot;א.
+      </span>
+      <ul className="list-disc pr-5 text-xs">
+        {names.map((name, index) => (
+          <li key={`${name}-${index}`}>&quot;{name}&quot;</li>
+        ))}
+      </ul>
     </Panel>
   );
 }
@@ -156,6 +166,38 @@ function PendingConfirmationPanel({ rangeDate, rows }: { rangeDate: string; rows
   );
 }
 
+function TeamMemberRow({ row }: { row: ManagerShootingRangeRow }) {
+  return (
+    <li className="flex flex-wrap items-center gap-3 rounded-lg bg-overlay-faint p-2 text-sm">
+      <Avatar name={row.personName} size="sm" />
+      <span className="min-w-0 flex-1 truncate text-foreground">{row.personName}</span>
+      <StatusBadge status={row.status} />
+      <span className="text-xs text-muted-2">{row.baselineDate ? `אחרון: ${formatReportOneDateSlash(row.baselineDate)}` : "אין נתונים"}</span>
+      {row.expiryDate ? <span className="text-xs text-muted-2">תוקף: {formatReportOneDateSlash(row.expiryDate)}</span> : null}
+      {row.plannedRange ? (
+        <Badge tone={row.plannedRange.status === "pending_confirmation" ? "critical" : "neutral"}>
+          {row.plannedRange.status === "pending_confirmation" ? "ממתין לאישור" : `🎯 ${formatReportOneDateDot(row.plannedRange.rangeDate)}`}
+        </Badge>
+      ) : null}
+      {row.hasPendingSelfReport ? <Badge tone="warning">דיווח ממתין</Badge> : null}
+    </li>
+  );
+}
+
+function RoleGroupSection({ title, rows }: { title: string; rows: ManagerShootingRangeRow[] }) {
+  if (rows.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-2">
+      <h3 className="text-xs font-semibold text-muted">{title}</h3>
+      <ul className="flex flex-col gap-2">
+        {rows.map((row) => (
+          <TeamMemberRow key={row.personId} row={row} />
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function CreatePlannedRangeForm({ roster }: { roster: { id: string; name: string }[] }) {
   const [open, setOpen] = useState(false);
   const [rangeDate, setRangeDate] = useState("");
@@ -244,6 +286,7 @@ export function ShootingRangeManagerPanel({
   pendingSelfReports,
   roster,
   unresolvedSheetRowCount,
+  unresolvedSheetRowNames,
 }: ShootingRangeManagerPanelProps) {
   const [attentionOnly, setAttentionOnly] = useState(false);
 
@@ -259,10 +302,12 @@ export function ShootingRangeManagerPanel({
   }, [rows]);
 
   const visibleRows = attentionOnly ? rows.filter((row) => row.requiresAttention) : rows;
+  const supervisorRows = visibleRows.filter((row) => row.roleGroup === "supervisor");
+  const technicianRows = visibleRows.filter((row) => row.roleGroup === "technician");
 
   return (
     <div className="flex flex-col gap-6">
-      <UnresolvedSheetRowsNotice count={unresolvedSheetRowCount} />
+      <UnresolvedSheetRowsNotice count={unresolvedSheetRowCount} names={unresolvedSheetRowNames} />
 
       <SummaryTiles summary={summary} />
 
@@ -274,7 +319,7 @@ export function ShootingRangeManagerPanel({
 
       <SelfReportQueue reports={pendingSelfReports} />
 
-      <Panel variant="panel" className="flex flex-col gap-3">
+      <Panel variant="panel" className="flex flex-col gap-4">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-foreground">אנשי צוות</h2>
           <label className="flex items-center gap-2 text-xs text-muted">
@@ -283,23 +328,9 @@ export function ShootingRangeManagerPanel({
           </label>
         </div>
 
-        <ul className="flex flex-col gap-2">
-          {visibleRows.map((row) => (
-            <li key={row.personId} className="flex flex-wrap items-center gap-3 rounded-lg bg-overlay-faint p-2 text-sm">
-              <Avatar name={row.personName} size="sm" />
-              <span className="min-w-0 flex-1 truncate text-foreground">{row.personName}</span>
-              <StatusBadge status={row.status} />
-              <span className="text-xs text-muted-2">{row.baselineDate ? `אחרון: ${formatReportOneDateSlash(row.baselineDate)}` : "אין נתונים"}</span>
-              {row.expiryDate ? <span className="text-xs text-muted-2">תוקף: {formatReportOneDateSlash(row.expiryDate)}</span> : null}
-              {row.plannedRange ? (
-                <Badge tone={row.plannedRange.status === "pending_confirmation" ? "critical" : "neutral"}>
-                  {row.plannedRange.status === "pending_confirmation" ? "ממתין לאישור" : `🎯 ${formatReportOneDateDot(row.plannedRange.rangeDate)}`}
-                </Badge>
-              ) : null}
-              {row.hasPendingSelfReport ? <Badge tone="warning">דיווח ממתין</Badge> : null}
-            </li>
-          ))}
-        </ul>
+        <RoleGroupSection title="אחמ״שים" rows={supervisorRows} />
+        <RoleGroupSection title="טכנאים" rows={technicianRows} />
+
         {visibleRows.length === 0 ? <p className="text-sm text-muted">אין אנשים להצגה.</p> : null}
       </Panel>
     </div>

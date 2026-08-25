@@ -1,3 +1,4 @@
+import { classifyRoleGroup, type FairnessRoleGroupKey } from "@/lib/domain/personnelType";
 import type { QualificationStatus } from "@/lib/domain/shootingRangeQualification";
 import type {
   PlannedRangeView,
@@ -7,6 +8,19 @@ import type {
 export interface ManagerShootingRangeRow {
   personId: string;
   personName: string;
+  /**
+   * "supervisor" (אחמ"ש) or "technician" (טכנאי), via the SAME canonical
+   * `classifyRoleGroup` the roster/Fairness views already use -- never a
+   * second role-classification scheme. Supervisor takes precedence when a
+   * person is both (`classifyRoleGroup`'s own documented rule), so a
+   * person is NEVER duplicated across the manager UI's two role sections.
+   * Structurally never `"other"` here: every row in this model already
+   * passed `isEligibleForShootingRanges` (regular-service AND
+   * `isShiftCapable`) upstream, so `isSupervisor || isTechnician` always
+   * holds -- the type still allows it only because it's the same shared
+   * `FairnessRoleGroupKey` the rest of the domain uses.
+   */
+  roleGroup: FairnessRoleGroupKey;
   status: QualificationStatus;
   baselineDate: string | null;
   expiryDate: string | null;
@@ -49,10 +63,28 @@ export interface ShootingRangeManagerReadModel {
    * identical as "אין מידע כשירות" everywhere.
    */
   unresolvedSheetRowCount: number;
+  /**
+   * The RAW `sourceName` text of every row counted in
+   * `unresolvedSheetRowCount`, verbatim (never trimmed/normalized here) --
+   * lets a manager visually compare the sheet's own text against כ"א
+   * directly in the UI, without needing a dev-only diagnostic script, to
+   * spot a real spelling/word-order/invisible-character mismatch
+   * themselves. Not sensitive: this text is already visible in the source
+   * "מטווחים" sheet the manager already has access to.
+   */
+  unresolvedSheetRowNames: string[];
 }
 
 const QUALIFIED_STATUSES: ReadonlySet<QualificationStatus> = new Set(["valid", "expiring_soon", "expiring_very_soon"]);
 const NEARING_EXPIRY_STATUSES: ReadonlySet<QualificationStatus> = new Set(["expiring_soon", "expiring_very_soon"]);
+
+export interface ManagerShootingRangePersonInput {
+  personId: string;
+  personName: string;
+  isSupervisor: boolean;
+  isTechnician: boolean;
+  model: ShootingRangeQualificationReadModel;
+}
 
 /**
  * Pure manager team-overview builder -- takes one already-built personal
@@ -62,10 +94,11 @@ const NEARING_EXPIRY_STATUSES: ReadonlySet<QualificationStatus> = new Set(["expi
  * computation) and aggregates them. No network, no auth, no `Date`/UTC.
  */
 export function buildShootingRangeManagerReadModel(
-  people: readonly { personId: string; personName: string; model: ShootingRangeQualificationReadModel }[],
+  people: readonly ManagerShootingRangePersonInput[],
   unresolvedSheetRowCount = 0,
+  unresolvedSheetRowNames: readonly string[] = [],
 ): ShootingRangeManagerReadModel {
-  const rows: ManagerShootingRangeRow[] = people.map(({ personId, personName, model }) => {
+  const rows: ManagerShootingRangeRow[] = people.map(({ personId, personName, isSupervisor, isTechnician, model }) => {
     const pendingConfirmation = model.plannedRange?.status === "pending_confirmation";
     const requiresAttention =
       model.status === "expired" ||
@@ -76,6 +109,7 @@ export function buildShootingRangeManagerReadModel(
     return {
       personId,
       personName,
+      roleGroup: classifyRoleGroup({ isSupervisor, isTechnician }),
       status: model.status,
       baselineDate: model.baselineDate,
       expiryDate: model.expiryDate,
@@ -106,5 +140,6 @@ export function buildShootingRangeManagerReadModel(
     rows,
     pendingSelfReports,
     unresolvedSheetRowCount,
+    unresolvedSheetRowNames: [...unresolvedSheetRowNames],
   };
 }

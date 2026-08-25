@@ -69,6 +69,8 @@ export async function loadShootingRangeManagerOverview(): Promise<ShootingRangeM
   const perPersonModels = eligiblePeople.map((person) => ({
     personId: person.id,
     personName: person.name,
+    isSupervisor: person.isSupervisor,
+    isTechnician: person.isTechnician,
     model: buildShootingRangeQualificationReadModel({
       personId: person.id,
       sheetBaseline: selectSheetBaselineForPerson(sheetRecords, person.id, now.date),
@@ -87,11 +89,13 @@ export async function loadShootingRangeManagerOverview(): Promise<ShootingRangeM
   // with no visible trace anywhere is its own failure mode: a manager
   // staring at "אין מידע כשירות" for someone they know completed a range
   // has no way to tell "no data" apart from "data exists but couldn't be
-  // matched". Counting (never listing raw sheet text here -- this is a
-  // manager-facing count, not a data dump) makes that distinction visible.
-  const unresolvedSheetRowCount = sheetRecords.filter((record) => record.resolvedPersonId === null).length;
+  // matched". The RAW `sourceName` text (never trimmed/normalized) is
+  // carried through so a manager can visually compare it against כ"א
+  // themselves -- see `buildShootingRangeManagerReadModel`'s own docs.
+  const unresolvedSheetRows = sheetRecords.filter((record) => record.resolvedPersonId === null);
+  const unresolvedSheetRowNames = unresolvedSheetRows.map((record) => record.sourceName);
 
-  const model = buildShootingRangeManagerReadModel(perPersonModels, unresolvedSheetRowCount);
+  const model = buildShootingRangeManagerReadModel(perPersonModels, unresolvedSheetRows.length, unresolvedSheetRowNames);
   return { status: "ok", manager, model, avatarUrl };
 }
 
