@@ -1,6 +1,6 @@
 import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { ThemeProvider } from "@/lib/theme/ThemeProvider";
 import { AppShell } from "./AppShell";
 
@@ -245,18 +245,26 @@ describe("AppShell — theme control", () => {
       </AppShell>,
     );
     // vitest.setup.ts's baseline matchMedia stub resolves to light -> offers to switch to dark.
-    expect(screen.getByRole("button", { name: "מצב כהה" })).toBeInTheDocument();
+    // Scoped to the desktop footer -- the mobile top bar (nav redesign pass) now offers its
+    // own separate instance of the same control, so a bare screen-wide query would match both.
+    const footer = screen.getByRole("button", { name: "התנתקות" }).closest("div.border-t");
+    expect(footer).not.toBeNull();
+    const { getByRole } = within(footer as HTMLElement);
+    expect(getByRole("button", { name: "מצב כהה" })).toBeInTheDocument();
   });
 
-  it("the mobile profile menu offers a single binary light/dark action instead", () => {
+  it("the mobile top bar offers its own binary light/dark action instead of the profile menu (nav redesign pass)", () => {
     renderWithTheme(
       <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null, userId: "user-test-1" }}>
         <div>content</div>
       </AppShell>,
     );
+    // vitest.setup.ts's baseline matchMedia stub resolves to light -> offers to switch to dark.
+    // Two instances exist in the DOM (desktop footer + mobile top bar), CSS-hidden per breakpoint.
+    expect(screen.getAllByRole("button", { name: "מצב כהה" })).toHaveLength(2);
+
     openMobileProfileMenu();
-    const toggle = screen.getByRole("menuitem", { name: /עבור למצב/ });
-    expect(toggle).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /עבור למצב/ })).toBeNull();
   });
 });
 

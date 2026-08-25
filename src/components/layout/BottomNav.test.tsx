@@ -62,9 +62,9 @@ describe("BottomNav", () => {
     expect(screen.queryByText("מנהל")).toBeNull();
   });
 
-  it("renders exactly four bottom-nav items (PR #4 adds טבלת צדק)", () => {
+  it("renders exactly five bottom-nav tabs: the four curated routes plus עוד (nav redesign pass)", () => {
     const { container } = render(<BottomNav />);
-    expect(container.querySelectorAll("li").length).toBe(4);
+    expect(container.querySelectorAll("li").length).toBe(5);
   });
 
   it("the standalone Fairness route is a real link with its compact label", () => {
@@ -127,5 +127,71 @@ describe("BottomNav — pending navigation feedback", () => {
     const scheduleLink = screen.getByRole("link", { name: "הלוח שלי" });
     const notPrevented = fireEvent.click(scheduleLink);
     expect(notPrevented).toBe(false);
+  });
+});
+
+describe("BottomNav — עוד (More) sheet", () => {
+  it('renders a 5th "עוד" tab, closed by default', () => {
+    render(<BottomNav />);
+    const trigger = screen.getByRole("button", { name: "עוד" });
+    expect(trigger).toHaveAttribute("aria-haspopup", "dialog");
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("dialog", { name: "עוד" })).toBeNull();
+  });
+
+  it("opens the sheet on tap, containing מטווחים for a non-manager but not the manager-only destinations", () => {
+    render(<BottomNav isManager={false} />);
+    fireEvent.click(screen.getByRole("button", { name: "עוד" }));
+
+    const sheet = screen.getByRole("dialog", { name: "עוד" });
+    expect(sheet).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "מטווחים" })).toHaveAttribute("href", "/shooting-ranges");
+    expect(screen.queryByRole("link", { name: "אזור מנהל" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "מרכז התראות" })).toBeNull();
+  });
+
+  it("a manager sees אזור מנהל and מרכז התראות inside the sheet too", () => {
+    render(<BottomNav isManager={true} />);
+    fireEvent.click(screen.getByRole("button", { name: "עוד" }));
+
+    expect(screen.getByRole("link", { name: "אזור מנהל" })).toHaveAttribute("href", "/manager");
+    expect(screen.getByRole("link", { name: "מרכז התראות" })).toHaveAttribute("href", "/notifications");
+  });
+
+  it("never contains סנכרון יומן, theme, or logout -- those stay in the profile menu, not עוד", () => {
+    render(<BottomNav isManager={true} />);
+    fireEvent.click(screen.getByRole("button", { name: "עוד" }));
+
+    expect(screen.queryByRole("link", { name: "סנכרון יומן" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "התנתקות" })).toBeNull();
+    expect(screen.queryByText("מצב כהה")).toBeNull();
+    expect(screen.queryByText("מצב בהיר")).toBeNull();
+  });
+
+  it("closes on Escape", () => {
+    render(<BottomNav />);
+    fireEvent.click(screen.getByRole("button", { name: "עוד" }));
+    expect(screen.getByRole("dialog", { name: "עוד" })).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "עוד" })).toBeNull();
+  });
+
+  it("closes on backdrop click", () => {
+    render(<BottomNav />);
+    fireEvent.click(screen.getByRole("button", { name: "עוד" }));
+    expect(screen.getByRole("dialog", { name: "עוד" })).toBeInTheDocument();
+
+    const backdrop = document.querySelector('[role="presentation"]');
+    expect(backdrop).not.toBeNull();
+    fireEvent.click(backdrop!);
+    expect(screen.queryByRole("dialog", { name: "עוד" })).toBeNull();
+  });
+
+  it("closes after activating a destination link inside it", () => {
+    render(<BottomNav />);
+    fireEvent.click(screen.getByRole("button", { name: "עוד" }));
+    fireEvent.click(screen.getByRole("link", { name: "מטווחים" }));
+    expect(screen.queryByRole("dialog", { name: "עוד" })).toBeNull();
   });
 });

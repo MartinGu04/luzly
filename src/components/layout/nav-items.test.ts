@@ -139,6 +139,19 @@ describe("navItems — \"תזכורות\" removed (sidebar/mobile-nav refinement
   });
 });
 
+describe("navItems — Home nav label rename (nav redesign pass)", () => {
+  it('the "/" nav label and short label are both "סקירה", not the old "לוח בקרה"/"היום שלי"', () => {
+    const home = navItems.find((item) => item.href === "/");
+    expect(home?.label).toBe("סקירה");
+    expect(home?.shortLabel).toBe("סקירה");
+  });
+
+  it("the / route itself is unchanged -- this is a wording-only rename", () => {
+    const home = navItems.find((item) => item.label === "סקירה");
+    expect(home?.href).toBe("/");
+  });
+});
+
 describe("navItems — manager nav label rename (Design Pass, PR #19)", () => {
   it('the /manager nav label is "אזור מנהל", not the old "מול מנהל"', () => {
     const manager = navItems.find((item) => item.href === "/manager");

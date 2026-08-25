@@ -2,7 +2,6 @@ import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ThemeProvider } from "@/lib/theme/ThemeProvider";
-import { THEME_STORAGE_KEY } from "@/lib/theme/themeScript";
 import { MobileProfileMenu } from "./MobileProfileMenu";
 
 function mockMatchMedia(prefersDark: boolean) {
@@ -76,30 +75,22 @@ describe("MobileProfileMenu — identity block", () => {
   });
 });
 
-describe("MobileProfileMenu — manager access", () => {
-  it('a manager sees "אזור מנהל", linking to /manager', () => {
+describe("MobileProfileMenu — no app navigation (nav redesign pass)", () => {
+  it("a manager sees no אזור מנהל / מרכז התראות entries here -- those live in BottomNav's עוד sheet instead", () => {
     renderWithTheme(<MobileProfileMenu name="נועה מנהלת" isManager={true} avatarUrl={null} />);
     fireEvent.click(screen.getByRole("button", { name: /תפריט פרופיל/ }));
-    const link = screen.getByRole("menuitem", { name: "אזור מנהל" });
-    expect(link).toHaveAttribute("href", "/manager");
+    expect(screen.queryByRole("menuitem", { name: "אזור מנהל" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "מרכז התראות" })).toBeNull();
     expect(screen.getByText("מנהל/ת")).toBeInTheDocument();
   });
 
-  it('a manager ALSO sees "מרכז התראות", linking to /notifications', () => {
-    renderWithTheme(<MobileProfileMenu name="נועה מנהלת" isManager={true} avatarUrl={null} />);
+  it("never shows מטווחים -- that lives in BottomNav's עוד sheet instead", () => {
+    renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} avatarUrl={null} />);
     fireEvent.click(screen.getByRole("button", { name: /תפריט פרופיל/ }));
-    const link = screen.getByRole("menuitem", { name: "מרכז התראות" });
-    expect(link).toHaveAttribute("href", "/notifications");
+    expect(screen.queryByRole("menuitem", { name: "מטווחים" })).toBeNull();
   });
 
-  it("both manager-only entries appear together, as separate menu items", () => {
-    renderWithTheme(<MobileProfileMenu name="נועה מנהלת" isManager={true} avatarUrl={null} />);
-    fireEvent.click(screen.getByRole("button", { name: /תפריט פרופיל/ }));
-    expect(screen.getByRole("menuitem", { name: "אזור מנהל" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "מרכז התראות" })).toBeInTheDocument();
-  });
-
-  it("a non-manager never sees either manager-only entry", () => {
+  it("a non-manager never sees the manager identity/entries either", () => {
     renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} avatarUrl={null} />);
     fireEvent.click(screen.getByRole("button", { name: /תפריט פרופיל/ }));
     expect(screen.queryByRole("menuitem", { name: "אזור מנהל" })).toBeNull();
@@ -108,66 +99,29 @@ describe("MobileProfileMenu — manager access", () => {
   });
 });
 
-describe("MobileProfileMenu — single-button theme toggle", () => {
-  it('when the system currently resolves dark, offers "עבור למצב בהיר" and switches to explicit light on click', () => {
-    mockMatchMedia(true);
+describe("MobileProfileMenu — no theme control (nav redesign pass)", () => {
+  it("never renders a theme toggle of any kind -- it moved to the mobile top bar", () => {
     renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} avatarUrl={null} />);
     fireEvent.click(screen.getByRole("button", { name: /תפריט פרופיל/ }));
-
-    const toggle = screen.getByRole("menuitem", { name: "עבור למצב בהיר" });
-    fireEvent.click(toggle);
-
-    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe("light");
-  });
-
-  it('when the system currently resolves light, offers "עבור למצב כהה" and switches to explicit dark on click', () => {
-    mockMatchMedia(false);
-    renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} avatarUrl={null} />);
-    fireEvent.click(screen.getByRole("button", { name: /תפריט פרופיל/ }));
-
-    const toggle = screen.getByRole("menuitem", { name: "עבור למצב כהה" });
-    fireEvent.click(toggle);
-
-    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe("dark");
-  });
-
-  it("an explicit stored dark preference (not system) also offers the light-switch action", () => {
-    localStorage.setItem(THEME_STORAGE_KEY, "dark");
-    renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} avatarUrl={null} />);
-    fireEvent.click(screen.getByRole("button", { name: /תפריט פרופיל/ }));
-    expect(screen.getByRole("menuitem", { name: "עבור למצב בהיר" })).toBeInTheDocument();
-  });
-
-  it("keeps the menu open after toggling theme", () => {
-    renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} avatarUrl={null} />);
-    fireEvent.click(screen.getByRole("button", { name: /תפריט פרופיל/ }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "עבור למצב כהה" }));
-    expect(screen.getByRole("menu")).toBeInTheDocument();
-  });
-
-  it("never renders the 3-option system/light/dark segmented control inside the menu", () => {
-    renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} avatarUrl={null} />);
-    fireEvent.click(screen.getByRole("button", { name: /תפריט פרופיל/ }));
+    expect(screen.queryByText("עבור למצב בהיר")).toBeNull();
+    expect(screen.queryByText("עבור למצב כהה")).toBeNull();
     expect(screen.queryByRole("radiogroup")).toBeNull();
     expect(screen.queryByText("מערכת")).toBeNull();
   });
 });
 
-describe("MobileProfileMenu — shooting ranges link", () => {
-  it('every user sees "מטווחים", linking to /shooting-ranges', () => {
+describe("MobileProfileMenu — סנכרון יומן link", () => {
+  it('every user sees "סנכרון יומן", linking to /settings', () => {
     renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} avatarUrl={null} />);
     fireEvent.click(screen.getByRole("button", { name: /תפריט פרופיל/ }));
-    const link = screen.getByRole("menuitem", { name: "מטווחים" });
-    expect(link).toHaveAttribute("href", "/shooting-ranges");
-  });
-});
-
-describe("MobileProfileMenu — settings link", () => {
-  it('every user sees "הגדרות", linking to /settings', () => {
-    renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} avatarUrl={null} />);
-    fireEvent.click(screen.getByRole("button", { name: /תפריט פרופיל/ }));
-    const link = screen.getByRole("menuitem", { name: "הגדרות" });
+    const link = screen.getByRole("menuitem", { name: "סנכרון יומן" });
     expect(link).toHaveAttribute("href", "/settings");
+  });
+
+  it('no longer shows the old "הגדרות" label', () => {
+    renderWithTheme(<MobileProfileMenu name="דני בדיקה" isManager={false} avatarUrl={null} />);
+    fireEvent.click(screen.getByRole("button", { name: /תפריט פרופיל/ }));
+    expect(screen.queryByRole("menuitem", { name: "הגדרות" })).toBeNull();
   });
 });
 

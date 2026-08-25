@@ -83,7 +83,7 @@ export function AppShell({ children, person, initialClockTime = null, dateLabel 
           <div className="mx-auto w-full max-w-[1440px]">{children}</div>
         </main>
       </div>
-      <BottomNav />
+      <BottomNav isManager={person?.isManager} />
     </div>
   );
 }

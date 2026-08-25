@@ -1,5 +1,6 @@
 import { Header } from "@/components/dashboard/Header";
 import { DataFreshnessStatus } from "@/components/ui/DataFreshnessStatus";
+import { SetupSection } from "@/components/home/SetupSection";
 import type { ReportOneDraft } from "@/lib/domain/reportOne";
 import type { PermanentManagerHomeReadModel } from "@/lib/readModels/permanentManagerHomeTypes";
 import { ReportOneQuickAction } from "./ReportOneQuickAction";
@@ -12,6 +13,10 @@ interface PermanentManagerHomeProps {
   reportOneDraft?: ReportOneDraft | null;
   /** Passed straight through to `ReportOneQuickAction` -- see `ReportOneEditorOverlay`'s own docs. `undefined`/omitted whenever `reportOneDraft` itself is `null`. */
   reportOneReserveInclusion?: Readonly<Record<string, boolean>>;
+  /** Authenticated Supabase user id, passed straight through to `SetupSection` -- a permanent manager gets the exact same setup card a regular Dashboard visitor does, see that component's own docstring. */
+  userId?: string;
+  /** The authoritative calendar-sync state, passed straight through to `SetupSection` -- see its own docstring. */
+  calendarSyncEnabled?: boolean;
 }
 
 /**
@@ -27,12 +32,19 @@ interface PermanentManagerHomeProps {
  * the `order-*` classes below), current-first stacked on mobile, followed
  * by the smaller "today" section.
  */
-export function PermanentManagerHome({ model, reportOneDraft, reportOneReserveInclusion }: PermanentManagerHomeProps) {
+export function PermanentManagerHome({
+  model,
+  reportOneDraft,
+  reportOneReserveInclusion,
+  userId,
+  calendarSyncEnabled = false,
+}: PermanentManagerHomeProps) {
   const todayDate = model.localNow.date;
 
   return (
     <div className="flex flex-col gap-6">
       <Header personName={model.person.name} localNow={model.localNow} />
+      <SetupSection userId={userId} calendarSyncEnabled={calendarSyncEnabled} />
 
       {reportOneDraft ? (
         <ReportOneQuickAction draft={reportOneDraft} reserveInclusionByPersonId={reportOneReserveInclusion} />

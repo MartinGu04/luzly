@@ -17,8 +17,10 @@ export interface NavItem {
    * disabled/"coming soon" placeholder (unlike the genuinely-future routes
    * below), so callers filter them out entirely rather than rendering them
    * disabled. Deliberately excluded from `inBottomNav` — the mobile
-   * shortcut for each lives in `MobileProfileMenu` instead, so the
-   * four-item BottomNav never grows another entry.
+   * shortcut for each lives in `BottomNav`'s "עוד" sheet (`MoreSheet`)
+   * instead (nav redesign pass; formerly `MobileProfileMenu`, which is now
+   * account-only), so the curated BottomNav tab set never grows another
+   * per-destination entry.
    */
   managerOnly?: boolean;
 }
@@ -48,8 +50,9 @@ export interface NavItem {
 // "מטווחים" (`/shooting-ranges`) is a real, enabled, non-manager-only
 // destination like fairness -- currently a placeholder page with no
 // functionality of its own yet. `inBottomNav: false` keeps the bottom nav
-// at its existing curated four items; on mobile it's reached the same way
-// "/manager" and "/settings" already are, via `MobileProfileMenu`.
+// tabs at their existing curated set; on mobile it's reached via
+// `BottomNav`'s "עוד" sheet (`MoreSheet`), the same place "/manager" and
+// "/notifications" are reached for a manager (nav redesign pass).
 // "מרכז התראות" (`/notifications`) -- a standalone product surface split out
 // of what used to be the Manager Area's combined "התחברויות והתראות"
 // category: notification sending/scheduling/history/recurring-rule
@@ -57,8 +60,11 @@ export interface NavItem {
 // with only login/notification-readiness visibility. `/notifications` is its
 // own top-level `managerOnly` destination, at the same nav level as
 // "/manager" -- never rendered as a Manager Area subsection.
+// "/" was renamed from "לוח בקרה"/"היום שלי" to "סקירה" (nav redesign pass):
+// the Home page already surfaces more than "today", so a today-scoped label
+// stopped being accurate. Wording-only -- the route itself is unchanged.
 export const navItems: NavItem[] = [
-  { label: "לוח בקרה", shortLabel: "היום שלי", href: "/", enabled: true, icon: LayoutDashboard, inBottomNav: true },
+  { label: "סקירה", shortLabel: "סקירה", href: "/", enabled: true, icon: LayoutDashboard, inBottomNav: true },
   { label: "הלוח שלי", shortLabel: "הלוח שלי", href: "/schedule", enabled: true, icon: CalendarDays, inBottomNav: true },
   { label: "תורנויות", shortLabel: "תורנויות", href: "/duties", enabled: true, icon: ShieldCheck, inBottomNav: true },
   { label: "טבלת צדק", shortLabel: "צדק", href: "/fairness", enabled: true, icon: Scale, inBottomNav: true },

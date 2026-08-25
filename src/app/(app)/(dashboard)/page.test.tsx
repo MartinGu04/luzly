@@ -18,6 +18,22 @@ vi.mock("@/lib/readModels/getRequestReportOneTomorrow", () => ({ getRequestRepor
 const recordDashboardVisitAction = vi.fn().mockResolvedValue({ ok: true });
 vi.mock("@/lib/dashboardVisit/actions", () => ({ recordDashboardVisitAction }));
 
+const getCalendarFeedForCurrentUser = vi.fn();
+vi.mock("@/lib/calendar/feedStore", () => ({ getCalendarFeedForCurrentUser: (...args: unknown[]) => getCalendarFeedForCurrentUser(...args) }));
+
+// SetupSection (nav redesign pass, rendered by both Dashboard and
+// PermanentManagerHome) mounts usePushSubscription, which imports these
+// "use server" actions -- mocked defensively so a real (unmocked)
+// server-action module is never evaluated in this jsdom test environment,
+// same as NotificationBell.test.tsx already does for the same hook.
+vi.mock("@/lib/notifications/actions", () => ({
+  enablePushNotificationsAction: vi.fn(),
+  disablePushNotificationsAction: vi.fn(),
+  getPushSubscriptionStatusAction: vi.fn(),
+  sendTestNotificationAction: vi.fn(),
+}));
+vi.mock("@/lib/push/publicConfig", () => ({ getVapidPublicKey: () => "test-public-key" }));
+
 vi.mock("@/lib/reportOne/actions", () => ({ setReserveInclusionPreferenceAction: vi.fn().mockResolvedValue({ ok: true }) }));
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
@@ -39,6 +55,8 @@ beforeEach(() => {
   getRequestReportOneTomorrow.mockReset();
   getRequestReportOneTomorrow.mockResolvedValue({ status: "forbidden" });
   recordDashboardVisitAction.mockClear();
+  getCalendarFeedForCurrentUser.mockReset();
+  getCalendarFeedForCurrentUser.mockResolvedValue({ enabled: false, token: null });
 });
 
 function model(overrides: Partial<PersonalScheduleReadModel> = {}): PersonalScheduleReadModel {

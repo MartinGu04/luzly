@@ -2,6 +2,7 @@ import { BLOCKING_ABSENCE_KINDS } from "@/lib/domain/operationalIssues";
 import type { ReportOneDraft } from "@/lib/domain/reportOne";
 import { DataFreshnessStatus } from "@/components/ui/DataFreshnessStatus";
 import { ReportOneQuickAction } from "@/components/home/ReportOneQuickAction";
+import { SetupSection } from "@/components/home/SetupSection";
 import { buildPersonalWeekOverview } from "@/lib/presentation/personalWeekOverview";
 import type { PersonalEventView, PersonalScheduleReadModel } from "@/lib/readModels/types";
 import type { DashboardVisitRecap } from "@/lib/readModels/recentDashboardChangesTypes";
@@ -39,6 +40,10 @@ interface DashboardProps {
   reportOneDraft?: ReportOneDraft | null;
   /** Passed straight through to `ReportOneQuickAction` -- see `ReportOneEditorOverlay`'s own docs. `undefined`/omitted whenever `reportOneDraft` itself is `null`. */
   reportOneReserveInclusion?: Readonly<Record<string, boolean>>;
+  /** Authenticated Supabase user id, passed straight through to `SetupSection` -- see its own docstring. `undefined`/omitted degrades to no setup card at all, same as every other optional prop here. */
+  userId?: string;
+  /** The authoritative calendar-sync state, passed straight through to `SetupSection` -- see its own docstring. Defaults to `false` (not yet synced) for callers that don't pass it, same conservative default `SetupSection` itself would derive from an absent signal. */
+  calendarSyncEnabled?: boolean;
 }
 
 /** A known blocking absence (vacation/abroad/medical/day_off) dated today, reusing the domain's own "blocking" semantics -- never redefined here. */
@@ -75,7 +80,14 @@ function findVacationEvent(todayEvents: readonly PersonalEventView[]): PersonalE
  * purely from `calendarEvents` (never `upcomingEvents`, which excludes
  * finished history) via `buildPersonalWeekOverview`.
  */
-export function Dashboard({ model, visitRecap = null, reportOneDraft = null, reportOneReserveInclusion }: DashboardProps) {
+export function Dashboard({
+  model,
+  visitRecap = null,
+  reportOneDraft = null,
+  reportOneReserveInclusion,
+  userId,
+  calendarSyncEnabled = false,
+}: DashboardProps) {
   const hasCurrentAssignment = model.currentAssignments.length > 0;
 
   // Vacation only becomes the hero's story when nothing is currently
@@ -104,6 +116,7 @@ export function Dashboard({ model, visitRecap = null, reportOneDraft = null, rep
   return (
     <div className="flex flex-col gap-4">
       <Header personName={model.person.name} localNow={model.localNow} />
+      <SetupSection userId={userId} calendarSyncEnabled={calendarSyncEnabled} />
       {reportOneDraft ? (
         <ReportOneQuickAction draft={reportOneDraft} reserveInclusionByPersonId={reportOneReserveInclusion} />
       ) : null}

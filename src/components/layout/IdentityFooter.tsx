@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Settings } from "lucide-react";
+import { CalendarSync } from "lucide-react";
 import { signOutAction } from "@/lib/auth/actions";
 import { Avatar } from "@/components/ui/Avatar";
 import { PushEndpointHiddenField } from "@/components/pwa/PushEndpointHiddenField";
@@ -36,11 +36,11 @@ export function IdentityFooter({ name, isManager, avatarUrl }: IdentityFooterPro
         <div className="flex items-center gap-1">
           <Link
             href="/settings"
-            aria-label="הגדרות"
-            title="הגדרות"
+            aria-label="סנכרון יומן"
+            title="סנכרון יומן"
             className="flex h-8 w-8 items-center justify-center rounded-lg text-sidebar-muted transition-colors duration-200 hover:bg-sidebar-hover hover:text-sidebar-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
           >
-            <Settings className="h-[16px] w-[16px]" aria-hidden="true" strokeWidth={1.75} />
+            <CalendarSync className="h-[16px] w-[16px]" aria-hidden="true" strokeWidth={1.75} />
           </Link>
           <IdentityFooterThemeAction />
         </div>
