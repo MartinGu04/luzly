@@ -14,6 +14,7 @@ const notifyPeopleScheduledForRange = vi.fn();
 const scheduleManagerConfirmationRequiredJob = vi.fn();
 const cancelManagerConfirmationRequiredJob = vi.fn();
 const notifySelfReportDecision = vi.fn();
+const notifyManagersOfSelfReportSubmitted = vi.fn();
 
 vi.mock("@/lib/auth/currentUser", () => ({ getAuthenticatedIdentity }));
 vi.mock("@/lib/sync", () => ({ getWorkbookSnapshot }));
@@ -30,6 +31,7 @@ vi.mock("@/lib/notifications/engine/shootingRanges", () => ({
   scheduleManagerConfirmationRequiredJob,
   cancelManagerConfirmationRequiredJob,
   notifySelfReportDecision,
+  notifyManagersOfSelfReportSubmitted,
 }));
 
 const {
@@ -79,7 +81,8 @@ describe("submitSelfReportShootingRangeAction -- eligibility (regular-service AN
     getAuthenticatedIdentity.mockReset();
     getWorkbookSnapshot.mockReset();
     insertSelfReport.mockReset();
-    insertSelfReport.mockResolvedValue({});
+    notifyManagersOfSelfReportSubmitted.mockReset();
+    insertSelfReport.mockResolvedValue({ id: "report1" });
 
     getAuthenticatedIdentity.mockResolvedValue({ status: "authenticated", userId: "u1", email: "dani@example.invalid", avatarUrl: null });
   });
@@ -91,6 +94,47 @@ describe("submitSelfReportShootingRangeAction -- eligibility (regular-service AN
 
     expect(result).toEqual({ ok: true });
     expect(insertSelfReport).toHaveBeenCalledTimes(1);
+  });
+
+  describe("manager notification on submission", () => {
+    it("notifies managers ONLY after insertSelfReport has actually succeeded, with the reporter's name, performed date, and the persisted report id", async () => {
+      getWorkbookSnapshot.mockResolvedValue(personnelSnapshot(personnelRowsWithType("חובה")));
+      insertSelfReport.mockResolvedValue({ id: "persisted-report-42" });
+
+      const result = await submitSelfReportShootingRangeAction("2026-08-20", null);
+
+      expect(result).toEqual({ ok: true });
+      expect(notifyManagersOfSelfReportSubmitted).toHaveBeenCalledTimes(1);
+      const [people, reporterName, performedOn, reportId] = notifyManagersOfSelfReportSubmitted.mock.calls[0];
+      expect(reporterName).toBe("דני בדיקה");
+      expect(performedOn).toBe("2026-08-20");
+      expect(reportId).toBe("persisted-report-42");
+      expect(people.map((p: Person) => p.name)).toContain("דני בדיקה");
+
+      // insertSelfReport must be called strictly before the notification.
+      const insertOrder = insertSelfReport.mock.invocationCallOrder[0];
+      const notifyOrder = notifyManagersOfSelfReportSubmitted.mock.invocationCallOrder[0];
+      expect(insertOrder).toBeLessThan(notifyOrder);
+    });
+
+    it("never notifies managers when insertSelfReport fails -- the rejection propagates and no notification is ever created", async () => {
+      getWorkbookSnapshot.mockResolvedValue(personnelSnapshot(personnelRowsWithType("חובה")));
+      insertSelfReport.mockRejectedValue(new Error("db unavailable"));
+
+      await expect(submitSelfReportShootingRangeAction("2026-08-20", null)).rejects.toThrow("db unavailable");
+
+      expect(notifyManagersOfSelfReportSubmitted).not.toHaveBeenCalled();
+    });
+
+    it("never notifies managers when an eligibility/relevance check rejects the submission before any insert is attempted", async () => {
+      getWorkbookSnapshot.mockResolvedValue(personnelSnapshot(personnelRowsWithType("קבע")));
+
+      const result = await submitSelfReportShootingRangeAction("2026-08-20", null);
+
+      expect(result).toEqual({ ok: false, error: "not_eligible" });
+      expect(insertSelfReport).not.toHaveBeenCalled();
+      expect(notifyManagersOfSelfReportSubmitted).not.toHaveBeenCalled();
+    });
   });
 
   it("rejects a permanent (קבע) person -- never trusts the client, never inserts a report", async () => {
