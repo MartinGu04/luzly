@@ -35,11 +35,22 @@
  * timestamp scattered across components -- update this one value if the
  * rollout date ever needs to change, never edit call sites.
  *
- * Set to this feature's own ship date (2026-08-25) -- every account that
- * already existed before מי-מה-מו ever had a setup card must never suddenly
- * see one just because the feature shipped.
+ * Deliberately NOT set to this PR's authoring date: at authoring time
+ * (2026-08-25) this feature had not shipped yet -- the PR was still open,
+ * unmerged -- so the exact merge/deploy instant is not knowable in advance.
+ * A cutoff equal to (or before) the authoring date would misclassify any
+ * account created later that same day, still before the real rollout, as
+ * "new"/onboarding-eligible. Set one full day past the authoring date
+ * instead, as a safety buffer past any realistic merge time -- every
+ * account that already existed before מי-מה-מו ever had a setup card must
+ * never suddenly see one just because the feature shipped. The one-sided
+ * cost of this buffer is a handful of genuinely-new accounts created in
+ * that same narrow window not seeing the card immediately, which is safe
+ * (never shown = never wrong) and correctable by moving this value earlier
+ * once the real rollout instant is known -- never move it earlier than
+ * that actual instant.
  */
-export const ONBOARDING_ROLLOUT_CUTOFF = "2026-08-25T00:00:00.000Z";
+export const ONBOARDING_ROLLOUT_CUTOFF = "2026-08-26T00:00:00.000Z";
 
 /**
  * Pure account-level eligibility check. Fails closed on anything that
