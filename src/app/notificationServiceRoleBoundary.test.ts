@@ -12,7 +12,7 @@ import path from "node:path";
  *
  * Two invariants:
  *  1. `createSupabaseServiceRoleClient` is referenced by name in exactly
- *     five files: its own definition,
+ *     six files: its own definition,
  *     `src/lib/notifications/engine/serviceClient.ts` (the notification
  *     worker's call site -- no session exists for a Cron-triggered
  *     request), `src/lib/calendar/serviceClient.ts` (the personal
@@ -22,13 +22,16 @@ import path from "node:path";
  *     (the personal Home "since your previous visit" recap's own
  *     independent call site for the zero-RLS-policy `dashboard_visit_state`
  *     table -- see that file's own docstring for why this is a separate
- *     domain boundary from the notification engine's), and
- *     `src/lib/reportOne/serviceClient.ts` (the Report 1
- *     reserve-inclusion toggle's own independent call site for the
- *     zero-RLS-policy `report_one_reserve_inclusion` table -- same
- *     reasoning, its own separate domain boundary). No other file --
- *     not a route, not a Server Component/Action, not a client component
- *     -- may import or call it directly.
+ *     domain boundary from the notification engine's), `src/lib/reportOne/serviceClient.ts`
+ *     (the Report 1 reserve-inclusion toggle's own independent call site
+ *     for the zero-RLS-policy `report_one_reserve_inclusion` table -- same
+ *     reasoning, its own separate domain boundary), and
+ *     `src/lib/shootingRanges/serviceClient.ts` (the מטווחים qualification
+ *     feature's own independent call site for the zero-RLS-policy
+ *     `shooting_range_completions`/`shooting_range_planned_occurrences`
+ *     tables -- same reasoning again, its own separate domain boundary).
+ *     No other file -- not a route, not a Server Component/Action, not a
+ *     client component -- may import or call it directly.
  *  2. No "use client" component, and no file under `src/app` reachable
  *     from ordinary user navigation, ever references
  *     `SUPABASE_SERVICE_ROLE_KEY` or `NOTIFICATION_WORKER_SECRET` --
@@ -57,15 +60,17 @@ const NOTIFICATION_SERVICE_ROLE_CALL_SITE_FILE = path.join(srcRoot, "lib", "noti
 const CALENDAR_SERVICE_ROLE_CALL_SITE_FILE = path.join(srcRoot, "lib", "calendar", "serviceClient.ts");
 const DASHBOARD_VISIT_SERVICE_ROLE_CALL_SITE_FILE = path.join(srcRoot, "lib", "dashboardVisit", "serviceClient.ts");
 const REPORT_ONE_SERVICE_ROLE_CALL_SITE_FILE = path.join(srcRoot, "lib", "reportOne", "serviceClient.ts");
+const SHOOTING_RANGES_SERVICE_ROLE_CALL_SITE_FILE = path.join(srcRoot, "lib", "shootingRanges", "serviceClient.ts");
 const ALLOWED_SERVICE_ROLE_REFERENCE_FILES = new Set([
   SERVICE_ROLE_DEFINITION_FILE,
   NOTIFICATION_SERVICE_ROLE_CALL_SITE_FILE,
   CALENDAR_SERVICE_ROLE_CALL_SITE_FILE,
   DASHBOARD_VISIT_SERVICE_ROLE_CALL_SITE_FILE,
   REPORT_ONE_SERVICE_ROLE_CALL_SITE_FILE,
+  SHOOTING_RANGES_SERVICE_ROLE_CALL_SITE_FILE,
 ]);
 
-describe("notification worker + calendar feed + dashboard visit + report one service-role boundary guard", () => {
+describe("notification worker + calendar feed + dashboard visit + report one + shooting ranges service-role boundary guard", () => {
   it("finds source files (sanity check the scan itself works)", () => {
     expect(sourceFiles.length).toBeGreaterThan(0);
   });
