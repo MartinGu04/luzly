@@ -1,5 +1,41 @@
 # מטווחים (shooting-range qualification)
 
+## Scope: regular-service (חובה) personnel only
+
+Product decision: this feature applies ONLY to personnel classified as
+`classifyPersonnelType(person.personnelType) === "regular"`
+(`lib/domain/personnelType.ts` -- the one canonical classifier, never a
+second/ad-hoc inference from name/role/text). Permanent (קבע) and reserve
+(מילואים) personnel are completely out of scope, not merely hidden from
+the UI -- every server entry point re-checks eligibility itself:
+
+- **Personal loader** (`shootingRangeQualification.ts`): a non-regular
+  person gets `{status: "not_applicable"}` before the "מטווחים" sheet is
+  even parsed or any app-owned table is read. `person`/`avatarUrl` are
+  still carried on that result so the page can still show identity chrome
+  and the manager-overview link for a non-regular MANAGER (a קבע/מילואים
+  person overseeing regular personnel is a real case).
+- **Manager overview** (`shootingRangeManagerOverview.ts`): the roster is
+  filtered to regular personnel BEFORE building any per-person model --
+  permanent/reserve people never appear in `rows`, are never counted in
+  `summary`, and never appear in `pendingSelfReports`. Name resolution
+  against the "מטווחים" sheet (`parseShootingRangesSheet`'s fail-closed
+  ambiguity check) still runs against the FULL roster first, so a name
+  ambiguous against permanent/reserve personnel too still fails closed --
+  filtering happens only after resolution, never before it.
+- **Self-report submission** (`submitSelfReportShootingRangeAction`):
+  re-checks the freshly-resolved caller's own personnel type server-side;
+  a non-regular person can never create a self-report even by calling the
+  action directly (hiding the UI button is not the enforcement).
+- **Planned-range scheduling** (`createPlannedShootingRangeAction`):
+  re-validates every submitted person id against a freshly-fetched roster
+  AND `classifyPersonnelType(...) === "regular"` in the same filter -- a
+  permanent/reserve id is silently dropped from the scheduled set, exactly
+  like a foreign/non-roster id, and therefore never receives a scheduled/
+  reminder notification and can never become a target of bulk
+  confirmation either (confirmation only ever resolves occurrences that
+  were actually created).
+
 ## Source-of-truth precedence
 
 1. The most recent **approved** `shooting_range_completions` row for a

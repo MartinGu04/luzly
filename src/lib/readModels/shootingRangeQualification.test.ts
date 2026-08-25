@@ -22,9 +22,12 @@ function shootingRangesSheet(rows: (string | number)[][]): RawSheet {
   return { name: "מטווחים", values: rows };
 }
 
+// Regular-service (חובה) by default -- מטווחים is scoped to regular
+// personnel only (see the dedicated "personnel-type eligibility" describe
+// block below), so every pre-existing "ok" test needs an explicit חובה row.
 const PERSONNEL_ROWS: string[][] = [
-  ["שם", "מייל"],
-  ["דני בדיקה", "dani@example.invalid"],
+  ["שם", "מייל", 'סוג כ"א'],
+  ["דני בדיקה", "dani@example.invalid", "חובה"],
 ];
 
 function snapshot(shootingRangesRows: (string | number)[][] = []) {
@@ -187,6 +190,67 @@ describe("loadShootingRangeQualification", () => {
     getWorkbookSnapshot.mockResolvedValue({ fetchedAt: "2026-08-25T08:00:00.000Z", sheets: [personnelSheet(PERSONNEL_ROWS)] });
 
     await expect(loadShootingRangeQualification()).rejects.toThrow(/מטווחים/);
+  });
+
+  describe("personnel-type eligibility (מטווחים is regular-service only)", () => {
+    function personnelRowsWithType(type: string): string[][] {
+      return [
+        ["שם", "מייל", 'סוג כ"א'],
+        ["דני בדיקה", "dani@example.invalid", type],
+      ];
+    }
+
+    it.each([
+      ["permanent (קבע)", "קבע"],
+      ["reserve (מילואים)", "מילואים"],
+      ["unclassified/unrecognized type", "משהו אחר"],
+    ])("returns not_applicable for %s -- never builds a model, never touches the app-owned tables", async (_label, type) => {
+      getRequestAuthenticatedIdentity.mockResolvedValue({ status: "authenticated", userId: "u1", email: "dani@example.invalid", avatarUrl: "https://photo" });
+      getWorkbookSnapshot.mockResolvedValue({
+        fetchedAt: "2026-08-25T08:00:00.000Z",
+        sheets: [personnelSheet(personnelRowsWithType(type)), shootingRangesSheet([
+          ["שם", "תאריך ביצוע מטווח"],
+          ["דני בדיקה", "01/01/2026"],
+        ])],
+      });
+
+      const result = await loadShootingRangeQualification();
+
+      expect(result.status).toBe("not_applicable");
+      if (result.status !== "not_applicable") throw new Error("unreachable");
+      // Identity is still carried (e.g. so the page can still show a manager-overview link for a non-regular manager).
+      expect(result.person.name).toBe("דני בדיקה");
+      expect(result.avatarUrl).toBe("https://photo");
+      expect(getCompletionsForPersonIds).not.toHaveBeenCalled();
+      expect(getPlannedOccurrencesForPersonIds).not.toHaveBeenCalled();
+    });
+
+    it("a row for a non-regular person in the מטווחים sheet never makes them eligible -- eligibility is checked BEFORE the sheet is even parsed", async () => {
+      getRequestAuthenticatedIdentity.mockResolvedValue({ status: "authenticated", userId: "u1", email: "dani@example.invalid", avatarUrl: null });
+      getWorkbookSnapshot.mockResolvedValue({
+        fetchedAt: "2026-08-25T08:00:00.000Z",
+        sheets: [
+          personnelSheet(personnelRowsWithType("מילואים")),
+          shootingRangesSheet([
+            ["שם", "תאריך ביצוע מטווח"],
+            ["דני בדיקה", "01/01/2026"],
+          ]),
+        ],
+      });
+
+      const result = await loadShootingRangeQualification();
+
+      expect(result).toEqual({ status: "not_applicable", person: expect.objectContaining({ name: "דני בדיקה" }), avatarUrl: null });
+    });
+
+    it("a regular (חובה) person still proceeds to a full ok result", async () => {
+      getRequestAuthenticatedIdentity.mockResolvedValue({ status: "authenticated", userId: "u1", email: "dani@example.invalid", avatarUrl: null });
+      getWorkbookSnapshot.mockResolvedValue(snapshot());
+
+      const result = await loadShootingRangeQualification();
+
+      expect(result.status).toBe("ok");
+    });
   });
 });
 

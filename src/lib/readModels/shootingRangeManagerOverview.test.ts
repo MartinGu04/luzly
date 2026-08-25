@@ -24,8 +24,11 @@ function shootingRangesSheet(rows: (string | number)[][]): RawSheet {
   return { name: "מטווחים", values: rows };
 }
 
+// Regular-service (חובה) by default -- מטווחים is scoped to regular
+// personnel only (see the dedicated "personnel-type eligibility" describe
+// block below), so every pre-existing test needs an explicit חובה person.
 function person(overrides: Partial<Person> = {}): Person {
-  return { id: "p1", name: "דני עובד", email: "dani@example.invalid", isManager: false, isTechnician: false, isSupervisor: false, personnelType: null, ...overrides };
+  return { id: "p1", name: "דני עובד", email: "dani@example.invalid", isManager: false, isTechnician: false, isSupervisor: false, personnelType: "חובה", ...overrides };
 }
 
 const MANAGER: Person = { id: "mgr1", name: "מנהל בדיקה", email: "mgr@example.invalid", isManager: true, isTechnician: false, isSupervisor: false, personnelType: null };
@@ -162,5 +165,62 @@ describe("loadShootingRangeManagerOverview", () => {
     expect(result.model.rows).toEqual([]);
     expect(result.model.summary).toEqual({ qualifiedCount: 0, nearingExpiryCount: 0, notQualifiedCount: 0, totalCount: 0 });
     expect(getCompletionsForPersonIds).toHaveBeenCalledWith([]);
+  });
+
+  describe("personnel-type eligibility (מטווחים is regular-service only)", () => {
+    it("excludes permanent (קבע) and reserve (מילואים) personnel from rows/summary/counts entirely", async () => {
+      const regular = person({ id: "p_regular", name: "רגיל בדיקה", personnelType: "חובה" });
+      const permanent = person({ id: "p_permanent", name: "קבע בדיקה", personnelType: "קבע" });
+      const reserve = person({ id: "p_reserve", name: "מילואים בדיקה", personnelType: "מילואים" });
+      loadManagerWorkbookContext.mockResolvedValue(okContext([regular, permanent, reserve]));
+
+      const result = await loadShootingRangeManagerOverview();
+
+      expect(result.status).toBe("ok");
+      if (result.status !== "ok") throw new Error("unreachable");
+      expect(result.model.rows.map((row) => row.personId)).toEqual(["p_regular"]);
+      expect(result.model.summary.totalCount).toBe(1);
+    });
+
+    it("never even fetches completions/planned occurrences for permanent/reserve person ids", async () => {
+      const regular = person({ id: "p_regular", personnelType: "חובה" });
+      const permanent = person({ id: "p_permanent", personnelType: "קבע" });
+      loadManagerWorkbookContext.mockResolvedValue(okContext([regular, permanent]));
+
+      await loadShootingRangeManagerOverview();
+
+      expect(getCompletionsForPersonIds).toHaveBeenCalledWith(["p_regular"]);
+      expect(getPlannedOccurrencesForPersonIds).toHaveBeenCalledWith(["p_regular"]);
+    });
+
+    it("an ambiguous name shared between a regular and a non-regular person still fails closed to null resolution -- filtering never happens before name resolution", async () => {
+      const regular = person({ id: "p_regular", name: "כפול כפולי", personnelType: "חובה" });
+      const permanent = person({ id: "p_permanent", name: "כפול כפולי", personnelType: "קבע" });
+      loadManagerWorkbookContext.mockResolvedValue(
+        okContext([regular, permanent], [
+          ["שם", "תאריך ביצוע מטווח"],
+          ["כפול כפולי", "01/01/2026"],
+        ]),
+      );
+
+      const result = await loadShootingRangeManagerOverview();
+
+      expect(result.status).toBe("ok");
+      if (result.status !== "ok") throw new Error("unreachable");
+      // The ambiguous sheet row resolves to nobody -- the regular person's row must NOT pick it up as their baseline.
+      expect(result.model.rows.find((row) => row.personId === "p_regular")?.baselineDate).toBeNull();
+    });
+
+    it("excludes a permanent/reserve person's pending self-report from the manager review queue too", async () => {
+      const permanent = person({ id: "p_permanent", personnelType: "קבע" });
+      loadManagerWorkbookContext.mockResolvedValue(okContext([permanent]));
+      getCompletionsForPersonIds.mockResolvedValue([]);
+
+      const result = await loadShootingRangeManagerOverview();
+
+      expect(result.status).toBe("ok");
+      if (result.status !== "ok") throw new Error("unreachable");
+      expect(result.model.pendingSelfReports).toEqual([]);
+    });
   });
 });

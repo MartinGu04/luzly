@@ -1,6 +1,7 @@
 import "server-only";
 import { getRequestAuthenticatedIdentity } from "@/lib/auth/getRequestAuthenticatedIdentity";
 import { resolveIdentityAgainstPeople } from "@/lib/auth/resolveCurrentPerson";
+import { classifyPersonnelType } from "@/lib/domain/personnelType";
 import type { Person } from "@/lib/domain/types";
 import { SHEET_SOURCES, type RawWorkbookSnapshot, type SheetSourceKey } from "@/lib/google";
 import { parsePersonnelSheet } from "@/lib/parsers/personnel";
@@ -20,6 +21,19 @@ export type ShootingRangeQualificationLoadResult =
   | { status: "missing_email" }
   | { status: "unmapped" }
   | { status: "ambiguous_identity" }
+  /**
+   * Authenticated + uniquely mapped, but `classifyPersonnelType(person.personnelType)
+   * !== "regular"` -- מטווחים is scoped to regular-service (חובה) personnel
+   * only (product decision); permanent (קבע) and reserve (מילואים)
+   * personnel are entirely out of scope, not merely hidden from the UI.
+   * No model is ever built for this caller. `person`/`avatarUrl` are still
+   * carried (same shape as "ok") so the page can still render identity
+   * chrome and the manager-overview link for a non-regular MANAGER
+   * (a קבע/מילואים person overseeing regular personnel is a real case --
+   * their own personal ineligibility must never hide their access to the
+   * team overview).
+   */
+  | { status: "not_applicable"; person: Person; avatarUrl: string | null }
   | { status: "ok"; person: Person; model: ShootingRangeQualificationReadModel; avatarUrl: string | null };
 
 function getSheet(snapshot: RawWorkbookSnapshot, key: SheetSourceKey) {
@@ -58,11 +72,15 @@ export function selectSheetBaselineForPerson(
  *    `resolveIdentityAgainstPeople` every other personal read model uses.
  * 2. Fetches personnel + "מטווחים" via `lib/sync`'s cached
  *    `getWorkbookSnapshot` -- never a second/duplicate Google source.
- * 3. Parses the sheet with `parseShootingRangesSheet` and narrows it to
+ * 3. Gates on `classifyPersonnelType(person.personnelType) === "regular"`
+ *    -- מטווחים is regular-service-only (product decision); a permanent/
+ *    reserve person gets `{status: "not_applicable"}` before the sheet is
+ *    even parsed.
+ * 4. Parses the sheet with `parseShootingRangesSheet` and narrows it to
  *    this person's own most recent past-dated row (`selectSheetBaselineForPerson`).
- * 4. Reads this person's own completion history + planned occurrences from
+ * 5. Reads this person's own completion history + planned occurrences from
  *    `lib/shootingRanges/store.ts` (the app-owned tables).
- * 5. Delegates all business logic to the pure, independently testable
+ * 6. Delegates all business logic to the pure, independently testable
  *    `buildShootingRangeQualificationReadModel` -- this function does no
  *    precedence/date-math decisions of its own.
  */
@@ -77,6 +95,10 @@ export async function loadShootingRangeQualification(): Promise<ShootingRangeQua
   if (identityResult.status !== "ok") return identityResult;
 
   const person = identityResult.person;
+  if (classifyPersonnelType(person.personnelType) !== "regular") {
+    return { status: "not_applicable", person, avatarUrl: identity.avatarUrl };
+  }
+
   const sheetRecords = parseShootingRangesSheet(getSheet(snapshot, "shootingRanges"), people);
   const now = getJerusalemLocalNow();
 

@@ -99,4 +99,29 @@ describe("ShootingRangesPage", () => {
     render(page);
     expect(screen.queryByText("תצוגת מנהל")).toBeNull();
   });
+
+  describe("not_applicable (permanent/reserve personnel -- מטווחים is regular-service only)", () => {
+    it("shows a calm scope message, never the qualification card or self-report button", async () => {
+      loadShootingRangeQualification.mockResolvedValue({ status: "not_applicable", person: person({ isManager: false }), avatarUrl: null });
+      const page = await ShootingRangesPage();
+      render(page);
+      expect(screen.getByText("מטווחים זמין לחיילי שירות סדיר בלבד.")).toBeInTheDocument();
+      expect(screen.queryByText("ביצעתי מטווח")).toBeNull();
+      expect(screen.queryByText("כשירות מטווח")).toBeNull();
+    });
+
+    it("still shows the manager-overview link for a non-regular MANAGER -- their own ineligibility must never hide it", async () => {
+      loadShootingRangeQualification.mockResolvedValue({ status: "not_applicable", person: person({ isManager: true }), avatarUrl: null });
+      const page = await ShootingRangesPage();
+      render(page);
+      expect(screen.getByText("תצוגת מנהל")).toBeInTheDocument();
+    });
+
+    it("never shows the manager-overview link for a non-regular non-manager", async () => {
+      loadShootingRangeQualification.mockResolvedValue({ status: "not_applicable", person: person({ isManager: false }), avatarUrl: null });
+      const page = await ShootingRangesPage();
+      render(page);
+      expect(screen.queryByText("תצוגת מנהל")).toBeNull();
+    });
+  });
 });

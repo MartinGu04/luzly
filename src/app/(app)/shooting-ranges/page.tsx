@@ -23,6 +23,7 @@ export default async function ShootingRangesPage() {
   const result = await loadShootingRangeQualification();
 
   if (result.status === "unauthenticated") redirect("/login");
+  if (result.status === "not_applicable") return <NotApplicableView isManager={result.person.isManager} />;
   if (result.status !== "ok") return <AccessDeniedScreen />;
 
   const { model } = result;
@@ -80,6 +81,34 @@ export default async function ShootingRangesPage() {
         <h2 className="text-sm font-semibold text-foreground">היסטוריית מטווחים</h2>
         <ShootingRangeHistoryList history={model.history} />
       </div>
+    </div>
+  );
+}
+
+/**
+ * מטווחים is scoped to regular-service (חובה) personnel only -- shown for
+ * an authenticated, mapped permanent (קבע) or reserve (מילואים) person
+ * instead of a qualification card. Calm and truthful (same spirit as "no
+ * qualification data" -- never an access-denied tone, since this isn't a
+ * security boundary, just product scope). Still shows the manager-overview
+ * link when relevant: a non-regular MANAGER overseeing regular personnel
+ * must still reach the team overview even though the feature doesn't
+ * apply to them personally.
+ */
+function NotApplicableView({ isManager }: { isManager: boolean }) {
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-xl font-semibold text-foreground">מטווחים</h1>
+        {isManager ? (
+          <Link href="/shooting-ranges/manager" className="text-sm text-primary hover:underline">
+            תצוגת מנהל
+          </Link>
+        ) : null}
+      </div>
+      <Panel variant="panel" className="text-center text-sm text-muted">
+        מטווחים זמין לחיילי שירות סדיר בלבד.
+      </Panel>
     </div>
   );
 }

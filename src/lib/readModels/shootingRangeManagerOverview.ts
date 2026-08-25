@@ -1,4 +1,5 @@
 import "server-only";
+import { classifyPersonnelType } from "@/lib/domain/personnelType";
 import type { Person } from "@/lib/domain/types";
 import type { SheetSourceKey } from "@/lib/google";
 import { parseShootingRangesSheet } from "@/lib/parsers/shootingRanges";
@@ -40,10 +41,23 @@ export async function loadShootingRangeManagerOverview(): Promise<ShootingRangeM
   if (contextResult.status !== "ok") return contextResult;
 
   const { manager, people, snapshot, avatarUrl } = contextResult.context;
+  // Name resolution (`parseShootingRangesSheet`'s fail-closed ambiguity
+  // check) is run against the FULL roster, never a pre-filtered subset --
+  // a name that's ambiguous against permanent/reserve personnel too must
+  // still fail closed, even though this feature is scoped to regular
+  // personnel only below. Filtering before resolution could silently turn
+  // a genuinely ambiguous name into a falsely-unique match.
   const sheetRecords = parseShootingRangesSheet(getManagerWorkbookSheet(snapshot, "shootingRanges"), people);
   const now = getJerusalemLocalNow();
 
-  const personIds = people.map((person) => person.id);
+  // מטווחים is scoped to regular-service (חובה) personnel only (product
+  // decision) -- permanent (קבע) and reserve (מילואים) personnel are
+  // entirely excluded from the overview: not in `rows`, not counted in
+  // `summary`, not in `pendingSelfReports`, and never fetched from the
+  // app-owned tables below at all.
+  const eligiblePeople = people.filter((person) => classifyPersonnelType(person.personnelType) === "regular");
+
+  const personIds = eligiblePeople.map((person) => person.id);
   const [allCompletions, allPlannedOccurrences] = await Promise.all([
     getCompletionsForPersonIds(personIds),
     getPlannedOccurrencesForPersonIds(personIds),
@@ -52,7 +66,7 @@ export async function loadShootingRangeManagerOverview(): Promise<ShootingRangeM
   const completionsByPerson = groupBy(allCompletions, (row) => row.personId);
   const plannedByPerson = groupBy(allPlannedOccurrences, (row) => row.personId);
 
-  const perPersonModels = people.map((person) => ({
+  const perPersonModels = eligiblePeople.map((person) => ({
     personId: person.id,
     personName: person.name,
     model: buildShootingRangeQualificationReadModel({
