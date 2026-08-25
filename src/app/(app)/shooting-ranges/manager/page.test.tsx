@@ -25,7 +25,12 @@ function manager(): Person {
 }
 
 function emptyModel(): ShootingRangeManagerReadModel {
-  return { summary: { qualifiedCount: 0, nearingExpiryCount: 0, notQualifiedCount: 0, totalCount: 0 }, rows: [], pendingSelfReports: [] };
+  return {
+    summary: { qualifiedCount: 0, nearingExpiryCount: 0, notQualifiedCount: 0, totalCount: 0 },
+    rows: [],
+    pendingSelfReports: [],
+    unresolvedSheetRowCount: 0,
+  };
 }
 
 describe("ShootingRangeManagerPage", () => {
@@ -46,5 +51,32 @@ describe("ShootingRangeManagerPage", () => {
     render(await ShootingRangeManagerPage());
     expect(screen.getByText("מטווחים -- תצוגת מנהל")).toBeInTheDocument();
     expect(screen.getByText("אין אנשים להצגה.")).toBeInTheDocument();
+  });
+
+  describe("symmetric navigation back to the personal page", () => {
+    it("renders a 'לתצוגה האישית' link pointing to /shooting-ranges", async () => {
+      loadShootingRangeManagerOverview.mockResolvedValue({ status: "ok", manager: manager(), model: emptyModel(), avatarUrl: null });
+      render(await ShootingRangeManagerPage());
+      const link = screen.getByText("לתצוגה האישית");
+      expect(link).toBeInTheDocument();
+      expect(link.closest("a")).toHaveAttribute("href", "/shooting-ranges");
+    });
+
+    it("never renders the back-link for a non-manager (the forbidden state has no manager content at all)", async () => {
+      loadShootingRangeManagerOverview.mockResolvedValue({ status: "forbidden" });
+      render(await ShootingRangeManagerPage());
+      expect(screen.queryByText("לתצוגה האישית")).toBeNull();
+    });
+  });
+
+  it("passes unresolvedSheetRowCount through to the panel (surfaces unmatched מטווחים sheet rows)", async () => {
+    loadShootingRangeManagerOverview.mockResolvedValue({
+      status: "ok",
+      manager: manager(),
+      model: { ...emptyModel(), unresolvedSheetRowCount: 2 },
+      avatarUrl: null,
+    });
+    render(await ShootingRangeManagerPage());
+    expect(screen.getByText(/לא שויכ/)).toBeInTheDocument();
   });
 });

@@ -24,11 +24,12 @@ function shootingRangesSheet(rows: (string | number)[][]): RawSheet {
   return { name: "מטווחים", values: rows };
 }
 
-// Regular-service (חובה) by default -- מטווחים is scoped to regular
-// personnel only (see the dedicated "personnel-type eligibility" describe
-// block below), so every pre-existing test needs an explicit חובה person.
+// Regular-service (חובה) + טכנאי by default -- מטווחים is scoped to
+// regular personnel who are also אחמ"ש/טכנאי (see the dedicated
+// "eligibility" describe block below), so every pre-existing test needs
+// an explicit eligible person.
 function person(overrides: Partial<Person> = {}): Person {
-  return { id: "p1", name: "דני עובד", email: "dani@example.invalid", isManager: false, isTechnician: false, isSupervisor: false, personnelType: "חובה", ...overrides };
+  return { id: "p1", name: "דני עובד", email: "dani@example.invalid", isManager: false, isTechnician: true, isSupervisor: false, personnelType: "חובה", ...overrides };
 }
 
 const MANAGER: Person = { id: "mgr1", name: "מנהל בדיקה", email: "mgr@example.invalid", isManager: true, isTechnician: false, isSupervisor: false, personnelType: null };
@@ -167,7 +168,30 @@ describe("loadShootingRangeManagerOverview", () => {
     expect(getCompletionsForPersonIds).toHaveBeenCalledWith([]);
   });
 
-  describe("personnel-type eligibility (מטווחים is regular-service only)", () => {
+  describe("eligibility (regular-service AND אחמ\"ש/טכנאי)", () => {
+    it("excludes a regular person who is neither אחמ\"ש nor טכנאי -- the role half of the rule, not just the service half", async () => {
+      const eligible = person({ id: "p_eligible", isTechnician: true });
+      const regularOther = person({ id: "p_other", name: "אחר בדיקה", isTechnician: false, isSupervisor: false });
+      loadManagerWorkbookContext.mockResolvedValue(okContext([eligible, regularOther]));
+
+      const result = await loadShootingRangeManagerOverview();
+
+      expect(result.status).toBe("ok");
+      if (result.status !== "ok") throw new Error("unreachable");
+      expect(result.model.rows.map((row) => row.personId)).toEqual(["p_eligible"]);
+    });
+
+    it("includes a regular אחמ\"ש even without the טכנאי flag", async () => {
+      const supervisor = person({ id: "p_sup", isTechnician: false, isSupervisor: true });
+      loadManagerWorkbookContext.mockResolvedValue(okContext([supervisor]));
+
+      const result = await loadShootingRangeManagerOverview();
+
+      expect(result.status).toBe("ok");
+      if (result.status !== "ok") throw new Error("unreachable");
+      expect(result.model.rows.map((row) => row.personId)).toEqual(["p_sup"]);
+    });
+
     it("excludes permanent (קבע) and reserve (מילואים) personnel from rows/summary/counts entirely", async () => {
       const regular = person({ id: "p_regular", name: "רגיל בדיקה", personnelType: "חובה" });
       const permanent = person({ id: "p_permanent", name: "קבע בדיקה", personnelType: "קבע" });
@@ -221,6 +245,59 @@ describe("loadShootingRangeManagerOverview", () => {
       expect(result.status).toBe("ok");
       if (result.status !== "ok") throw new Error("unreachable");
       expect(result.model.pendingSelfReports).toEqual([]);
+    });
+  });
+
+  describe("unresolvedSheetRowCount (surfacing unmatched מטווחים sheet rows, e.g. a real name mismatch)", () => {
+    it("is 0 when every sheet row resolves to exactly one person", async () => {
+      const alice = person({ id: "p_alice", name: "אליס בדיקה" });
+      loadManagerWorkbookContext.mockResolvedValue(
+        okContext([alice], [
+          ["שם", "תאריך ביצוע מטווח"],
+          ["אליס בדיקה", "29/06/2026"],
+        ]),
+      );
+
+      const result = await loadShootingRangeManagerOverview();
+
+      expect(result.status).toBe("ok");
+      if (result.status !== "ok") throw new Error("unreachable");
+      expect(result.model.unresolvedSheetRowCount).toBe(0);
+    });
+
+    it("counts a sheet row whose name never resolved to a known person -- e.g. a real name mismatch between the sheet and כ״א", async () => {
+      const alice = person({ id: "p_alice", name: "אליס בדיקה" });
+      loadManagerWorkbookContext.mockResolvedValue(
+        okContext([alice], [
+          ["שם", "תאריך ביצוע מטווח"],
+          ["אליס בדיקה", "29/06/2026"],
+          ["שם שלא קיים ברשימה", "01/01/2026"],
+        ]),
+      );
+
+      const result = await loadShootingRangeManagerOverview();
+
+      expect(result.status).toBe("ok");
+      if (result.status !== "ok") throw new Error("unreachable");
+      expect(result.model.unresolvedSheetRowCount).toBe(1);
+    });
+
+    it("counts an unresolved row even when it belongs to an INELIGIBLE person -- the count reflects the whole sheet, computed against the full roster, not just eligible rows", async () => {
+      const eligible = person({ id: "p_eligible" });
+      const permanentDup = person({ id: "p_dup_a", name: "כפול כפולי", personnelType: "קבע" });
+      const otherDup = person({ id: "p_dup_b", name: "כפול כפולי", personnelType: "קבע" });
+      loadManagerWorkbookContext.mockResolvedValue(
+        okContext([eligible, permanentDup, otherDup], [
+          ["שם", "תאריך ביצוע מטווח"],
+          ["כפול כפולי", "29/06/2026"],
+        ]),
+      );
+
+      const result = await loadShootingRangeManagerOverview();
+
+      expect(result.status).toBe("ok");
+      if (result.status !== "ok") throw new Error("unreachable");
+      expect(result.model.unresolvedSheetRowCount).toBe(1);
     });
   });
 });

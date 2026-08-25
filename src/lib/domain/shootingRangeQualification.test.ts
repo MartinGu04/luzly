@@ -3,7 +3,34 @@ import {
   addCalendarMonths,
   classifyQualificationStatus,
   computeQualificationExpiryDate,
+  isEligibleForShootingRanges,
 } from "./shootingRangeQualification";
+
+describe("isEligibleForShootingRanges", () => {
+  it("regular (חובה) + טכנאי is eligible", () => {
+    expect(isEligibleForShootingRanges({ personnelType: "חובה", isSupervisor: false, isTechnician: true })).toBe(true);
+  });
+
+  it("regular (חובה) + אחמ\"ש is eligible", () => {
+    expect(isEligibleForShootingRanges({ personnelType: "חובה", isSupervisor: true, isTechnician: false })).toBe(true);
+  });
+
+  it("regular (חובה) but neither אחמ\"ש nor טכנאי is NOT eligible", () => {
+    expect(isEligibleForShootingRanges({ personnelType: "חובה", isSupervisor: false, isTechnician: false })).toBe(false);
+  });
+
+  it("permanent (קבע) is never eligible, even if אחמ\"ש/טכנאי", () => {
+    expect(isEligibleForShootingRanges({ personnelType: "קבע", isSupervisor: true, isTechnician: true })).toBe(false);
+  });
+
+  it("reserve (מילואים) is never eligible, even if אחמ\"ש/טכנאי", () => {
+    expect(isEligibleForShootingRanges({ personnelType: "מילואים", isSupervisor: false, isTechnician: true })).toBe(false);
+  });
+
+  it("unclassified/missing personnel type is never eligible -- fails closed", () => {
+    expect(isEligibleForShootingRanges({ personnelType: null, isSupervisor: true, isTechnician: true })).toBe(false);
+  });
+});
 
 describe("addCalendarMonths", () => {
   it("adds a plain 6-month span with no month-end edge case", () => {

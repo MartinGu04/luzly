@@ -172,4 +172,76 @@ describe("parseShootingRangesSheet", () => {
     );
     expect(result).toEqual([]);
   });
+
+  describe("real-world Unicode/bidi name-matching robustness (visually-identical names must still resolve)", () => {
+    const RTL_MARK = "\u200F";
+    const LTR_MARK = "\u200E";
+    const NBSP = "\u00A0";
+
+    it("matches a sheet name carrying an embedded RTL mark that a personnel name doesn't have -- invisible, no visual difference", () => {
+      const LEV = syntheticPerson("לב סינייצקי");
+      const sourceNameWithRtlMark = `לב${RTL_MARK} סינייצקי`;
+      const result = parseShootingRangesSheet(
+        sheet([
+          ["שם", "תאריך ביצוע מטווח"],
+          [sourceNameWithRtlMark, "29/06/2026"],
+        ]),
+        [LEV],
+      );
+      expect(result[0].resolvedPersonId).toBe(LEV.id);
+    });
+
+    it("matches when the PERSONNEL name (not the sheet name) carries the invisible mark", () => {
+      const LEV = syntheticPerson(`לב${LTR_MARK} סינייצקי`);
+      const result = parseShootingRangesSheet(
+        sheet([
+          ["שם", "תאריך ביצוע מטווח"],
+          ["לב סינייצקי", "29/06/2026"],
+        ]),
+        [LEV],
+      );
+      expect(result[0].resolvedPersonId).toBe(LEV.id);
+    });
+
+    it("matches names whose diacritics differ in Unicode composition form (precomposed vs base+combining-mark) -- a general robustness step, not Hebrew-specific (plain Hebrew names without niqqud have no such distinction to begin with)", () => {
+      // "e" + combining acute accent (U+0065 U+0301) vs the single precomposed "é" -- canonically equivalent, visually identical, byte-different without NFC.
+      const decomposed = "e\u0301";
+      const precomposed = "\u00e9";
+      expect(decomposed.normalize("NFC")).toBe(precomposed); // sanity check the two forms really are canonically equivalent
+      const LEV = syntheticPerson(`בדיקה ${precomposed}`);
+      const result = parseShootingRangesSheet(
+        sheet([
+          ["שם", "תאריך ביצוע מטווח"],
+          [`בדיקה ${decomposed}`, "29/06/2026"],
+        ]),
+        [LEV],
+      );
+      expect(result[0].resolvedPersonId).toBe(LEV.id);
+    });
+
+    it("matches a sheet name using a non-breaking space where the personnel name uses a regular space", () => {
+      const LEV = syntheticPerson("לב סינייצקי");
+      const sourceNameWithNbsp = `לב${NBSP}סינייצקי`;
+      const result = parseShootingRangesSheet(
+        sheet([
+          ["שם", "תאריך ביצוע מטווח"],
+          [sourceNameWithNbsp, "29/06/2026"],
+        ]),
+        [LEV],
+      );
+      expect(result[0].resolvedPersonId).toBe(LEV.id);
+    });
+
+    it("still fails closed for a GENUINE spelling difference -- hardened normalization never becomes fuzzy matching", () => {
+      const LEV = syntheticPerson("לב סינייצקי");
+      const result = parseShootingRangesSheet(
+        sheet([
+          ["שם", "תאריך ביצוע מטווח"],
+          ["לייב סינייצקי", "29/06/2026"],
+        ]),
+        [LEV],
+      );
+      expect(result[0].resolvedPersonId).toBeNull();
+    });
+  });
 });

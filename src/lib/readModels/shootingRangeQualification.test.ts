@@ -22,12 +22,13 @@ function shootingRangesSheet(rows: (string | number)[][]): RawSheet {
   return { name: "מטווחים", values: rows };
 }
 
-// Regular-service (חובה) by default -- מטווחים is scoped to regular
-// personnel only (see the dedicated "personnel-type eligibility" describe
-// block below), so every pre-existing "ok" test needs an explicit חובה row.
+// Regular-service (חובה) + טכנאי by default -- מטווחים is scoped to
+// regular personnel who are also אחמ"ש/טכנאי (see the dedicated
+// "personnel-type eligibility" describe block below), so every
+// pre-existing "ok" test needs an explicit eligible row.
 const PERSONNEL_ROWS: string[][] = [
-  ["שם", "מייל", 'סוג כ"א'],
-  ["דני בדיקה", "dani@example.invalid", "חובה"],
+  ["שם", "מייל", 'סוג כ"א', "טכנאי"],
+  ["דני בדיקה", "dani@example.invalid", "חובה", "TRUE"],
 ];
 
 function snapshot(shootingRangesRows: (string | number)[][] = []) {
@@ -192,7 +193,7 @@ describe("loadShootingRangeQualification", () => {
     await expect(loadShootingRangeQualification()).rejects.toThrow(/מטווחים/);
   });
 
-  describe("personnel-type eligibility (מטווחים is regular-service only)", () => {
+  describe("eligibility (regular-service AND אחמ\"ש/טכנאי)", () => {
     function personnelRowsWithType(type: string): string[][] {
       return [
         ["שם", "מייל", 'סוג כ"א'],
@@ -243,9 +244,39 @@ describe("loadShootingRangeQualification", () => {
       expect(result).toEqual({ status: "not_applicable", person: expect.objectContaining({ name: "דני בדיקה" }), avatarUrl: null });
     });
 
-    it("a regular (חובה) person still proceeds to a full ok result", async () => {
+    it("a regular (חובה) + טכנאי person still proceeds to a full ok result", async () => {
       getRequestAuthenticatedIdentity.mockResolvedValue({ status: "authenticated", userId: "u1", email: "dani@example.invalid", avatarUrl: null });
       getWorkbookSnapshot.mockResolvedValue(snapshot());
+
+      const result = await loadShootingRangeQualification();
+
+      expect(result.status).toBe("ok");
+    });
+
+    it("a regular (חובה) person who is NEITHER אחמ\"ש NOR טכנאי is not_applicable -- the role half of the rule, not just the service half", async () => {
+      getRequestAuthenticatedIdentity.mockResolvedValue({ status: "authenticated", userId: "u1", email: "dani@example.invalid", avatarUrl: null });
+      getWorkbookSnapshot.mockResolvedValue({
+        fetchedAt: "2026-08-25T08:00:00.000Z",
+        sheets: [personnelSheet(personnelRowsWithType("חובה")), shootingRangesSheet([])],
+      });
+
+      const result = await loadShootingRangeQualification();
+
+      expect(result.status).toBe("not_applicable");
+    });
+
+    it("a regular (חובה) + אחמ\"ש person is eligible too, not just טכנאי", async () => {
+      getRequestAuthenticatedIdentity.mockResolvedValue({ status: "authenticated", userId: "u1", email: "dani@example.invalid", avatarUrl: null });
+      getWorkbookSnapshot.mockResolvedValue({
+        fetchedAt: "2026-08-25T08:00:00.000Z",
+        sheets: [
+          personnelSheet([
+            ["שם", "מייל", 'סוג כ"א', 'אחמ"ש'],
+            ["דני בדיקה", "dani@example.invalid", "חובה", "TRUE"],
+          ]),
+          shootingRangesSheet([]),
+        ],
+      });
 
       const result = await loadShootingRangeQualification();
 

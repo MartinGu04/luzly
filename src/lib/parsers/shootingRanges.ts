@@ -92,8 +92,47 @@ export function parseShootingRangesSheet(sheet: RawSheet, personnel: readonly Pe
   return records;
 }
 
+/**
+ * Invisible Unicode bidi/formatting marks that real-world Hebrew
+ * spreadsheet text (pasted or exported from different sources/apps) can
+ * carry without any VISIBLE difference at all: LTR mark (U+200E), RTL mark
+ * (U+200F), the Arabic letter mark (U+061C), explicit bidi embedding/
+ * override (U+202A-U+202E), and bidi isolates (U+2066-U+2069). Left in
+ * place, these make an otherwise byte-for-byte-identical-LOOKING name fail
+ * a strict equality check -- a real, known root cause of "this is
+ * definitely the same person's name, why doesn't it match" in cross-sheet
+ * name resolution. Written entirely as `\u` escapes (never a literal
+ * invisible character in source) so this file's own text stays inspectable
+ * and can't itself silently pick up a stray control character.
+ */
+const BIDI_CONTROL_CHARS_RE = /[\u200E\u200F\u061C\u202A-\u202E\u2066-\u2069]/g;
+
+/** Non-breaking space (U+00A0) -- visually indistinguishable from a regular space, but not matched by `\s`-based whitespace collapsing without this explicit normalization first. */
+const NBSP_RE = /\u00A0/g;
+
+/**
+ * Normalizes a person's name for cross-sheet comparison: Unicode canonical
+ * composition (`NFC` -- the same visible Hebrew name can be represented
+ * with different underlying code point sequences depending on which
+ * application/keyboard produced it), invisible bidi/formatting mark
+ * removal (`BIDI_CONTROL_CHARS_RE`), non-breaking-space normalization,
+ * then the pre-existing whitespace-collapse + trim. Applied identically to
+ * BOTH the sheet's own name text and every כ"א personnel name before
+ * comparison, so this hardens matching for BOTH sides at once regardless
+ * of which sheet the invisible/differently-encoded text originated from.
+ *
+ * Still exact-match only -- this narrows what counts as "the same text",
+ * it does not add any fuzzy/partial matching. A genuine spelling/word-order
+ * difference between the two sheets still fails closed to `null`, exactly
+ * as intended.
+ */
 function normalizeName(text: string): string {
-  return text.replace(/\s+/g, " ").trim();
+  return text
+    .normalize("NFC")
+    .replace(BIDI_CONTROL_CHARS_RE, "")
+    .replace(NBSP_RE, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /** Exact-normalized-name match only, resolved against EXACTLY one personnel record -- zero or 2+ matches both fail closed to `null`. No fuzzy matching either way, matching `potential.ts`'s `resolveSourcePersonId`. */

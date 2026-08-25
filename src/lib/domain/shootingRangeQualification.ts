@@ -1,6 +1,7 @@
 import { daysInCalendarMonth } from "./calendarMonth";
 import { formatCalendarDate } from "./dateRange";
 import { daysBetweenCalendarDates, parseCalendarDate, type CalendarDate } from "./dutyBlocks";
+import { classifyPersonnelType, isShiftCapable, type RoleGroupable } from "./personnelType";
 
 /**
  * Shooting-range ("מטווחים") qualification validity rules -- pure calendar-
@@ -51,6 +52,30 @@ export function computeQualificationExpiryDate(performedOn: string): string | nu
   const parsed = parseCalendarDate(performedOn);
   if (!parsed) return null;
   return formatCalendarDate(addCalendarMonths(parsed, QUALIFICATION_VALIDITY_MONTHS));
+}
+
+/** The minimal shape `isEligibleForShootingRanges` needs. */
+export interface ShootingRangeEligibilityCandidate extends RoleGroupable {
+  personnelType: string | null;
+}
+
+/**
+ * The ONE place this feature's eligibility rule is decided: regular
+ * service (`classifyPersonnelType(...) === "regular"`, i.e. חובה) AND
+ * shift-capable (`isShiftCapable`, i.e. אחמ"ש or טכנאי). Composes the two
+ * EXISTING canonical classifiers from `personnelType.ts` -- never a third,
+ * duplicated role/service inference, and never a text/name-based guess.
+ * Every server entry point (personal loader, manager overview, self-report,
+ * planned-range scheduling) calls this SAME function -- see
+ * `lib/shootingRanges/README.md` for the full list of call sites.
+ *
+ * A permanent (קבע) or reserve (מילואים) person is out of scope regardless
+ * of role; a regular (חובה) person who is neither אחמ"ש nor טכנאי is
+ * equally out of scope -- both are simply not eligible, never surfaced as
+ * "missing qualification data".
+ */
+export function isEligibleForShootingRanges(person: ShootingRangeEligibilityCandidate): boolean {
+  return classifyPersonnelType(person.personnelType) === "regular" && isShiftCapable(person);
 }
 
 export type QualificationStatus = "valid" | "expiring_soon" | "expiring_very_soon" | "expired" | "none";

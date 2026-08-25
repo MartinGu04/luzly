@@ -19,6 +19,17 @@ export interface ShootingRangeManagerPanelProps {
   rows: ManagerShootingRangeRow[];
   pendingSelfReports: ManagerPendingSelfReportRow[];
   roster: { id: string; name: string }[];
+  /** Count of "מטווחים" sheet rows that never resolved to exactly one eligible person (a name mismatch or ambiguity) -- see `buildShootingRangeManagerReadModel`'s own docs. `0` renders nothing. */
+  unresolvedSheetRowCount: number;
+}
+
+function UnresolvedSheetRowsNotice({ count }: { count: number }) {
+  if (count === 0) return null;
+  return (
+    <Panel variant="inline" className="text-sm text-warning">
+      ⚠️ {count} {count === 1 ? "שורה בגיליון" : "שורות בגיליון"} &quot;מטווחים&quot; לא שויכ{count === 1 ? "ה" : "ו"} לאיש/אנשי צוות מוכר/ים -- ייתכן שהשם בגיליון שונה מהשם ברשימת כ&quot;א.
+    </Panel>
+  );
 }
 
 function StatusBadge({ status }: { status: ManagerShootingRangeRow["status"] }) {
@@ -227,7 +238,13 @@ function CreatePlannedRangeForm({ roster }: { roster: { id: string; name: string
   );
 }
 
-export function ShootingRangeManagerPanel({ summary, rows, pendingSelfReports, roster }: ShootingRangeManagerPanelProps) {
+export function ShootingRangeManagerPanel({
+  summary,
+  rows,
+  pendingSelfReports,
+  roster,
+  unresolvedSheetRowCount,
+}: ShootingRangeManagerPanelProps) {
   const [attentionOnly, setAttentionOnly] = useState(false);
 
   const pendingConfirmationByDate = useMemo(() => {
@@ -245,6 +262,8 @@ export function ShootingRangeManagerPanel({ summary, rows, pendingSelfReports, r
 
   return (
     <div className="flex flex-col gap-6">
+      <UnresolvedSheetRowsNotice count={unresolvedSheetRowCount} />
+
       <SummaryTiles summary={summary} />
 
       <CreatePlannedRangeForm roster={roster} />

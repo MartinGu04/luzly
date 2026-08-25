@@ -40,6 +40,15 @@ export interface ShootingRangeManagerReadModel {
   rows: ManagerShootingRangeRow[];
   /** Every open self-report across the whole roster, oldest first (fairest review order) -- the manager review queue. */
   pendingSelfReports: ManagerPendingSelfReportRow[];
+  /**
+   * Count of "מטווחים" sheet rows that never resolved to exactly one
+   * eligible person (an unmatched name, or a genuine ambiguity) --
+   * computed by the orchestration loader from the raw parsed sheet, never
+   * by this pure builder. Surfaced so a manager can tell "nobody has data"
+   * apart from "the sheet has unmatched rows" instead of both looking
+   * identical as "אין מידע כשירות" everywhere.
+   */
+  unresolvedSheetRowCount: number;
 }
 
 const QUALIFIED_STATUSES: ReadonlySet<QualificationStatus> = new Set(["valid", "expiring_soon", "expiring_very_soon"]);
@@ -54,6 +63,7 @@ const NEARING_EXPIRY_STATUSES: ReadonlySet<QualificationStatus> = new Set(["expi
  */
 export function buildShootingRangeManagerReadModel(
   people: readonly { personId: string; personName: string; model: ShootingRangeQualificationReadModel }[],
+  unresolvedSheetRowCount = 0,
 ): ShootingRangeManagerReadModel {
   const rows: ManagerShootingRangeRow[] = people.map(({ personId, personName, model }) => {
     const pendingConfirmation = model.plannedRange?.status === "pending_confirmation";
@@ -95,5 +105,6 @@ export function buildShootingRangeManagerReadModel(
     summary: { qualifiedCount, nearingExpiryCount, notQualifiedCount, totalCount: rows.length },
     rows,
     pendingSelfReports,
+    unresolvedSheetRowCount,
   };
 }

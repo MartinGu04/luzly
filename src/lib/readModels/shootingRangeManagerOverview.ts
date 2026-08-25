@@ -1,5 +1,5 @@
 import "server-only";
-import { classifyPersonnelType } from "@/lib/domain/personnelType";
+import { isEligibleForShootingRanges } from "@/lib/domain/shootingRangeQualification";
 import type { Person } from "@/lib/domain/types";
 import type { SheetSourceKey } from "@/lib/google";
 import { parseShootingRangesSheet } from "@/lib/parsers/shootingRanges";
@@ -50,12 +50,12 @@ export async function loadShootingRangeManagerOverview(): Promise<ShootingRangeM
   const sheetRecords = parseShootingRangesSheet(getManagerWorkbookSheet(snapshot, "shootingRanges"), people);
   const now = getJerusalemLocalNow();
 
-  // מטווחים is scoped to regular-service (חובה) personnel only (product
-  // decision) -- permanent (קבע) and reserve (מילואים) personnel are
-  // entirely excluded from the overview: not in `rows`, not counted in
-  // `summary`, not in `pendingSelfReports`, and never fetched from the
-  // app-owned tables below at all.
-  const eligiblePeople = people.filter((person) => classifyPersonnelType(person.personnelType) === "regular");
+  // מטווחים is scoped to regular-service (חובה) personnel who are also
+  // אחמ"ש or טכנאי (product decision) -- everyone else is entirely
+  // excluded from the overview: not in `rows`, not counted in `summary`,
+  // not in `pendingSelfReports`, and never fetched from the app-owned
+  // tables below at all.
+  const eligiblePeople = people.filter((person) => isEligibleForShootingRanges(person));
 
   const personIds = eligiblePeople.map((person) => person.id);
   const [allCompletions, allPlannedOccurrences] = await Promise.all([
@@ -78,7 +78,20 @@ export async function loadShootingRangeManagerOverview(): Promise<ShootingRangeM
     }),
   }));
 
-  const model = buildShootingRangeManagerReadModel(perPersonModels);
+  // Diagnostic visibility (spec: "surface parser/data issues rather than
+  // guessing"): a "מטווחים" row that never resolved to exactly one
+  // personnel record (a name mismatch between this sheet and כ"א, or a
+  // genuine ambiguity) is silently EXCLUDED from every baseline
+  // computation above -- by design, since fabricating an assignment would
+  // risk attributing someone else's completion. But silently dropping it
+  // with no visible trace anywhere is its own failure mode: a manager
+  // staring at "אין מידע כשירות" for someone they know completed a range
+  // has no way to tell "no data" apart from "data exists but couldn't be
+  // matched". Counting (never listing raw sheet text here -- this is a
+  // manager-facing count, not a data dump) makes that distinction visible.
+  const unresolvedSheetRowCount = sheetRecords.filter((record) => record.resolvedPersonId === null).length;
+
+  const model = buildShootingRangeManagerReadModel(perPersonModels, unresolvedSheetRowCount);
   return { status: "ok", manager, model, avatarUrl };
 }
 

@@ -86,11 +86,13 @@ describe("ShootingRangesPage", () => {
     expect(screen.queryByText("ביצעתי מטווח")).toBeNull();
   });
 
-  it("shows a manager link only for a manager", async () => {
+  it("shows a manager link only for a manager, pointing to /shooting-ranges/manager", async () => {
     loadShootingRangeQualification.mockResolvedValue({ status: "ok", person: person({ isManager: true }), model: model(), avatarUrl: null });
     const page = await ShootingRangesPage();
     render(page);
-    expect(screen.getByText("תצוגת מנהל")).toBeInTheDocument();
+    const link = screen.getByText("תצוגת מנהל");
+    expect(link).toBeInTheDocument();
+    expect(link.closest("a")).toHaveAttribute("href", "/shooting-ranges/manager");
   });
 
   it("never shows a manager link for a non-manager", async () => {
@@ -105,7 +107,7 @@ describe("ShootingRangesPage", () => {
       loadShootingRangeQualification.mockResolvedValue({ status: "not_applicable", person: person({ isManager: false }), avatarUrl: null });
       const page = await ShootingRangesPage();
       render(page);
-      expect(screen.getByText("מטווחים זמין לחיילי שירות סדיר בלבד.")).toBeInTheDocument();
+      expect(screen.getByText('מטווחים זמין לאחמ"ש/טכנאי בשירות סדיר בלבד.')).toBeInTheDocument();
       expect(screen.queryByText("ביצעתי מטווח")).toBeNull();
       expect(screen.queryByText("כשירות מטווח")).toBeNull();
     });

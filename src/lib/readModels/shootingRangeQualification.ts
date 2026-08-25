@@ -1,7 +1,7 @@
 import "server-only";
 import { getRequestAuthenticatedIdentity } from "@/lib/auth/getRequestAuthenticatedIdentity";
 import { resolveIdentityAgainstPeople } from "@/lib/auth/resolveCurrentPerson";
-import { classifyPersonnelType } from "@/lib/domain/personnelType";
+import { isEligibleForShootingRanges } from "@/lib/domain/shootingRangeQualification";
 import type { Person } from "@/lib/domain/types";
 import { SHEET_SOURCES, type RawWorkbookSnapshot, type SheetSourceKey } from "@/lib/google";
 import { parsePersonnelSheet } from "@/lib/parsers/personnel";
@@ -22,16 +22,16 @@ export type ShootingRangeQualificationLoadResult =
   | { status: "unmapped" }
   | { status: "ambiguous_identity" }
   /**
-   * Authenticated + uniquely mapped, but `classifyPersonnelType(person.personnelType)
-   * !== "regular"` -- מטווחים is scoped to regular-service (חובה) personnel
-   * only (product decision); permanent (קבע) and reserve (מילואים)
-   * personnel are entirely out of scope, not merely hidden from the UI.
-   * No model is ever built for this caller. `person`/`avatarUrl` are still
-   * carried (same shape as "ok") so the page can still render identity
-   * chrome and the manager-overview link for a non-regular MANAGER
-   * (a קבע/מילואים person overseeing regular personnel is a real case --
-   * their own personal ineligibility must never hide their access to the
-   * team overview).
+   * Authenticated + uniquely mapped, but `!isEligibleForShootingRanges(person)`
+   * -- מטווחים is scoped to regular-service (חובה) personnel who are also
+   * אחמ"ש or טכנאי (product decision); everyone else (permanent, reserve,
+   * or a regular person in neither role) is entirely out of scope, not
+   * merely hidden from the UI. No model is ever built for this caller.
+   * `person`/`avatarUrl` are still carried (same shape as "ok") so the page
+   * can still render identity chrome and the manager-overview link for a
+   * non-eligible MANAGER (e.g. a קבע person overseeing regular personnel is
+   * a real case -- their own personal ineligibility must never hide their
+   * access to the team overview).
    */
   | { status: "not_applicable"; person: Person; avatarUrl: string | null }
   | { status: "ok"; person: Person; model: ShootingRangeQualificationReadModel; avatarUrl: string | null };
@@ -72,10 +72,10 @@ export function selectSheetBaselineForPerson(
  *    `resolveIdentityAgainstPeople` every other personal read model uses.
  * 2. Fetches personnel + "מטווחים" via `lib/sync`'s cached
  *    `getWorkbookSnapshot` -- never a second/duplicate Google source.
- * 3. Gates on `classifyPersonnelType(person.personnelType) === "regular"`
- *    -- מטווחים is regular-service-only (product decision); a permanent/
- *    reserve person gets `{status: "not_applicable"}` before the sheet is
- *    even parsed.
+ * 3. Gates on `isEligibleForShootingRanges(person)` -- מטווחים applies only
+ *    to regular-service (חובה) personnel who are also אחמ"ש or טכנאי
+ *    (product decision); anyone else gets `{status: "not_applicable"}`
+ *    before the sheet is even parsed.
  * 4. Parses the sheet with `parseShootingRangesSheet` and narrows it to
  *    this person's own most recent past-dated row (`selectSheetBaselineForPerson`).
  * 5. Reads this person's own completion history + planned occurrences from
@@ -95,7 +95,7 @@ export async function loadShootingRangeQualification(): Promise<ShootingRangeQua
   if (identityResult.status !== "ok") return identityResult;
 
   const person = identityResult.person;
-  if (classifyPersonnelType(person.personnelType) !== "regular") {
+  if (!isEligibleForShootingRanges(person)) {
     return { status: "not_applicable", person, avatarUrl: identity.avatarUrl };
   }
 

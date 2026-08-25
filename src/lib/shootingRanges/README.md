@@ -1,40 +1,45 @@
 # מטווחים (shooting-range qualification)
 
-## Scope: regular-service (חובה) personnel only
+## Scope: regular-service (חובה) personnel who are also אחמ"ש/טכנאי
 
-Product decision: this feature applies ONLY to personnel classified as
-`classifyPersonnelType(person.personnelType) === "regular"`
-(`lib/domain/personnelType.ts` -- the one canonical classifier, never a
-second/ad-hoc inference from name/role/text). Permanent (קבע) and reserve
-(מילואים) personnel are completely out of scope, not merely hidden from
-the UI -- every server entry point re-checks eligibility itself:
+Product decision: this feature applies ONLY to personnel for whom
+`isEligibleForShootingRanges(person)` (`lib/domain/shootingRangeQualification.ts`)
+is true -- `classifyPersonnelType(person.personnelType) === "regular"` AND
+`isShiftCapable(person)` (i.e. `isSupervisor || isTechnician`). Both are
+the EXISTING canonical classifiers from `lib/domain/personnelType.ts`;
+`isEligibleForShootingRanges` composes them and is the ONE place this
+feature's eligibility rule is decided -- never a second/ad-hoc inference
+from name/role/text, and never duplicated at each call site. Permanent
+(קבע)/reserve (מילואים) personnel, and a regular person who is neither
+אחמ"ש nor טכנאי, are all equally out of scope, not merely hidden from the
+UI -- every server entry point re-checks eligibility itself:
 
-- **Personal loader** (`shootingRangeQualification.ts`): a non-regular
+- **Personal loader** (`shootingRangeQualification.ts`): an ineligible
   person gets `{status: "not_applicable"}` before the "מטווחים" sheet is
   even parsed or any app-owned table is read. `person`/`avatarUrl` are
   still carried on that result so the page can still show identity chrome
-  and the manager-overview link for a non-regular MANAGER (a קבע/מילואים
-  person overseeing regular personnel is a real case).
+  and the manager-overview link for an ineligible MANAGER (e.g. a קבע
+  person overseeing eligible personnel is a real case).
 - **Manager overview** (`shootingRangeManagerOverview.ts`): the roster is
-  filtered to regular personnel BEFORE building any per-person model --
-  permanent/reserve people never appear in `rows`, are never counted in
-  `summary`, and never appear in `pendingSelfReports`. Name resolution
-  against the "מטווחים" sheet (`parseShootingRangesSheet`'s fail-closed
-  ambiguity check) still runs against the FULL roster first, so a name
-  ambiguous against permanent/reserve personnel too still fails closed --
-  filtering happens only after resolution, never before it.
+  filtered to eligible personnel BEFORE building any per-person model --
+  everyone else never appears in `rows`, is never counted in `summary`,
+  and never appears in `pendingSelfReports`. Name resolution against the
+  "מטווחים" sheet (`parseShootingRangesSheet`'s fail-closed ambiguity
+  check) still runs against the FULL roster first, so a name ambiguous
+  against an ineligible namesake too still fails closed -- filtering
+  happens only after resolution, never before it.
 - **Self-report submission** (`submitSelfReportShootingRangeAction`):
-  re-checks the freshly-resolved caller's own personnel type server-side;
-  a non-regular person can never create a self-report even by calling the
+  re-checks the freshly-resolved caller's own eligibility server-side; an
+  ineligible person can never create a self-report even by calling the
   action directly (hiding the UI button is not the enforcement).
 - **Planned-range scheduling** (`createPlannedShootingRangeAction`):
   re-validates every submitted person id against a freshly-fetched roster
-  AND `classifyPersonnelType(...) === "regular"` in the same filter -- a
-  permanent/reserve id is silently dropped from the scheduled set, exactly
-  like a foreign/non-roster id, and therefore never receives a scheduled/
-  reminder notification and can never become a target of bulk
-  confirmation either (confirmation only ever resolves occurrences that
-  were actually created).
+  AND `isEligibleForShootingRanges(...)` in the same filter -- an
+  ineligible id is silently dropped from the scheduled set, exactly like a
+  foreign/non-roster id, and therefore never receives a scheduled/reminder
+  notification and can never become a target of bulk confirmation either
+  (confirmation only ever resolves occurrences that were actually
+  created).
 
 ## Source-of-truth precedence
 
@@ -84,6 +89,51 @@ forward-scheduling data starts appearing in the sheet, teach
 `selectSheetBaselineForPerson`'s caller to also surface those rows as
 planned occurrences (read-through, same idea as the baseline itself) --
 this is a one-function change, not a redesign.
+
+## Real-world Sheet-data robustness
+
+Two hardening fixes, both proven with regression tests, address a
+real-world report of an eligible person with a genuine "מטווחים" row
+rendering as "אין מידע כשירות":
+
+- **`lib/parsers/date.ts`'s `parseLocalDate`** now tolerates (and
+  discards) a trailing time-of-day component ("29/06/2026 0:00:00",
+  "2026-06-29T00:00:00"). Google Sheets' `FORMATTED_STRING` rendering
+  includes one whenever a column's cell format is "Date time" rather than
+  plain "Date" -- a real, common workbook-authoring inconsistency (a
+  column typed as dates can still end up formatted as datetime). Without
+  this, every row in an affected column would silently fail to parse.
+  Shared by every parser that reads dates, not מטווחים-specific.
+- **`lib/parsers/shootingRanges.ts`'s name normalization** now applies
+  Unicode NFC composition and strips invisible bidi/formatting marks
+  (LTR/RTL marks, bidi embedding/override/isolate controls) and
+  non-breaking spaces before comparison, on BOTH the sheet's name text and
+  every כ"א personnel name. Real spreadsheet text pasted from different
+  sources/apps can carry these completely invisible differences -- a name
+  that looks byte-for-byte identical to a human can otherwise fail a
+  strict equality check. Still exact-match only: a genuine spelling/
+  word-order difference still fails closed to `null`, never fuzzy-matched.
+
+**Diagnostic visibility**: `ShootingRangeManagerReadModel.unresolvedSheetRowCount`
+(computed by `shootingRangeManagerOverview.ts` from the raw parsed sheet,
+against the FULL roster, independent of the eligibility filter) counts
+"מטווחים" rows that still never resolved to exactly one person after the
+hardening above. Rendered as a small warning banner in the manager panel
+so a real remaining name mismatch is visibly different from "nobody has
+data" -- per the identity-matching spec's own principle ("surface
+parser/data issues rather than guessing"), never silently indistinguishable
+from a genuine no-data case.
+
+## Personal <-> manager navigation
+
+`components/shootingRanges/ViewSwitchLink.tsx` is the ONE shared link
+component for the reciprocal "תצוגת מנהל" (on `/shooting-ranges`, manager
+only) / "לתצוגה האישית" (on `/shooting-ranges/manager`, always) pair --
+same visual treatment on both sides, plain text link, no new primary
+action. Authorization for `/shooting-ranges/manager` is unaffected by this
+link's presence -- it is still gated entirely server-side by
+`loadShootingRangeManagerOverview`'s manager check; the link is just a
+convenience, never a boundary.
 
 ## Three states, never collapsed
 

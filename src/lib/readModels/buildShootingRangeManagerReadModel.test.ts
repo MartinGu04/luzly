@@ -43,4 +43,9 @@ describe("buildShootingRangeManagerReadModel", () => {
     ]);
     expect(result.rows[0].requiresAttention).toBe(true);
   });
+
+  it("defaults unresolvedSheetRowCount to 0 and otherwise passes it through verbatim", () => {
+    expect(buildShootingRangeManagerReadModel([]).unresolvedSheetRowCount).toBe(0);
+    expect(buildShootingRangeManagerReadModel([], 3).unresolvedSheetRowCount).toBe(3);
+  });
 });

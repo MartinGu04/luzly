@@ -34,13 +34,15 @@ const {
   createPlannedShootingRangeAction,
 } = await import("./actions");
 
+// Regular-service (חובה) + טכנאי by default -- מטווחים is scoped to
+// regular personnel who are also אחמ"ש/טכנאי.
 function person(overrides: Partial<Person> = {}): Person {
   return {
     id: "p1",
     name: "דני בדיקה",
     email: "dani@example.invalid",
     isManager: false,
-    isTechnician: false,
+    isTechnician: true,
     isSupervisor: false,
     personnelType: "חובה",
     ...overrides,
@@ -49,7 +51,7 @@ function person(overrides: Partial<Person> = {}): Person {
 
 const MANAGER = person({ id: "mgr1", name: "מנהל בדיקה", isManager: true });
 
-describe("submitSelfReportShootingRangeAction -- regular-service-only eligibility", () => {
+describe("submitSelfReportShootingRangeAction -- eligibility (regular-service AND אחמ\"ש/טכנאי)", () => {
   beforeEach(() => {
     resolveCurrentPerson.mockReset();
     insertSelfReport.mockReset();
@@ -90,9 +92,26 @@ describe("submitSelfReportShootingRangeAction -- regular-service-only eligibilit
 
     expect(result).toEqual({ ok: false, error: "not_eligible" });
   });
+
+  it("rejects a regular (חובה) person who is neither אחמ\"ש nor טכנאי", async () => {
+    resolveCurrentPerson.mockResolvedValue({ status: "ok", person: person({ isTechnician: false, isSupervisor: false }) });
+
+    const result = await submitSelfReportShootingRangeAction("2026-08-20", null);
+
+    expect(result).toEqual({ ok: false, error: "not_eligible" });
+    expect(insertSelfReport).not.toHaveBeenCalled();
+  });
+
+  it("allows a regular (חובה) אחמ\"ש even without the טכנאי flag", async () => {
+    resolveCurrentPerson.mockResolvedValue({ status: "ok", person: person({ isTechnician: false, isSupervisor: true }) });
+
+    const result = await submitSelfReportShootingRangeAction("2026-08-20", null);
+
+    expect(result).toEqual({ ok: true });
+  });
 });
 
-describe("createPlannedShootingRangeAction -- regular-service-only eligibility", () => {
+describe("createPlannedShootingRangeAction -- eligibility (regular-service AND אחמ\"ש/טכנאי)", () => {
   beforeEach(() => {
     loadManagerPersonnelContext.mockReset();
     createPlannedOccurrences.mockReset();
@@ -112,6 +131,17 @@ describe("createPlannedShootingRangeAction -- regular-service-only eligibility",
     expect(result).toEqual({ ok: true, scheduledCount: 1 });
     expect(createPlannedOccurrences).toHaveBeenCalledWith("2026-09-03", ["p_regular"], "mgr1", "מנהל בדיקה");
     expect(notifyPeopleScheduledForRange).toHaveBeenCalledWith([regular, permanent, reserve], ["p_regular"], "2026-09-03");
+  });
+
+  it("drops a regular person who is neither אחמ\"ש nor טכנאי from the scheduled set", async () => {
+    const eligible = person({ id: "p_eligible" });
+    const regularOther = person({ id: "p_other", isTechnician: false, isSupervisor: false });
+    loadManagerPersonnelContext.mockResolvedValue({ status: "ok", context: { manager: MANAGER, people: [eligible, regularOther] } });
+
+    const result = await createPlannedShootingRangeAction("2026-09-03", ["p_eligible", "p_other"]);
+
+    expect(result).toEqual({ ok: true, scheduledCount: 1 });
+    expect(createPlannedOccurrences).toHaveBeenCalledWith("2026-09-03", ["p_eligible"], "mgr1", "מנהל בדיקה");
   });
 
   it("fails with invalid_targets when EVERY submitted id is non-regular -- never silently schedules nobody as a false success", async () => {

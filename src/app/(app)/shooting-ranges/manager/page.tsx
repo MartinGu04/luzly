@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { AccessDeniedScreen } from "@/components/auth/AccessDeniedScreen";
 import { ManagerForbiddenState } from "@/components/manager/ManagerForbiddenState";
 import { ShootingRangeManagerPanel } from "@/components/shootingRanges/ShootingRangeManagerPanel";
+import { ViewSwitchLink } from "@/components/shootingRanges/ViewSwitchLink";
 import { loadShootingRangeManagerOverview } from "@/lib/readModels/shootingRangeManagerOverview";
 
 /**
@@ -24,12 +25,16 @@ export default async function ShootingRangeManagerPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <h1 className="text-xl font-semibold text-foreground">מטווחים -- תצוגת מנהל</h1>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-xl font-semibold text-foreground">מטווחים -- תצוגת מנהל</h1>
+        <ViewSwitchLink href="/shooting-ranges" label="לתצוגה האישית" />
+      </div>
       <ShootingRangeManagerPanel
         summary={model.summary}
         rows={model.rows}
         pendingSelfReports={model.pendingSelfReports}
         roster={model.rows.map((row) => ({ id: row.personId, name: row.personName }))}
+        unresolvedSheetRowCount={model.unresolvedSheetRowCount}
       />
     </div>
   );

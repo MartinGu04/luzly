@@ -2,7 +2,7 @@
 
 import { resolveCurrentPerson } from "@/lib/auth/resolveCurrentPerson";
 import { parseCalendarDate } from "@/lib/domain/dutyBlocks";
-import { classifyPersonnelType } from "@/lib/domain/personnelType";
+import { isEligibleForShootingRanges } from "@/lib/domain/shootingRangeQualification";
 import {
   cancelManagerConfirmationRequiredJob,
   notifyPeopleScheduledForRange,
@@ -38,13 +38,13 @@ function validateNotes(notes: string | null | undefined): string | null | "inval
  * `performedOn` must be a real calendar date that is not in the future --
  * a self-report is a claim about something that already happened.
  *
- * מטווחים is scoped to regular-service (חובה) personnel only (product
- * decision) -- permanent (קבע) and reserve (מילואים) personnel are
- * completely out of scope for this feature, not merely hidden from the
- * UI. Re-checked here server-side via the canonical
- * `classifyPersonnelType` classifier (never inferred from name/role/text)
- * against the FRESHLY resolved identity -- a non-regular person can never
- * create a self-report, even by calling this action directly.
+ * מטווחים is scoped to regular-service (חובה) personnel who are also
+ * אחמ"ש or טכנאי (product decision) -- everyone else is completely out of
+ * scope for this feature, not merely hidden from the UI. Re-checked here
+ * server-side via the canonical `isEligibleForShootingRanges` (composing
+ * `classifyPersonnelType`/`isShiftCapable`, never inferred from name/role/
+ * text) against the FRESHLY resolved identity -- an ineligible person can
+ * never create a self-report, even by calling this action directly.
  */
 export async function submitSelfReportShootingRangeAction(
   performedOn: string,
@@ -52,7 +52,7 @@ export async function submitSelfReportShootingRangeAction(
 ): Promise<ShootingRangeActionResult> {
   const identity = await resolveCurrentPerson();
   if (identity.status !== "ok") return { ok: false, error: identity.status };
-  if (classifyPersonnelType(identity.person.personnelType) !== "regular") return { ok: false, error: "not_eligible" };
+  if (!isEligibleForShootingRanges(identity.person)) return { ok: false, error: "not_eligible" };
 
   const parsedDate = parseCalendarDate(performedOn);
   if (!parsedDate) return { ok: false, error: "invalid_date" };
@@ -113,13 +113,13 @@ export type CreatePlannedShootingRangeResult =
  * idempotent either way, so scheduling more people onto an existing date
  * is always safe to re-call.
  *
- * Also re-validates each id against `classifyPersonnelType(...) === "regular"`
- * (product decision: מטווחים is regular-service-only, see this file's
- * `submitSelfReportShootingRangeAction` docs) -- a permanent/reserve person
- * can never become the target of a planned occurrence, even if their id is
- * somehow submitted (a stale UI, a direct call). Silently dropped from the
- * scheduled set, exactly like a foreign/non-roster id -- never a partial
- * failure of the whole request.
+ * Also re-validates each id against `isEligibleForShootingRanges(...)`
+ * (product decision: מטווחים applies only to regular-service personnel who
+ * are also אחמ"ש/טכנאי, see this file's `submitSelfReportShootingRangeAction`
+ * docs) -- an ineligible person can never become the target of a planned
+ * occurrence, even if their id is somehow submitted (a stale UI, a direct
+ * call). Silently dropped from the scheduled set, exactly like a foreign/
+ * non-roster id -- never a partial failure of the whole request.
  */
 export async function createPlannedShootingRangeAction(
   rangeDate: string,
@@ -133,7 +133,7 @@ export async function createPlannedShootingRangeAction(
   const { manager, people } = contextResult.context;
 
   const eligibleRosterIds = new Set(
-    people.filter((person) => classifyPersonnelType(person.personnelType) === "regular").map((person) => person.id),
+    people.filter((person) => isEligibleForShootingRanges(person)).map((person) => person.id),
   );
   const validPersonIds = [...new Set(personIds)].filter((id) => eligibleRosterIds.has(id));
   if (validPersonIds.length === 0) return { ok: false, error: "invalid_targets" };

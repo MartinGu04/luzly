@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AccessDeniedScreen } from "@/components/auth/AccessDeniedScreen";
 import { Panel } from "@/components/ui/Panel";
@@ -6,6 +5,7 @@ import { PlannedRangeCountdown } from "@/components/shootingRanges/PlannedRangeC
 import { QualificationLiveCard } from "@/components/shootingRanges/QualificationLiveCard";
 import { SelfReportForm } from "@/components/shootingRanges/SelfReportForm";
 import { ShootingRangeHistoryList } from "@/components/shootingRanges/ShootingRangeHistoryList";
+import { ViewSwitchLink } from "@/components/shootingRanges/ViewSwitchLink";
 import { daysBetweenCalendarDates } from "@/lib/domain/dutyBlocks";
 import { formatReportOneDateSlash } from "@/lib/presentation/reportOneFormat";
 import { loadShootingRangeQualification } from "@/lib/readModels/shootingRangeQualification";
@@ -39,11 +39,7 @@ export default async function ShootingRangesPage() {
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-semibold text-foreground">מטווחים</h1>
-        {result.person.isManager ? (
-          <Link href="/shooting-ranges/manager" className="text-sm text-primary hover:underline">
-            תצוגת מנהל
-          </Link>
-        ) : null}
+        {result.person.isManager ? <ViewSwitchLink href="/shooting-ranges/manager" label="תצוגת מנהל" /> : null}
       </div>
 
       <Panel variant="hero">
@@ -86,12 +82,13 @@ export default async function ShootingRangesPage() {
 }
 
 /**
- * מטווחים is scoped to regular-service (חובה) personnel only -- shown for
- * an authenticated, mapped permanent (קבע) or reserve (מילואים) person
- * instead of a qualification card. Calm and truthful (same spirit as "no
+ * מטווחים is scoped to regular-service (חובה) personnel who are also
+ * אחמ"ש/טכנאי -- shown instead of a qualification card for anyone else who
+ * is nonetheless authenticated and mapped (permanent, reserve, or a
+ * regular person in neither role). Calm and truthful (same spirit as "no
  * qualification data" -- never an access-denied tone, since this isn't a
  * security boundary, just product scope). Still shows the manager-overview
- * link when relevant: a non-regular MANAGER overseeing regular personnel
+ * link when relevant: a non-eligible MANAGER overseeing eligible personnel
  * must still reach the team overview even though the feature doesn't
  * apply to them personally.
  */
@@ -100,14 +97,10 @@ function NotApplicableView({ isManager }: { isManager: boolean }) {
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-semibold text-foreground">מטווחים</h1>
-        {isManager ? (
-          <Link href="/shooting-ranges/manager" className="text-sm text-primary hover:underline">
-            תצוגת מנהל
-          </Link>
-        ) : null}
+        {isManager ? <ViewSwitchLink href="/shooting-ranges/manager" label="תצוגת מנהל" /> : null}
       </div>
       <Panel variant="panel" className="text-center text-sm text-muted">
-        מטווחים זמין לחיילי שירות סדיר בלבד.
+        מטווחים זמין לאחמ&quot;ש/טכנאי בשירות סדיר בלבד.
       </Panel>
     </div>
   );
