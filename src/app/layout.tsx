@@ -4,6 +4,7 @@ import { APP_DESCRIPTION, APP_NAME } from "@/lib/config/productName";
 import { ThemeProvider } from "@/lib/theme/ThemeProvider";
 import { THEME_INIT_SCRIPT } from "@/lib/theme/themeScript";
 import { ServiceWorkerManager } from "@/components/pwa/ServiceWorkerManager";
+import { PwaInstallProvider } from "@/components/pwa/PwaInstallProvider";
 import "./globals.css";
 
 const heebo = Heebo({
@@ -71,6 +72,18 @@ export const viewport: Viewport = {
  * authentication redirects (it renders nothing but an optional update
  * banner, and touches no auth/navigation state).
  *
+ * `PwaInstallProvider` wraps `children` (rather than sitting as a sibling
+ * like `ServiceWorkerManager`) for the same "mount at the true root" reason
+ * -- the non-standard `beforeinstallprompt` event can fire at any point
+ * after the page loads, well before the user ever opens the notification
+ * bell (`NotificationBell`'s own contextual install card, several route
+ * transitions later, is what actually consumes this state) -- so its
+ * listener must already be attached from the very first render, not
+ * attached lazily once some deeper component happens to mount. Kept
+ * entirely separate from Push subscription state (`usePushSubscription`)
+ * and from `ServiceWorkerManager` itself -- installability and Service
+ * Worker registration are different concerns.
+ *
  * Deliberately NO `h-full`/`height: 100%` here on `<html>`/`<body>` --
  * that used to be a percentage-height chain rooted at the true document
  * root, which on mobile Safari resolves against the LARGE/static
@@ -96,8 +109,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <body>
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
         <ThemeProvider>
-          {children}
-          <ServiceWorkerManager />
+          <PwaInstallProvider>
+            {children}
+            <ServiceWorkerManager />
+          </PwaInstallProvider>
         </ThemeProvider>
       </body>
     </html>

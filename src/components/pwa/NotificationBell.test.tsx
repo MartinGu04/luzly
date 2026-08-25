@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { APP_REVALIDATE_EVENT } from "@/components/layout/AppRevalidator";
 import { readPushPreference } from "@/lib/notifications/pushPreference";
+import { INSTALL_PROMPT_COOLDOWN_MS } from "@/lib/pwa/installPromptPreference";
 import { NotificationBell } from "./NotificationBell";
+import { PwaInstallProvider } from "./PwaInstallProvider";
 
 const TEST_USER_ID = "user-test-1";
 
@@ -645,4 +647,395 @@ describe("NotificationBell — popover anchor side (header polish follow-up)", (
       expect(panel.className).not.toMatch(/\bstart-0\b/);
     },
   );
+});
+
+// ---------------------------------------------------------------------------
+// PWA install onboarding (contextual install -> Push onboarding flow) --
+// exercised through a REAL `PwaInstallProvider`, same as `usePushSubscription`
+// is exercised through a real (browser-stubbed) environment above, rather
+// than a mocked hook -- this catches real wiring bugs between the provider,
+// `bellOnboarding.ts`'s derivation, and the bell's own JSX.
+// ---------------------------------------------------------------------------
+
+class FakeBeforeInstallPromptEvent extends Event {
+  readonly userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
+  readonly promptSpy = vi.fn();
+
+  constructor(outcome: "accepted" | "dismissed" = "accepted") {
+    super("beforeinstallprompt", { cancelable: true });
+    this.userChoice = Promise.resolve({ outcome, platform: "web" });
+  }
+
+  prompt(): Promise<void> {
+    this.promptSpy();
+    return Promise.resolve();
+  }
+}
+
+function stubMatchMedia(standalone: boolean) {
+  window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+    matches: standalone,
+    media: query,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  }));
+}
+
+function stubIosDevice() {
+  vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue(
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+  );
+  vi.spyOn(window.navigator, "platform", "get").mockReturnValue("iPhone");
+}
+
+async function renderBellWithInstall(userId = TEST_USER_ID) {
+  render(
+    <PwaInstallProvider>
+      <NotificationBell variant="mobile" userId={userId} />
+    </PwaInstallProvider>,
+  );
+  await act(async () => {});
+}
+
+async function openInstallBellPanel(userId = TEST_USER_ID) {
+  await renderBellWithInstall(userId);
+  fireEvent.click(screen.getByRole("button", { name: /התראות/ }));
+}
+
+afterEach(() => {
+  // `stubIosDevice` spies on `navigator.userAgent`/`platform` -- restored
+  // here so it can never leak into a later, unrelated test in this same
+  // file (`vi.clearAllMocks()` in the top-level `beforeEach` above clears
+  // call history, but does NOT restore a spy's overridden implementation).
+  vi.restoreAllMocks();
+  // @ts-expect-error -- test-only cleanup of a stubbed global.
+  delete window.matchMedia;
+  delete (window.navigator as { standalone?: boolean }).standalone;
+});
+
+describe("NotificationBell — onboarding card (D): non-iOS browser with a native deferred prompt", () => {
+  it("shows the install pitch with a real Install CTA, not the low-key fallback note", async () => {
+    stubMatchMedia(false);
+    removeBrowserPushEnvironment();
+    await renderBellWithInstall();
+    fireEvent.click(screen.getByRole("button", { name: /התראות/ }));
+    await act(async () => window.dispatchEvent(new FakeBeforeInstallPromptEvent()));
+
+    await waitFor(() => expect(screen.getByText("📲 התקינו את מי-מה-מו")).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: /התקנה/ })).toBeInTheDocument();
+    expect(screen.queryByText(/דרך תפריט הדפדפן/)).toBeNull();
+  });
+
+  it("clicking התקנה calls the deferred event's prompt() exactly once", async () => {
+    stubMatchMedia(false);
+    removeBrowserPushEnvironment();
+    await renderBellWithInstall();
+    fireEvent.click(screen.getByRole("button", { name: /התראות/ }));
+    const event = new FakeBeforeInstallPromptEvent("accepted");
+    await act(async () => window.dispatchEvent(event));
+    const installButton = await screen.findByRole("button", { name: /התקנה/ });
+
+    await act(async () => fireEvent.click(installButton));
+
+    expect(event.promptSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("dismissing via 'לא עכשיו' hides the card immediately", async () => {
+    stubMatchMedia(false);
+    removeBrowserPushEnvironment();
+    await renderBellWithInstall();
+    fireEvent.click(screen.getByRole("button", { name: /התראות/ }));
+    await act(async () => window.dispatchEvent(new FakeBeforeInstallPromptEvent()));
+    await waitFor(() => expect(screen.getByText("📲 התקינו את מי-מה-מו")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "לא עכשיו" }));
+
+    expect(screen.queryByText("📲 התקינו את מי-מה-מו")).toBeNull();
+  });
+});
+
+describe("NotificationBell — onboarding card (G): non-iOS, no deferred prompt", () => {
+  it("shows only the truthful low-key fallback note, never a dead Install button", async () => {
+    stubMatchMedia(false);
+    removeBrowserPushEnvironment();
+    await openInstallBellPanel();
+
+    await waitFor(() => expect(screen.getByText("אפשר להוסיף את מי-מה-מו למסך הבית דרך תפריט הדפדפן.")).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: /התקנה/ })).toBeNull();
+    // The inbox itself is still perfectly usable alongside the fallback note.
+    await waitFor(() => expect(screen.getByText("אין התראות חדשות")).toBeInTheDocument());
+  });
+});
+
+describe("NotificationBell — onboarding card (E): iPhone/iPad, not standalone", () => {
+  it("gets Add to Home Screen instructions, collapsed by default with correct aria wiring", async () => {
+    stubMatchMedia(false);
+    stubIosDevice();
+    removeBrowserPushEnvironment();
+    await openInstallBellPanel();
+
+    await waitFor(() => expect(screen.getByText("הוסיפו את מי-מה-מו למסך הבית")).toBeInTheDocument());
+    const trigger = screen.getByRole("button", { name: "איך מוסיפים למסך הבית?" });
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("לחצו על כפתור השיתוף")).toBeNull();
+
+    fireEvent.click(trigger);
+
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    const stepsId = trigger.getAttribute("aria-controls");
+    expect(stepsId).toBeTruthy();
+    expect(screen.getByText("לחצו על כפתור השיתוף").closest(`#${stepsId}`)).not.toBeNull();
+  });
+
+  it("never renders a fake native install button (no install API exists on iOS)", async () => {
+    stubMatchMedia(false);
+    stubIosDevice();
+    removeBrowserPushEnvironment();
+    await openInstallBellPanel();
+
+    await waitFor(() => expect(screen.getByText("הוסיפו את מי-מה-מו למסך הבית")).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: /^התקנה$/ })).toBeNull();
+  });
+});
+
+describe("NotificationBell — onboarding card (E): iPhone/iPad, standalone", () => {
+  it("does NOT show install instructions", async () => {
+    stubMatchMedia(true);
+    stubIosDevice();
+    removeBrowserPushEnvironment();
+    await openInstallBellPanel();
+
+    await waitFor(() => expect(screen.getByText("אין התראות חדשות")).toBeInTheDocument());
+    expect(screen.queryByText("הוסיפו את מי-מה-מו למסך הבית")).toBeNull();
+  });
+});
+
+describe("NotificationBell — onboarding card (F): install completed this session, tab still not standalone", () => {
+  it("shows the truthful next-step message, not another install pitch", async () => {
+    stubMatchMedia(false);
+    removeBrowserPushEnvironment();
+    await renderBellWithInstall();
+    await act(async () => window.dispatchEvent(new Event("appinstalled")));
+    fireEvent.click(screen.getByRole("button", { name: /התראות/ }));
+
+    await waitFor(() => expect(screen.getByText("ההתקנה הושלמה")).toBeInTheDocument());
+    expect(screen.getByText(/פתח\/י את מי-מה-מו מהסמל במסך הבית/)).toBeInTheDocument();
+    expect(screen.queryByText("📲 התקינו את מי-מה-מו")).toBeNull();
+  });
+});
+
+describe("NotificationBell — onboarding card (B): standalone + Push not enabled", () => {
+  it("shows the Enable Notifications card", async () => {
+    stubMatchMedia(true);
+    installBrowserPushEnvironment();
+    await openInstallBellPanel();
+
+    await waitFor(() => expect(screen.getByText("🔔 הפעילו התראות")).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "הפעל התראות" })).toBeInTheDocument();
+  });
+
+  it("clicking the card's CTA calls the EXISTING enable() -- real permission request, real subscribe, real server persistence", async () => {
+    stubMatchMedia(true);
+    const env = installBrowserPushEnvironment();
+    await openInstallBellPanel();
+    const enableButton = await screen.findByRole("button", { name: "הפעל התראות" });
+
+    await act(async () => fireEvent.click(enableButton));
+
+    expect(env.requestPermission).toHaveBeenCalledTimes(1);
+    expect(env.pushManager.subscribe).toHaveBeenCalledTimes(1);
+    expect(enablePushNotificationsAction).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.queryByText("🔔 הפעילו התראות")).toBeNull());
+  });
+
+  it("the card disappears once Push becomes enabled (spec A: standalone + enabled -> no card)", async () => {
+    stubMatchMedia(true);
+    installBrowserPushEnvironment();
+    await openInstallBellPanel();
+    fireEvent.click(await screen.findByRole("button", { name: "הפעל התראות" }));
+
+    await waitFor(() => expect(screen.queryByText("🔔 הפעילו התראות")).toBeNull());
+    // The inbox stays right there underneath, unaffected.
+    expect(screen.getByText("אין התראות חדשות")).toBeInTheDocument();
+  });
+});
+
+describe("NotificationBell — onboarding card (C): standalone + permission denied", () => {
+  it("shows blocked guidance, never re-requesting permission", async () => {
+    stubMatchMedia(true);
+    const env = installBrowserPushEnvironment();
+    // @ts-expect-error -- simulate a browser that already denied permission.
+    window.Notification.permission = "denied";
+    await openInstallBellPanel();
+
+    await waitFor(() => expect(screen.getByText("התראות חסומות")).toBeInTheDocument());
+    expect(env.requestPermission).not.toHaveBeenCalled();
+  });
+
+  it("its 'לפרטים' link opens the full Settings explanation", async () => {
+    stubMatchMedia(true);
+    installBrowserPushEnvironment();
+    // @ts-expect-error -- simulate a browser that already denied permission.
+    window.Notification.permission = "denied";
+    await openInstallBellPanel();
+    fireEvent.click(await screen.findByRole("button", { name: "לפרטים" }));
+
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "הגדרות התראות" })).toBeInTheDocument());
+    expect(screen.getByText(/ההתראות חסומות בהגדרות הדפדפן או המערכת/)).toBeInTheDocument();
+  });
+});
+
+describe("NotificationBell — dismissal cooldown", () => {
+  it("respects the cooldown -- once dismissed, a fresh mount does not auto-show the install card again", async () => {
+    stubMatchMedia(false);
+    removeBrowserPushEnvironment();
+    await renderBellWithInstall();
+    fireEvent.click(screen.getByRole("button", { name: /התראות/ }));
+    await act(async () => window.dispatchEvent(new FakeBeforeInstallPromptEvent()));
+    await waitFor(() => expect(screen.getByText("📲 התקינו את מי-מה-מו")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "לא עכשיו" }));
+    cleanup();
+
+    // A fresh mount/open on the SAME device/user shortly after -- e.g. the
+    // next time this same person taps the bell -- must not re-pitch install.
+    await renderBellWithInstall();
+    fireEvent.click(screen.getByRole("button", { name: /התראות/ }));
+    await act(async () => window.dispatchEvent(new FakeBeforeInstallPromptEvent()));
+
+    await waitFor(() => expect(screen.getByText("אין התראות חדשות")).toBeInTheDocument());
+    expect(screen.queryByText("📲 התקינו את מי-מה-מו")).toBeNull();
+  });
+
+  it("is scoped by userId -- a different account on the same device still gets the automatic card", async () => {
+    stubMatchMedia(false);
+    removeBrowserPushEnvironment();
+    await renderBellWithInstall(TEST_USER_ID);
+    fireEvent.click(screen.getByRole("button", { name: /התראות/ }));
+    await act(async () => window.dispatchEvent(new FakeBeforeInstallPromptEvent()));
+    await waitFor(() => expect(screen.getByText("📲 התקינו את מי-מה-מו")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "לא עכשיו" }));
+    cleanup();
+
+    await renderBellWithInstall("a-different-user");
+    fireEvent.click(screen.getByRole("button", { name: /התראות/ }));
+    await act(async () => window.dispatchEvent(new FakeBeforeInstallPromptEvent()));
+
+    await waitFor(() => expect(screen.getByText("📲 התקינו את מי-מה-מו")).toBeInTheDocument());
+  });
+
+  it("expires after the cooldown window, letting the card appear again", async () => {
+    stubMatchMedia(false);
+    removeBrowserPushEnvironment();
+    const key = `mi-ma-mo:install-prompt-dismissed:${TEST_USER_ID}`;
+    window.localStorage.setItem(key, String(Date.now() - INSTALL_PROMPT_COOLDOWN_MS - 1000));
+
+    await renderBellWithInstall();
+    fireEvent.click(screen.getByRole("button", { name: /התראות/ }));
+    await act(async () => window.dispatchEvent(new FakeBeforeInstallPromptEvent()));
+
+    await waitFor(() => expect(screen.getByText("📲 התקינו את מי-מה-מו")).toBeInTheDocument());
+  });
+});
+
+describe("NotificationBell — Settings manual install entry point (spec point 8)", () => {
+  it("always reachable from the gear when not standalone, even mid-cooldown", async () => {
+    stubMatchMedia(false);
+    removeBrowserPushEnvironment();
+    const key = `mi-ma-mo:install-prompt-dismissed:${TEST_USER_ID}`;
+    window.localStorage.setItem(key, String(Date.now()));
+
+    await renderBellWithInstall();
+    fireEvent.click(screen.getByRole("button", { name: /התראות/ }));
+    await act(async () => window.dispatchEvent(new FakeBeforeInstallPromptEvent()));
+    // The automatic card is suppressed by the fresh dismissal...
+    await waitFor(() => expect(screen.getByText("אין התראות חדשות")).toBeInTheDocument());
+    expect(screen.queryByText("📲 התקינו את מי-מה-מו")).toBeNull();
+
+    // ...but Settings still offers it, unconditionally.
+    fireEvent.click(await screen.findByRole("button", { name: "הגדרות התראות" }));
+
+    await waitFor(() => expect(screen.getByText("התקנת האפליקציה")).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: /התקנה/ })).toBeInTheDocument();
+  });
+
+  it("is never shown once the app is standalone", async () => {
+    stubMatchMedia(true);
+    installBrowserPushEnvironment();
+    await renderBellWithInstall();
+    fireEvent.click(screen.getByRole("button", { name: /התראות/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "הגדרות התראות" }));
+
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "הגדרות התראות" })).toBeInTheDocument());
+    expect(screen.queryByText("התקנת האפליקציה")).toBeNull();
+  });
+});
+
+describe("NotificationBell — Settings replaces the misleading unsupported message on iOS non-standalone (spec point 6)", () => {
+  it("iOS + not standalone + Push reporting unsupported -> install guidance instead of the blunt 'not supported' message", async () => {
+    stubMatchMedia(false);
+    stubIosDevice();
+    removeBrowserPushEnvironment();
+    await renderBellWithInstall();
+    fireEvent.click(screen.getByRole("button", { name: /התראות/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "הגדרות התראות" }));
+
+    await waitFor(() => expect(screen.getByText("התקנת האפליקציה")).toBeInTheDocument());
+    expect(screen.getByText("הוסיפו את מי-מה-מו למסך הבית")).toBeInTheDocument();
+    expect(screen.queryByText("התראות אינן נתמכות בדפדפן או במכשיר הזה.")).toBeNull();
+  });
+
+  it("a non-iOS browser that is genuinely unsupported still keeps the truthful unsupported message", async () => {
+    stubMatchMedia(false);
+    removeBrowserPushEnvironment();
+    await renderBellWithInstall();
+    fireEvent.click(screen.getByRole("button", { name: /התראות/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "הגדרות התראות" }));
+
+    await waitFor(() => expect(screen.getByText("התראות אינן נתמכות בדפדפן או במכשיר הזה.")).toBeInTheDocument());
+  });
+});
+
+describe("NotificationBell — install onboarding never triggers an automatic permission prompt", () => {
+  it("simply opening the bell with the Enable Notifications card visible never calls requestPermission", async () => {
+    stubMatchMedia(true);
+    const env = installBrowserPushEnvironment();
+    await openInstallBellPanel();
+
+    await waitFor(() => expect(screen.getByText("🔔 הפעילו התראות")).toBeInTheDocument());
+    expect(env.requestPermission).not.toHaveBeenCalled();
+  });
+
+  it("a native appinstalled completion never calls requestPermission automatically", async () => {
+    stubMatchMedia(false);
+    const env = installBrowserPushEnvironment();
+    await renderBellWithInstall();
+
+    await act(async () => window.dispatchEvent(new Event("appinstalled")));
+
+    expect(env.requestPermission).not.toHaveBeenCalled();
+  });
+
+  it("mounting standalone (as if freshly launched from the installed icon) never requests permission on its own", async () => {
+    stubMatchMedia(true);
+    const env = installBrowserPushEnvironment();
+
+    await renderBellWithInstall();
+
+    expect(env.requestPermission).not.toHaveBeenCalled();
+  });
+});
+
+describe("NotificationBell — unread badge stays independent of install/Push state", () => {
+  it("still shows the unread count even while the install fallback note is displayed", async () => {
+    stubMatchMedia(false);
+    removeBrowserPushEnvironment();
+    getNotificationInboxAction.mockResolvedValue({
+      items: [inboxItem({ id: "a" }), inboxItem({ id: "b" })],
+      unreadCount: 2,
+    });
+
+    await renderBellWithInstall();
+
+    await waitFor(() => expect(screen.getByText("2")).toBeInTheDocument());
+  });
 });
