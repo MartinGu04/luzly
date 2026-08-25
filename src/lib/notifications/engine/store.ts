@@ -621,14 +621,23 @@ export interface RecentSettledJobRow {
   createdAt: string;
 }
 
+export interface RecentSettledJobsResult {
+  /** Newest-first, bounded to `limit` -- a small presentation slice, never the full match set. */
+  rows: RecentSettledJobRow[];
+  /** The EXACT number of matching rows, independent of `limit` -- lets the caller render a truthful "ועוד N שינויים" without a second query. */
+  totalCount: number;
+}
+
 /**
  * Read-only lookup of ONE recipient's own recent settled-change jobs --
- * powers the personal dashboard's "מה השתנה" recap (PR #36), never the
- * worker itself. Deliberately selects ONLY presentation-safe columns --
- * never `recipient_user_id`, `dedupe_key`, `attempts`, `last_error`,
- * `status`, `scheduled_for`, `claimed_at`, `tag`, or `updated_at`. The
- * caller (`lib/readModels/recentDashboardChanges.ts`) maps this straight
- * into a small typed read model -- never a raw row into React.
+ * powers the personal Home dashboard's "מה השתנה מאז הפעם הקודמת" recap
+ * (originally PR #36, upgraded from a fixed 72h horizon to "since your
+ * previous Home visit"), never the worker itself. Deliberately selects
+ * ONLY presentation-safe columns -- never `recipient_user_id`,
+ * `dedupe_key`, `attempts`, `last_error`, `status`, `scheduled_for`,
+ * `claimed_at`, `tag`, or `updated_at`. The caller
+ * (`lib/readModels/recentDashboardChanges.ts`) maps this straight into a
+ * small typed read model -- never a raw row into React.
  *
  * Deliberately NO `status` filter: whether a job's push delivery
  * completed, was skipped, or failed is irrelevant here -- a settled
@@ -636,17 +645,27 @@ export interface RecentSettledJobRow {
  * independent of delivery outcome. Coupling this recap's visibility to
  * delivery status would be exactly the "second baseline system" this
  * feature is designed to avoid becoming.
+ *
+ * `sinceIso` is caller-supplied and generic -- this function has no
+ * opinion on WHERE it comes from (a fixed horizon, or, as of the
+ * "since your previous visit" upgrade, the user's own previous-visit
+ * cutoff from `lib/dashboardVisit/store.ts`).
+ *
+ * Requests an EXACT row count (`{ count: "exact" }`) in the SAME request
+ * as the bounded/limited rows -- postgrest computes `count` over the
+ * whole filtered match set independent of `limit`, so this is one round
+ * trip, never a second "how many total?" query (no N+1).
  */
 export async function getRecentSettledJobsForRecipient(
   recipientUserId: string,
   categories: readonly string[],
   sinceIso: string,
   limit: number,
-): Promise<RecentSettledJobRow[]> {
+): Promise<RecentSettledJobsResult> {
   const supabase = getNotificationServiceClient();
-  const { data, error } = await supabase
+  const { data, error, count } = await supabase
     .from("notification_jobs")
-    .select("id, category, title, body, path, source_ref, created_at")
+    .select("id, category, title, body, path, source_ref, created_at", { count: "exact" })
     .eq("recipient_user_id", recipientUserId)
     .in("category", categories)
     .gte("created_at", sinceIso)
@@ -654,7 +673,7 @@ export async function getRecentSettledJobsForRecipient(
     .limit(limit);
   if (error) throw error;
 
-  return ((data ?? []) as Record<string, unknown>[]).map((row) => ({
+  const rows = ((data ?? []) as Record<string, unknown>[]).map((row) => ({
     id: row.id as string,
     category: row.category as string,
     title: row.title as string,
@@ -663,6 +682,8 @@ export async function getRecentSettledJobsForRecipient(
     sourceRef: row.source_ref as string | null,
     createdAt: row.created_at as string,
   }));
+
+  return { rows, totalCount: count ?? rows.length };
 }
 
 // ---------------------------------------------------------------------------
@@ -678,7 +699,7 @@ export async function getRecentSettledJobsForRecipient(
 // anywhere but a Server Action/Server Component.
 // ---------------------------------------------------------------------------
 
-/** A bounded inbox window -- a bell popover, never a full notification archive (same "bounded, not an archive" convention `RECENT_DASHBOARD_CHANGES_LIMIT` already establishes). The unread badge counts only within this window. */
+/** A bounded inbox window -- a bell popover, never a full notification archive (same "bounded, not an archive" convention `DASHBOARD_VISIT_RECAP_VISIBLE_LIMIT` already establishes). The unread badge counts only within this window. */
 export const NOTIFICATION_INBOX_LIMIT = 50;
 
 export interface InboxJobRow {

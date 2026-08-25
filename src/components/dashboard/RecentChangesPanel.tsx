@@ -5,6 +5,15 @@ import type { RecentDashboardChange, RecentDashboardChangeCategory } from "@/lib
 
 interface RecentChangesPanelProps {
   changes: RecentDashboardChange[];
+  /**
+   * The EXACT total number of changes since the previous visit --
+   * independent of `changes.length` (the bounded, newest-first
+   * presentation slice). Defaults to `changes.length` so existing
+   * callers that only ever had the visible rows keep working unchanged
+   * (no "ועוד N" line ever appears in that case, which is correct: there
+   * is nothing more to report).
+   */
+  totalCount?: number;
   /** Defaults to the real current instant; tests pass a fixed value for deterministic relative-time labels. */
   now?: Date;
 }
@@ -16,34 +25,58 @@ const CATEGORY_EMOJI: Record<RecentDashboardChangeCategory, string> = {
   duty: "🔄",
 };
 
+/** e.g. "3 שינויים מאז הביקור האחרון" / "שינוי אחד מאז הביקור האחרון". */
+function formatChangeCountLabel(count: number): string {
+  if (count === 1) return "שינוי אחד מאז הביקור האחרון";
+  return `${count} שינויים מאז הביקור האחרון`;
+}
+
+/** e.g. "ועוד 4 שינויים" / "ועוד שינוי אחד". Only ever called when `remainingCount > 0`. */
+function formatMoreChangesLabel(remainingCount: number): string {
+  if (remainingCount === 1) return "ועוד שינוי אחד";
+  return `ועוד ${remainingCount} שינויים`;
+}
+
 /**
- * "מה השתנה" -- a tiny, calm recap of recently SETTLED personal
- * shift/team/duty changes (PR #36). This is NOT the Notification Bell and
- * NOT a notification inbox: read-only, no unread state, no mark-as-read,
- * no history page.
+ * "מה השתנה מאז הפעם הקודמת" -- a tiny, calm recap of personal
+ * shift/team/duty changes SETTLED since the user's previous genuine Home
+ * visit (originally PR #36's "מה השתנה", upgraded from a fixed 72-hour
+ * window into a true "since last visit" recap -- see
+ * `lib/readModels/recentDashboardChanges.ts`). This is NOT the
+ * Notification Bell and NOT a notification inbox: read-only, no unread
+ * state, no mark-as-read, no history page.
  *
  * Renders NOTHING at all when `changes` is empty -- no placeholder card,
  * no "אין שינויים", no skeleton slot. A dashboard with nothing to recap
  * must look exactly like it did before this feature existed.
+ *
+ * The supporting line under the heading always states the TRUE total
+ * (`totalCount`), never just how many rows happen to be visible -- and a
+ * quiet trailing line ("ועוד N שינויים") appears whenever `totalCount`
+ * exceeds the visible rows, so a bounded V1 presentation (newest 3 rows)
+ * never silently understates how much actually changed.
  *
  * `body` is the settled notification's own already-Hebrew-worded copy,
  * reused verbatim -- never regenerated here. The generic `title` (e.g.
  * "⚠️ שינוי בשיבוץ") is deliberately never rendered next to it -- it would
  * only repeat what the category emoji + body already say; it's kept
  * `sr-only` for a screen reader's benefit instead. Deliberately no
- * severity ring/red background even for a shift change -- an ordinary
- * activity recap, not an alert.
+ * severity ring/red background even for a shift change -- an ordinary,
+ * calm activity recap, never a warning surface.
  *
  * `body` is allowed to wrap (never `truncate`) -- unlike a title, hiding
  * part of the actual change description would defeat the panel's whole
  * purpose.
  */
-export function RecentChangesPanel({ changes, now = new Date() }: RecentChangesPanelProps) {
+export function RecentChangesPanel({ changes, totalCount = changes.length, now = new Date() }: RecentChangesPanelProps) {
   if (changes.length === 0) return null;
+
+  const remainingCount = Math.max(0, totalCount - changes.length);
 
   return (
     <Panel variant="panel">
-      <h3 className="text-sm font-semibold text-foreground">מה השתנה</h3>
+      <h3 className="text-sm font-semibold text-foreground">מה השתנה מאז הפעם הקודמת</h3>
+      <p className="mt-0.5 text-xs text-muted">{formatChangeCountLabel(totalCount)}</p>
       <ul className="mt-3 space-y-1">
         {changes.map((change) => (
           <li key={change.key}>
@@ -63,6 +96,7 @@ export function RecentChangesPanel({ changes, now = new Date() }: RecentChangesP
           </li>
         ))}
       </ul>
+      {remainingCount > 0 ? <p className="mt-2 text-xs text-muted">{formatMoreChangesLabel(remainingCount)}</p> : null}
     </Panel>
   );
 }

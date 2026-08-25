@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import type {
   PersonalAssignmentView,
@@ -13,6 +13,12 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 vi.mock("@/components/ui/DataFreshnessStatus", () => ({
   DataFreshnessStatus: ({ fetchedAt }: { fetchedAt: string }) => <div data-testid="freshness">{fetchedAt}</div>,
 }));
+const recordDashboardVisitAction = vi.hoisted(() => vi.fn().mockResolvedValue({ ok: true }));
+vi.mock("@/lib/dashboardVisit/actions", () => ({ recordDashboardVisitAction }));
+
+beforeEach(() => {
+  recordDashboardVisitAction.mockClear();
+});
 
 afterEach(() => {
   cleanup();
@@ -233,37 +239,50 @@ describe("Dashboard — data freshness uses PersonalScheduleReadModel.fetchedAt 
   });
 });
 
-describe("Dashboard — PR #36 'מה השתנה' recap wiring", () => {
-  it("regression: no recentChanges prop at all renders no trace of the recap (existing callers/tests are unaffected)", () => {
+describe("Dashboard — 'מה השתנה מאז הפעם הקודמת' visit recap wiring", () => {
+  it("regression: no visitRecap prop at all renders no trace of the recap (existing callers/tests are unaffected)", () => {
     render(<Dashboard model={model()} />);
-    expect(screen.queryByText("מה השתנה")).toBeNull();
+    expect(screen.queryByText("מה השתנה מאז הפעם הקודמת")).toBeNull();
   });
 
-  it("an explicit empty recentChanges array also renders no trace of the recap", () => {
-    render(<Dashboard model={model()} recentChanges={[]} />);
-    expect(screen.queryByText("מה השתנה")).toBeNull();
+  it("an explicit null visitRecap (ineligible personnel) renders no trace of the recap, and never mounts the visit marker", async () => {
+    render(<Dashboard model={model()} visitRecap={null} />);
+    expect(screen.queryByText("מה השתנה מאז הפעם הקודמת")).toBeNull();
+    await Promise.resolve();
+    expect(recordDashboardVisitAction).not.toHaveBeenCalled();
   });
 
-  it("a populated recentChanges renders the recap heading, without hiding/replacing the Hero", () => {
+  it("an eligible visitor with zero items renders no trace of the recap panel, but still mounts the visit marker", async () => {
+    render(<Dashboard model={model()} visitRecap={{ visitStartedAt: "2026-08-25T10:00:00.000Z", items: [], totalCount: 0 }} />);
+    expect(screen.queryByText("מה השתנה מאז הפעם הקודמת")).toBeNull();
+    await Promise.resolve();
+    expect(recordDashboardVisitAction).toHaveBeenCalledWith("2026-08-25T10:00:00.000Z");
+  });
+
+  it("a populated visitRecap renders the recap heading, without hiding/replacing the Hero", () => {
     const currentShift = assignment({ title: "טכנאי יום" });
     render(
       <Dashboard
         model={model({ currentAssignments: [currentShift] })}
-        recentChanges={[
-          {
-            key: "change:job_1",
-            category: "shift",
-            title: "⚠️ שינוי בשיבוץ",
-            body: "השיבוץ שלך ליום חמישי השתנה: יום → לילה",
-            happenedAt: "2026-08-12T07:42:00.000Z",
-            href: "/schedule?date=2026-08-19",
-            date: "2026-08-19",
-          },
-        ]}
+        visitRecap={{
+          visitStartedAt: "2026-08-25T10:00:00.000Z",
+          totalCount: 1,
+          items: [
+            {
+              key: "change:job_1",
+              category: "shift",
+              title: "⚠️ שינוי בשיבוץ",
+              body: "השיבוץ שלך ליום חמישי השתנה: יום → לילה",
+              happenedAt: "2026-08-12T07:42:00.000Z",
+              href: "/schedule?date=2026-08-19",
+              date: "2026-08-19",
+            },
+          ],
+        }}
       />,
     );
 
-    expect(screen.getByText("מה השתנה")).toBeInTheDocument();
+    expect(screen.getByText("מה השתנה מאז הפעם הקודמת")).toBeInTheDocument();
     expect(screen.getByText("פעיל עכשיו")).toBeInTheDocument(); // Hero's own current-assignment story, still present
     expect(screen.getByText("השיבוץ שלך ליום חמישי השתנה: יום → לילה")).toBeInTheDocument();
   });
@@ -279,23 +298,27 @@ describe("Dashboard — 'השבוע הקרוב' weekly overview", () => {
           todayEvents: [currentShift],
           calendarEvents: [currentShift],
         })}
-        recentChanges={[
-          {
-            key: "change:job_1",
-            category: "shift",
-            title: "⚠️ שינוי בשיבוץ",
-            body: "השיבוץ שלך השתנה",
-            happenedAt: "2026-08-12T07:42:00.000Z",
-            href: "/schedule?date=2026-08-19",
-            date: "2026-08-19",
-          },
-        ]}
+        visitRecap={{
+          visitStartedAt: "2026-08-25T10:00:00.000Z",
+          totalCount: 1,
+          items: [
+            {
+              key: "change:job_1",
+              category: "shift",
+              title: "⚠️ שינוי בשיבוץ",
+              body: "השיבוץ שלך השתנה",
+              happenedAt: "2026-08-12T07:42:00.000Z",
+              href: "/schedule?date=2026-08-19",
+              date: "2026-08-19",
+            },
+          ],
+        }}
       />,
     );
 
     expect(screen.getByText("פעיל עכשיו")).toBeInTheDocument(); // Hero
     expect(screen.getByText("היום שלי")).toBeInTheDocument(); // TodayTimeline
-    expect(screen.getByText("מה השתנה")).toBeInTheDocument(); // RecentChangesPanel
+    expect(screen.getByText("מה השתנה מאז הפעם הקודמת")).toBeInTheDocument(); // RecentChangesPanel
     expect(screen.getByText("הסידור שלך נראה תקין")).toBeInTheDocument(); // IssuesPanel (no issues)
     expect(screen.getByText("הקרובים שלי")).toBeInTheDocument(); // UpcomingSection
     expect(screen.getByText("השבוע הקרוב")).toBeInTheDocument(); // new weekly overview

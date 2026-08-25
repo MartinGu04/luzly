@@ -1,17 +1,19 @@
 import "server-only";
 import { getRequestAuthenticatedIdentity } from "@/lib/auth/getRequestAuthenticatedIdentity";
 import { parseCalendarDate } from "@/lib/domain/dutyBlocks";
+import { getLastVisitedAt } from "@/lib/dashboardVisit/store";
 import { getRecentSettledJobsForRecipient, type RecentSettledJobRow } from "@/lib/notifications/engine/store";
-import type { RecentDashboardChange, RecentDashboardChangeCategory } from "./recentDashboardChangesTypes";
+import type { DashboardVisitRecap, RecentDashboardChange, RecentDashboardChangeCategory } from "./recentDashboardChangesTypes";
 
 /**
- * A bounded "what recently changed?" horizon -- a small dashboard recap,
- * never a notification archive. These two constants are the ONLY place
- * the 72h/3-item shape is decided; nothing else in this file hardcodes a
- * duration or count.
+ * The bounded PRESENTATION slice for the personal Home dashboard's "מה
+ * השתנה מאז הפעם הקודמת" recap -- a small returning-user recap, never a
+ * notification wall. This is the ONLY place that decides how many rows
+ * are shown; the recap's TIME LOWER BOUND is no longer a constant at
+ * all (see this file's own docstring below) -- it is now the
+ * authenticated user's own previous Home-visit instant.
  */
-export const RECENT_DASHBOARD_CHANGES_HORIZON_HOURS = 72;
-export const RECENT_DASHBOARD_CHANGES_LIMIT = 3;
+export const DASHBOARD_VISIT_RECAP_VISIBLE_LIMIT = 3;
 
 /**
  * Exactly the personal semantic-change categories this recap covers, and
@@ -83,15 +85,25 @@ function toRecentDashboardChange(row: RecentSettledJobRow): RecentDashboardChang
   };
 }
 
+const EMPTY_RECAP_AT = (visitStartedAt: string): DashboardVisitRecap => ({ visitStartedAt, items: [], totalCount: 0 });
+
 /**
- * Server-only orchestration for the dashboard's "מה השתנה" recap.
- * Deliberately does NOT re-diff the workbook: the notification engine
- * (PR #30) has already captured a baseline, computed semantic facts,
- * detected changes, debounced them through the quiet period, and settled
- * genuine ones into durable `notification_jobs` rows -- this reuses that
- * outbox as the single source of truth for "did anything real happen?"
- * rather than building a second baseline/diff system, and never calls
- * Google Sheets itself.
+ * Server-only orchestration for the personal Home dashboard's "מה השתנה
+ * מאז הפעם הקודמת" recap. Upgraded from PR #36's original "recent
+ * settled changes from the last 72 hours" into a TRUE "since your
+ * previous Home visit" recap: the lower time bound is no longer any
+ * fixed horizon at all -- it is the authenticated user's own previous
+ * Home-visit instant, persisted server-side (`lib/dashboardVisit/store.ts`)
+ * and never localStorage, so it works identically across devices.
+ *
+ * Deliberately does NOT re-diff the workbook, and deliberately does NOT
+ * become a second baseline/semantic-change engine: the notification
+ * engine (PR #30) has already captured a baseline, computed semantic
+ * facts, detected changes, debounced them through the quiet period, and
+ * settled genuine ones into durable `notification_jobs` rows -- this
+ * reuses that outbox as the single source of truth for "did anything
+ * real happen?", exactly as PR #36 already did, only with a different
+ * (per-user, per-visit) lower time bound instead of a shared constant.
  *
  * Resolves the authenticated user independently (the same "re-verify,
  * don't thread an already-narrowed read model across boundaries" pattern
@@ -100,44 +112,73 @@ function toRecentDashboardChange(row: RecentSettledJobRow): RecentDashboardChang
  * never a client-supplied recipient id, and never through anything but
  * the notification engine's own service-role-gated store layer: RLS on
  * `notification_jobs` is default-deny with zero policies, so there is no
- * other way for a browser-authenticated request to read it at all.
+ * other way for a browser-authenticated request to read it at all. The
+ * previous-visit cutoff itself is read the same way, through
+ * `lib/dashboardVisit/store.ts`'s own separate service-role boundary.
  *
- * `now` defaults to the real current instant; tests pass a fixed value
- * for determinism (same default-parameter convention as
- * `getJerusalemLocalNow`).
+ * CRITICAL ordering, per PR spec section 7: this function only ever
+ * READS the previous visit -- it never advances it. The current visit is
+ * marked separately, client-side, only after the Home screen has
+ * genuinely mounted (`DashboardVisitMarker`) -- never during this server
+ * render. `now` (defaulting to the real current instant; tests pass a
+ * fixed value for determinism, same convention as `getJerusalemLocalNow`)
+ * becomes `visitStartedAt`, captured immediately and returned even on
+ * failure -- see PR spec section 8 for why the marker must persist THIS
+ * snapshot instant, never a later client-side `Date.now()`: a semantic
+ * change could otherwise settle in the gap between this read and the
+ * marker's write and be silently treated as "already seen" next time.
  *
- * Never throws: an infra/config failure here (e.g. a missing service-role
- * key) must never take down the personal dashboard, which stays more
- * important than this optional recap -- caught and logged (a fixed,
- * PII-safe string, matching the notification worker's own `console.error`
- * convention), degrading to an empty list, which `RecentChangesPanel`
- * already renders as nothing at all.
+ * First-ever visit (no stored previous timestamp): this is the user's
+ * baseline. No historical recap is shown -- `items`/`totalCount` stay
+ * empty, and NOTHING is queried against `notification_jobs` for it, even
+ * though old settled jobs may well exist. Their NEXT visit can
+ * legitimately show changes since this baseline, once `DashboardVisitMarker`
+ * records it.
+ *
+ * Never throws: an infra/config failure here (visit-state read, or the
+ * changes query itself) must never take down the personal dashboard,
+ * which stays more important than this optional recap -- caught and
+ * logged (a fixed, PII-safe string, matching the notification worker's
+ * own `console.error` convention), degrading to an empty recap, which
+ * `RecentChangesPanel` already renders as nothing at all. `visitStartedAt`
+ * is still returned in this failure case (it was captured before any
+ * fallible call), so the caller can still mount `DashboardVisitMarker`
+ * and make forward progress for next time.
  */
-export async function loadRecentDashboardChanges(now: Date = new Date()): Promise<RecentDashboardChange[]> {
+export async function loadDashboardVisitRecap(now: Date = new Date()): Promise<DashboardVisitRecap> {
+  const visitStartedAt = now.toISOString();
+
   try {
     // Request-scoped memoized (`getRequestAuthenticatedIdentity`) -- this
     // runs on the SAME dashboard-page render as the protected layout's own
     // `getRequestPersonalSchedule()`, so it shares that one live Supabase
     // `getUser()` check instead of triggering a second one.
     const identity = await getRequestAuthenticatedIdentity();
-    if (identity.status !== "authenticated") return [];
+    if (identity.status !== "authenticated") return EMPTY_RECAP_AT(visitStartedAt);
 
-    const sinceIso = new Date(now.getTime() - RECENT_DASHBOARD_CHANGES_HORIZON_HOURS * 60 * 60_000).toISOString();
-    const rows = await getRecentSettledJobsForRecipient(
+    const previousVisitedAt = await getLastVisitedAt(identity.userId);
+    if (previousVisitedAt === null) {
+      // First-ever visit: this IS the baseline -- no historical recap,
+      // and no notification_jobs query at all (see this function's own
+      // docstring).
+      return EMPTY_RECAP_AT(visitStartedAt);
+    }
+
+    const { rows, totalCount } = await getRecentSettledJobsForRecipient(
       identity.userId,
       Object.keys(PERSONAL_CHANGE_CATEGORIES),
-      sinceIso,
-      RECENT_DASHBOARD_CHANGES_LIMIT,
+      previousVisitedAt,
+      DASHBOARD_VISIT_RECAP_VISIBLE_LIMIT,
     );
 
-    const changes: RecentDashboardChange[] = [];
+    const items: RecentDashboardChange[] = [];
     for (const row of rows) {
       const change = toRecentDashboardChange(row);
-      if (change) changes.push(change);
+      if (change) items.push(change);
     }
-    return changes;
+    return { visitStartedAt, items, totalCount };
   } catch {
-    console.error("[dashboard] recent changes query failed");
-    return [];
+    console.error("[dashboard] visit recap query failed");
+    return EMPTY_RECAP_AT(visitStartedAt);
   }
 }

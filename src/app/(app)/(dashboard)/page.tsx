@@ -4,7 +4,7 @@ import { PermanentManagerHome } from "@/components/home/PermanentManagerHome";
 import { classifyPersonnelType } from "@/lib/domain/personnelType";
 import { getRequestPermanentManagerHome } from "@/lib/readModels/getRequestPermanentManagerHome";
 import { getRequestPersonalSchedule } from "@/lib/readModels/getRequestPersonalSchedule";
-import { getRequestRecentDashboardChanges } from "@/lib/readModels/getRequestRecentDashboardChanges";
+import { getRequestDashboardVisitRecap } from "@/lib/readModels/getRequestRecentDashboardChanges";
 
 /**
  * By the time this page renders, the protected layout has already gated
@@ -14,9 +14,10 @@ import { getRequestRecentDashboardChanges } from "@/lib/readModels/getRequestRec
  * result the layout already computed (React `cache()`), so this performs
  * no additional Google request.
  *
- * `getRequestRecentDashboardChanges()` (PR #36's "מה השתנה" recap) is a
- * SEPARATE, optional call -- it never throws (see its own docstring), so
- * a failure there can never turn this page into `ConfigurationErrorState`;
+ * `getRequestDashboardVisitRecap()` (originally PR #36's "מה השתנה"
+ * recap, upgraded into a true "since your previous Home visit" recap) is
+ * a SEPARATE, optional call -- it never throws (see its own docstring),
+ * so a failure there can never turn this page into `ConfigurationErrorState`;
  * the personal schedule stays the page's one load-bearing dependency.
  *
  * Deliberately still awaited AFTER `result`, not in parallel: unlike the
@@ -26,6 +27,18 @@ import { getRequestRecentDashboardChanges } from "@/lib/readModels/getRequestRec
  * extra Supabase round trip finding that out. See this file's own test
  * ("never fetches recent changes at all when the personal schedule itself
  * failed") for the behavior this preserves.
+ *
+ * The visit recap is ALSO explicitly gated here to regular (`חובה`) and
+ * reserve (`מילואים`) personnel ONLY -- `classifyPersonnelType(...)`,
+ * re-checked from the already-authenticated `result.model.person`, is
+ * the ONE place that decides eligibility for this feature. Permanent
+ * staff never see it (managers already have their own separate
+ * `PermanentManagerHome`, but this gate does not rely on that alone --
+ * a non-manager permanent person reaching the normal Dashboard below
+ * still must not get this recap) and unclassified personnel never see
+ * it either. An ineligible person never even triggers
+ * `getRequestDashboardVisitRecap()` -- no wasted Supabase round trip for
+ * a recap that would never render anyway.
  *
  * Permanent-manager Home routing (post-release feature): ONLY an
  * authenticated person who is BOTH `classifyPersonnelType(...) ===
@@ -59,7 +72,10 @@ export default async function DashboardPage() {
     }
   }
 
-  const recentChanges = await getRequestRecentDashboardChanges();
+  const serviceCategory = classifyPersonnelType(result.model.person.personnelType);
+  const isVisitRecapEligible = serviceCategory === "regular" || serviceCategory === "reserve";
 
-  return <Dashboard model={result.model} recentChanges={recentChanges} />;
+  const visitRecap = isVisitRecapEligible ? await getRequestDashboardVisitRecap() : null;
+
+  return <Dashboard model={result.model} visitRecap={visitRecap} />;
 }

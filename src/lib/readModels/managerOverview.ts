@@ -165,7 +165,7 @@ async function loadManagerOverviewReadModelInner(
  * trustworthy. A push-subscription/Supabase Admin API infra failure must
  * never take down the whole manager overview though -- adoption is
  * optional operational context, not a page-blocking dependency (same
- * defensive convention as `loadRecentDashboardChanges`'s notification-
+ * defensive convention as `loadDashboardVisitRecap`'s notification-
  * engine query) -- so `unavailable` is a caught, logged (fixed PII-safe
  * string only, never the underlying error, which could carry a raw
  * Supabase response) degradation, not a thrown exception.

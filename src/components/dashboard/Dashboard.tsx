@@ -2,7 +2,8 @@ import { BLOCKING_ABSENCE_KINDS } from "@/lib/domain/operationalIssues";
 import { DataFreshnessStatus } from "@/components/ui/DataFreshnessStatus";
 import { buildPersonalWeekOverview } from "@/lib/presentation/personalWeekOverview";
 import type { PersonalEventView, PersonalScheduleReadModel } from "@/lib/readModels/types";
-import type { RecentDashboardChange } from "@/lib/readModels/recentDashboardChangesTypes";
+import type { DashboardVisitRecap } from "@/lib/readModels/recentDashboardChangesTypes";
+import { DashboardVisitMarker } from "./DashboardVisitMarker";
 import { Header } from "./Header";
 import { Hero } from "./Hero";
 import { IssuesPanel } from "./IssuesPanel";
@@ -13,8 +14,17 @@ import { WeekOverviewSection } from "./WeekOverviewSection";
 
 interface DashboardProps {
   model: PersonalScheduleReadModel;
-  /** PR #36's "מה השתנה" recap -- defaults to empty so every existing caller/test is unaffected; `RecentChangesPanel` itself renders nothing for an empty list. */
-  recentChanges?: RecentDashboardChange[];
+  /**
+   * The "מה השתנה מאז הפעם הקודמת" recap (originally PR #36's "מה
+   * השתנה", upgraded to a true "since your previous Home visit" recap)
+   * -- `null`/omitted for every existing caller/test (regression-safe),
+   * and whenever `page.tsx` decided this person is ineligible
+   * (permanent/unclassified personnel never receive this prop at all).
+   * `RecentChangesPanel` itself still renders nothing for an empty
+   * `items` list; `DashboardVisitMarker` only mounts when this is
+   * non-null -- see below.
+   */
+  visitRecap?: DashboardVisitRecap | null;
 }
 
 /** A known blocking absence (vacation/abroad/medical/day_off) dated today, reusing the domain's own "blocking" semantics -- never redefined here. */
@@ -51,7 +61,7 @@ function findVacationEvent(todayEvents: readonly PersonalEventView[]): PersonalE
  * purely from `calendarEvents` (never `upcomingEvents`, which excludes
  * finished history) via `buildPersonalWeekOverview`.
  */
-export function Dashboard({ model, recentChanges = [] }: DashboardProps) {
+export function Dashboard({ model, visitRecap = null }: DashboardProps) {
   const hasCurrentAssignment = model.currentAssignments.length > 0;
 
   // Vacation only becomes the hero's story when nothing is currently
@@ -79,6 +89,7 @@ export function Dashboard({ model, recentChanges = [] }: DashboardProps) {
 
   return (
     <div className="flex flex-col gap-4">
+      {visitRecap ? <DashboardVisitMarker visitStartedAt={visitRecap.visitStartedAt} /> : null}
       <Header personName={model.person.name} localNow={model.localNow} />
       <DataFreshnessStatus fetchedAt={model.fetchedAt} />
 
@@ -104,9 +115,9 @@ export function Dashboard({ model, recentChanges = [] }: DashboardProps) {
             />
           </div>
 
-          {recentChanges.length > 0 ? (
+          {visitRecap && visitRecap.items.length > 0 ? (
             <div className="animate-fade-up" style={{ animationDelay: "120ms" }}>
-              <RecentChangesPanel changes={recentChanges} />
+              <RecentChangesPanel changes={visitRecap.items} totalCount={visitRecap.totalCount} />
             </div>
           ) : null}
         </div>
