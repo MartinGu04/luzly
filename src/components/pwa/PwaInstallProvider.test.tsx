@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, renderHook } from "@testing-library/react";
+import { hydrateRoot, type Root } from "react-dom/client";
+import { renderToStaticMarkup } from "react-dom/server";
 import type { ReactNode } from "react";
 import { PwaInstallProvider, usePwaInstall } from "./PwaInstallProvider";
 
@@ -55,8 +57,9 @@ afterEach(() => {
 });
 
 describe("PwaInstallProvider — usePwaInstall() outside a provider (safety net)", () => {
-  it("never throws, and reports the conservative 'ordinary browser tab' default", async () => {
+  it("never throws, and reports the conservative 'ordinary browser tab' default -- isReady: true since there is no pending detection to wait for", async () => {
     const { result } = renderHook(() => usePwaInstall());
+    expect(result.current.isReady).toBe(true);
     expect(result.current.isStandalone).toBe(false);
     expect(result.current.canPromptInstall).toBe(false);
     expect(result.current.installCompleted).toBe(false);
@@ -68,6 +71,7 @@ describe("PwaInstallProvider — standalone detection", () => {
   it("reflects (display-mode: standalone) at mount", () => {
     installMatchMediaStub(true);
     const { result } = renderHook(() => usePwaInstall(), { wrapper });
+    expect(result.current.isReady).toBe(true);
     expect(result.current.isStandalone).toBe(true);
   });
 
@@ -75,6 +79,7 @@ describe("PwaInstallProvider — standalone detection", () => {
     installMatchMediaStub(false);
     Object.defineProperty(window.navigator, "standalone", { value: true, configurable: true });
     const { result } = renderHook(() => usePwaInstall(), { wrapper });
+    expect(result.current.isReady).toBe(true);
     expect(result.current.isStandalone).toBe(true);
   });
 
@@ -233,5 +238,148 @@ describe("PwaInstallProvider — appinstalled", () => {
 
     expect(result.current.installCompleted).toBe(true);
     expect(result.current.isStandalone).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SSR/hydration safety -- the actual bug this describe block regression-
+// tests: `isStandalone`/`isIos` used to be computed with
+// `useState(() => isStandaloneDisplayMode())`, i.e. synchronously DURING
+// render. That function call also runs again for the client's first
+// (pre-hydration) render pass, where `window`/`navigator` already exist --
+// so on an iPhone/iPad, or a tab already running standalone, that call
+// could return `true` on the client while the server-rendered markup
+// assumed `false`, which is exactly the shape of a hydration mismatch React
+// warns (or, in stricter cases, errors) about. `renderHook`/`render` from
+// Testing Library render straight into a detached client-only container --
+// there is no real server-rendered markup for React to reconcile against at
+// all, so they cannot exercise this class of bug either way. The tests
+// below instead do the two real steps: `renderToStaticMarkup` (an actual
+// server render, using the SAME `getServerSnapshot` codepath a real
+// `next build`/SSR request would use) followed by `hydrateRoot` against
+// that markup (the same API Next.js itself uses on the client) -- and
+// assert React never logs a hydration-mismatch `console.error` while doing
+// so, using a real DOM attribute tied to the detected state as the signal
+// (see `Capture` below) rather than inspecting a JS variable, which React
+// can update purely internally without that being visible to any
+// hydration-correctness check.
+// ---------------------------------------------------------------------------
+
+describe("PwaInstallProvider — SSR/hydration safety: hydrating against real server markup never warns, and still resolves correctly", () => {
+  let container: HTMLDivElement;
+  let root: Root | undefined;
+
+  // A real, DOM-visible signal tied to the state under test -- unlike
+  // inspecting `usePwaInstall()`'s return value from a JS variable (which
+  // React can update purely internally, invisibly to any assertion that
+  // runs after the fact), a mismatched value rendered into an actual DOM
+  // attribute during hydration is exactly what React's own hydration
+  // mismatch detection reacts to, via `console.error`.
+  //
+  // Manually verified (not asserted here) that this describe block's FIRST
+  // test -- the server markup itself must always be the deterministic
+  // default -- genuinely fails if the SSR-unsafe pattern this PR fixed
+  // (`useState(() => isStandaloneDisplayMode())`, computed synchronously
+  // during render) is reintroduced. The two `console.error`-spy tests
+  // below this one do NOT reliably catch that same regression in THIS test
+  // process specifically: jsdom exposes a real `window`/`navigator` even
+  // during `renderToStaticMarkup`'s "server" pass, so the old buggy
+  // pattern's "server" output already reflects the real (stubbed)
+  // environment there too -- there is no genuine server/client
+  // disagreement left for React to warn about once jsdom itself has
+  // already erased the one true SSR signal (`typeof window === "undefined"`)
+  // that would exist on an actual server. They are kept because they still
+  // prove something real and independent: hydrating via the actual
+  // `hydrateRoot` API against real server markup completes without
+  // throwing or warning, AND resolves to the correct final values -- an
+  // end-to-end integration check the pure-derivation tests above can't
+  // give.
+  function Capture() {
+    const { isReady, isStandalone, isIos } = usePwaInstall();
+    return <span data-ready={String(isReady)} data-standalone={String(isStandalone)} data-ios={String(isIos)} />;
+  }
+
+  function tree() {
+    return (
+      <PwaInstallProvider>
+        <Capture />
+      </PwaInstallProvider>
+    );
+  }
+
+  /**
+   * Exercises React's REAL hydration code path end to end: `renderToStaticMarkup`
+   * first produces the actual server-rendered HTML (`getServerSnapshot` is
+   * what `useSyncExternalStore` always uses during real server rendering,
+   * per React's own documented contract for that hook -- independent of
+   * whatever `window`/`navigator` jsdom happens to expose in this test
+   * process), which is then hydrated via `hydrateRoot` -- the same API
+   * Next.js itself uses to hydrate a server-rendered page.
+   */
+  function serverRenderThenHydrate() {
+    const html = renderToStaticMarkup(tree());
+    container = document.createElement("div");
+    container.innerHTML = html;
+    document.body.appendChild(container);
+    act(() => {
+      root = hydrateRoot(container, tree());
+    });
+  }
+
+  function readSpan() {
+    const span = container.querySelector("span");
+    if (!span) throw new Error("Capture never rendered");
+    return {
+      ready: span.getAttribute("data-ready"),
+      standalone: span.getAttribute("data-standalone"),
+      ios: span.getAttribute("data-ios"),
+    };
+  }
+
+  afterEach(() => {
+    if (root) act(() => root!.unmount());
+    container?.remove();
+  });
+
+  it("the server-rendered markup itself is always the deterministic default, regardless of the real environment", () => {
+    installMatchMediaStub(true);
+    Object.defineProperty(window.navigator, "standalone", { value: true, configurable: true });
+    vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue(
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+    );
+    vi.spyOn(window.navigator, "platform", "get").mockReturnValue("iPhone");
+
+    const html = renderToStaticMarkup(tree());
+
+    expect(html).toContain('data-ready="false"');
+    expect(html).toContain('data-standalone="false"');
+    expect(html).toContain('data-ios="false"');
+  });
+
+  it("hydrating on an iPhone that is ALREADY standalone in reality never logs a hydration mismatch, and resolves to the real iOS + standalone guidance afterward", async () => {
+    installMatchMediaStub(true);
+    Object.defineProperty(window.navigator, "standalone", { value: true, configurable: true });
+    vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue(
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+    );
+    vi.spyOn(window.navigator, "platform", "get").mockReturnValue("iPhone");
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    serverRenderThenHydrate();
+    await act(async () => {});
+
+    expect(consoleError).not.toHaveBeenCalled();
+    expect(readSpan()).toEqual({ ready: "true", standalone: "true", ios: "true" });
+  });
+
+  it("hydrating an ordinary (non-iOS, non-standalone) browser tab never logs a hydration mismatch either, and resolves normally", async () => {
+    installMatchMediaStub(false);
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    serverRenderThenHydrate();
+    await act(async () => {});
+
+    expect(consoleError).not.toHaveBeenCalled();
+    expect(readSpan()).toEqual({ ready: "true", standalone: "false", ios: "false" });
   });
 });

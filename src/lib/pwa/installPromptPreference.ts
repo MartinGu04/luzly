@@ -42,8 +42,23 @@ export function markInstallPromptDismissed(userId: string): void {
   }
 }
 
-/** Whether a stored dismissal is still within the cooldown window. Pure -- takes `now` explicitly so it stays trivially testable without faking the system clock. */
+/**
+ * Whether a stored dismissal is still within the cooldown window. Pure --
+ * takes `now` explicitly so it stays trivially testable without faking the
+ * system clock.
+ *
+ * Fails open on a future-dated `dismissedAt` (strictly `> now`): the write
+ * and every read both happen on this same device's clock, which only moves
+ * forward, so a legitimate dismissal can never be LATER than "now" at read
+ * time -- one being later is corrupt/tampered/clock-rollback data.
+ * Treating it as an ordinary past timestamp would make `now - dismissedAt`
+ * negative, which is always less than the (positive) cooldown constant --
+ * i.e. an indefinitely long cooldown, potentially years past the real V1
+ * window, rather than the 7 days this constant actually promises. A
+ * `dismissedAt` exactly equal to `now` (the same millisecond) is still a
+ * perfectly ordinary, valid, active dismissal -- not corrupt data.
+ */
 export function isInstallPromptDismissalActive(dismissedAt: number | null, now: number = Date.now()): boolean {
-  if (dismissedAt === null) return false;
+  if (dismissedAt === null || dismissedAt > now) return false;
   return now - dismissedAt < INSTALL_PROMPT_COOLDOWN_MS;
 }

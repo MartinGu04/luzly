@@ -34,6 +34,16 @@ export type BellOnboardingCard =
   | { kind: "install_completed" };
 
 export interface BellOnboardingInput {
+  /**
+   * `PwaInstallProvider`'s one-time environment detection (standalone
+   * display mode + iOS/iPad) has not finished yet -- true only for the
+   * server render and the client's first pre-hydration render, briefly,
+   * before its detection effect runs. `isStandalone`/`isIos` cannot be
+   * trusted while this is `false`, so no card is derived at all until it
+   * flips -- never a guess that might immediately turn out wrong right
+   * after hydration.
+   */
+  isReady: boolean;
   isStandalone: boolean;
   pushState: PushUiState;
   isIos: boolean;
@@ -43,7 +53,9 @@ export interface BellOnboardingInput {
 }
 
 export function deriveBellOnboardingCard(input: BellOnboardingInput): BellOnboardingCard {
-  const { isStandalone, pushState, isIos, canPromptInstall, installCompleted, installDismissalActive } = input;
+  const { isReady, isStandalone, pushState, isIos, canPromptInstall, installCompleted, installDismissalActive } = input;
+
+  if (!isReady) return { kind: "none" };
 
   if (isStandalone) {
     // (A) enabled/disabling -> no card, normal inbox. (B) not yet enabled ->

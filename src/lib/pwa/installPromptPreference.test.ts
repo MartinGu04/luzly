@@ -81,3 +81,21 @@ describe("isInstallPromptDismissalActive — 7-day cooldown", () => {
     expect(isInstallPromptDismissalActive(dismissedAt, dismissedAt + INSTALL_PROMPT_COOLDOWN_MS * 3)).toBe(false);
   });
 });
+
+describe("isInstallPromptDismissalActive — fails open on a future-dated timestamp (corrupt/tampered data)", () => {
+  it("a dismissedAt one second in the future is never treated as active", () => {
+    const now = 1_000_000;
+    expect(isInstallPromptDismissalActive(now + 1_000, now)).toBe(false);
+  });
+
+  it("a dismissedAt many years in the future never creates an indefinitely long cooldown", () => {
+    const now = 1_000_000;
+    const farFuture = now + INSTALL_PROMPT_COOLDOWN_MS * 1000;
+    expect(isInstallPromptDismissalActive(farFuture, now)).toBe(false);
+  });
+
+  it("a dismissedAt exactly equal to now is still an ordinary, valid, active dismissal -- not treated as corrupt", () => {
+    const now = 1_000_000;
+    expect(isInstallPromptDismissalActive(now, now)).toBe(true);
+  });
+});

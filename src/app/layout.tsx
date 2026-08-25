@@ -78,8 +78,14 @@ export const viewport: Viewport = {
  * after the page loads, well before the user ever opens the notification
  * bell (`NotificationBell`'s own contextual install card, several route
  * transitions later, is what actually consumes this state) -- so its
- * listener must already be attached from the very first render, not
- * attached lazily once some deeper component happens to mount. Kept
+ * listener attaches from this component's own mount effect, the earliest
+ * point in this app's client tree a React effect can run, rather than
+ * lazily once some deeper component happens to mount. That is not a claim
+ * that no earlier-firing event could ever be missed -- an effect only
+ * runs after this render has committed/hydrated, and there is deliberately
+ * no inline pre-hydration script here to close that theoretical gap (see
+ * `PwaInstallProvider`'s own docstring for why, and for how its
+ * `isStandalone`/`isIos` avoid a hydration mismatch of their own). Kept
  * entirely separate from Push subscription state (`usePushSubscription`)
  * and from `ServiceWorkerManager` itself -- installability and Service
  * Worker registration are different concerns.

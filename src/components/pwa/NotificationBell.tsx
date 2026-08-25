@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import Link from "next/link";
 import { ArrowRight, Bell, BellOff, BellRing, ChevronDown, ChevronUp, Download, Loader2, RefreshCw, Settings } from "lucide-react";
 import type { NotificationInboxItem } from "@/lib/readModels/notificationInboxTypes";
@@ -28,6 +28,15 @@ interface NotificationBellProps {
 }
 
 type BellView = "inbox" | "settings";
+
+/** `useSyncExternalStore` plumbing for the install-dismissal localStorage read below -- see that call site's own comment. */
+function subscribeToNothing(): () => void {
+  return () => {};
+}
+
+function noStoredDismissalOnFirstRender(): number | null {
+  return null;
+}
 
 const TRIGGER_CLASSES: Record<NotificationBellProps["variant"], string> = {
   sidebar:
@@ -108,24 +117,42 @@ export function NotificationBell({ variant, userId }: NotificationBellProps) {
 
   const { state, errorMessage, testStatus, enable, disable, sendTest } = usePushSubscription(userId);
   const { status: inboxStatus, items, unreadCount, refresh, markRead, markAllRead, clear } = useNotificationInbox();
-  const { isStandalone, canPromptInstall, isIos, installCompleted, promptInstall } = usePwaInstall();
+  const { isReady: isInstallStateReady, isStandalone, canPromptInstall, isIos, installCompleted, promptInstall } = usePwaInstall();
 
-  // Read once per `userId` (this component is always rendered `key={userId}`
-  // by its callers -- see `MobileIdentityBar`/`ShellUtilityBar` -- so a
-  // fresh instance already remounts on every account switch, exactly like
-  // `usePushSubscription`'s own per-user state). A completely separate
-  // localStorage key from the Push preference -- see
-  // `installPromptPreference.ts`'s own docstring.
-  const [installDismissedAt, setInstallDismissedAt] = useState<number | null>(() =>
-    userId ? readInstallPromptDismissedAt(userId) : null,
+  // `useSyncExternalStore` rather than a plain
+  // `useState(() => readInstallPromptDismissedAt(...))` initializer or a
+  // `useEffect` that reads storage and calls `setState` -- same
+  // SSR-safety reasoning as `PwaInstallProvider`'s own `isStandalone`/
+  // `isIos` (see its docstring): a lazy `useState` initializer runs again,
+  // with a real localStorage answer, on the client's first hydration
+  // render, which can disagree with what the server rendered (`null`,
+  // since `readInstallPromptDismissedAt` degrades safely with no
+  // `window`). `getServerSnapshot` below keeps that first render at the
+  // same deterministic `null` server and client agree on; React's own
+  // hydration reconciliation resolves it to the real stored value right
+  // after. A completely separate localStorage key from the Push
+  // preference -- see `installPromptPreference.ts`'s own docstring.
+  const storedInstallDismissedAt = useSyncExternalStore(
+    subscribeToNothing,
+    () => (userId ? readInstallPromptDismissedAt(userId) : null),
+    noStoredDismissalOnFirstRender,
   );
+  // An explicit "לא עכשיו" click during THIS render session is known
+  // immediately (it's the click handler's own `Date.now()`, not a storage
+  // re-read) and always wins over whatever the store above still reports --
+  // this is an ordinary user-event-driven `setState`, not a render- or
+  // effect-body read of browser state, so it carries none of the
+  // SSR-safety concerns above.
+  const [explicitInstallDismissedAt, setExplicitInstallDismissedAt] = useState<number | null>(null);
+  const installDismissedAt = explicitInstallDismissedAt ?? storedInstallDismissedAt;
 
   function dismissInstallCard() {
     if (userId) markInstallPromptDismissed(userId);
-    setInstallDismissedAt(Date.now());
+    setExplicitInstallDismissedAt(Date.now());
   }
 
   const onboardingCard = deriveBellOnboardingCard({
+    isReady: isInstallStateReady,
     isStandalone,
     pushState: state,
     isIos,
@@ -237,6 +264,7 @@ export function NotificationBell({ variant, userId }: NotificationBellProps) {
               onEnable={enable}
               onDisable={disable}
               onSendTest={sendTest}
+              isInstallStateReady={isInstallStateReady}
               isStandalone={isStandalone}
               isIos={isIos}
               canPromptInstall={canPromptInstall}
@@ -365,6 +393,7 @@ function SettingsView({
   onEnable,
   onDisable,
   onSendTest,
+  isInstallStateReady,
   isStandalone,
   isIos,
   canPromptInstall,
@@ -378,6 +407,7 @@ function SettingsView({
   onEnable: () => void;
   onDisable: () => void;
   onSendTest: () => void;
+  isInstallStateReady: boolean;
   isStandalone: boolean;
   isIos: boolean;
   canPromptInstall: boolean;
@@ -389,8 +419,17 @@ function SettingsView({
   // usually just means "Push APIs aren't available outside standalone",
   // never a genuine device limitation. A non-iOS `unsupported` browser
   // (installing would not add Push support there either) keeps its
-  // existing truthful `UnsupportedPanel` untouched.
-  const showPushStateSwitch = isStandalone || !(isIos && state === "unsupported");
+  // existing truthful `UnsupportedPanel` untouched. While install-state
+  // detection has not finished (`!isInstallStateReady` -- see
+  // `PwaInstallProvider`'s own docstring), `isIos` cannot be trusted yet,
+  // so this always falls through to the ordinary, always-safe push panel
+  // rather than possibly skipping it based on a not-yet-known iOS guess.
+  const showPushStateSwitch = !isInstallStateReady || isStandalone || !(isIos && state === "unsupported");
+  // Section 8's manual install entry point is itself install-guidance UI --
+  // same rule as the bell's automatic card: never rendered before
+  // detection has actually finished (see `deriveBellOnboardingCard`'s
+  // identical `isReady` gate).
+  const showInstallSection = isInstallStateReady && !isStandalone;
 
   return (
     <div>
@@ -412,7 +451,7 @@ function SettingsView({
             deliberately IGNORES the bell's automatic-card dismissal
             cooldown (that cooldown only suppresses the unsolicited card;
             an intentional visit here must always work). */}
-        {!isStandalone ? (
+        {showInstallSection ? (
           <InstallSettingsSection
             guidance={deriveInstallGuidance({ isIos, canPromptInstall, installCompleted })}
             onPromptInstall={onPromptInstall}
@@ -420,7 +459,7 @@ function SettingsView({
         ) : null}
 
         {showPushStateSwitch ? (
-          <div className={!isStandalone ? "mt-4 border-t border-border pt-3" : undefined}>
+          <div className={showInstallSection ? "mt-4 border-t border-border pt-3" : undefined}>
             {state === "checking" ? <CheckingPanel /> : null}
             {state === "unsupported" ? <UnsupportedPanel /> : null}
             {state === "permission_denied" ? <PermissionDeniedPanel /> : null}

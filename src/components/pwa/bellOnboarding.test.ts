@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { deriveBellOnboardingCard, deriveInstallGuidance } from "./bellOnboarding";
 
 const BASE = {
+  isReady: true,
   isStandalone: false,
   pushState: "not_enabled" as const,
   isIos: false,
@@ -108,5 +109,29 @@ describe("deriveBellOnboardingCard — not standalone branch (D/E/F/G)", () => {
       kind: "install",
       guidance: "native",
     });
+  });
+});
+
+describe("deriveBellOnboardingCard — isReady gate (SSR/hydration safety)", () => {
+  it("renders no card while detection is not ready, even if every other input already looks like a real install candidate", () => {
+    expect(
+      deriveBellOnboardingCard({
+        ...BASE,
+        isReady: false,
+        isStandalone: true,
+        isIos: true,
+        canPromptInstall: true,
+      }),
+    ).toEqual({ kind: "none" });
+  });
+
+  it("not ready + not standalone + a native prompt already captured -> still no card (never a guessed fallback before detection)", () => {
+    expect(deriveBellOnboardingCard({ ...BASE, isReady: false, canPromptInstall: true })).toEqual({ kind: "none" });
+  });
+
+  it("once ready, the very same inputs resolve to the real card (no other input needs to change)", () => {
+    const input = { ...BASE, isReady: false, isIos: true };
+    expect(deriveBellOnboardingCard(input)).toEqual({ kind: "none" });
+    expect(deriveBellOnboardingCard({ ...input, isReady: true })).toEqual({ kind: "install", guidance: "ios" });
   });
 });
