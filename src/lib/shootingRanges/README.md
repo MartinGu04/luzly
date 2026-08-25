@@ -60,6 +60,65 @@ Expiry = baseline + 6 **calendar** months
 that calendar day in Asia/Jerusalem. See that module's own docs for the
 month-add/leap-year semantics.
 
+## רלוונטיות / סיבה / הערה -- applicability wins over stale baseline data
+
+The precedence above decides WHAT baseline a person has; `רלוונטיות`
+decides WHETHER that baseline is even a live concern for them right now,
+and it wins unconditionally. Parsed independently from the completion
+date by `lib/parsers/shootingRanges.ts`'s `parseShootingRangeRelevanceSheet`
+(a `לא רלוונטי` row carries no completion-date requirement at all -- unlike
+`parseShootingRangesSheet`, a blank/malformed `תאריך ביצוע מטווחים` cell
+never causes this row to be skipped), and selected per person by
+`lib/readModels/shootingRangeQualification.ts`'s `selectRelevanceRecordForPerson`.
+
+- **רלוונטי + a valid completion date** -- the normal baseline/expiry/status
+  computation above, unaffected.
+- **רלוונטי + no completion date** -- `status: "none"` ("אין מידע כשירות"),
+  same as if רלוונטיות didn't exist at all -- this is genuinely missing
+  data that may need attention.
+- **לא רלוונטי** (with or without a completion date, however recent or
+  stale) -- `status: "not_relevant"`, a distinct `QualificationStatus`
+  value, never collapsed into `"none"`/`"expired"`/qualified.
+  `buildShootingRangeQualificationReadModel` nulls out `baselineDate`/
+  `baselineSource`/`expiryDate` entirely in this branch (never left
+  populated-but-unused) and carries `notRelevantReason` (the `סיבה / הערה`
+  text, optional -- `null` when absent). `history` is untouched either way:
+  it is a factual record of what happened, independent of current
+  applicability.
+- Relevance is inferred **only** from the explicit `רלוונטיות` cell text
+  (`"רלוונטי"` / `"לא רלוונטי"`, exact match) -- never from the `סיבה / הערה`
+  text, and a blank/unrecognized cell is "no signal" (treated exactly like
+  before this feature existed), never guessed as either value.
+
+**Manager summary semantics**: `ManagerShootingRangeSummary.notRelevantCount`
+is its own field -- a `not_relevant` row is excluded from
+`qualifiedCount`/`notQualifiedCount` both (never silently folded into
+either), and `requiresAttention` is unconditionally `false` for it
+regardless of a stale baseline or even a past-due planned occurrence.
+`ManagerShootingRangeRow` still appears in its correct אחמ"ש/טכנאי role
+section -- role/service eligibility (`isEligibleForShootingRanges`) is the
+only thing that removes someone from the roster entirely; relevance only
+changes how an included row is classified.
+
+**Write path**: a `לא רלוונטי` person can no longer be newly scheduled for
+a planned range -- `createPlannedShootingRangeAction` re-fetches the
+"מטווחים" sheet and silently drops a `לא רלוונטי` id from the scheduled
+set, exactly like a foreign/non-roster id (never a partial-failure error;
+see `ShootingRangeManagerPanel`'s own picker roster, which excludes them
+up front so a manager can't select someone here only to see the returned
+`scheduledCount` come back lower with no explanation). `submitSelfReportShootingRangeAction`
+re-checks the CALLER's own relevance the same way and rejects with
+`error: "not_relevant"`. Both re-checks are product decisions with the
+same posture as the existing `isEligibleForShootingRanges` re-checks
+elsewhere in this file -- hiding the UI is never the enforcement.
+
+**Personal page**: an otherwise-eligible person whose own row is
+`לא רלוונטי` sees a calm dedicated state ("לא רלוונטי לכשירות מטווח" +
+the reason, if present) instead of the countdown/ring/self-report card --
+see `app/(app)/shooting-ranges/page.tsx`'s `NotRelevantView`, a sibling to
+the existing `NotApplicableView` (which is about role/service scope, not
+this person's own sheet data).
+
 ## Planned ranges: a deliberate architecture decision
 
 The product spec describes planned ranges as "the schedule/workbook

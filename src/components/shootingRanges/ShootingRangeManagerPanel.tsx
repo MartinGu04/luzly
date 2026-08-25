@@ -49,7 +49,7 @@ function StatusBadge({ status }: { status: ManagerShootingRangeRow["status"] }) 
 
 function SummaryTiles({ summary }: { summary: ManagerShootingRangeSummary }) {
   return (
-    <div className="grid grid-cols-3 gap-3">
+    <div className={`grid gap-3 ${summary.notRelevantCount > 0 ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-3"}`}>
       <Panel variant="compact" className="text-center">
         <p className="text-2xl font-bold text-success">{summary.qualifiedCount}</p>
         <p className="text-xs text-muted">כשירים</p>
@@ -62,6 +62,12 @@ function SummaryTiles({ summary }: { summary: ManagerShootingRangeSummary }) {
         <p className="text-2xl font-bold text-critical">{summary.notQualifiedCount}</p>
         <p className="text-xs text-muted">לא כשירים</p>
       </Panel>
+      {summary.notRelevantCount > 0 ? (
+        <Panel variant="compact" className="text-center">
+          <p className="text-2xl font-bold text-muted-2">{summary.notRelevantCount}</p>
+          <p className="text-xs text-muted">לא רלוונטיים</p>
+        </Panel>
+      ) : null}
     </div>
   );
 }
@@ -167,13 +173,20 @@ function PendingConfirmationPanel({ rangeDate, rows }: { rangeDate: string; rows
 }
 
 function TeamMemberRow({ row }: { row: ManagerShootingRangeRow }) {
+  const isNotRelevant = row.status === "not_relevant";
   return (
     <li className="flex flex-wrap items-center gap-3 rounded-lg bg-overlay-faint p-2 text-sm">
-      <Avatar name={row.personName} size="sm" />
+      <Avatar name={row.personName} size="sm" avatarUrl={row.avatarUrl} />
       <span className="min-w-0 flex-1 truncate text-foreground">{row.personName}</span>
       <StatusBadge status={row.status} />
-      <span className="text-xs text-muted-2">{row.baselineDate ? `אחרון: ${formatReportOneDateSlash(row.baselineDate)}` : "אין נתונים"}</span>
-      {row.expiryDate ? <span className="text-xs text-muted-2">תוקף: {formatReportOneDateSlash(row.expiryDate)}</span> : null}
+      {isNotRelevant ? (
+        row.notRelevantReason ? <span className="text-xs text-muted-2">{row.notRelevantReason}</span> : null
+      ) : (
+        <>
+          <span className="text-xs text-muted-2">{row.baselineDate ? `אחרון: ${formatReportOneDateSlash(row.baselineDate)}` : "אין נתונים"}</span>
+          {row.expiryDate ? <span className="text-xs text-muted-2">תוקף: {formatReportOneDateSlash(row.expiryDate)}</span> : null}
+        </>
+      )}
       {row.plannedRange ? (
         <Badge tone={row.plannedRange.status === "pending_confirmation" ? "critical" : "neutral"}>
           {row.plannedRange.status === "pending_confirmation" ? "ממתין לאישור" : `🎯 ${formatReportOneDateDot(row.plannedRange.rangeDate)}`}

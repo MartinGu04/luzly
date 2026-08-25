@@ -536,13 +536,17 @@ only.
   `null` (a permanent/non-shift manager) renders nothing extra, and every
   other Manager Area category/behavior is unaffected.
 
-## Fairness table avatars
+## Person avatar convention (project-wide)
 
-Both standalone Fairness modes (`shiftFairness.ts`/`dutyFairness.ts`, via
-`loadFairnessWorkbookContext()`) now carry each row's Google profile
-photo, so `/fairness`'s cards can show it next to the person's name.
+**Person avatar = connected Google profile photo when available; initials
+otherwise.** This is a project-wide mi-ma-mo convention, not a
+Fairness-specific or Shooting-Ranges-specific one — any feature that
+displays a person's avatar resolves it this way, and reuses the SAME
+primitives below rather than inventing a second Google-profile system,
+fetching Google directly from the browser, or doing a per-person DB/auth
+lookup:
 
-- **`fairnessAvatarLookup.ts`** — `fetchEmailToAvatarUrl()` (account-wide,
+- **`personAvatarLookup.ts`** — `fetchEmailToAvatarUrl()` (account-wide,
   roster-independent, reuses the SAME Supabase Admin API bulk
   `listUsers()` primitive `lib/notifications/engine/recipients.ts`'s
   `fetchAllUserIdsByEmail` already established for the notification worker
@@ -576,8 +580,21 @@ photo, so `/fairness`'s cards can show it next to the person's name.
 - **`lib/presentation/fairnessCards.ts`** — `ShiftFairnessCardView`/
   `DutyFairnessCardView` both carry `avatarUrl` straight through from the
   row, unchanged.
+- **`shootingRangeManagerOverview.ts`** — the Shooting Ranges manager team
+  overview reuses the EXACT SAME two `personAvatarLookup.ts` functions:
+  `fetchEmailToAvatarUrl()` kicked off concurrently with
+  `loadManagerWorkbookContext()`, then `resolveAvatarUrlsByPersonId()`
+  against the eligible roster once both resolve — one bulk Admin API call
+  for the whole team, never a per-person lookup. `ManagerShootingRangeRow.avatarUrl`
+  carries the result through to `ShootingRangeManagerPanel`'s `TeamMemberRow`.
+  This is the pattern for any NEW feature needing roster avatars too: reuse
+  `personAvatarLookup.ts` directly, never copy/paste this resolution logic.
 - **UI** — `ShiftFairnessCard`/`DutyFairnessCard` (`components/fairness/`)
-  render it via the shared `Avatar` component (`components/ui/Avatar.tsx`,
-  new `size="xs"` variant for this dense-row context) immediately beside
-  the person's name — Google photo when available, initials otherwise,
-  graceful fallback on a failed image load.
+  and `ShootingRangeManagerPanel`'s `TeamMemberRow` (`components/shootingRanges/`)
+  all render it via the shared `Avatar` component (`components/ui/Avatar.tsx`,
+  `size="xs"`/`"sm"` for dense-row contexts) immediately beside the
+  person's name — Google photo when available, initials otherwise,
+  graceful fallback on a failed image load (`Avatar`'s own `onError`
+  handling — never a broken-image icon). A person absent from the resolved
+  map, or with no usable photo, simply renders initials; this is the ONE
+  fallback path every caller shares, never a second/parallel one.

@@ -78,7 +78,20 @@ export function isEligibleForShootingRanges(person: ShootingRangeEligibilityCand
   return classifyPersonnelType(person.personnelType) === "regular" && isShiftCapable(person);
 }
 
-export type QualificationStatus = "valid" | "expiring_soon" | "expiring_very_soon" | "expired" | "none";
+/**
+ * `"not_relevant"` is NEVER produced by `classifyQualificationStatus` below
+ * (a pure function of dates alone) -- it is set directly by
+ * `buildShootingRangeQualificationReadModel` when the "מטווחים" sheet's
+ * `רלוונטיות` column explicitly says `לא רלוונטי` for this person,
+ * overriding whatever date-based status would otherwise have been computed
+ * (spec: "Applicability must win over stale Sheet qualification data").
+ * It exists in this shared union anyway (not a second/parallel status type)
+ * so every switch/consumer of `QualificationStatus` -- `presentQualificationStatus`,
+ * the manager summary counts, `requiresAttention` -- is forced by the
+ * compiler to decide explicitly what "not relevant" means for it, rather
+ * than silently falling through to an existing case.
+ */
+export type QualificationStatus = "valid" | "expiring_soon" | "expiring_very_soon" | "expired" | "none" | "not_relevant";
 
 /**
  * Classifies validity from `expiryDate` alone, as of the civil date

@@ -30,6 +30,7 @@ function model(overrides: Partial<ShootingRangeQualificationReadModel> = {}): Sh
     baselineSource: null,
     expiryDate: null,
     status: "none",
+    notRelevantReason: null,
     plannedRange: null,
     pendingSelfReport: null,
     history: [],
@@ -124,6 +125,64 @@ describe("ShootingRangesPage", () => {
       const page = await ShootingRangesPage();
       render(page);
       expect(screen.queryByText("תצוגת מנהל")).toBeNull();
+    });
+  });
+
+  describe("not_relevant (this person's own מטווחים sheet row is explicitly לא רלוונטי)", () => {
+    it("shows the calm dedicated state, never a countdown/ring or 'אין מידע כשירות'", async () => {
+      loadShootingRangeQualification.mockResolvedValue({
+        status: "ok",
+        person: person(),
+        model: model({ status: "not_relevant", notRelevantReason: "פטור שמירות" }),
+        avatarUrl: null,
+      });
+      const page = await ShootingRangesPage();
+      render(page);
+      expect(screen.getByText("לא רלוונטי לכשירות מטווח")).toBeInTheDocument();
+      expect(screen.getByText("סיבה: פטור שמירות")).toBeInTheDocument();
+      expect(screen.queryByText("כשירות מטווח")).toBeNull();
+      expect(screen.queryByText("אין עדיין נתוני מטווח מאומתים עבורך.")).toBeNull();
+      expect(screen.queryByText("ביצעתי מטווח")).toBeNull();
+    });
+
+    it("reason is optional -- renders cleanly with no 'סיבה:' line when absent", async () => {
+      loadShootingRangeQualification.mockResolvedValue({
+        status: "ok",
+        person: person(),
+        model: model({ status: "not_relevant", notRelevantReason: null }),
+        avatarUrl: null,
+      });
+      const page = await ShootingRangesPage();
+      render(page);
+      expect(screen.getByText("לא רלוונטי לכשירות מטווח")).toBeInTheDocument();
+      expect(screen.queryByText(/^סיבה:/)).toBeNull();
+    });
+
+    it("still shows the manager-overview link for a manager who is themselves not_relevant", async () => {
+      loadShootingRangeQualification.mockResolvedValue({
+        status: "ok",
+        person: person({ isManager: true }),
+        model: model({ status: "not_relevant" }),
+        avatarUrl: null,
+      });
+      const page = await ShootingRangesPage();
+      render(page);
+      expect(screen.getByText("תצוגת מנהל")).toBeInTheDocument();
+    });
+
+    it("applicability wins over a stale/expired-looking baseline -- never rendered as expired/qualified based on it", async () => {
+      loadShootingRangeQualification.mockResolvedValue({
+        status: "ok",
+        person: person(),
+        // Even if a caller mistakenly still populated baseline/expiry, the not_relevant branch must never render the countdown card off them.
+        model: model({ status: "not_relevant", notRelevantReason: "פטור שמירות", baselineDate: "2026-02-23", expiryDate: "2026-08-23" }),
+        avatarUrl: null,
+      });
+      const page = await ShootingRangesPage();
+      render(page);
+      expect(screen.getByText("לא רלוונטי לכשירות מטווח")).toBeInTheDocument();
+      expect(screen.queryByText(/מטווח אחרון/)).toBeNull();
+      expect(screen.queryByText(/תוקף עד/)).toBeNull();
     });
   });
 });

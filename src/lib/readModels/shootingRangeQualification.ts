@@ -5,7 +5,12 @@ import { isEligibleForShootingRanges } from "@/lib/domain/shootingRangeQualifica
 import type { Person } from "@/lib/domain/types";
 import { SHEET_SOURCES, type RawWorkbookSnapshot, type SheetSourceKey } from "@/lib/google";
 import { parsePersonnelSheet } from "@/lib/parsers/personnel";
-import { parseShootingRangesSheet, type ShootingRangeSheetRecord } from "@/lib/parsers/shootingRanges";
+import {
+  parseShootingRangeRelevanceSheet,
+  parseShootingRangesSheet,
+  type ShootingRangeRelevanceRecord,
+  type ShootingRangeSheetRecord,
+} from "@/lib/parsers/shootingRanges";
 import { getCompletionsForPersonIds, getPlannedOccurrencesForPersonIds } from "@/lib/shootingRanges/store";
 import { getWorkbookSnapshot } from "@/lib/sync";
 import { getJerusalemLocalNow } from "@/lib/time/jerusalemClock";
@@ -36,7 +41,7 @@ export type ShootingRangeQualificationLoadResult =
   | { status: "not_applicable"; person: Person; avatarUrl: string | null }
   | { status: "ok"; person: Person; model: ShootingRangeQualificationReadModel; avatarUrl: string | null };
 
-function getSheet(snapshot: RawWorkbookSnapshot, key: SheetSourceKey) {
+export function getShootingRangesWorkbookSheet(snapshot: RawWorkbookSnapshot, key: SheetSourceKey) {
   const name = SHEET_SOURCES[key];
   const sheet = snapshot.sheets.find((candidate) => candidate.name === name);
   if (!sheet) throw new Error(`Workbook snapshot is missing the "${name}" sheet.`);
@@ -65,6 +70,24 @@ export function selectSheetBaselineForPerson(
 }
 
 /**
+ * The most relevant "מטווחים" sheet `רלוונטיות` row for `personId` -- unlike
+ * `selectSheetBaselineForPerson` above, there is no date field to rank
+ * candidates by (a `רלוונטיות` value isn't itself dated), so this simply
+ * takes the LAST matching row in sheet order (`parseShootingRangeRelevanceSheet`
+ * emits records in the order its rows appear), i.e. whichever row is
+ * furthest down the sheet -- the same "later entry wins" assumption a
+ * manually-maintained status column implies. `null` when the sheet has no
+ * explicit רלוונטיות value for this person at all.
+ */
+export function selectRelevanceRecordForPerson(
+  records: readonly ShootingRangeRelevanceRecord[],
+  personId: string,
+): ShootingRangeRelevanceRecord | null {
+  const candidates = records.filter((record) => record.resolvedPersonId === personId);
+  return candidates.length === 0 ? null : candidates[candidates.length - 1];
+}
+
+/**
  * Server-only orchestration for the authenticated person's own מטווחים
  * qualification read model:
  *
@@ -90,7 +113,7 @@ export async function loadShootingRangeQualification(): Promise<ShootingRangeQua
   if (identity.status === "missing_email") return { status: "missing_email" };
 
   const snapshot = await getWorkbookSnapshot(SHOOTING_RANGES_REQUIRED_SOURCES);
-  const people = parsePersonnelSheet(getSheet(snapshot, "personnel"));
+  const people = parsePersonnelSheet(getShootingRangesWorkbookSheet(snapshot, "personnel"));
   const identityResult = resolveIdentityAgainstPeople(identity, people);
   if (identityResult.status !== "ok") return identityResult;
 
@@ -99,7 +122,9 @@ export async function loadShootingRangeQualification(): Promise<ShootingRangeQua
     return { status: "not_applicable", person, avatarUrl: identity.avatarUrl };
   }
 
-  const sheetRecords = parseShootingRangesSheet(getSheet(snapshot, "shootingRanges"), people);
+  const shootingRangesSheet = getShootingRangesWorkbookSheet(snapshot, "shootingRanges");
+  const sheetRecords = parseShootingRangesSheet(shootingRangesSheet, people);
+  const relevanceRecords = parseShootingRangeRelevanceSheet(shootingRangesSheet, people);
   const now = getJerusalemLocalNow();
 
   const [completions, plannedOccurrences] = await Promise.all([
@@ -110,6 +135,7 @@ export async function loadShootingRangeQualification(): Promise<ShootingRangeQua
   const model = buildShootingRangeQualificationReadModel({
     personId: person.id,
     sheetBaseline: selectSheetBaselineForPerson(sheetRecords, person.id, now.date),
+    sheetRelevance: selectRelevanceRecordForPerson(relevanceRecords, person.id),
     completions,
     plannedOccurrences,
     today: now.date,

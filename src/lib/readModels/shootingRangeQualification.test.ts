@@ -12,7 +12,9 @@ vi.mock("@/lib/sync", () => ({ getWorkbookSnapshot }));
 vi.mock("@/lib/time/jerusalemClock", () => ({ getJerusalemLocalNow }));
 vi.mock("@/lib/shootingRanges/store", () => ({ getCompletionsForPersonIds, getPlannedOccurrencesForPersonIds }));
 
-const { loadShootingRangeQualification, selectSheetBaselineForPerson } = await import("./shootingRangeQualification");
+const { loadShootingRangeQualification, selectSheetBaselineForPerson, selectRelevanceRecordForPerson } = await import(
+  "./shootingRangeQualification"
+);
 
 function personnelSheet(rows: string[][]): RawSheet {
   return { name: 'כ"א', values: rows };
@@ -285,6 +287,109 @@ describe("loadShootingRangeQualification", () => {
   });
 });
 
+describe("loadShootingRangeQualification -- רלוונטיות / סיבה / הערה (real Sheet headers)", () => {
+  beforeEach(() => {
+    getRequestAuthenticatedIdentity.mockReset();
+    getWorkbookSnapshot.mockReset();
+    getJerusalemLocalNow.mockReset();
+    getCompletionsForPersonIds.mockReset();
+    getPlannedOccurrencesForPersonIds.mockReset();
+
+    getJerusalemLocalNow.mockReturnValue({ date: "2026-08-25", minuteOfDay: 600 });
+    getCompletionsForPersonIds.mockResolvedValue([]);
+    getPlannedOccurrencesForPersonIds.mockResolvedValue([]);
+    getRequestAuthenticatedIdentity.mockResolvedValue({
+      status: "authenticated",
+      userId: "u1",
+      email: "dani@example.invalid",
+      avatarUrl: null,
+    });
+  });
+
+  it("A. רלוונטי + valid completion date -> normal qualification state", async () => {
+    getWorkbookSnapshot.mockResolvedValue(
+      snapshot([
+        ["שם", "תאריך ביצוע מטווחים", "תאריך תפוגה", "סטטוס", "רלוונטיות", "סיבה / הערה"],
+        ["דני בדיקה", "29/06/2026", "29/12/2026", "תקף", "רלוונטי", ""],
+      ]),
+    );
+
+    const result = await loadShootingRangeQualification();
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") throw new Error("unreachable");
+    expect(result.model.status).not.toBe("not_relevant");
+    expect(result.model.baselineDate).toBe("2026-06-29");
+    expect(result.model.notRelevantReason).toBeNull();
+  });
+
+  it("B. רלוונטי + no completion date -> אין מידע כשירות ('none')", async () => {
+    getWorkbookSnapshot.mockResolvedValue(
+      snapshot([
+        ["שם", "תאריך ביצוע מטווחים", "רלוונטיות", "סיבה / הערה"],
+        ["דני בדיקה", "", "רלוונטי", ""],
+      ]),
+    );
+
+    const result = await loadShootingRangeQualification();
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") throw new Error("unreachable");
+    expect(result.model.status).toBe("none");
+    expect(result.model.baselineDate).toBeNull();
+  });
+
+  it("C. לא רלוונטי + reason -> dedicated not_relevant state + reason", async () => {
+    getWorkbookSnapshot.mockResolvedValue(
+      snapshot([
+        ["שם", "תאריך ביצוע מטווחים", "רלוונטיות", "סיבה / הערה"],
+        ["דני בדיקה", "", "לא רלוונטי", "פטור שמירות"],
+      ]),
+    );
+
+    const result = await loadShootingRangeQualification();
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") throw new Error("unreachable");
+    expect(result.model.status).toBe("not_relevant");
+    expect(result.model.notRelevantReason).toBe("פטור שמירות");
+  });
+
+  it("C. לא רלוונטי + a STALE completion date -- must still render as not_relevant, never qualified/expired off the stale date (spec's own example)", async () => {
+    getWorkbookSnapshot.mockResolvedValue(
+      snapshot([
+        ["שם", "תאריך ביצוע מטווחים", "תאריך תפוגה", "סטטוס", "רלוונטיות", "סיבה / הערה"],
+        ["דני בדיקה", "23/02/2026", "23/08/2026", "פג תוקף", "לא רלוונטי", "פטור שמירות"],
+      ]),
+    );
+
+    const result = await loadShootingRangeQualification();
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") throw new Error("unreachable");
+    expect(result.model.status).toBe("not_relevant");
+    expect(result.model.notRelevantReason).toBe("פטור שמירות");
+    expect(result.model.baselineDate).toBeNull();
+    expect(result.model.expiryDate).toBeNull();
+  });
+
+  it("לא רלוונטי without a reason still works cleanly -- reason is optional", async () => {
+    getWorkbookSnapshot.mockResolvedValue(
+      snapshot([
+        ["שם", "תאריך ביצוע מטווחים", "רלוונטיות"],
+        ["דני בדיקה", "", "לא רלוונטי"],
+      ]),
+    );
+
+    const result = await loadShootingRangeQualification();
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") throw new Error("unreachable");
+    expect(result.model.status).toBe("not_relevant");
+    expect(result.model.notRelevantReason).toBeNull();
+  });
+});
+
 describe("selectSheetBaselineForPerson", () => {
   it("picks the LATEST past-or-today row for the person, ignoring other people and future dates", () => {
     const records = [
@@ -301,5 +406,30 @@ describe("selectSheetBaselineForPerson", () => {
 
   it("returns null when the person has no resolved row at all", () => {
     expect(selectSheetBaselineForPerson([], "p1", "2026-08-25")).toBeNull();
+  });
+});
+
+describe("selectRelevanceRecordForPerson", () => {
+  it("returns the LAST matching row in sheet order (later entry wins), ignoring other people", () => {
+    const records = [
+      { sourceName: "a", resolvedPersonId: "p1", relevance: "relevant" as const, reason: null, sourceSheet: "מטווחים", sourceCell: "E2" },
+      { sourceName: "b", resolvedPersonId: "p2", relevance: "not_relevant" as const, reason: null, sourceSheet: "מטווחים", sourceCell: "E3" },
+      { sourceName: "a", resolvedPersonId: "p1", relevance: "not_relevant" as const, reason: "פטור שמירות", sourceSheet: "מטווחים", sourceCell: "E4" },
+    ];
+
+    const result = selectRelevanceRecordForPerson(records, "p1");
+
+    expect(result).toEqual({
+      sourceName: "a",
+      resolvedPersonId: "p1",
+      relevance: "not_relevant",
+      reason: "פטור שמירות",
+      sourceSheet: "מטווחים",
+      sourceCell: "E4",
+    });
+  });
+
+  it("returns null when the person has no explicit רלוונטיות row at all", () => {
+    expect(selectRelevanceRecordForPerson([], "p1")).toBeNull();
   });
 });

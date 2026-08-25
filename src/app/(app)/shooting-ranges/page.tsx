@@ -27,6 +27,17 @@ export default async function ShootingRangesPage() {
   if (result.status !== "ok") return <AccessDeniedScreen />;
 
   const { model } = result;
+
+  // Applicability wins over stale Sheet data (spec): a person whose
+  // "מטווחים" sheet row is explicitly `לא רלוונטי` gets a calm dedicated
+  // state instead of the countdown/ring -- never rendered as "אין מידע
+  // כשירות"/expired/qualified based on whatever baseline the sheet might
+  // otherwise carry (`buildShootingRangeQualificationReadModel` already
+  // nulls out `baselineDate`/`expiryDate` for this status).
+  if (model.status === "not_relevant") {
+    return <NotRelevantView isManager={result.person.isManager} reason={model.notRelevantReason} />;
+  }
+
   const today = getJerusalemLocalNow().date;
 
   const baselineDateLabel = model.baselineDate ? formatReportOneDateSlash(model.baselineDate) : null;
@@ -92,6 +103,29 @@ export default async function ShootingRangesPage() {
  * must still reach the team overview even though the feature doesn't
  * apply to them personally.
  */
+/**
+ * An otherwise-eligible אחמ"ש/טכנאי whose "מטווחים" sheet row is explicitly
+ * `לא רלוונטי` -- distinct from `NotApplicableView` above (which is about
+ * role/service scope, not this person's own sheet data). Deliberately no
+ * countdown/ring/self-report form/history -- a single calm statement, same
+ * spirit as `NotApplicableView` (spec: "the personal page should not show
+ * a countdown/ring or missing qualification").
+ */
+function NotRelevantView({ isManager, reason }: { isManager: boolean; reason: string | null }) {
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-xl font-semibold text-foreground">מטווחים</h1>
+        {isManager ? <ViewSwitchLink href="/shooting-ranges/manager" label="תצוגת מנהל" /> : null}
+      </div>
+      <Panel variant="panel" className="flex flex-col items-center gap-2 py-6 text-center">
+        <p className="text-lg font-semibold text-foreground">לא רלוונטי לכשירות מטווח</p>
+        {reason ? <p className="text-sm text-muted">סיבה: {reason}</p> : null}
+      </Panel>
+    </div>
+  );
+}
+
 function NotApplicableView({ isManager }: { isManager: boolean }) {
   return (
     <div className="flex flex-col gap-6">

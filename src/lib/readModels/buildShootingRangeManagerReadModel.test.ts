@@ -9,6 +9,7 @@ function model(overrides: Partial<ShootingRangeQualificationReadModel> = {}): Sh
     baselineSource: "app",
     expiryDate: "2026-12-01",
     status: "valid",
+    notRelevantReason: null,
     plannedRange: null,
     pendingSelfReport: null,
     history: [],
@@ -23,6 +24,7 @@ function personInput(overrides: Partial<ManagerShootingRangePersonInput> = {}): 
     personName: "א",
     isSupervisor: false,
     isTechnician: true,
+    avatarUrl: null,
     model: model(),
     ...overrides,
   };
@@ -38,11 +40,66 @@ describe("buildShootingRangeManagerReadModel", () => {
       personInput({ personId: "p5", personName: "ה", model: model({ status: "none", baselineDate: null, expiryDate: null }) }),
     ]);
 
-    expect(result.summary).toEqual({ qualifiedCount: 3, nearingExpiryCount: 1, notQualifiedCount: 2, totalCount: 5 });
+    expect(result.summary).toEqual({
+      qualifiedCount: 3,
+      nearingExpiryCount: 1,
+      notQualifiedCount: 2,
+      notRelevantCount: 0,
+      totalCount: 5,
+    });
     expect(result.rows.find((r) => r.personId === "p2")?.requiresAttention).toBe(false);
     expect(result.rows.find((r) => r.personId === "p3")?.requiresAttention).toBe(true);
     expect(result.rows.find((r) => r.personId === "p4")?.requiresAttention).toBe(true);
     expect(result.rows.find((r) => r.personId === "p5")?.requiresAttention).toBe(true);
+  });
+
+  describe("not_relevant (לא רלוונטי) -- never folded into red/green counts or דורשי טיפול", () => {
+    it("counts a not_relevant row in its own notRelevantCount, never qualifiedCount/notQualifiedCount", () => {
+      const result = buildShootingRangeManagerReadModel([
+        personInput({ personId: "p1", model: model({ status: "valid" }) }),
+        personInput({ personId: "p2", model: model({ status: "not_relevant", notRelevantReason: "פטור שמירות" }) }),
+      ]);
+
+      expect(result.summary).toEqual({
+        qualifiedCount: 1,
+        nearingExpiryCount: 0,
+        notQualifiedCount: 0,
+        notRelevantCount: 1,
+        totalCount: 2,
+      });
+    });
+
+    it("never sets requiresAttention for a not_relevant row, even with a past-due pending confirmation", () => {
+      const result = buildShootingRangeManagerReadModel([
+        personInput({
+          model: model({
+            status: "not_relevant",
+            plannedRange: { rangeDate: "2026-01-01", status: "pending_confirmation" },
+          }),
+        }),
+      ]);
+      expect(result.rows[0].requiresAttention).toBe(false);
+    });
+
+    it("carries notRelevantReason through onto the row, and null when absent", () => {
+      const withReason = buildShootingRangeManagerReadModel([
+        personInput({ model: model({ status: "not_relevant", notRelevantReason: "פטור שמירות" }) }),
+      ]);
+      expect(withReason.rows[0].notRelevantReason).toBe("פטור שמירות");
+
+      const withoutReason = buildShootingRangeManagerReadModel([
+        personInput({ model: model({ status: "not_relevant", notRelevantReason: null }) }),
+      ]);
+      expect(withoutReason.rows[0].notRelevantReason).toBeNull();
+    });
+  });
+
+  it("carries avatarUrl through onto the row, null when absent", () => {
+    const withPhoto = buildShootingRangeManagerReadModel([personInput({ avatarUrl: "https://example.invalid/a.jpg" })]);
+    expect(withPhoto.rows[0].avatarUrl).toBe("https://example.invalid/a.jpg");
+
+    const withoutPhoto = buildShootingRangeManagerReadModel([personInput({ avatarUrl: null })]);
+    expect(withoutPhoto.rows[0].avatarUrl).toBeNull();
   });
 
   it("flags a past-due pending confirmation as requiring attention even while the current baseline is still valid", () => {

@@ -27,5 +27,7 @@ export function presentQualificationStatus(status: QualificationStatus): Qualifi
       return { label: "🔴 הכשירות פגה", badgeTone: "critical", ringToneClassName: "text-critical" };
     case "none":
       return { label: "אין מידע כשירות", badgeTone: "neutral", ringToneClassName: "text-muted-2" };
+    case "not_relevant":
+      return { label: "לא רלוונטי", badgeTone: "neutral", ringToneClassName: "text-muted-2" };
   }
 }

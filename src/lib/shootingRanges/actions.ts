@@ -1,6 +1,7 @@
 "use server";
 
-import { resolveCurrentPerson } from "@/lib/auth/resolveCurrentPerson";
+import { getAuthenticatedIdentity } from "@/lib/auth/currentUser";
+import { resolveIdentityAgainstPeople } from "@/lib/auth/resolveCurrentPerson";
 import { parseCalendarDate } from "@/lib/domain/dutyBlocks";
 import { isEligibleForShootingRanges } from "@/lib/domain/shootingRangeQualification";
 import {
@@ -9,7 +10,15 @@ import {
   notifySelfReportDecision,
   scheduleManagerConfirmationRequiredJob,
 } from "@/lib/notifications/engine/shootingRanges";
+import { parsePersonnelSheet } from "@/lib/parsers/personnel";
+import { parseShootingRangeRelevanceSheet } from "@/lib/parsers/shootingRanges";
 import { loadManagerPersonnelContext } from "@/lib/readModels/managerWorkbookContext";
+import {
+  getShootingRangesWorkbookSheet,
+  selectRelevanceRecordForPerson,
+  SHOOTING_RANGES_REQUIRED_SOURCES,
+} from "@/lib/readModels/shootingRangeQualification";
+import { getWorkbookSnapshot } from "@/lib/sync";
 import { getJerusalemLocalNow } from "@/lib/time/jerusalemClock";
 import {
   confirmShootingRangeOccurrences,
@@ -45,14 +54,38 @@ function validateNotes(notes: string | null | undefined): string | null | "inval
  * `classifyPersonnelType`/`isShiftCapable`, never inferred from name/role/
  * text) against the FRESHLY resolved identity -- an ineligible person can
  * never create a self-report, even by calling this action directly.
+ *
+ * Also re-checked against the "מטווחים" sheet's own `רלוונטיות` value
+ * (product decision, same posture as eligibility above): a person whose
+ * current sheet row is explicitly `לא רלוונטי` can never create a
+ * self-report either, even by calling this action directly -- מטווחים is
+ * not currently a qualification concern for them, so there is nothing for
+ * a self-report to renew.
  */
 export async function submitSelfReportShootingRangeAction(
   performedOn: string,
   notes: string | null,
 ): Promise<ShootingRangeActionResult> {
-  const identity = await resolveCurrentPerson();
-  if (identity.status !== "ok") return { ok: false, error: identity.status };
-  if (!isEligibleForShootingRanges(identity.person)) return { ok: false, error: "not_eligible" };
+  // Fetches personnel + "מטווחים" together (never a second/duplicate
+  // personnel-only fetch) and re-resolves identity against this FRESH
+  // parse -- same "fetch full context, then verify identity from it"
+  // pattern `loadFairnessWorkbookContext`/`loadShootingRangeQualification`
+  // already use, needed here because `רלוונטיות` name-resolution must run
+  // against the FULL roster (never a singleton list), same fail-closed
+  // ambiguity rule as everywhere else in this feature.
+  const snapshot = await getWorkbookSnapshot(SHOOTING_RANGES_REQUIRED_SOURCES);
+  const people = parsePersonnelSheet(getShootingRangesWorkbookSheet(snapshot, "personnel"));
+  const identity = await getAuthenticatedIdentity();
+  const identityResult = resolveIdentityAgainstPeople(identity, people);
+  if (identityResult.status !== "ok") return { ok: false, error: identityResult.status };
+  if (!isEligibleForShootingRanges(identityResult.person)) return { ok: false, error: "not_eligible" };
+
+  const relevanceRecords = parseShootingRangeRelevanceSheet(
+    getShootingRangesWorkbookSheet(snapshot, "shootingRanges"),
+    people,
+  );
+  const relevance = selectRelevanceRecordForPerson(relevanceRecords, identityResult.person.id);
+  if (relevance?.relevance === "not_relevant") return { ok: false, error: "not_relevant" };
 
   const parsedDate = parseCalendarDate(performedOn);
   if (!parsedDate) return { ok: false, error: "invalid_date" };
@@ -64,11 +97,11 @@ export async function submitSelfReportShootingRangeAction(
   if (cleanNotes === "invalid") return { ok: false, error: "invalid_notes" };
 
   await insertSelfReport({
-    personId: identity.person.id,
+    personId: identityResult.person.id,
     performedOn,
     notes: cleanNotes,
-    submittedByPersonId: identity.person.id,
-    submittedByPersonName: identity.person.name,
+    submittedByPersonId: identityResult.person.id,
+    submittedByPersonName: identityResult.person.name,
   });
 
   return { ok: true };
@@ -120,6 +153,13 @@ export type CreatePlannedShootingRangeResult =
  * occurrence, even if their id is somehow submitted (a stale UI, a direct
  * call). Silently dropped from the scheduled set, exactly like a foreign/
  * non-roster id -- never a partial failure of the whole request.
+ *
+ * Also excludes anyone whose "מטווחים" sheet row is currently explicitly
+ * `לא רלוונטי` (product decision, same posture and same silent-drop
+ * treatment as the eligibility check above): a manager can no longer
+ * schedule a לא רלוונטי person for a range, so they never receive the
+ * "you're scheduled" notification/reminder either -- מטווחים is not
+ * currently a qualification concern for them.
  */
 export async function createPlannedShootingRangeAction(
   rangeDate: string,
@@ -132,8 +172,17 @@ export async function createPlannedShootingRangeAction(
   if (contextResult.status !== "ok") return { ok: false, error: contextResult.status };
   const { manager, people } = contextResult.context;
 
+  const shootingRangesSnapshot = await getWorkbookSnapshot(["shootingRanges"]);
+  const relevanceRecords = parseShootingRangeRelevanceSheet(
+    getShootingRangesWorkbookSheet(shootingRangesSnapshot, "shootingRanges"),
+    people,
+  );
+
   const eligibleRosterIds = new Set(
-    people.filter((person) => isEligibleForShootingRanges(person)).map((person) => person.id),
+    people
+      .filter((person) => isEligibleForShootingRanges(person))
+      .filter((person) => selectRelevanceRecordForPerson(relevanceRecords, person.id)?.relevance !== "not_relevant")
+      .map((person) => person.id),
   );
   const validPersonIds = [...new Set(personIds)].filter((id) => eligibleRosterIds.has(id));
   if (validPersonIds.length === 0) return { ok: false, error: "invalid_targets" };

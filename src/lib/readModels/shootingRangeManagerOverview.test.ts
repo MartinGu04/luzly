@@ -6,6 +6,8 @@ const loadManagerWorkbookContext = vi.fn();
 const getJerusalemLocalNow = vi.fn();
 const getCompletionsForPersonIds = vi.fn();
 const getPlannedOccurrencesForPersonIds = vi.fn();
+const fetchEmailToAvatarUrl = vi.fn();
+const resolveAvatarUrlsByPersonId = vi.fn();
 
 vi.mock("@/lib/readModels/managerWorkbookContext", async (importOriginal) => {
   // `getManagerWorkbookSheet` is kept REAL (a simple, pure name-lookup over
@@ -17,6 +19,7 @@ vi.mock("@/lib/readModels/managerWorkbookContext", async (importOriginal) => {
 });
 vi.mock("@/lib/time/jerusalemClock", () => ({ getJerusalemLocalNow }));
 vi.mock("@/lib/shootingRanges/store", () => ({ getCompletionsForPersonIds, getPlannedOccurrencesForPersonIds }));
+vi.mock("@/lib/readModels/personAvatarLookup", () => ({ fetchEmailToAvatarUrl, resolveAvatarUrlsByPersonId }));
 
 const { loadShootingRangeManagerOverview } = await import("./shootingRangeManagerOverview");
 
@@ -52,10 +55,14 @@ describe("loadShootingRangeManagerOverview", () => {
     getJerusalemLocalNow.mockReset();
     getCompletionsForPersonIds.mockReset();
     getPlannedOccurrencesForPersonIds.mockReset();
+    fetchEmailToAvatarUrl.mockReset();
+    resolveAvatarUrlsByPersonId.mockReset();
 
     getJerusalemLocalNow.mockReturnValue({ date: "2026-08-25", minuteOfDay: 600 });
     getCompletionsForPersonIds.mockResolvedValue([]);
     getPlannedOccurrencesForPersonIds.mockResolvedValue([]);
+    fetchEmailToAvatarUrl.mockResolvedValue(new Map());
+    resolveAvatarUrlsByPersonId.mockReturnValue(new Map());
   });
 
   it("reuses loadManagerWorkbookContext narrowed to exactly [personnel, shootingRanges] -- never the full 5-source manager set", async () => {
@@ -164,7 +171,13 @@ describe("loadShootingRangeManagerOverview", () => {
     expect(result.status).toBe("ok");
     if (result.status !== "ok") throw new Error("unreachable");
     expect(result.model.rows).toEqual([]);
-    expect(result.model.summary).toEqual({ qualifiedCount: 0, nearingExpiryCount: 0, notQualifiedCount: 0, totalCount: 0 });
+    expect(result.model.summary).toEqual({
+      qualifiedCount: 0,
+      nearingExpiryCount: 0,
+      notQualifiedCount: 0,
+      notRelevantCount: 0,
+      totalCount: 0,
+    });
     expect(getCompletionsForPersonIds).toHaveBeenCalledWith([]);
   });
 
@@ -373,6 +386,93 @@ describe("loadShootingRangeManagerOverview", () => {
       expect(row?.baselineDate).toBe("2026-06-29");
       expect(row?.expiryDate).toBe("2026-12-29");
       expect(result.model.unresolvedSheetRowCount).toBe(0);
+    });
+  });
+
+  describe("רלוונטיות (excluded from missing/expired/requires-attention, remains visible in their role group)", () => {
+    it("a לא רלוונטי eligible person still appears in rows/roleGroup, is excluded from qualifiedCount/notQualifiedCount, and is counted in notRelevantCount instead", async () => {
+      const alice = person({ id: "p_alice", name: "אליס בדיקה" });
+      loadManagerWorkbookContext.mockResolvedValue(
+        okContext([alice], [
+          ["שם", "תאריך ביצוע מטווחים", "רלוונטיות", "סיבה / הערה"],
+          ["אליס בדיקה", "", "לא רלוונטי", "פטור שמירות"],
+        ]),
+      );
+
+      const result = await loadShootingRangeManagerOverview();
+
+      expect(result.status).toBe("ok");
+      if (result.status !== "ok") throw new Error("unreachable");
+      const row = result.model.rows.find((r) => r.personId === "p_alice");
+      expect(row?.status).toBe("not_relevant");
+      expect(row?.notRelevantReason).toBe("פטור שמירות");
+      expect(result.model.summary).toEqual({
+        qualifiedCount: 0,
+        nearingExpiryCount: 0,
+        notQualifiedCount: 0,
+        notRelevantCount: 1,
+        totalCount: 1,
+      });
+    });
+
+    it("is never counted as missing/expired and never appears in requiresAttention, even with a stale completion date that would otherwise be expired", async () => {
+      const alice = person({ id: "p_alice", name: "אליס בדיקה" });
+      loadManagerWorkbookContext.mockResolvedValue(
+        okContext([alice], [
+          ["שם", "תאריך ביצוע מטווחים", "רלוונטיות", "סיבה / הערה"],
+          ["אליס בדיקה", "23/02/2026", "לא רלוונטי", "פטור שמירות"],
+        ]),
+      );
+      getJerusalemLocalNow.mockReturnValue({ date: "2026-08-25", minuteOfDay: 600 });
+
+      const result = await loadShootingRangeManagerOverview();
+
+      expect(result.status).toBe("ok");
+      if (result.status !== "ok") throw new Error("unreachable");
+      const row = result.model.rows.find((r) => r.personId === "p_alice");
+      expect(row?.status).toBe("not_relevant");
+      expect(row?.requiresAttention).toBe(false);
+      expect(result.model.summary.notQualifiedCount).toBe(0);
+    });
+  });
+
+  describe("Google profile photo avatars (bulk resolution, never per-person)", () => {
+    it("resolves roster avatars in ONE bulk call regardless of roster size, never a per-person lookup", async () => {
+      const alice = person({ id: "p_alice" });
+      const bob = person({ id: "p_bob" });
+      loadManagerWorkbookContext.mockResolvedValue(okContext([alice, bob]));
+      resolveAvatarUrlsByPersonId.mockReturnValue(new Map([["p_alice", "https://example.invalid/alice.jpg"], ["p_bob", null]]));
+
+      const result = await loadShootingRangeManagerOverview();
+
+      expect(fetchEmailToAvatarUrl).toHaveBeenCalledTimes(1);
+      expect(resolveAvatarUrlsByPersonId).toHaveBeenCalledTimes(1);
+      expect(result.status).toBe("ok");
+      if (result.status !== "ok") throw new Error("unreachable");
+      expect(result.model.rows.find((r) => r.personId === "p_alice")?.avatarUrl).toBe("https://example.invalid/alice.jpg");
+      expect(result.model.rows.find((r) => r.personId === "p_bob")?.avatarUrl).toBeNull();
+    });
+
+    it("a person absent from the resolved map falls back to null (never a placeholder), so the UI falls back to initials", async () => {
+      loadManagerWorkbookContext.mockResolvedValue(okContext([person({ id: "p_alice" })]));
+      resolveAvatarUrlsByPersonId.mockReturnValue(new Map());
+
+      const result = await loadShootingRangeManagerOverview();
+
+      expect(result.status).toBe("ok");
+      if (result.status !== "ok") throw new Error("unreachable");
+      expect(result.model.rows[0].avatarUrl).toBeNull();
+    });
+
+    it("degrades gracefully (never fails the whole panel) when the avatar lookup rejects", async () => {
+      loadManagerWorkbookContext.mockResolvedValue(okContext([person({ id: "p_alice" })]));
+      fetchEmailToAvatarUrl.mockRejectedValue(new Error("Admin API unavailable"));
+
+      const result = await loadShootingRangeManagerOverview();
+
+      expect(result.status).toBe("ok");
+      if (result.status !== "ok") throw new Error("unreachable");
+      expect(result.model.rows[0].avatarUrl).toBeNull();
     });
   });
 });

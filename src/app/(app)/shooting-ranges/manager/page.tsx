@@ -33,7 +33,12 @@ export default async function ShootingRangeManagerPage() {
         summary={model.summary}
         rows={model.rows}
         pendingSelfReports={model.pendingSelfReports}
-        roster={model.rows.map((row) => ({ id: row.personId, name: row.personName }))}
+        // A לא רלוונטי person can no longer be scheduled server-side
+        // (`createPlannedShootingRangeAction` silently drops them) -- excluded
+        // from the picker roster too, so a manager can never select someone
+        // here only to see the resulting scheduledCount come back lower than
+        // what they picked with no explanation why.
+        roster={model.rows.filter((row) => row.status !== "not_relevant").map((row) => ({ id: row.personId, name: row.personName }))}
         unresolvedSheetRowCount={model.unresolvedSheetRowCount}
         unresolvedSheetRowNames={model.unresolvedSheetRowNames}
       />

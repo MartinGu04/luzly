@@ -4,7 +4,7 @@ import {
   type QualificationStatus,
 } from "@/lib/domain/shootingRangeQualification";
 import type { CompletionRow, PlannedOccurrenceRow } from "@/lib/shootingRanges/store";
-import type { ShootingRangeSheetRecord } from "@/lib/parsers/shootingRanges";
+import type { ShootingRangeRelevanceRecord, ShootingRangeSheetRecord } from "@/lib/parsers/shootingRanges";
 
 export type QualificationBaselineSource = "app" | "sheet" | null;
 
@@ -38,6 +38,8 @@ export interface ShootingRangeQualificationReadModel {
   baselineSource: QualificationBaselineSource;
   expiryDate: string | null;
   status: QualificationStatus;
+  /** The `סיבה / הערה` sheet text explaining a `status === "not_relevant"` classification -- `null` whenever `status !== "not_relevant"`, and also `null` for a `not_relevant` person whose sheet row simply has no reason text (optional by design). */
+  notRelevantReason: string | null;
   plannedRange: PlannedRangeView | null;
   pendingSelfReport: PendingSelfReportView | null;
   history: ShootingRangeHistoryEntry[];
@@ -47,6 +49,19 @@ export interface BuildShootingRangeQualificationReadModelInput {
   personId: string;
   /** This person's own most recent Google Sheet מטווחים row whose `performedOn` is today or earlier (a genuinely past completion) -- a future-dated row is never passed here, see the orchestration loader's own split. `null` when the sheet has no such row for this person. */
   sheetBaseline: ShootingRangeSheetRecord | null;
+  /**
+   * This person's own most recent explicit `רלוונטיות` (+ `סיבה / הערה`)
+   * signal from the "מטווחים" sheet -- resolved independently of
+   * `sheetBaseline` (see `lib/parsers/shootingRanges.ts`'s
+   * `parseShootingRangeRelevanceSheet`: a `לא רלוונטי` row need not carry
+   * any completion date at all). `null` when the sheet has no explicit
+   * רלוונטיות value for this person -- treated as "no signal", never as
+   * "not relevant"; only an explicit `relevance === "not_relevant"` value
+   * overrides the date-driven baseline/status below (spec: "Do not infer
+   * relevance from the reason text. Only the explicit רלוונטיות value
+   * controls applicability").
+   */
+  sheetRelevance: ShootingRangeRelevanceRecord | null;
   /** Every completion CLAIM for this person, any status -- source precedence and history are both derived from this single set, never a second query. */
   completions: readonly CompletionRow[];
   /** Every planned occurrence for this person, any status. */
@@ -110,12 +125,35 @@ export function buildShootingRangeQualificationReadModel(
 
   const history = buildHistory(input.sheetBaseline, input.completions);
 
+  // Applicability wins over stale Sheet qualification data (spec): an
+  // explicit `לא רלוונטי` unconditionally overrides whatever baseline/
+  // expiry/status the date-driven logic above computed, however recent or
+  // stale that date is -- baseline/expiry are nulled out entirely rather
+  // than left populated-but-unused, so no consumer of this model can
+  // accidentally render a ring/countdown/date off them for a not-relevant
+  // person. `history` is left untouched: it is a factual record of what
+  // happened, independent of current applicability.
+  if (input.sheetRelevance?.relevance === "not_relevant") {
+    return {
+      personId: input.personId,
+      baselineDate: null,
+      baselineSource: null,
+      expiryDate: null,
+      status: "not_relevant",
+      notRelevantReason: input.sheetRelevance.reason,
+      plannedRange,
+      pendingSelfReport,
+      history,
+    };
+  }
+
   return {
     personId: input.personId,
     baselineDate,
     baselineSource,
     expiryDate,
     status,
+    notRelevantReason: null,
     plannedRange,
     pendingSelfReport,
     history,

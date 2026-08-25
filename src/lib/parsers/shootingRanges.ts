@@ -5,6 +5,8 @@ import { cellToTrimmedString, findColumnIndexByHeader, toA1Cell } from "./sheetG
 
 const NAME_HEADERS = ["שם", "שם מלא", "שם עובד"];
 const PERFORMED_ON_HEADERS = ["תאריך ביצוע מטווחים", "תאריך ביצוע מטווח", "תאריך ביצוע", "תאריך"];
+const RELEVANCE_HEADERS = ["רלוונטיות"];
+const REASON_HEADERS = ["סיבה / הערה", "סיבה/הערה", "סיבה", "הערה"];
 
 /**
  * Any one of these being present is enough to recognize the "מטווחים"
@@ -52,9 +54,7 @@ export interface ShootingRangeSheetRecord {
  * date is skipped entirely, never guessed.
  */
 export function parseShootingRangesSheet(sheet: RawSheet, personnel: readonly Person[]): ShootingRangeSheetRecord[] {
-  const headerRowIndex = sheet.values.findIndex((row) =>
-    RECOGNIZED_LABEL_GROUPS.some((labels) => findColumnIndexByHeader(row, labels) !== -1),
-  );
+  const headerRowIndex = findHeaderRowIndex(sheet);
   if (headerRowIndex === -1) return [];
 
   const headerRow = sheet.values[headerRowIndex] ?? [];
@@ -62,13 +62,7 @@ export function parseShootingRangesSheet(sheet: RawSheet, personnel: readonly Pe
   const performedOnCol = findColumnIndexByHeader(headerRow, PERFORMED_ON_HEADERS);
   if (nameCol === -1 || performedOnCol === -1) return [];
 
-  const peopleByNormalizedName = new Map<string, Person[]>();
-  for (const person of personnel) {
-    const key = normalizeName(person.name);
-    const group = peopleByNormalizedName.get(key);
-    if (group) group.push(person);
-    else peopleByNormalizedName.set(key, [person]);
-  }
+  const peopleByNormalizedName = buildNormalizedNameIndex(personnel);
 
   const records: ShootingRangeSheetRecord[] = [];
 
@@ -90,6 +84,104 @@ export function parseShootingRangesSheet(sheet: RawSheet, personnel: readonly Pe
   }
 
   return records;
+}
+
+/**
+ * One row of the "מטווחים" sheet's `רלוונטיות` (+ optional `סיבה / הערה`)
+ * columns, structurally parsed independently of `ShootingRangeSheetRecord`
+ * above -- a `לא רלוונטי` row carries no completion date requirement at
+ * all (the person may have a blank/stale/missing `תאריך ביצוע מטווח`
+ * cell and still needs this signal), so this can never reuse
+ * `parseShootingRangesSheet`'s own "skip when performedOn doesn't parse"
+ * rule. `resolvedPersonId` follows the exact same fail-closed, exact-
+ * normalized-name-match-against-exactly-one-personnel-record convention as
+ * `ShootingRangeSheetRecord.resolvedPersonId` above.
+ */
+export interface ShootingRangeRelevanceRecord {
+  sourceName: string;
+  resolvedPersonId: string | null;
+  relevance: ShootingRangeRelevance;
+  /** Trimmed `סיבה / הערה` text; "" (blank cell, or the column doesn't exist) normalizes to `null` -- optional by design (spec: "לא רלוונטי without a reason must still work cleanly"). */
+  reason: string | null;
+  sourceSheet: string;
+  sourceCell: string;
+}
+
+export type ShootingRangeRelevance = "relevant" | "not_relevant";
+
+/**
+ * Structurally parses the "מטווחים" sheet's `רלוונטיות` column into
+ * `ShootingRangeRelevanceRecord[]`, by header text (never a fixed column),
+ * same convention as `parseShootingRangesSheet`. A row's relevance is
+ * recorded ONLY when the cell's trimmed text is EXACTLY `"רלוונטי"` or
+ * `"לא רלוונטי"` -- anything else (blank, a typo, unexpected free text)
+ * yields no record for that row rather than a guessed value (spec: "Do not
+ * infer relevance from the reason text. Only the explicit רלוונטיות value
+ * controls applicability"). Returns `[]` when the sheet has no recognizable
+ * header row, or the header row has no name column, or no `רלוונטיות`
+ * column at all (an older workbook snapshot that predates this column).
+ */
+export function parseShootingRangeRelevanceSheet(
+  sheet: RawSheet,
+  personnel: readonly Person[],
+): ShootingRangeRelevanceRecord[] {
+  const headerRowIndex = findHeaderRowIndex(sheet);
+  if (headerRowIndex === -1) return [];
+
+  const headerRow = sheet.values[headerRowIndex] ?? [];
+  const nameCol = findColumnIndexByHeader(headerRow, NAME_HEADERS);
+  const relevanceCol = findColumnIndexByHeader(headerRow, RELEVANCE_HEADERS);
+  if (nameCol === -1 || relevanceCol === -1) return [];
+  const reasonCol = findColumnIndexByHeader(headerRow, REASON_HEADERS);
+
+  const peopleByNormalizedName = buildNormalizedNameIndex(personnel);
+
+  const records: ShootingRangeRelevanceRecord[] = [];
+
+  for (let row = headerRowIndex + 1; row < sheet.values.length; row++) {
+    const cells = sheet.values[row] ?? [];
+    const sourceName = cellToTrimmedString(cells[nameCol]);
+    if (!sourceName) continue;
+
+    const relevance = parseRelevanceCell(cellToTrimmedString(cells[relevanceCol]));
+    if (relevance === null) continue; // blank/unrecognized -- never guessed
+
+    records.push({
+      sourceName,
+      resolvedPersonId: resolvePersonId(sourceName, peopleByNormalizedName),
+      relevance,
+      reason: reasonCol === -1 ? null : cellToTrimmedString(cells[reasonCol]) || null,
+      sourceSheet: sheet.name,
+      sourceCell: toA1Cell(row, nameCol),
+    });
+  }
+
+  return records;
+}
+
+function parseRelevanceCell(text: string): ShootingRangeRelevance | null {
+  if (text === "רלוונטי") return "relevant";
+  if (text === "לא רלוונטי") return "not_relevant";
+  return null;
+}
+
+/** Locates the "מטווחים" header row -- shared by every parse function in this file so the two never risk disagreeing on which row it is. */
+function findHeaderRowIndex(sheet: RawSheet): number {
+  return sheet.values.findIndex((row) =>
+    RECOGNIZED_LABEL_GROUPS.some((labels) => findColumnIndexByHeader(row, labels) !== -1),
+  );
+}
+
+/** Every personnel record, grouped by normalized name -- shared by every parse function in this file so name resolution is identical everywhere. */
+function buildNormalizedNameIndex(personnel: readonly Person[]): Map<string, Person[]> {
+  const peopleByNormalizedName = new Map<string, Person[]>();
+  for (const person of personnel) {
+    const key = normalizeName(person.name);
+    const group = peopleByNormalizedName.get(key);
+    if (group) group.push(person);
+    else peopleByNormalizedName.set(key, [person]);
+  }
+  return peopleByNormalizedName;
 }
 
 /**

@@ -8,6 +8,8 @@ import type {
 export interface ManagerShootingRangeRow {
   personId: string;
   personName: string;
+  /** The person's connected Google profile photo, resolved in bulk by `shootingRangeManagerOverview.ts` via `personAvatarLookup.ts` -- `null` when they have no connected account or no usable photo; `TeamMemberRow` falls back to initials. */
+  avatarUrl: string | null;
   /**
    * "supervisor" (אחמ"ש) or "technician" (טכנאי), via the SAME canonical
    * `classifyRoleGroup` the roster/Fairness views already use -- never a
@@ -24,19 +26,30 @@ export interface ManagerShootingRangeRow {
   status: QualificationStatus;
   baselineDate: string | null;
   expiryDate: string | null;
+  /** The `סיבה / הערה` sheet text for a `status === "not_relevant"` row -- `null` for every other status, and also `null` for a not-relevant row with no reason text (optional by design). */
+  notRelevantReason: string | null;
   plannedRange: PlannedRangeView | null;
   hasPendingSelfReport: boolean;
-  /** "דורש טיפול": expired, no qualification data at all, nearing expiry, or a past planned range still awaiting manager confirmation. Never true for a valid qualification with only a future planned renewal. */
+  /**
+   * "דורש טיפול": expired, no qualification data at all, nearing expiry, or
+   * a past planned range still awaiting manager confirmation. Never true
+   * for a valid qualification with only a future planned renewal, and
+   * NEVER true for `status === "not_relevant"` regardless of any of the
+   * above (spec: "is NOT included in דורשי טיפול") -- a לא רלוונטי person
+   * simply isn't a qualification concern right now.
+   */
   requiresAttention: boolean;
 }
 
 export interface ManagerShootingRangeSummary {
-  /** Currently has an active qualification (valid, or valid-but-nearing-expiry) -- i.e. status is anything except "expired"/"none". */
+  /** Currently has an active qualification (valid, or valid-but-nearing-expiry) -- i.e. status is anything except "expired"/"none"/"not_relevant". */
   qualifiedCount: number;
   /** Subset of `qualifiedCount` inside the nearing-expiry window (<= 30 days). */
   nearingExpiryCount: number;
-  /** Expired, or no qualification data at all. */
+  /** Expired, or no qualification data at all -- NEVER includes `"not_relevant"` rows (spec: "do not silently fold לא רלוונטי people into the existing red/green counts"). */
   notQualifiedCount: number;
+  /** Eligible people whose sheet row is explicitly `לא רלוונטי` -- excluded from `qualifiedCount`/`notQualifiedCount` both, surfaced here instead so they're never silently invisible from the summary. */
+  notRelevantCount: number;
   totalCount: number;
 }
 
@@ -83,6 +96,7 @@ export interface ManagerShootingRangePersonInput {
   personName: string;
   isSupervisor: boolean;
   isTechnician: boolean;
+  avatarUrl: string | null;
   model: ShootingRangeQualificationReadModel;
 }
 
@@ -98,30 +112,37 @@ export function buildShootingRangeManagerReadModel(
   unresolvedSheetRowCount = 0,
   unresolvedSheetRowNames: readonly string[] = [],
 ): ShootingRangeManagerReadModel {
-  const rows: ManagerShootingRangeRow[] = people.map(({ personId, personName, isSupervisor, isTechnician, model }) => {
-    const pendingConfirmation = model.plannedRange?.status === "pending_confirmation";
-    const requiresAttention =
-      model.status === "expired" ||
-      model.status === "none" ||
-      NEARING_EXPIRY_STATUSES.has(model.status) ||
-      pendingConfirmation;
+  const rows: ManagerShootingRangeRow[] = people.map(
+    ({ personId, personName, isSupervisor, isTechnician, avatarUrl, model }) => {
+      const isNotRelevant = model.status === "not_relevant";
+      const pendingConfirmation = model.plannedRange?.status === "pending_confirmation";
+      const requiresAttention =
+        !isNotRelevant &&
+        (model.status === "expired" ||
+          model.status === "none" ||
+          NEARING_EXPIRY_STATUSES.has(model.status) ||
+          pendingConfirmation);
 
-    return {
-      personId,
-      personName,
-      roleGroup: classifyRoleGroup({ isSupervisor, isTechnician }),
-      status: model.status,
-      baselineDate: model.baselineDate,
-      expiryDate: model.expiryDate,
-      plannedRange: model.plannedRange,
-      hasPendingSelfReport: model.pendingSelfReport !== null,
-      requiresAttention,
-    };
-  });
+      return {
+        personId,
+        personName,
+        avatarUrl,
+        roleGroup: classifyRoleGroup({ isSupervisor, isTechnician }),
+        status: model.status,
+        baselineDate: model.baselineDate,
+        expiryDate: model.expiryDate,
+        notRelevantReason: model.notRelevantReason,
+        plannedRange: model.plannedRange,
+        hasPendingSelfReport: model.pendingSelfReport !== null,
+        requiresAttention,
+      };
+    },
+  );
 
   const qualifiedCount = rows.filter((row) => QUALIFIED_STATUSES.has(row.status)).length;
   const nearingExpiryCount = rows.filter((row) => NEARING_EXPIRY_STATUSES.has(row.status)).length;
   const notQualifiedCount = rows.filter((row) => row.status === "expired" || row.status === "none").length;
+  const notRelevantCount = rows.filter((row) => row.status === "not_relevant").length;
 
   const pendingSelfReports: ManagerPendingSelfReportRow[] = people
     .filter(({ model }) => model.pendingSelfReport !== null)
@@ -136,7 +157,7 @@ export function buildShootingRangeManagerReadModel(
     .sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
 
   return {
-    summary: { qualifiedCount, nearingExpiryCount, notQualifiedCount, totalCount: rows.length },
+    summary: { qualifiedCount, nearingExpiryCount, notQualifiedCount, notRelevantCount, totalCount: rows.length },
     rows,
     pendingSelfReports,
     unresolvedSheetRowCount,

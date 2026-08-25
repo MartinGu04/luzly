@@ -26,7 +26,7 @@ function manager(): Person {
 
 function emptyModel(): ShootingRangeManagerReadModel {
   return {
-    summary: { qualifiedCount: 0, nearingExpiryCount: 0, notQualifiedCount: 0, totalCount: 0 },
+    summary: { qualifiedCount: 0, nearingExpiryCount: 0, notQualifiedCount: 0, notRelevantCount: 0, totalCount: 0 },
     rows: [],
     pendingSelfReports: [],
     unresolvedSheetRowCount: 0,
@@ -38,10 +38,12 @@ function row(overrides: Partial<ManagerShootingRangeRow> = {}): ManagerShootingR
   return {
     personId: "p1",
     personName: "אדם בדיקה",
+    avatarUrl: null,
     roleGroup: "technician",
     status: "valid",
     baselineDate: "2026-06-01",
     expiryDate: "2026-12-01",
+    notRelevantReason: null,
     plannedRange: null,
     hasPendingSelfReport: false,
     requiresAttention: false,
@@ -103,7 +105,7 @@ describe("ShootingRangeManagerPage", () => {
       loadShootingRangeManagerOverview.mockResolvedValue({
         status: "ok",
         manager: manager(),
-        model: { ...emptyModel(), rows: [supervisor, technician], summary: { qualifiedCount: 2, nearingExpiryCount: 0, notQualifiedCount: 0, totalCount: 2 } },
+        model: { ...emptyModel(), rows: [supervisor, technician], summary: { qualifiedCount: 2, nearingExpiryCount: 0, notQualifiedCount: 0, notRelevantCount: 0, totalCount: 2 } },
         avatarUrl: null,
       });
       render(await ShootingRangeManagerPage());
@@ -119,7 +121,7 @@ describe("ShootingRangeManagerPage", () => {
       loadShootingRangeManagerOverview.mockResolvedValue({
         status: "ok",
         manager: manager(),
-        model: { ...emptyModel(), rows: [technician], summary: { qualifiedCount: 1, nearingExpiryCount: 0, notQualifiedCount: 0, totalCount: 1 } },
+        model: { ...emptyModel(), rows: [technician], summary: { qualifiedCount: 1, nearingExpiryCount: 0, notQualifiedCount: 0, notRelevantCount: 0, totalCount: 1 } },
         avatarUrl: null,
       });
       render(await ShootingRangeManagerPage());
@@ -138,7 +140,7 @@ describe("ShootingRangeManagerPage", () => {
         model: {
           ...emptyModel(),
           rows: [okSupervisor, attentionSupervisor, okTechnician],
-          summary: { qualifiedCount: 2, nearingExpiryCount: 0, notQualifiedCount: 1, totalCount: 3 },
+          summary: { qualifiedCount: 2, nearingExpiryCount: 0, notQualifiedCount: 1, notRelevantCount: 0, totalCount: 3 },
         },
         avatarUrl: null,
       });
@@ -150,6 +152,137 @@ describe("ShootingRangeManagerPage", () => {
       expect(screen.queryByText("מפקדת תקינה")).toBeNull();
       expect(screen.queryByText("טכנאי תקין")).toBeNull();
       expect(screen.queryByText("טכנאים")).toBeNull();
+    });
+  });
+
+  describe("Google profile photo avatars", () => {
+    it("renders the connected person's Google photo when avatarUrl is present", async () => {
+      const withPhoto = row({ personId: "p1", personName: "בעל תמונה", avatarUrl: "https://example.invalid/photo.jpg" });
+      loadShootingRangeManagerOverview.mockResolvedValue({
+        status: "ok",
+        manager: manager(),
+        model: {
+          ...emptyModel(),
+          rows: [withPhoto],
+          summary: { qualifiedCount: 1, nearingExpiryCount: 0, notQualifiedCount: 0, notRelevantCount: 0, totalCount: 1 },
+        },
+        avatarUrl: null,
+      });
+      render(await ShootingRangeManagerPage());
+
+      expect(screen.getByTestId("avatar-photo")).toHaveAttribute("src", "https://example.invalid/photo.jpg");
+    });
+
+    it("falls back to initials when avatarUrl is null (no connected account, or no usable photo)", async () => {
+      const noPhoto = row({ personId: "p1", personName: "ללא תמונה", avatarUrl: null });
+      loadShootingRangeManagerOverview.mockResolvedValue({
+        status: "ok",
+        manager: manager(),
+        model: {
+          ...emptyModel(),
+          rows: [noPhoto],
+          summary: { qualifiedCount: 1, nearingExpiryCount: 0, notQualifiedCount: 0, notRelevantCount: 0, totalCount: 1 },
+        },
+        avatarUrl: null,
+      });
+      render(await ShootingRangeManagerPage());
+
+      expect(screen.queryByTestId("avatar-photo")).toBeNull();
+    });
+  });
+
+  describe("לא רלוונטי rows in the team list", () => {
+    it("shows the distinct לא רלוונטי badge and reason, never a baseline/expiry date line", async () => {
+      const notRelevant = row({
+        personId: "p1",
+        personName: "לא רלוונטי בדיקה",
+        status: "not_relevant",
+        notRelevantReason: "פטור שמירות",
+        baselineDate: null,
+        expiryDate: null,
+      });
+      loadShootingRangeManagerOverview.mockResolvedValue({
+        status: "ok",
+        manager: manager(),
+        model: {
+          ...emptyModel(),
+          rows: [notRelevant],
+          summary: { qualifiedCount: 0, nearingExpiryCount: 0, notQualifiedCount: 0, notRelevantCount: 1, totalCount: 1 },
+        },
+        avatarUrl: null,
+      });
+      render(await ShootingRangeManagerPage());
+
+      expect(screen.getByText("לא רלוונטי")).toBeInTheDocument();
+      expect(screen.getByText("פטור שמירות")).toBeInTheDocument();
+      expect(screen.queryByText(/אחרון:/)).toBeNull();
+      expect(screen.queryByText(/תוקף:/)).toBeNull();
+      expect(screen.queryByText("אין נתונים")).toBeNull();
+    });
+
+    it("a לא רלוונטי person is excluded from the 'דורשי טיפול' filter", async () => {
+      const notRelevant = row({ personId: "p1", personName: "לא רלוונטי בדיקה", status: "not_relevant", requiresAttention: false });
+      loadShootingRangeManagerOverview.mockResolvedValue({
+        status: "ok",
+        manager: manager(),
+        model: {
+          ...emptyModel(),
+          rows: [notRelevant],
+          summary: { qualifiedCount: 0, nearingExpiryCount: 0, notQualifiedCount: 0, notRelevantCount: 1, totalCount: 1 },
+        },
+        avatarUrl: null,
+      });
+      render(await ShootingRangeManagerPage());
+
+      fireEvent.click(screen.getByLabelText("הצג רק דורשי טיפול"));
+      expect(screen.queryByText("לא רלוונטי בדיקה")).toBeNull();
+    });
+
+    it("renders a separate לא רלוונטיים summary tile only when there's at least one, never silently folded into כשירים/לא כשירים", async () => {
+      loadShootingRangeManagerOverview.mockResolvedValue({
+        status: "ok",
+        manager: manager(),
+        model: {
+          ...emptyModel(),
+          summary: { qualifiedCount: 0, nearingExpiryCount: 0, notQualifiedCount: 0, notRelevantCount: 3, totalCount: 3 },
+        },
+        avatarUrl: null,
+      });
+      render(await ShootingRangeManagerPage());
+
+      expect(screen.getByText("3")).toBeInTheDocument();
+      expect(screen.getByText("לא רלוונטיים")).toBeInTheDocument();
+    });
+
+    it("never renders the לא רלוונטיים tile when the count is 0", async () => {
+      loadShootingRangeManagerOverview.mockResolvedValue({ status: "ok", manager: manager(), model: emptyModel(), avatarUrl: null });
+      render(await ShootingRangeManagerPage());
+
+      expect(screen.queryByText("לא רלוונטיים")).toBeNull();
+    });
+
+    it("excludes a לא רלוונטי person from the 'שיבוץ מטווח חדש' picker roster -- they can no longer be scheduled server-side either", async () => {
+      const eligible = row({ personId: "p1", personName: "כשיר בדיקה", status: "valid" });
+      const notRelevant = row({ personId: "p2", personName: "לא רלוונטי בדיקה", status: "not_relevant" });
+      loadShootingRangeManagerOverview.mockResolvedValue({
+        status: "ok",
+        manager: manager(),
+        model: {
+          ...emptyModel(),
+          rows: [eligible, notRelevant],
+          summary: { qualifiedCount: 1, nearingExpiryCount: 0, notQualifiedCount: 0, notRelevantCount: 1, totalCount: 2 },
+        },
+        avatarUrl: null,
+      });
+      render(await ShootingRangeManagerPage());
+
+      fireEvent.click(screen.getByText("שיבוץ מטווח חדש"));
+
+      // Both names also render in the team list above, so scope the check to
+      // the picker's own checkbox labels rather than the whole document.
+      const pickerLabels = screen.getAllByRole("checkbox").map((checkbox) => checkbox.closest("label")?.textContent);
+      expect(pickerLabels).toContain("כשיר בדיקה");
+      expect(pickerLabels).not.toContain("לא רלוונטי בדיקה");
     });
   });
 });

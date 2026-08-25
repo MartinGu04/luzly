@@ -4,12 +4,13 @@ import {
   type BuildShootingRangeQualificationReadModelInput,
 } from "./buildShootingRangeQualificationReadModel";
 import type { CompletionRow, PlannedOccurrenceRow } from "@/lib/shootingRanges/store";
-import type { ShootingRangeSheetRecord } from "@/lib/parsers/shootingRanges";
+import type { ShootingRangeRelevanceRecord, ShootingRangeSheetRecord } from "@/lib/parsers/shootingRanges";
 
 function baseInput(overrides: Partial<BuildShootingRangeQualificationReadModelInput> = {}): BuildShootingRangeQualificationReadModelInput {
   return {
     personId: "p1",
     sheetBaseline: null,
+    sheetRelevance: null,
     completions: [],
     plannedOccurrences: [],
     today: "2026-08-25",
@@ -19,6 +20,18 @@ function baseInput(overrides: Partial<BuildShootingRangeQualificationReadModelIn
 
 function sheetRecord(performedOn: string): ShootingRangeSheetRecord {
   return { sourceName: "מרטין בדיקה", resolvedPersonId: "p1", performedOn, sourceSheet: "מטווחים", sourceCell: "A2" };
+}
+
+function relevanceRecord(overrides: Partial<ShootingRangeRelevanceRecord> = {}): ShootingRangeRelevanceRecord {
+  return {
+    sourceName: "מרטין בדיקה",
+    resolvedPersonId: "p1",
+    relevance: "not_relevant",
+    reason: null,
+    sourceSheet: "מטווחים",
+    sourceCell: "E2",
+    ...overrides,
+  };
 }
 
 function completion(overrides: Partial<CompletionRow> = {}): CompletionRow {
@@ -210,6 +223,74 @@ describe("buildShootingRangeQualificationReadModel -- planned / pending confirma
       }),
     );
     expect(model.plannedRange).toEqual({ rangeDate: "2026-09-01", status: "pending_confirmation" });
+  });
+});
+
+describe("buildShootingRangeQualificationReadModel -- רלוונטיות precedence (applicability wins over stale Sheet data)", () => {
+  it("A. רלוונטי + valid completion date -> normal qualification, unaffected by an explicit 'relevant' signal", () => {
+    const model = buildShootingRangeQualificationReadModel(
+      baseInput({
+        sheetBaseline: sheetRecord("2026-06-29"),
+        sheetRelevance: relevanceRecord({ relevance: "relevant" }),
+        today: "2026-08-25",
+      }),
+    );
+    expect(model.baselineDate).toBe("2026-06-29");
+    expect(model.status).not.toBe("not_relevant");
+    expect(model.notRelevantReason).toBeNull();
+  });
+
+  it("B. רלוונטי + no completion date -> אין מידע כשירות ('none'), never 'not_relevant'", () => {
+    const model = buildShootingRangeQualificationReadModel(
+      baseInput({ sheetBaseline: null, sheetRelevance: relevanceRecord({ relevance: "relevant" }), today: "2026-08-25" }),
+    );
+    expect(model.status).toBe("none");
+    expect(model.baselineDate).toBeNull();
+    expect(model.notRelevantReason).toBeNull();
+  });
+
+  it("C. לא רלוונטי + reason -> dedicated not_relevant status + reason, baseline/expiry nulled out", () => {
+    const model = buildShootingRangeQualificationReadModel(
+      baseInput({
+        sheetBaseline: sheetRecord("2026-02-23"),
+        sheetRelevance: relevanceRecord({ relevance: "not_relevant", reason: "פטור שמירות" }),
+        today: "2026-08-25",
+      }),
+    );
+    expect(model.status).toBe("not_relevant");
+    expect(model.notRelevantReason).toBe("פטור שמירות");
+    expect(model.baselineDate).toBeNull();
+    expect(model.baselineSource).toBeNull();
+    expect(model.expiryDate).toBeNull();
+  });
+
+  it("C. לא רלוונטי + a STALE completion date that would otherwise read as expired -- must still render as not_relevant, never expired/qualified (spec's own example)", () => {
+    // 23/02/2026 + 6 months = 23/08/2026, so by 25/08/2026 this would
+    // otherwise be "expired" -- applicability must still win.
+    const model = buildShootingRangeQualificationReadModel(
+      baseInput({
+        sheetBaseline: sheetRecord("2026-02-23"),
+        sheetRelevance: relevanceRecord({ relevance: "not_relevant", reason: "פטור שמירות" }),
+        today: "2026-08-25",
+      }),
+    );
+    expect(model.status).toBe("not_relevant");
+    expect(model.status).not.toBe("expired");
+  });
+
+  it("לא רלוונטי without a reason must still work cleanly -- reason is optional", () => {
+    const model = buildShootingRangeQualificationReadModel(
+      baseInput({ sheetRelevance: relevanceRecord({ relevance: "not_relevant", reason: null }), today: "2026-08-25" }),
+    );
+    expect(model.status).toBe("not_relevant");
+    expect(model.notRelevantReason).toBeNull();
+  });
+
+  it("does not infer relevance from anything other than the explicit רלוונטיות value -- absent signal (sheetRelevance: null) behaves exactly like before this feature existed", () => {
+    const model = buildShootingRangeQualificationReadModel(
+      baseInput({ sheetBaseline: sheetRecord("2026-06-29"), sheetRelevance: null, today: "2026-12-30" }),
+    );
+    expect(model.status).toBe("expired");
   });
 });
 

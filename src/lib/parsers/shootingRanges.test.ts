@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { RawSheet } from "@/lib/google";
 import type { Person } from "@/lib/domain/types";
-import { parseShootingRangesSheet } from "./shootingRanges";
+import { parseShootingRangeRelevanceSheet, parseShootingRangesSheet } from "./shootingRanges";
 
 function syntheticPerson(name: string, overrides: Partial<Person> = {}): Person {
   return {
@@ -264,5 +264,109 @@ describe("parseShootingRangesSheet", () => {
         sourceCell: "A2",
       },
     ]);
+  });
+});
+
+describe("parseShootingRangeRelevanceSheet", () => {
+  it("parses רלוונטי and לא רלוונטי rows using the exact real Sheet headers, independent of whether a completion date is present", () => {
+    const result = parseShootingRangeRelevanceSheet(
+      sheet([
+        ["שם", "תאריך ביצוע מטווחים", "תאריך תפוגה", "סטטוס", "רלוונטיות", "סיבה / הערה"],
+        ["מרטין בדיקה", "29/06/2026", "29/12/2026", "תקף", "רלוונטי", ""],
+        ["איתן דוגמה", "", "", "", "לא רלוונטי", "פטור שמירות"],
+      ]),
+      personnel,
+    );
+
+    expect(result).toEqual([
+      {
+        sourceName: "מרטין בדיקה",
+        resolvedPersonId: MARTIN.id,
+        relevance: "relevant",
+        reason: null,
+        sourceSheet: "מטווחים",
+        sourceCell: "A2",
+      },
+      {
+        sourceName: "איתן דוגמה",
+        resolvedPersonId: EITAN.id,
+        relevance: "not_relevant",
+        reason: "פטור שמירות",
+        sourceSheet: "מטווחים",
+        sourceCell: "A3",
+      },
+    ]);
+  });
+
+  it("still parses a לא רלוונטי row with a STALE completion date -- unlike parseShootingRangesSheet, blank/malformed performedOn never causes this row to be skipped", () => {
+    const result = parseShootingRangeRelevanceSheet(
+      sheet([
+        ["שם", "תאריך ביצוע מטווחים", "רלוונטיות", "סיבה / הערה"],
+        ["מרטין בדיקה", "23/02/2026", "לא רלוונטי", "פטור שמירות"],
+        ["איתן דוגמה", "", "לא רלוונטי", ""],
+      ]),
+      personnel,
+    );
+
+    expect(result.map((r) => r.sourceName)).toEqual(["מרטין בדיקה", "איתן דוגמה"]);
+    expect(result[0].relevance).toBe("not_relevant");
+    expect(result[1].relevance).toBe("not_relevant");
+    expect(result[1].reason).toBeNull();
+  });
+
+  it("reason is optional -- a blank סיבה / הערה cell normalizes to null, never an empty string", () => {
+    const result = parseShootingRangeRelevanceSheet(
+      sheet([
+        ["שם", "רלוונטיות", "סיבה / הערה"],
+        ["מרטין בדיקה", "לא רלוונטי", ""],
+      ]),
+      personnel,
+    );
+    expect(result[0].reason).toBeNull();
+  });
+
+  it("skips a row whose רלוונטיות cell is blank or unrecognized text -- never guessed", () => {
+    const result = parseShootingRangeRelevanceSheet(
+      sheet([
+        ["שם", "רלוונטיות"],
+        ["מרטין בדיקה", ""],
+        ["איתן דוגמה", "אולי"],
+      ]),
+      personnel,
+    );
+    expect(result).toEqual([]);
+  });
+
+  it("does NOT infer relevance from the reason text -- only the explicit רלוונטיות value controls it", () => {
+    const result = parseShootingRangeRelevanceSheet(
+      sheet([
+        ["שם", "רלוונטיות", "סיבה / הערה"],
+        ["מרטין בדיקה", "", "לא רלוונטי - פטור שמירות"],
+      ]),
+      personnel,
+    );
+    expect(result).toEqual([]);
+  });
+
+  it("returns an empty array when the sheet has no רלוונטיות column at all (an older workbook snapshot)", () => {
+    const result = parseShootingRangeRelevanceSheet(
+      sheet([
+        ["שם", "תאריך ביצוע מטווח"],
+        ["מרטין בדיקה", "29/06/2026"],
+      ]),
+      personnel,
+    );
+    expect(result).toEqual([]);
+  });
+
+  it("fails closed to a null resolvedPersonId for an ambiguous name, same convention as parseShootingRangesSheet", () => {
+    const result = parseShootingRangeRelevanceSheet(
+      sheet([
+        ["שם", "רלוונטיות"],
+        ["כפול כפולי", "לא רלוונטי"],
+      ]),
+      personnel,
+    );
+    expect(result[0].resolvedPersonId).toBeNull();
   });
 });
