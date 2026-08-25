@@ -6,28 +6,35 @@
 #
 # Version policy: installs/reinstalls to the EXACT version pinned in
 # .claude/skills/graphify/.graphify_version (the version this repo's graph
-# was built and committed with), not "latest" - so a fresh container never
-# silently drifts onto a newer/older graphify than what produced graph.json.
-# The pin is only trusted if it matches a strict X.Y.Z pattern (defense
-# against a malformed or tampered version file); otherwise this falls back
-# to unpinned "latest" behavior.
+# was built and committed with) - NEVER "latest". The pin is only trusted if
+# it matches a strict X.Y.Z pattern (defense against a malformed or tampered
+# version file). There is no unpinned/"latest" install fallback anywhere in
+# this script: if the pin is missing or invalid AND graphify isn't already
+# present, this does not install anything - it fails open with a warning
+# instead, because installing an arbitrary unpinned version would itself be
+# a silent drift the whole point of pinning is to prevent.
 #
 # Resolution order (on first call, or whenever the pin changes):
 #   1. `graphify` already on PATH / common uv-tool install locations.
-#   2. Compare its `--version` against the pin. Matches -> reused as-is.
-#      Differs, or nothing found -> `uv tool install [--force] "graphifyy[sql]==<pin>"`.
-#   3. Re-resolve after install.
+#   2. If the pin is valid: compare its `--version` against the pin.
+#      Matches -> reused as-is. Differs, or nothing found ->
+#      `uv tool install [--force] "graphifyy[sql]==<pin>"`.
+#      If the pin is missing/invalid: use whatever is already found as-is
+#      (nothing to converge to); if nothing is found, do NOT install -
+#      fall through to the fail-open warning below.
+#   3. Re-resolve after any install.
 # A local marker file (graphify-out/.graphify_guard_bootstrap, gitignored)
 # caches "already verified against this pin" so steady-state calls after the
 # first one in a session are a cheap file-read, not a subprocess + reinstall
 # check on every single tool call.
 #
-# If graphify still cannot be found or installed (no uv, no network), this
-# fails OPEN (exit 0, tool call proceeds) rather than blocking every tool
-# call in an environment with no way to satisfy the dependency. Strict mode
-# is therefore enforced whenever graphify is present or installable, and
-# NOT enforced in that one unavoidable fallback case - which is always
-# surfaced via hookSpecificOutput.additionalContext, never silent.
+# If graphify still cannot be found (no pin to bootstrap from, or no uv, or
+# offline), this fails OPEN (exit 0, tool call proceeds) rather than
+# blocking every tool call in an environment with no way to satisfy the
+# dependency. Strict mode is therefore enforced whenever a valid pin lets
+# graphify be resolved/installed, or graphify is already present, and NOT
+# enforced in that fallback case - which is always surfaced via
+# hookSpecificOutput.additionalContext, never silent.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -80,29 +87,31 @@ if [ -n "$GRAPHIFY_BIN" ]; then
     CURRENT_VERSION="$("$GRAPHIFY_BIN" --version 2>/dev/null | awk '{print $2}')"
 fi
 
-if command -v uv >/dev/null 2>&1; then
-    if [ -n "$PINNED_VERSION" ]; then
-        if [ -z "$GRAPHIFY_BIN" ]; then
-            # Missing entirely -> install the pinned version.
-            uv tool install "graphifyy[sql]==$PINNED_VERSION" -q >/dev/null 2>&1
-        elif [ "$CURRENT_VERSION" != "$PINNED_VERSION" ]; then
-            # A different version is installed -> converge predictably to the pin.
-            uv tool install --force "graphifyy[sql]==$PINNED_VERSION" -q >/dev/null 2>&1
-        else
-            # Version already matches - idempotent no-op call (uv resolves and
-            # does nothing) just to guarantee the [sql] extra is present too.
-            uv tool install "graphifyy[sql]==$PINNED_VERSION" -q >/dev/null 2>&1
-        fi
-    elif [ -z "$GRAPHIFY_BIN" ]; then
-        # No usable pin on file - fall back to unpinned latest (old behavior).
-        uv tool install "graphifyy[sql]" -q >/dev/null 2>&1
+if [ -n "$PINNED_VERSION" ] && command -v uv >/dev/null 2>&1; then
+    if [ -z "$GRAPHIFY_BIN" ]; then
+        # Missing entirely -> install the pinned version.
+        uv tool install "graphifyy[sql]==$PINNED_VERSION" -q >/dev/null 2>&1
+    elif [ "$CURRENT_VERSION" != "$PINNED_VERSION" ]; then
+        # A different version is installed -> converge predictably to the pin.
+        uv tool install --force "graphifyy[sql]==$PINNED_VERSION" -q >/dev/null 2>&1
+    else
+        # Version already matches - idempotent no-op call (uv resolves and
+        # does nothing) just to guarantee the [sql] extra is present too.
+        uv tool install "graphifyy[sql]==$PINNED_VERSION" -q >/dev/null 2>&1
     fi
     GRAPHIFY_BIN="$(find_graphify)"
 fi
+# No valid pin: never install anything here (no unpinned/"latest" fallback).
+# If graphify already happens to be present, it's used as-is below (nothing
+# to converge to without a pin); if not, the check below fails open.
 
 if [ -z "$GRAPHIFY_BIN" ]; then
-    _pin_hint="${PINNED_VERSION:+==$PINNED_VERSION}"
-    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"graphify is not installed in this environment and could not be self-installed (uv unavailable or offline). Strict graph-first navigation is NOT enforced this session - this is a fail-open fallback, not universal enforcement. If uv is available, run: uv tool install \\"graphifyy[sql]%s\\" - then retry."}}\n' "$_pin_hint"
+    if [ -n "$PINNED_VERSION" ]; then
+        _msg="graphify is not installed in this environment and could not be self-installed (uv unavailable or offline). Strict graph-first navigation is NOT enforced this session - this is a fail-open fallback, not universal enforcement. If uv is available, run: uv tool install \\\"graphifyy[sql]==$PINNED_VERSION\\\" - then retry."
+    else
+        _msg="The committed graphify version pin (.claude/skills/graphify/.graphify_version) is missing or invalid, and no graphify installation was found. Refusing to install an unpinned/latest graphify - that would silently defeat the version pin. Strict graph-first navigation is NOT enforced this session. Fix the version pin file (a single valid X.Y.Z version string) to restore automatic bootstrap, or install graphify manually at the version you intend to pin."
+    fi
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"%s"}}\n' "$_msg"
     exit 0
 fi
 
