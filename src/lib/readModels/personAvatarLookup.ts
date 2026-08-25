@@ -19,6 +19,13 @@ import { fetchAllUserIdsByEmail, normalizeEmail } from "@/lib/notifications/engi
  * loading /fairness within the same few seconds reuses one Admin API
  * call) without ever letting a photo go stale for more than half a
  * minute.
+ *
+ * This module started as Fairness's own lookup (hence the original
+ * filename); it carries no Fairness-specific logic at all, so any future
+ * feature needing "this roster's real Google avatar photos, in bulk" (e.g.
+ * the Shooting Ranges manager panel -- see `shootingRangeManagerOverview.ts`)
+ * reuses these same two functions rather than re-implementing this pattern
+ * -- see `lib/readModels/README.md`'s "Person avatar" convention.
  */
 const AVATAR_LOOKUP_CACHE_REVALIDATE_SECONDS = 30;
 
@@ -36,7 +43,7 @@ const getCachedEmailAvatarEntries = unstable_cache(
     const emailToAccount = await fetchAllUserIdsByEmail();
     return [...emailToAccount.entries()].map(([email, account]) => [email, account.avatarUrl]);
   },
-  ["fairness-avatar-lookup"],
+  ["person-avatar-lookup"],
   { revalidate: AVATAR_LOOKUP_CACHE_REVALIDATE_SECONDS },
 );
 

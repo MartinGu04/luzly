@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { getJerusalemLocalNow, jerusalemLocalTimeToInstant } from "./jerusalemClock";
+import {
+  getJerusalemLocalNow,
+  jerusalemEndOfDayInstant,
+  jerusalemLocalTimeToInstant,
+  jerusalemStartOfDayInstant,
+} from "./jerusalemClock";
 
 describe("getJerusalemLocalNow", () => {
   it("46. converts a winter (UTC+2, standard time) instant to Jerusalem local date/time", () => {
@@ -52,5 +57,24 @@ describe("jerusalemLocalTimeToInstant", () => {
     // the UTC day boundary.
     const instant = jerusalemLocalTimeToInstant("2026-08-16", 1, 0);
     expect(instant.toISOString()).toBe("2026-08-15T22:00:00.000Z");
+  });
+});
+
+describe("jerusalemStartOfDayInstant / jerusalemEndOfDayInstant", () => {
+  it("start-of-day is winter (UTC+2) midnight Jerusalem", () => {
+    expect(jerusalemStartOfDayInstant("2026-01-15").toISOString()).toBe("2026-01-14T22:00:00.000Z");
+  });
+
+  it("end-of-day is the last millisecond of the same Jerusalem calendar date, summer (UTC+3)", () => {
+    const end = jerusalemEndOfDayInstant("2026-06-29");
+    expect(getJerusalemLocalNow(end)).toEqual({ date: "2026-06-29", minuteOfDay: 23 * 60 + 59 });
+    expect(end.toISOString()).toBe("2026-06-29T20:59:59.999Z");
+  });
+
+  it("end-of-day stays strictly before the next day's start-of-day", () => {
+    const end = jerusalemEndOfDayInstant("2026-12-29");
+    const nextStart = jerusalemStartOfDayInstant("2026-12-30");
+    expect(end.getTime()).toBeLessThan(nextStart.getTime());
+    expect(nextStart.getTime() - end.getTime()).toBe(1);
   });
 });

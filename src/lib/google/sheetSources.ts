@@ -5,6 +5,7 @@ export const SHEET_SOURCES = {
   schedule: "משמרות + תורנויות",
   potentialH1: 'פוטנציאל תקש"אס 1-6/2026',
   potentialH2: 'פוטנציאל תקש"אס 7-12/2026',
+  shootingRanges: "מטווחים",
 } as const;
 
 export type SheetSourceKey = keyof typeof SHEET_SOURCES;

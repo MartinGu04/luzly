@@ -10,7 +10,7 @@ const resolveAvatarUrlsByPersonId = vi.fn();
 vi.mock("./getRequestPersonalSchedule", () => ({ getRequestPersonalSchedule }));
 vi.mock("@/lib/auth/currentUser", () => ({ getAuthenticatedIdentity }));
 vi.mock("@/lib/sync", () => ({ getWorkbookSnapshot }));
-vi.mock("./fairnessAvatarLookup", () => ({ fetchEmailToAvatarUrl, resolveAvatarUrlsByPersonId }));
+vi.mock("./personAvatarLookup", () => ({ fetchEmailToAvatarUrl, resolveAvatarUrlsByPersonId }));
 
 const { loadFairnessWorkbookContext, getFairnessWorkbookSheet, FAIRNESS_WORKBOOK_SOURCES } = await import(
   "./fairnessWorkbookContext"
