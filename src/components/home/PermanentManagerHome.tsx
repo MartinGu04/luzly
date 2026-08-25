@@ -17,6 +17,8 @@ interface PermanentManagerHomeProps {
   userId?: string;
   /** The authoritative calendar-sync state, passed straight through to `SetupSection` -- see its own docstring. */
   calendarSyncEnabled?: boolean;
+  /** Account-level onboarding eligibility, passed straight through to `SetupSection` -- see its own docstring and `lib/config/onboardingRollout.ts`. Defaults to `false` (never show). */
+  eligibleForOnboarding?: boolean;
 }
 
 /**
@@ -38,13 +40,14 @@ export function PermanentManagerHome({
   reportOneReserveInclusion,
   userId,
   calendarSyncEnabled = false,
+  eligibleForOnboarding = false,
 }: PermanentManagerHomeProps) {
   const todayDate = model.localNow.date;
 
   return (
     <div className="flex flex-col gap-6">
       <Header personName={model.person.name} localNow={model.localNow} />
-      <SetupSection userId={userId} calendarSyncEnabled={calendarSyncEnabled} />
+      <SetupSection userId={userId} calendarSyncEnabled={calendarSyncEnabled} eligibleForOnboarding={eligibleForOnboarding} />
 
       {reportOneDraft ? (
         <ReportOneQuickAction draft={reportOneDraft} reserveInclusionByPersonId={reportOneReserveInclusion} />

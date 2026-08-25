@@ -21,6 +21,21 @@ interface SetupSectionProps {
    * card existed, is never shown this item as outstanding.
    */
   calendarSyncEnabled: boolean;
+  /**
+   * Account-level onboarding eligibility (pre-merge correction), computed
+   * server-side by `(dashboard)/page.tsx` from `lib/config/onboardingRollout.ts`'s
+   * `isEligibleForOnboarding(accountCreatedAt)` -- Supabase's authoritative
+   * account-creation timestamp compared against a centralized rollout
+   * cutoff. This is a COMPLETELY SEPARATE gate from every per-item
+   * completion check below: `false` hides the entire card outright,
+   * regardless of install/Push/calendar-sync state, so a veteran account
+   * signing in from a brand-new browser (no PWA install, no local Push
+   * subscription -- exactly what a genuinely new account also looks like
+   * on first login) is never mistaken for a new user. Only once this is
+   * `true` do the real device/account signals below decide which rows
+   * actually show.
+   */
+  eligibleForOnboarding: boolean;
 }
 
 function installGuidanceText(guidance: Exclude<InstallGuidance, "completed">): string {
@@ -103,14 +118,28 @@ function SetupItemRow({ icon: Icon, title, description, actionLabel, onAction, h
  * localStorage-keyed-by-userId pattern, see that module's own docstring)
  * and never resurface once skipped.
  *
+ * Whether this card can appear AT ALL for the current account is a
+ * SEPARATE, account-level decision (pre-merge correction) -- see
+ * `eligibleForOnboarding`'s own docstring and `lib/config/onboardingRollout.ts`.
+ * A veteran account's device/Push/calendar state can look exactly like a
+ * new account's (nothing installed, nothing subscribed yet on THIS
+ * browser), so per-item completion alone can never be trusted to decide
+ * whether the card should exist for this account in the first place.
+ *
  * Deliberately renders nothing until both `usePwaInstall()`'s one-time
  * environment detection AND `usePushSubscription()`'s initial status check
  * have resolved (`isReady`/`pushState !== "checking"`) -- same "never
  * guess, wait for the real answer" rule `deriveBellOnboardingCard` already
  * follows, so this can never show a stale "incomplete" flash that
  * immediately flips complete right after hydration.
+ *
+ * `eligibleForOnboarding` is checked FIRST, before any device-state gate --
+ * see its own docstring. This is what actually fixes the veteran-user bug:
+ * device/browser state (not standalone, no Push subscription) looks
+ * IDENTICAL for a veteran account on a fresh browser and a genuinely new
+ * account, so only an account-level signal can tell them apart.
  */
-export function SetupSection({ userId, calendarSyncEnabled }: SetupSectionProps) {
+export function SetupSection({ userId, calendarSyncEnabled, eligibleForOnboarding }: SetupSectionProps) {
   const { isReady, isStandalone, canPromptInstall, isIos, installCompleted, promptInstall } = usePwaInstall();
   const { state: pushState, enable } = usePushSubscription(userId);
 
@@ -135,6 +164,8 @@ export function SetupSection({ userId, calendarSyncEnabled }: SetupSectionProps)
     if (userId) markSetupItemSkipped(userId, item);
     setSkippedItems((previous) => new Set(previous).add(item));
   }
+
+  if (!eligibleForOnboarding) return null;
 
   const pushStateKnown = pushState !== "checking";
   if (!isReady || !pushStateKnown) return null;

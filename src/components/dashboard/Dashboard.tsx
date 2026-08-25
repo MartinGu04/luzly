@@ -44,6 +44,14 @@ interface DashboardProps {
   userId?: string;
   /** The authoritative calendar-sync state, passed straight through to `SetupSection` -- see its own docstring. Defaults to `false` (not yet synced) for callers that don't pass it, same conservative default `SetupSection` itself would derive from an absent signal. */
   calendarSyncEnabled?: boolean;
+  /**
+   * Account-level onboarding eligibility, passed straight through to
+   * `SetupSection` -- see its own docstring and `lib/config/onboardingRollout.ts`.
+   * Defaults to `false` (never show) for callers that don't pass it -- the
+   * safe fail-closed default: an unproven account age must never be
+   * treated as "new".
+   */
+  eligibleForOnboarding?: boolean;
 }
 
 /** A known blocking absence (vacation/abroad/medical/day_off) dated today, reusing the domain's own "blocking" semantics -- never redefined here. */
@@ -87,6 +95,7 @@ export function Dashboard({
   reportOneReserveInclusion,
   userId,
   calendarSyncEnabled = false,
+  eligibleForOnboarding = false,
 }: DashboardProps) {
   const hasCurrentAssignment = model.currentAssignments.length > 0;
 
@@ -116,7 +125,7 @@ export function Dashboard({
   return (
     <div className="flex flex-col gap-4">
       <Header personName={model.person.name} localNow={model.localNow} />
-      <SetupSection userId={userId} calendarSyncEnabled={calendarSyncEnabled} />
+      <SetupSection userId={userId} calendarSyncEnabled={calendarSyncEnabled} eligibleForOnboarding={eligibleForOnboarding} />
       {reportOneDraft ? (
         <ReportOneQuickAction draft={reportOneDraft} reserveInclusionByPersonId={reportOneReserveInclusion} />
       ) : null}

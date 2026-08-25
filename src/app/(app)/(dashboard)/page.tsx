@@ -2,6 +2,7 @@ import { Dashboard } from "@/components/dashboard/Dashboard";
 import { ConfigurationErrorState } from "@/components/dashboard/ConfigurationErrorState";
 import { PermanentManagerHome } from "@/components/home/PermanentManagerHome";
 import { getCalendarFeedForCurrentUser } from "@/lib/calendar/feedStore";
+import { isEligibleForOnboarding } from "@/lib/config/onboardingRollout";
 import { classifyPersonnelType } from "@/lib/domain/personnelType";
 import { getRequestPermanentManagerHome } from "@/lib/readModels/getRequestPermanentManagerHome";
 import { getRequestPersonalSchedule } from "@/lib/readModels/getRequestPersonalSchedule";
@@ -74,6 +75,16 @@ import { getRequestReportOneTomorrow } from "@/lib/readModels/getRequestReportOn
  * re-derived. Cheap (a single RLS-scoped row read) and independent of the
  * personal-schedule/manager-home data above, so it costs nothing extra to
  * always fetch it once real content is about to render.
+ *
+ * `isEligibleForOnboarding(result.accountCreatedAt)` (pre-merge correction)
+ * is computed here too, server-side, from Supabase's own authoritative
+ * account-creation timestamp -- never from any client/device signal. This
+ * is a SEPARATE decision from `calendarSyncEnabled` above: it decides
+ * whether the setup card can appear for this ACCOUNT at all (grandfathering
+ * every account that predates the rollout cutoff), while the per-item
+ * completion signals (install/Push/calendar-sync state) still decide which
+ * rows show inside it for an eligible account. See
+ * `lib/config/onboardingRollout.ts` and `SetupSection`'s own docstrings.
  */
 export default async function DashboardPage() {
   const result = await getRequestPersonalSchedule();
@@ -83,6 +94,7 @@ export default async function DashboardPage() {
   }
 
   const calendarSyncEnabled = (await getCalendarFeedForCurrentUser()).enabled;
+  const eligibleForOnboarding = isEligibleForOnboarding(result.accountCreatedAt);
 
   const isPermanentManager =
     classifyPersonnelType(result.model.person.personnelType) === "permanent" && result.model.person.isManager;
@@ -100,6 +112,7 @@ export default async function DashboardPage() {
           reportOneReserveInclusion={reportOneReserveInclusion}
           userId={result.userId}
           calendarSyncEnabled={calendarSyncEnabled}
+          eligibleForOnboarding={eligibleForOnboarding}
         />
       );
     }
@@ -122,6 +135,7 @@ export default async function DashboardPage() {
       reportOneReserveInclusion={reportOneReserveInclusion}
       userId={result.userId}
       calendarSyncEnabled={calendarSyncEnabled}
+      eligibleForOnboarding={eligibleForOnboarding}
     />
   );
 }

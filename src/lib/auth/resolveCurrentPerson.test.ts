@@ -249,7 +249,7 @@ describe("resolveIdentityAgainstPeople (pure, shared by resolveCurrentPerson and
   it("resolves the matching Person for a unique authenticated email", () => {
     const p = person({ email: "dani@example.invalid" });
     const result = resolveIdentityAgainstPeople(
-      { status: "authenticated", userId: "u1", email: "dani@example.invalid", avatarUrl: null },
+      { status: "authenticated", userId: "u1", email: "dani@example.invalid", avatarUrl: null, createdAt: "2024-01-01T00:00:00.000Z" },
       [p],
     );
     expect(result).toEqual({ status: "ok", person: p });
@@ -258,7 +258,7 @@ describe("resolveIdentityAgainstPeople (pure, shared by resolveCurrentPerson and
   it("6. an unmapped email produces unmapped, not a Person", () => {
     const p = person({ email: "dani@example.invalid" });
     const result = resolveIdentityAgainstPeople(
-      { status: "authenticated", userId: "u1", email: "stranger@example.invalid", avatarUrl: null },
+      { status: "authenticated", userId: "u1", email: "stranger@example.invalid", avatarUrl: null, createdAt: "2024-01-01T00:00:00.000Z" },
       [p],
     );
     expect(result).toEqual({ status: "unmapped", email: "stranger@example.invalid" });
@@ -268,7 +268,7 @@ describe("resolveIdentityAgainstPeople (pure, shared by resolveCurrentPerson and
     const a = person({ id: "p_a", email: "shared@example.invalid" });
     const b = person({ id: "p_b", email: "SHARED@example.invalid" });
     const result = resolveIdentityAgainstPeople(
-      { status: "authenticated", userId: "u1", email: "shared@example.invalid", avatarUrl: null },
+      { status: "authenticated", userId: "u1", email: "shared@example.invalid", avatarUrl: null, createdAt: "2024-01-01T00:00:00.000Z" },
       [a, b],
     );
     expect(result).toEqual({ status: "ambiguous_identity" });
@@ -279,7 +279,7 @@ describe("resolveIdentityAgainstPeople (pure, shared by resolveCurrentPerson and
     const people = Object.freeze([p]);
     expect(() =>
       resolveIdentityAgainstPeople(
-        { status: "authenticated", userId: "u1", email: "dani@example.invalid", avatarUrl: null },
+        { status: "authenticated", userId: "u1", email: "dani@example.invalid", avatarUrl: null, createdAt: "2024-01-01T00:00:00.000Z" },
         people,
       ),
     ).not.toThrow();
