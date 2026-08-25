@@ -12,15 +12,19 @@ import path from "node:path";
  *
  * Two invariants:
  *  1. `createSupabaseServiceRoleClient` is referenced by name in exactly
- *     three files: its own definition,
+ *     four files: its own definition,
  *     `src/lib/notifications/engine/serviceClient.ts` (the notification
  *     worker's call site -- no session exists for a Cron-triggered
- *     request), and `src/lib/calendar/serviceClient.ts` (the personal
+ *     request), `src/lib/calendar/serviceClient.ts` (the personal
  *     calendar feed's call site -- no session exists for an external
  *     calendar client's token-authenticated request either, see that
- *     file's own docstring). No other file -- not a route, not a Server
- *     Component/Action, not a client component -- may import or call it
- *     directly.
+ *     file's own docstring), and `src/lib/dashboardVisit/serviceClient.ts`
+ *     (the personal Home "since your previous visit" recap's own
+ *     independent call site for the zero-RLS-policy `dashboard_visit_state`
+ *     table -- see that file's own docstring for why this is a separate
+ *     domain boundary from the notification engine's). No other file --
+ *     not a route, not a Server Component/Action, not a client component
+ *     -- may import or call it directly.
  *  2. No "use client" component, and no file under `src/app` reachable
  *     from ordinary user navigation, ever references
  *     `SUPABASE_SERVICE_ROLE_KEY` or `NOTIFICATION_WORKER_SECRET` --
@@ -47,18 +51,20 @@ const sourceFiles = findSourceFiles(srcRoot);
 const SERVICE_ROLE_DEFINITION_FILE = path.join(srcRoot, "lib", "supabase", "serviceRoleClient.ts");
 const NOTIFICATION_SERVICE_ROLE_CALL_SITE_FILE = path.join(srcRoot, "lib", "notifications", "engine", "serviceClient.ts");
 const CALENDAR_SERVICE_ROLE_CALL_SITE_FILE = path.join(srcRoot, "lib", "calendar", "serviceClient.ts");
+const DASHBOARD_VISIT_SERVICE_ROLE_CALL_SITE_FILE = path.join(srcRoot, "lib", "dashboardVisit", "serviceClient.ts");
 const ALLOWED_SERVICE_ROLE_REFERENCE_FILES = new Set([
   SERVICE_ROLE_DEFINITION_FILE,
   NOTIFICATION_SERVICE_ROLE_CALL_SITE_FILE,
   CALENDAR_SERVICE_ROLE_CALL_SITE_FILE,
+  DASHBOARD_VISIT_SERVICE_ROLE_CALL_SITE_FILE,
 ]);
 
-describe("notification worker + calendar feed service-role boundary guard", () => {
+describe("notification worker + calendar feed + dashboard visit service-role boundary guard", () => {
   it("finds source files (sanity check the scan itself works)", () => {
     expect(sourceFiles.length).toBeGreaterThan(0);
   });
 
-  it("createSupabaseServiceRoleClient is referenced by name only in its definition and the two engines' single call sites", () => {
+  it("createSupabaseServiceRoleClient is referenced by name only in its definition and each domain's single call site", () => {
     const referencingFiles = sourceFiles.filter((file) =>
       /createSupabaseServiceRoleClient/.test(fs.readFileSync(file, "utf8")),
     );

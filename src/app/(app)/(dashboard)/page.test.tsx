@@ -6,11 +6,14 @@ import type { PermanentManagerHomeReadModel } from "@/lib/readModels/permanentMa
 const getRequestPersonalSchedule = vi.fn();
 vi.mock("@/lib/readModels/getRequestPersonalSchedule", () => ({ getRequestPersonalSchedule }));
 
-const getRequestRecentDashboardChanges = vi.fn();
-vi.mock("@/lib/readModels/getRequestRecentDashboardChanges", () => ({ getRequestRecentDashboardChanges }));
+const getRequestDashboardVisitRecap = vi.fn();
+vi.mock("@/lib/readModels/getRequestRecentDashboardChanges", () => ({ getRequestDashboardVisitRecap }));
 
 const getRequestPermanentManagerHome = vi.fn();
 vi.mock("@/lib/readModels/getRequestPermanentManagerHome", () => ({ getRequestPermanentManagerHome }));
+
+const recordDashboardVisitAction = vi.fn().mockResolvedValue({ ok: true });
+vi.mock("@/lib/dashboardVisit/actions", () => ({ recordDashboardVisitAction }));
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 vi.mock("@/components/ui/DataFreshnessStatus", () => ({
@@ -25,9 +28,10 @@ afterEach(() => {
 
 beforeEach(() => {
   getRequestPersonalSchedule.mockReset();
-  getRequestRecentDashboardChanges.mockReset();
-  getRequestRecentDashboardChanges.mockResolvedValue([]);
+  getRequestDashboardVisitRecap.mockReset();
+  getRequestDashboardVisitRecap.mockResolvedValue({ visitStartedAt: "2026-08-25T10:00:00.000Z", items: [], totalCount: 0 });
   getRequestPermanentManagerHome.mockReset();
+  recordDashboardVisitAction.mockClear();
 });
 
 function model(overrides: Partial<PersonalScheduleReadModel> = {}): PersonalScheduleReadModel {
@@ -96,42 +100,118 @@ function permanentManagerHomeModel(
   };
 }
 
-describe("DashboardPage — PR #36 recent-changes wiring", () => {
-  it("passes the loaded recent changes through to the Dashboard, which renders the recap", async () => {
-    getRequestPersonalSchedule.mockResolvedValue({ status: "ok", model: model() });
-    getRequestRecentDashboardChanges.mockResolvedValue([
-      {
-        key: "change:job_1",
-        category: "shift",
-        title: "⚠️ שינוי בשיבוץ",
-        body: "השיבוץ שלך ליום חמישי השתנה: יום → לילה",
-        happenedAt: "2026-08-12T07:42:00.000Z",
-        href: "/schedule?date=2026-08-19",
-        date: "2026-08-19",
-      },
-    ]);
+describe("DashboardPage — 'מה השתנה מאז הפעם הקודמת' visit recap wiring", () => {
+  it("passes the loaded visit recap through to the Dashboard, which renders the recap", async () => {
+    getRequestPersonalSchedule.mockResolvedValue({
+      status: "ok",
+      model: model({ person: { id: "p_1", name: "עובד בדיקה", isManager: false, isTechnician: true, isSupervisor: false, personnelType: "חובה" } }),
+    });
+    getRequestDashboardVisitRecap.mockResolvedValue({
+      visitStartedAt: "2026-08-25T10:00:00.000Z",
+      totalCount: 1,
+      items: [
+        {
+          key: "change:job_1",
+          category: "shift",
+          title: "⚠️ שינוי בשיבוץ",
+          body: "השיבוץ שלך ליום חמישי השתנה: יום → לילה",
+          happenedAt: "2026-08-12T07:42:00.000Z",
+          href: "/schedule?date=2026-08-19",
+          date: "2026-08-19",
+        },
+      ],
+    });
 
     const element = await DashboardPage();
     render(element);
 
-    expect(screen.getByText("מה השתנה")).toBeInTheDocument();
+    expect(screen.getByText("מה השתנה מאז הפעם הקודמת")).toBeInTheDocument();
   });
 
-  it("an empty recent-changes result renders no trace of the recap", async () => {
-    getRequestPersonalSchedule.mockResolvedValue({ status: "ok", model: model() });
+  it("an empty visit recap result renders no trace of the recap panel", async () => {
+    getRequestPersonalSchedule.mockResolvedValue({
+      status: "ok",
+      model: model({ person: { id: "p_1", name: "עובד בדיקה", isManager: false, isTechnician: true, isSupervisor: false, personnelType: "חובה" } }),
+    });
 
     const element = await DashboardPage();
     render(element);
 
-    expect(screen.queryByText("מה השתנה")).toBeNull();
+    expect(screen.queryByText("מה השתנה מאז הפעם הקודמת")).toBeNull();
   });
 
-  it("never fetches recent changes at all when the personal schedule itself failed (configuration error)", async () => {
+  it("never fetches the visit recap at all when the personal schedule itself failed (configuration error)", async () => {
     getRequestPersonalSchedule.mockResolvedValue({ status: "configuration_error", message: "boom" });
 
     await DashboardPage();
 
-    expect(getRequestRecentDashboardChanges).not.toHaveBeenCalled();
+    expect(getRequestDashboardVisitRecap).not.toHaveBeenCalled();
+  });
+});
+
+describe("DashboardPage — visit recap eligibility gating (1, 2, 3, 4)", () => {
+  it("1. regular (חובה) personnel: the visit recap is fetched", async () => {
+    getRequestPersonalSchedule.mockResolvedValue({
+      status: "ok",
+      model: model({ person: { id: "p_1", name: "עובד בדיקה", isManager: false, isTechnician: true, isSupervisor: false, personnelType: "חובה" } }),
+    });
+
+    await DashboardPage();
+
+    expect(getRequestDashboardVisitRecap).toHaveBeenCalled();
+  });
+
+  it("2. reserve (מילואים) personnel: the visit recap is fetched", async () => {
+    getRequestPersonalSchedule.mockResolvedValue({
+      status: "ok",
+      model: model({ person: { id: "p_res", name: "מילואימניק", isManager: false, isTechnician: true, isSupervisor: false, personnelType: "מילואים" } }),
+    });
+
+    await DashboardPage();
+
+    expect(getRequestDashboardVisitRecap).toHaveBeenCalled();
+  });
+
+  it("3. permanent (קבע), non-manager personnel: the visit recap is NEVER fetched", async () => {
+    getRequestPersonalSchedule.mockResolvedValue({
+      status: "ok",
+      model: model({ person: { id: "p_1", name: "עובד קבע", isManager: false, isTechnician: true, isSupervisor: false, personnelType: "קבע" } }),
+    });
+
+    const element = await DashboardPage();
+    render(element);
+
+    expect(getRequestDashboardVisitRecap).not.toHaveBeenCalled();
+    expect(screen.queryByText("מה השתנה מאז הפעם הקודמת")).toBeNull();
+  });
+
+  it("4. unclassified personnel: the visit recap is NEVER fetched", async () => {
+    getRequestPersonalSchedule.mockResolvedValue({
+      status: "ok",
+      model: model({ person: { id: "p_unk", name: "לא מסווג", isManager: false, isTechnician: true, isSupervisor: false, personnelType: null } }),
+    });
+
+    const element = await DashboardPage();
+    render(element);
+
+    expect(getRequestDashboardVisitRecap).not.toHaveBeenCalled();
+    expect(screen.queryByText("מה השתנה מאז הפעם הקודמת")).toBeNull();
+  });
+
+  it("25. a permanent MANAGER never even reaches the eligibility check -- they get PermanentManagerHome instead, and the visit recap is never fetched", async () => {
+    getRequestPersonalSchedule.mockResolvedValue({
+      status: "ok",
+      model: model({
+        person: { id: "p_mgr", name: "מנהל בדיקה", isManager: true, isTechnician: false, isSupervisor: false, personnelType: "קבע" },
+      }),
+    });
+    getRequestPermanentManagerHome.mockResolvedValue({ status: "ok", model: permanentManagerHomeModel() });
+
+    const element = await DashboardPage();
+    render(element);
+
+    expect(screen.getByText("מה קורה עכשיו במחלקה?")).toBeInTheDocument();
+    expect(getRequestDashboardVisitRecap).not.toHaveBeenCalled();
   });
 });
 
@@ -149,7 +229,7 @@ describe("DashboardPage — permanent-manager Home eligibility", () => {
     render(element);
 
     expect(screen.getByText("מה קורה עכשיו במחלקה?")).toBeInTheDocument();
-    expect(getRequestRecentDashboardChanges).not.toHaveBeenCalled();
+    expect(getRequestDashboardVisitRecap).not.toHaveBeenCalled();
   });
 
   it("permanent + non-manager: receives the normal personal Dashboard, never the operational Home", async () => {
@@ -238,6 +318,9 @@ describe("DashboardPage — permanent-manager Home eligibility", () => {
     render(element);
 
     expect(screen.queryByText("מה קורה עכשיו במחלקה?")).toBeNull();
-    expect(getRequestRecentDashboardChanges).toHaveBeenCalled();
+    // Still permanent personnel even on this fallback path -- the visit
+    // recap stays gated to regular/reserve only, regardless of how the
+    // Dashboard was reached.
+    expect(getRequestDashboardVisitRecap).not.toHaveBeenCalled();
   });
 });

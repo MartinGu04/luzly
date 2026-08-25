@@ -257,9 +257,11 @@ function isEligibleCandidate(
  * within this many calendar days of the issue's own date -- an old or far-
  * future shift proves nothing about whether the person is active in the
  * rotation right now. No existing bounded operational horizon in this
- * domain fits this need (`RECENT_DASHBOARD_CHANGES_HORIZON_HOURS` is an
- * hours-since-a-timestamp window for an unrelated dashboard feature), so
- * this is PR #39's own small, explicitly conservative constant -- a
+ * domain fits this need (the personal Home dashboard's own recap window
+ * is keyed to each user's previous visit, not a fixed operational horizon
+ * -- see `DASHBOARD_VISIT_RECAP_VISIBLE_LIMIT`, an unrelated dashboard
+ * feature's ROW count, never a time window), so this is PR #39's own
+ * small, explicitly conservative constant -- a
  * reservist's Fairness allocation (see `reserveParticipation.ts`) is
  * always checked FIRST and is the stronger signal; this date-window shift
  * check is only the fallback when no Fairness evidence exists.

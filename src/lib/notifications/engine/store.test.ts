@@ -275,7 +275,7 @@ describe("applyPendingChanges -- repeated worker ticks at 5-minute cadence", () 
   });
 });
 
-describe("getRecentSettledJobsForRecipient (PR #36 dashboard recap)", () => {
+describe("getRecentSettledJobsForRecipient (personal Home 'since your previous visit' recap)", () => {
   interface FakeJobRow {
     id: string;
     category: string;
@@ -288,7 +288,7 @@ describe("getRecentSettledJobsForRecipient (PR #36 dashboard recap)", () => {
     status?: string;
   }
 
-  /** A minimal, faithful fake of `.from("notification_jobs").select().eq().in().gte().order().limit()` -- same style as `makeStatefulFakeSupabase` above, scoped to this one query shape. */
+  /** A minimal, faithful fake of `.from("notification_jobs").select(cols, {count:'exact'}).eq().in().gt().order().limit()` -- same style as `makeStatefulFakeSupabase` above, scoped to this one query shape. `count` mirrors postgrest's real `count: "exact"` behavior: computed over the WHOLE filtered match set, independent of `limit()`. */
   function makeJobsFakeSupabase(rows: FakeJobRow[]) {
     const calls: Record<string, unknown> = {};
     const client = {
@@ -296,8 +296,9 @@ describe("getRecentSettledJobsForRecipient (PR #36 dashboard recap)", () => {
         if (table !== "notification_jobs") throw new Error(`unexpected table ${table}`);
         let filtered = [...rows];
         const builder = {
-          select: (columns: string) => {
+          select: (columns: string, options?: { count?: string }) => {
             calls.select = columns;
+            calls.selectOptions = options;
             return builder;
           },
           eq: (column: string, value: unknown) => {
@@ -310,9 +311,9 @@ describe("getRecentSettledJobsForRecipient (PR #36 dashboard recap)", () => {
             filtered = filtered.filter((row) => values.includes((row as unknown as Record<string, unknown>)[column]));
             return builder;
           },
-          gte: (column: string, value: string) => {
-            calls.gte = [column, value];
-            filtered = filtered.filter((row) => String((row as unknown as Record<string, unknown>)[column]) >= value);
+          gt: (column: string, value: string) => {
+            calls.gt = [column, value];
+            filtered = filtered.filter((row) => String((row as unknown as Record<string, unknown>)[column]) > value);
             return builder;
           },
           order: (column: string, opts: { ascending: boolean }) => {
@@ -327,7 +328,7 @@ describe("getRecentSettledJobsForRecipient (PR #36 dashboard recap)", () => {
           },
           limit: (n: number) => {
             calls.limit = n;
-            return Promise.resolve({ data: filtered.slice(0, n), error: null });
+            return Promise.resolve({ data: filtered.slice(0, n), error: null, count: filtered.length });
           },
         };
         return builder;
@@ -351,11 +352,11 @@ describe("getRecentSettledJobsForRecipient (PR #36 dashboard recap)", () => {
     };
   }
 
-  it("filters by recipient_user_id, category IN (...), and created_at >= sinceIso", async () => {
+  it("filters by recipient_user_id, category IN (...), and created_at STRICTLY AFTER sinceIso (.gt, never .gte)", async () => {
     const { client, calls } = makeJobsFakeSupabase([jobRow()]);
     const { getRecentSettledJobsForRecipient } = await loadModule(client);
 
-    const rows = await getRecentSettledJobsForRecipient(
+    const { rows } = await getRecentSettledJobsForRecipient(
       "u_me",
       ["shift_change", "team_change", "duty_change"],
       "2026-08-13T10:00:00.000Z",
@@ -364,16 +365,82 @@ describe("getRecentSettledJobsForRecipient (PR #36 dashboard recap)", () => {
 
     expect(calls.eq).toEqual(["recipient_user_id", "u_me"]);
     expect(calls.in).toEqual(["category", ["shift_change", "team_change", "duty_change"]]);
-    expect(calls.gte).toEqual(["created_at", "2026-08-13T10:00:00.000Z"]);
+    expect(calls.gt).toEqual(["created_at", "2026-08-13T10:00:00.000Z"]);
     expect(rows).toHaveLength(1);
     expect(rows[0].id).toBe("job_1");
+  });
+
+  describe("previous-visit boundary is strictly AFTER, never >= (a job created exactly AT the cutoff belongs to that boundary, not the next period)", () => {
+    const CUTOFF = "2026-08-24T20:00:00.000Z";
+
+    it("created_at < cutoff -> excluded", async () => {
+      const { client } = makeJobsFakeSupabase([jobRow({ id: "before", created_at: "2026-08-24T19:59:59.999Z" })]);
+      const { getRecentSettledJobsForRecipient } = await loadModule(client);
+
+      const { rows, totalCount } = await getRecentSettledJobsForRecipient("u_me", ["shift_change"], CUTOFF, 10);
+
+      expect(rows).toEqual([]);
+      expect(totalCount).toBe(0);
+    });
+
+    it("created_at == cutoff -> excluded", async () => {
+      const { client } = makeJobsFakeSupabase([jobRow({ id: "exact", created_at: CUTOFF })]);
+      const { getRecentSettledJobsForRecipient } = await loadModule(client);
+
+      const { rows, totalCount } = await getRecentSettledJobsForRecipient("u_me", ["shift_change"], CUTOFF, 10);
+
+      expect(rows).toEqual([]);
+      expect(totalCount).toBe(0);
+    });
+
+    it("created_at > cutoff -> included", async () => {
+      const { client } = makeJobsFakeSupabase([jobRow({ id: "after", created_at: "2026-08-24T20:00:00.001Z" })]);
+      const { getRecentSettledJobsForRecipient } = await loadModule(client);
+
+      const { rows, totalCount } = await getRecentSettledJobsForRecipient("u_me", ["shift_change"], CUTOFF, 10);
+
+      expect(rows.map((r) => r.id)).toEqual(["after"]);
+      expect(totalCount).toBe(1);
+    });
+  });
+
+  it("requests an exact count in the SAME select call -- never a second query (no N+1)", async () => {
+    const { client, calls } = makeJobsFakeSupabase([jobRow()]);
+    const { getRecentSettledJobsForRecipient } = await loadModule(client);
+
+    await getRecentSettledJobsForRecipient("u_me", ["shift_change"], "2026-08-13T10:00:00.000Z", 3);
+
+    expect(calls.selectOptions).toEqual({ count: "exact" });
+  });
+
+  it("totalCount reflects the FULL match count, even when more rows exist than the limit returns (28)", async () => {
+    const rows7 = Array.from({ length: 7 }, (_, i) =>
+      jobRow({ id: `job_${i}`, created_at: `2026-08-${10 + i}T10:00:00.000Z` }),
+    );
+    const { client } = makeJobsFakeSupabase(rows7);
+    const { getRecentSettledJobsForRecipient } = await loadModule(client);
+
+    const { rows, totalCount } = await getRecentSettledJobsForRecipient("u_me", ["shift_change"], "2026-08-01T00:00:00.000Z", 3);
+
+    expect(rows).toHaveLength(3);
+    expect(totalCount).toBe(7);
+  });
+
+  it("totalCount equals rows.length when everything fits within the limit", async () => {
+    const { client } = makeJobsFakeSupabase([jobRow({ id: "a" }), jobRow({ id: "b" })]);
+    const { getRecentSettledJobsForRecipient } = await loadModule(client);
+
+    const { rows, totalCount } = await getRecentSettledJobsForRecipient("u_me", ["shift_change"], "2026-08-01T00:00:00.000Z", 10);
+
+    expect(totalCount).toBe(rows.length);
+    expect(totalCount).toBe(2);
   });
 
   it("never returns another recipient's rows", async () => {
     const { client } = makeJobsFakeSupabase([jobRow({ id: "mine", recipient_user_id: "u_me" }), jobRow({ id: "theirs", recipient_user_id: "u_other" })]);
     const { getRecentSettledJobsForRecipient } = await loadModule(client);
 
-    const rows = await getRecentSettledJobsForRecipient("u_me", ["shift_change"], "2026-08-01T00:00:00.000Z", 10);
+    const { rows } = await getRecentSettledJobsForRecipient("u_me", ["shift_change"], "2026-08-01T00:00:00.000Z", 10);
 
     expect(rows.map((r) => r.id)).toEqual(["mine"]);
   });
@@ -386,14 +453,14 @@ describe("getRecentSettledJobsForRecipient (PR #36 dashboard recap)", () => {
     ]);
     const { getRecentSettledJobsForRecipient } = await loadModule(client);
 
-    const rows = await getRecentSettledJobsForRecipient("u_me", ["shift_change"], "2026-08-01T00:00:00.000Z", 2);
+    const { rows } = await getRecentSettledJobsForRecipient("u_me", ["shift_change"], "2026-08-01T00:00:00.000Z", 2);
 
     expect(calls.order).toEqual(["created_at", { ascending: false }]);
     expect(calls.limit).toBe(2);
     expect(rows.map((r) => r.id)).toEqual(["new", "mid"]);
   });
 
-  it("includes jobs regardless of push-delivery status -- never filters on status", async () => {
+  it("includes jobs regardless of push-delivery status -- never filters on status (11)", async () => {
     const { client } = makeJobsFakeSupabase([
       jobRow({ id: "a", status: "completed" }),
       jobRow({ id: "b", status: "failed" }),
@@ -402,7 +469,7 @@ describe("getRecentSettledJobsForRecipient (PR #36 dashboard recap)", () => {
     ]);
     const { getRecentSettledJobsForRecipient } = await loadModule(client);
 
-    const rows = await getRecentSettledJobsForRecipient("u_me", ["shift_change"], "2026-08-01T00:00:00.000Z", 10);
+    const { rows } = await getRecentSettledJobsForRecipient("u_me", ["shift_change"], "2026-08-01T00:00:00.000Z", 10);
 
     expect(rows.map((r) => r.id).sort()).toEqual(["a", "b", "c", "d"]);
   });
@@ -411,7 +478,9 @@ describe("getRecentSettledJobsForRecipient (PR #36 dashboard recap)", () => {
     const { client } = makeJobsFakeSupabase([jobRow()]);
     const { getRecentSettledJobsForRecipient } = await loadModule(client);
 
-    const [row] = await getRecentSettledJobsForRecipient("u_me", ["shift_change"], "2026-08-01T00:00:00.000Z", 3);
+    const {
+      rows: [row],
+    } = await getRecentSettledJobsForRecipient("u_me", ["shift_change"], "2026-08-01T00:00:00.000Z", 3);
 
     expect(Object.keys(row).sort()).toEqual(["body", "category", "createdAt", "id", "path", "sourceRef", "title"]);
   });

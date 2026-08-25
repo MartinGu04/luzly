@@ -32,7 +32,7 @@ describe("RecentChangesPanel -- 11. zero changes", () => {
 describe("RecentChangesPanel -- 12. one change", () => {
   it("renders the heading and the item's body", () => {
     render(<RecentChangesPanel changes={[change()]} now={NOW} />);
-    expect(screen.getByRole("heading", { name: "מה השתנה" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "מה השתנה מאז הפעם הקודמת" })).toBeInTheDocument();
     expect(screen.getByText("השיבוץ שלך ליום חמישי השתנה: יום → לילה")).toBeInTheDocument();
   });
 
@@ -114,5 +114,60 @@ describe("RecentChangesPanel -- 17. long copy on mobile", () => {
     const bodyEl = screen.getByText(longBody);
     expect(bodyEl.textContent).toBe(longBody);
     expect(bodyEl.className).not.toMatch(/truncate/);
+  });
+});
+
+describe("RecentChangesPanel -- 22. truthful total count vs. visible rows", () => {
+  it("without an explicit totalCount, defaults to the visible row count -- no 'ועוד' line", () => {
+    render(<RecentChangesPanel changes={[change()]} now={NOW} />);
+    expect(screen.getByText("שינוי אחד מאז הביקור האחרון")).toBeInTheDocument();
+    expect(screen.queryByText(/ועוד/)).toBeNull();
+  });
+
+  it("plural supporting line for more than one visible change with no remainder", () => {
+    render(
+      <RecentChangesPanel
+        changes={[change({ key: "a" }), change({ key: "b" })]}
+        totalCount={2}
+        now={NOW}
+      />,
+    );
+    expect(screen.getByText("2 שינויים מאז הביקור האחרון")).toBeInTheDocument();
+    expect(screen.queryByText(/ועוד/)).toBeNull();
+  });
+
+  it("7 total changes, only 3 shown: renders the true total and 'ועוד 4 שינויים'", () => {
+    render(
+      <RecentChangesPanel
+        changes={[change({ key: "a" }), change({ key: "b" }), change({ key: "c" })]}
+        totalCount={7}
+        now={NOW}
+      />,
+    );
+    expect(screen.getByText("7 שינויים מאז הביקור האחרון")).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem")).toHaveLength(3);
+    expect(screen.getByText("ועוד 4 שינויים")).toBeInTheDocument();
+  });
+
+  it("singular remainder: 'ועוד שינוי אחד'", () => {
+    render(
+      <RecentChangesPanel
+        changes={[change({ key: "a" }), change({ key: "b" }), change({ key: "c" })]}
+        totalCount={4}
+        now={NOW}
+      />,
+    );
+    expect(screen.getByText("ועוד שינוי אחד")).toBeInTheDocument();
+  });
+
+  it("never claims more remain than actually do -- totalCount equal to the visible count never renders a trailing line", () => {
+    render(
+      <RecentChangesPanel
+        changes={[change({ key: "a" }), change({ key: "b" }), change({ key: "c" })]}
+        totalCount={3}
+        now={NOW}
+      />,
+    );
+    expect(screen.queryByText(/ועוד/)).toBeNull();
   });
 });
