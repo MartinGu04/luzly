@@ -1,5 +1,7 @@
 import { BLOCKING_ABSENCE_KINDS } from "@/lib/domain/operationalIssues";
+import type { ReportOneDraft } from "@/lib/domain/reportOne";
 import { DataFreshnessStatus } from "@/components/ui/DataFreshnessStatus";
+import { ReportOneQuickAction } from "@/components/home/ReportOneQuickAction";
 import { buildPersonalWeekOverview } from "@/lib/presentation/personalWeekOverview";
 import type { PersonalEventView, PersonalScheduleReadModel } from "@/lib/readModels/types";
 import type { DashboardVisitRecap } from "@/lib/readModels/recentDashboardChangesTypes";
@@ -26,6 +28,15 @@ interface DashboardProps {
    * the user is still looking at.
    */
   visitRecap?: DashboardVisitRecap | null;
+  /**
+   * "דוח 1 למחר" -- `null`/omitted whenever this person isn't a manager
+   * (Report 1 needs department-wide roster/schedule access, not just a
+   * personal schedule) or the draft itself failed to load. Reaches THIS
+   * component for every manager who is NOT a permanent (קבע) manager --
+   * a permanent manager gets the same quick action on `PermanentManagerHome`
+   * instead; see `(dashboard)/page.tsx` for the routing.
+   */
+  reportOneDraft?: ReportOneDraft | null;
 }
 
 /** A known blocking absence (vacation/abroad/medical/day_off) dated today, reusing the domain's own "blocking" semantics -- never redefined here. */
@@ -62,7 +73,7 @@ function findVacationEvent(todayEvents: readonly PersonalEventView[]): PersonalE
  * purely from `calendarEvents` (never `upcomingEvents`, which excludes
  * finished history) via `buildPersonalWeekOverview`.
  */
-export function Dashboard({ model, visitRecap = null }: DashboardProps) {
+export function Dashboard({ model, visitRecap = null, reportOneDraft = null }: DashboardProps) {
   const hasCurrentAssignment = model.currentAssignments.length > 0;
 
   // Vacation only becomes the hero's story when nothing is currently
@@ -91,6 +102,7 @@ export function Dashboard({ model, visitRecap = null }: DashboardProps) {
   return (
     <div className="flex flex-col gap-4">
       <Header personName={model.person.name} localNow={model.localNow} />
+      {reportOneDraft ? <ReportOneQuickAction draft={reportOneDraft} /> : null}
       <DataFreshnessStatus fetchedAt={model.fetchedAt} />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">

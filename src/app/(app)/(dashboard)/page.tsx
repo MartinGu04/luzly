@@ -5,6 +5,7 @@ import { classifyPersonnelType } from "@/lib/domain/personnelType";
 import { getRequestPermanentManagerHome } from "@/lib/readModels/getRequestPermanentManagerHome";
 import { getRequestPersonalSchedule } from "@/lib/readModels/getRequestPersonalSchedule";
 import { getRequestDashboardVisitRecap } from "@/lib/readModels/getRequestRecentDashboardChanges";
+import { getRequestReportOneTomorrow } from "@/lib/readModels/getRequestReportOneTomorrow";
 
 /**
  * By the time this page renders, the protected layout has already gated
@@ -54,6 +55,16 @@ import { getRequestDashboardVisitRecap } from "@/lib/readModels/getRequestRecent
  * schedule itself resolved "ok") falls back to the normal Dashboard rather
  * than a worse/error experience, since a working personal read model is
  * already in hand.
+ *
+ * "דוח 1 למחר" (Report 1) Home quick action: authorized to EVERY manager
+ * (`result.model.person.isManager === true`), never only permanent managers
+ * -- `getRequestReportOneTomorrow()` itself re-proves that exact boundary
+ * (see its own docs), this is just which Home surface renders the
+ * already-authorized draft. A permanent manager gets it on
+ * `PermanentManagerHome`; any other manager (regular/reserve, e.g. a
+ * shift-working אחמ"ש with manager access) gets it on the normal `Dashboard`
+ * instead -- never a separate nav destination either way. A non-manager
+ * never triggers `getRequestReportOneTomorrow()` at all.
  */
 export default async function DashboardPage() {
   const result = await getRequestPersonalSchedule();
@@ -68,7 +79,9 @@ export default async function DashboardPage() {
   if (isPermanentManager) {
     const homeResult = await getRequestPermanentManagerHome();
     if (homeResult.status === "ok") {
-      return <PermanentManagerHome model={homeResult.model} />;
+      const reportOneResult = await getRequestReportOneTomorrow();
+      const reportOneDraft = reportOneResult.status === "ok" ? reportOneResult.draft : null;
+      return <PermanentManagerHome model={homeResult.model} reportOneDraft={reportOneDraft} />;
     }
   }
 
@@ -77,5 +90,8 @@ export default async function DashboardPage() {
 
   const visitRecap = isVisitRecapEligible ? await getRequestDashboardVisitRecap() : null;
 
-  return <Dashboard model={result.model} visitRecap={visitRecap} />;
+  const reportOneResult = result.model.person.isManager ? await getRequestReportOneTomorrow() : null;
+  const reportOneDraft = reportOneResult?.status === "ok" ? reportOneResult.draft : null;
+
+  return <Dashboard model={result.model} visitRecap={visitRecap} reportOneDraft={reportOneDraft} />;
 }
