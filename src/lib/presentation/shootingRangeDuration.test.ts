@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatClockPart, formatDurationParts } from "./shootingRangeDuration";
+import { formatDurationParts, formatDurationUnitsLabel } from "./shootingRangeDuration";
 
 describe("formatDurationParts", () => {
   it("breaks a duration into days/hours/minutes/seconds", () => {
@@ -16,8 +16,16 @@ describe("formatDurationParts", () => {
   });
 });
 
-describe("formatClockPart", () => {
-  it("zero-pads hours/minutes/seconds", () => {
-    expect(formatClockPart({ days: 0, hours: 8, minutes: 4, seconds: 7 })).toBe("08:04:07");
+describe("formatDurationUnitsLabel", () => {
+  it("zero-pads hours/minutes/seconds and gives every number its own explicit Hebrew unit word", () => {
+    expect(formatDurationUnitsLabel({ days: 0, hours: 8, minutes: 4, seconds: 7 })).toBe("08 שעות · 04 דקות · 07 שניות");
+  });
+
+  it("never renders a bare, unexplained HH:MM:SS-shaped string", () => {
+    const label = formatDurationUnitsLabel({ days: 0, hours: 1, minutes: 41, seconds: 4 });
+    expect(label).not.toMatch(/^\d{2}:\d{2}:\d{2}$/);
+    expect(label).toContain("שעות");
+    expect(label).toContain("דקות");
+    expect(label).toContain("שניות");
   });
 });

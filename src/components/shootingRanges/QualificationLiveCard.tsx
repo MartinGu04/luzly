@@ -3,7 +3,7 @@
 import { Badge } from "@/components/ui/Badge";
 import { PulseIndicator } from "@/components/dashboard/PulseIndicator";
 import type { QualificationStatus } from "@/lib/domain/shootingRangeQualification";
-import { formatClockPart, formatDurationParts } from "@/lib/presentation/shootingRangeDuration";
+import { formatDurationParts, formatDurationUnitsLabel } from "@/lib/presentation/shootingRangeDuration";
 import { presentQualificationStatus } from "@/lib/presentation/shootingRangeStatus";
 import { ProgressRing } from "./ProgressRing";
 import { useLiveClock } from "./useLiveClock";
@@ -85,12 +85,12 @@ export function QualificationLiveCard(props: QualificationLiveCardProps) {
 
       <div className="flex items-center gap-2 text-sm text-muted">
         {isLive ? <PulseIndicator tone={isExpired ? "critical" : "primary"} /> : null}
-        <span dir="ltr" className="tabular-nums">
-          {isLive ? formatClockPart(parts) : "--:--:--"}
+        <span className="tabular-nums">
+          {isLive ? formatDurationUnitsLabel(parts) : "-- שעות · -- דקות · -- שניות"}
         </span>
       </div>
 
-      <p className="text-xs text-muted-2">{isExpired ? "מאז פקיעת הכשירות" : "נותרו עד פקיעת הכשירות"}</p>
+      <p className="text-xs text-muted-2">{isExpired ? "מאז פקיעת הכשירות" : "נותרו עד לפקיעת הכשירות"}</p>
 
       <div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-muted">
         <span>מטווח אחרון: {props.baselineDateLabel}</span>

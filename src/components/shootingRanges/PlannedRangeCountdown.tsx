@@ -1,6 +1,6 @@
 "use client";
 
-import { formatClockPart, formatDurationParts } from "@/lib/presentation/shootingRangeDuration";
+import { formatDurationParts, formatDurationUnitsLabel } from "@/lib/presentation/shootingRangeDuration";
 import { useLiveClock } from "./useLiveClock";
 
 export interface PlannedRangeCountdownProps {
@@ -30,8 +30,8 @@ export function PlannedRangeCountdown({ status, rangeDateLabel, rangeDateStartIn
     return (
       <div className="flex flex-col items-center gap-1 text-center">
         <p className="text-sm font-semibold text-foreground">🎯 מטווח מ-{rangeDateLabel} ממתין לאישור מנהל</p>
-        <span dir="ltr" className="text-xs tabular-nums text-muted">
-          {isLive ? `${parts.days} ימים · ${formatClockPart(parts)}` : "--"}
+        <span className="text-xs tabular-nums text-muted">
+          {isLive ? `${parts.days} ימים · ${formatDurationUnitsLabel(parts)}` : "-- ימים · -- שעות · -- דקות · -- שניות"}
         </span>
       </div>
     );
@@ -41,11 +41,12 @@ export function PlannedRangeCountdown({ status, rangeDateLabel, rangeDateStartIn
   const parts = formatDurationParts(remainingMs);
   return (
     <div className="flex flex-col items-center gap-1 text-center">
-      <p className="text-sm font-semibold text-foreground">🎯 מטווח מתוכנן בעוד</p>
-      <span dir="ltr" className="text-lg font-bold tabular-nums text-foreground">
-        {isLive ? `${parts.days} ימים · ${formatClockPart(parts)}` : "--"}
+      <p className="text-sm font-semibold text-foreground">🎯 מטווח מתוכנן</p>
+      <span className="text-lg font-bold tabular-nums text-foreground">{isLive ? `${parts.days} ימים` : "-- ימים"}</span>
+      <span className="text-sm tabular-nums text-muted">
+        {isLive ? formatDurationUnitsLabel(parts) : "-- שעות · -- דקות · -- שניות"}
       </span>
-      <span className="text-xs text-muted">בתאריך {rangeDateLabel}</span>
+      <span className="text-xs text-muted">עד למטווח המתוכנן בתאריך {rangeDateLabel}</span>
     </div>
   );
 }

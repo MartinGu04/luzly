@@ -21,8 +21,16 @@ export function formatDurationParts(totalMs: number): DurationParts {
   return { days, hours, minutes, seconds };
 }
 
-/** "HH:MM:SS", zero-padded. */
-export function formatClockPart(parts: DurationParts): string {
+/**
+ * "01 שעות · 41 דקות · 04 שניות" -- every number carries its own explicit
+ * Hebrew unit word, zero-padded. Deliberately NOT a bare "HH:MM:SS" clock
+ * string: a standalone zero-padded triplet like "01:41:04" reads as a
+ * time-of-day, not a duration, and forces the reader to infer which part is
+ * hours/minutes/seconds. This is the ONLY way this feature renders the
+ * sub-day portion of a duration -- see `QualificationLiveCard`/
+ * `PlannedRangeCountdown`.
+ */
+export function formatDurationUnitsLabel(parts: DurationParts): string {
   const pad2 = (n: number) => String(n).padStart(2, "0");
-  return `${pad2(parts.hours)}:${pad2(parts.minutes)}:${pad2(parts.seconds)}`;
+  return `${pad2(parts.hours)} שעות · ${pad2(parts.minutes)} דקות · ${pad2(parts.seconds)} שניות`;
 }
