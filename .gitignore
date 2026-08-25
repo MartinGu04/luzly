@@ -40,3 +40,14 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# graphify (knowledge graph tool) - machine-local pieces only.
+# graph.json / GRAPH_REPORT.md / manifest.json stay tracked (portable,
+# relative-path) so fresh sessions inherit the graph; everything below is
+# local state or a regenerable local artifact.
+graphify-out/cache/
+graphify-out/cost.json
+graphify-out/.graphify_python
+graphify-out/.graphify_root
+graphify-out/graph.html
+graphify-out/.graphify_guard_bootstrap
