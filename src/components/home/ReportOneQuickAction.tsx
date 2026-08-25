@@ -8,6 +8,8 @@ import { ReportOneEditorOverlay } from "./ReportOneEditorOverlay";
 
 interface ReportOneQuickActionProps {
   draft: ReportOneDraft;
+  /** Passed straight through to `ReportOneEditorOverlay` -- see that component's own docs. */
+  reserveInclusionByPersonId?: Readonly<Record<string, boolean>>;
 }
 
 /**
@@ -18,7 +20,7 @@ interface ReportOneQuickActionProps {
  * already generated server-side (`getRequestReportOneTomorrow`) by the time
  * this renders, so opening the action is instant -- never a client fetch.
  */
-export function ReportOneQuickAction({ draft }: ReportOneQuickActionProps) {
+export function ReportOneQuickAction({ draft, reserveInclusionByPersonId }: ReportOneQuickActionProps) {
   const [open, setOpen] = useState(false);
   const targetDateLabel = formatReportOneDateDot(draft.targetDate);
 
@@ -38,7 +40,9 @@ export function ReportOneQuickAction({ draft }: ReportOneQuickActionProps) {
         </button>
       </Panel>
 
-      {open ? <ReportOneEditorOverlay draft={draft} onClose={() => setOpen(false)} /> : null}
+      {open ? (
+        <ReportOneEditorOverlay draft={draft} reserveInclusionByPersonId={reserveInclusionByPersonId} onClose={() => setOpen(false)} />
+      ) : null}
     </>
   );
 }

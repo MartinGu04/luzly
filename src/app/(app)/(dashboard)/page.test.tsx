@@ -18,6 +18,8 @@ vi.mock("@/lib/readModels/getRequestReportOneTomorrow", () => ({ getRequestRepor
 const recordDashboardVisitAction = vi.fn().mockResolvedValue({ ok: true });
 vi.mock("@/lib/dashboardVisit/actions", () => ({ recordDashboardVisitAction }));
 
+vi.mock("@/lib/reportOne/actions", () => ({ setReserveInclusionPreferenceAction: vi.fn().mockResolvedValue({ ok: true }) }));
+
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 vi.mock("@/components/ui/DataFreshnessStatus", () => ({
   DataFreshnessStatus: ({ fetchedAt }: { fetchedAt: string }) => <div data-testid="freshness">{fetchedAt}</div>,

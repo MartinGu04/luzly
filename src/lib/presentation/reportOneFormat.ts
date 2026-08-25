@@ -30,19 +30,34 @@ export function formatReportOneTitle(targetDate: string): string {
  * -- falls back to the draft's own `generatedStatus` for any person not
  * present in the map, so an unmodified row never loses its generated text).
  *
+ * `includeInReportOneByPersonId` (optional, reserve-only): a מילואים
+ * person is OMITTED entirely -- no line, no blank placeholder -- when
+ * this map has an explicit `false` for their `personId`. Every other
+ * section's copy behavior is completely unaffected: the map is only ever
+ * consulted for people in the `"reserve"` section, and omitting the
+ * argument (every pre-existing call site) includes every reserve person
+ * exactly as before (backwards-compatible default, matching this
+ * feature's own "included = true unless explicitly toggled off" spec).
+ *
  * Preserves section ordering, the exact Hebrew section headers (emoji +
  * colon), and a blank line between sections (never before the first
- * section, never after the last) -- a section with zero people still
- * prints its header, so the report's four-part structure stays visually
- * predictable regardless of the day's roster.
+ * section, never after the last) -- a section with zero VISIBLE people
+ * still prints its header, so the report's four-part structure stays
+ * visually predictable regardless of the day's roster or reserve
+ * exclusions.
  */
-export function formatReportOneText(draft: ReportOneDraft, statusByPersonId: Readonly<Record<string, string>>): string {
+export function formatReportOneText(
+  draft: ReportOneDraft,
+  statusByPersonId: Readonly<Record<string, string>>,
+  includeInReportOneByPersonId?: Readonly<Record<string, boolean>>,
+): string {
   const lines: string[] = [formatReportOneTitle(draft.targetDate)];
 
   draft.sections.forEach((section, index) => {
     if (index > 0) lines.push("");
     lines.push(section.label);
     for (const person of section.people) {
+      if (section.section === "reserve" && includeInReportOneByPersonId?.[person.personId] === false) continue;
       const status = statusByPersonId[person.personId] ?? person.generatedStatus;
       lines.push(`${person.name} - ${status}`);
     }

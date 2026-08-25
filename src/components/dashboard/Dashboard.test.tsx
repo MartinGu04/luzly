@@ -15,6 +15,7 @@ vi.mock("@/components/ui/DataFreshnessStatus", () => ({
 }));
 const recordDashboardVisitAction = vi.hoisted(() => vi.fn().mockResolvedValue({ ok: true }));
 vi.mock("@/lib/dashboardVisit/actions", () => ({ recordDashboardVisitAction }));
+vi.mock("@/lib/reportOne/actions", () => ({ setReserveInclusionPreferenceAction: vi.fn().mockResolvedValue({ ok: true }) }));
 
 beforeEach(() => {
   recordDashboardVisitAction.mockClear();

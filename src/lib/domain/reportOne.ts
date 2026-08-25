@@ -324,6 +324,31 @@ export function resolveRegularOrReserveStatus(
   return [primary, ...additiveDutyTexts].join(", ");
 }
 
+/**
+ * Whether `person` has a meaningful, already-resolved attendance/
+ * assignment fact for the target date -- reuses `generatedStatus` exactly
+ * as `resolveRegularOrReserveStatus` resolved it (a shift, a blocking
+ * absence, a referral, after-night carryover, or ANY additive duty, e.g.
+ * כונן פינויים/רס"ר/שמירה -- see that function's own audit of every case
+ * it covers), never a second/parallel rule system. The ONE case this
+ * deliberately does NOT flag as meaningful is the bare unresolved "?" --
+ * including the blocking-absence-vs-assignment conflict case, which
+ * `resolveRegularOrReserveStatus` itself already deliberately collapses
+ * to a bare "?" rather than surfacing the conflicting duty/shift fact
+ * underneath it (see that function's own docs); this stays consistent
+ * with that existing choice rather than inventing a new one.
+ *
+ * Used ONLY by the reserve-inclusion-toggle UI (see this repo's Report 1
+ * reserve-inclusion spec) to decide whether unchecking/leaving-unchecked
+ * a reserve person needs a warning -- never referenced by
+ * `buildReportOneDraft` itself. Inclusion preferences are a separate,
+ * persisted config concern (`lib/reportOne`), never baked into this
+ * domain resolver.
+ */
+export function reportOnePersonHasMeaningfulTomorrowEvent(person: Pick<ReportOnePerson, "generatedStatus">): boolean {
+  return person.generatedStatus !== UNKNOWN_REPORT_ONE_STATUS;
+}
+
 export interface BuildReportOneDraftInput {
   /** Full parsed roster, in the authoritative source's own stable order -- never reordered. */
   people: readonly Person[];

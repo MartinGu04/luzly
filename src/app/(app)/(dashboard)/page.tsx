@@ -81,7 +81,14 @@ export default async function DashboardPage() {
     if (homeResult.status === "ok") {
       const reportOneResult = await getRequestReportOneTomorrow();
       const reportOneDraft = reportOneResult.status === "ok" ? reportOneResult.draft : null;
-      return <PermanentManagerHome model={homeResult.model} reportOneDraft={reportOneDraft} />;
+      const reportOneReserveInclusion = reportOneResult.status === "ok" ? reportOneResult.reserveInclusionByPersonId : undefined;
+      return (
+        <PermanentManagerHome
+          model={homeResult.model}
+          reportOneDraft={reportOneDraft}
+          reportOneReserveInclusion={reportOneReserveInclusion}
+        />
+      );
     }
   }
 
@@ -92,6 +99,14 @@ export default async function DashboardPage() {
 
   const reportOneResult = result.model.person.isManager ? await getRequestReportOneTomorrow() : null;
   const reportOneDraft = reportOneResult?.status === "ok" ? reportOneResult.draft : null;
+  const reportOneReserveInclusion = reportOneResult?.status === "ok" ? reportOneResult.reserveInclusionByPersonId : undefined;
 
-  return <Dashboard model={result.model} visitRecap={visitRecap} reportOneDraft={reportOneDraft} />;
+  return (
+    <Dashboard
+      model={result.model}
+      visitRecap={visitRecap}
+      reportOneDraft={reportOneDraft}
+      reportOneReserveInclusion={reportOneReserveInclusion}
+    />
+  );
 }
