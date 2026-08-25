@@ -1,7 +1,7 @@
 # Graph Report - luzly  (2026-08-25)
 
 ## Corpus Check
-- 737 files · ~624,490 words
+- 737 files · ~624,655 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `f58297e4`
+- Built from commit: `ad981262`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -1116,11 +1116,11 @@ Nodes (4): ManagerFixedNotificationsSection(), handleSystemRuleChanged(), handle
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `Person` connect `Person` to `engine/store.ts`, `managerOverview.ts`, `parseCalendarDate`, `buildPersonalScheduleReadModel.ts`, `Event`, `parsers/schedule.ts`, `engine/scheduledBroadcast.ts`, `personnel.ts`, `google/index.ts`, `potential.test.ts`, `buildSearchReadModel.test.ts`, `buildManagerOverviewReadModel.ts`, `shiftFairness.test.ts`, `fairnessShiftEngine.test.ts`, `buildShiftFairnessReadModel.ts`, `fairnessShiftEngine.ts`, `fairnessParticipation.test.ts`, `domain/types.ts`, `potentialSourceOwnership.ts`, `recurringRuleDispatch.test.ts`, `operationalIssues.ts`, `shiftCoverageRecommendation.ts`, `potentialReconciliation.ts`, `scheduledBroadcast.test.ts`, `reportOne.ts`, `reminders.ts`, `dutyFairness.ts`, `parsers/fairness.test.ts`, `buildScheduleReadModel.ts`, `buildManagerOverviewReadModel.test.ts`, `potentialDutyEvents.test.ts`, `buildPersonalScheduleReadModel.test.ts`, `buildScheduleReadModel.test.ts`, `dutyFairness.test.ts`, `recurringRuleDispatch.ts`?**
-  _High betweenness centrality (0.040) - this node is a cross-community bridge._
-- **Why does `Panel()` connect `Panel.tsx` to `labels.ts`, `readModels/types.ts`, `IssueRow.tsx`, `ruleActions.ts`, `TodayTimeline.tsx`, `calendar/actions.ts`, `CalendarGridCell`, `ManagerRecurringRuleComposer.tsx`, `ManagerHrefParams`, `dutyAbsenceGrouping.ts`, `schedule/page.tsx`, `scheduledBroadcastActions.ts`, `notifications/page.tsx`, `ManagerSelectedPersonView.tsx`, `scheduleEveryone.ts`, `managerAdoption.ts`, `(app)/layout.tsx`, `ManagerRecentBroadcastsSection.tsx`, `(app)/fairness/page.tsx`, `manager/types.ts`, `issue.ts`, `Dashboard.tsx`, `DayMeta`, `PermanentManagerHome.tsx`?**
-  _High betweenness centrality (0.035) - this node is a cross-community bridge._
-- **Why does `parseCalendarDate()` connect `parseCalendarDate` to `CalendarSurface.tsx`, `TodayTimeline.tsx`, `domain/event.ts`, `buildPersonalScheduleReadModel.ts`, `Event`, `engine/scheduledBroadcast.ts`, `recentDashboardChanges.ts`, `buildManagerOverviewReadModel.ts`, `schedule/page.tsx`, `buildDutyFairnessReadModel.ts`, `hebrewDate.ts`, `dutyAllocationWeight.ts`, `shiftCoverageRecommendation.ts`, `issue.ts`, `dutyBlocks.ts`, `reminders.ts`, `reminders.test.ts`, `icsRender.ts`, `CalendarGrid.test.tsx`, `PermanentManagerHome.tsx`, `recurringRuleDispatch.ts`?**
+  _High betweenness centrality (0.043) - this node is a cross-community bridge._
+- **Why does `LocalNow` connect `Event` to `duties/page.tsx`, `managerOverview.ts`, `managerTypes.ts`, `readModels/types.ts`, `TodayTimeline.tsx`, `parseCalendarDate`, `buildPersonalScheduleReadModel.ts`, `parsers/schedule.ts`, `buildSearchReadModel.test.ts`, `buildManagerOverviewReadModel.ts`, `schedule/page.tsx`, `resolveSearchIntent.ts`, `buildDutyFairnessReadModel.ts`, `fairnessShiftEngine.test.ts`, `scheduleEveryone.ts`, `buildShiftFairnessReadModel.ts`, `fairnessShiftEngine.ts`, `recurringRuleDispatch.test.ts`, `personalWeekOverview.ts`, `potentialReconciliation.ts`, `CommandPalette.test.tsx`, `reserveParticipation.ts`, `reportOne.ts`, `reminders.ts`, `reminders.test.ts`, `PermanentManagerHome.tsx`, `buildScheduleReadModel.ts`, `buildManagerOverviewReadModel.test.ts`, `buildPersonalScheduleReadModel.test.ts`, `managerPerspectives.test.tsx`, `buildScheduleReadModel.test.ts`, `recurringRuleDispatch.ts`?**
   _High betweenness centrality (0.031) - this node is a cross-community bridge._
+- **Why does `getAuthenticatedIdentity()` connect `getAuthenticatedIdentity` to `dashboardVisit/actions.ts`, `managerOverview.ts`, `usePushSubscription.ts`, `createSupabaseServerClient`, `calendar/actions.ts`, `dutyFairness.ts`, `notifications/actions.ts`, `Person`?**
+  _High betweenness centrality (0.030) - this node is a cross-community bridge._
 - **What connects `ChangeDetectionSummary`, `JobOutcome`, `Row` to the rest of the system?**
   _1116 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `engine/store.ts` be split into smaller, more focused modules?**

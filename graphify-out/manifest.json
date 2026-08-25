@@ -4482,9 +4482,9 @@
     "semantic_hash": "94dce7da73ed98651fcfa40d6f6e8906"
   },
   ".claude/hooks/graphify-guard.sh": {
-    "mtime": 1787669332.6593359,
-    "seen": 1787669445.396383,
-    "ast_hash": "cba9a3b6de589ac57c9640bf2bfedc0c",
+    "mtime": 1787670478.9005196,
+    "seen": 1787670568.3641946,
+    "ast_hash": "74895a77aa331b15a887c98a0c4f14d0",
     "semantic_hash": ""
   }
 }
