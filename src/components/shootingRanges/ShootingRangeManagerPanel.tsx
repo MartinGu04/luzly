@@ -172,27 +172,48 @@ function PendingConfirmationPanel({ rangeDate, rows }: { rangeDate: string; rows
   );
 }
 
+/**
+ * Mobile (below `sm`): a stacked, readable layout -- avatar+name on their
+ * own first line, the status badge on its own second line, then
+ * metadata/reason and any planned-range/pending-report badges each on
+ * their own wrapped line below. Desktop (`sm` and up) is UNCHANGED from
+ * before this responsive pass: every field becomes a flex item of the same
+ * single-line, wrapping row it always was, via `sm:contents` on the
+ * grouping wrappers below -- `display: contents` makes a wrapper box
+ * disappear at that breakpoint so its children re-parent directly into the
+ * outer `<li>`'s flex row, with no duplicated markup and no reordering.
+ * Only the avatar+name pair needs a wrapper at all (the only two fields
+ * that must render as one unit on mobile) -- every other field is already
+ * a direct `<li>` child, so on mobile (`flex-col`) it's naturally its own
+ * line with zero extra markup.
+ */
 function TeamMemberRow({ row }: { row: ManagerShootingRangeRow }) {
   const isNotRelevant = row.status === "not_relevant";
   return (
-    <li className="flex flex-wrap items-center gap-3 rounded-lg bg-overlay-faint p-2 text-sm">
-      <Avatar name={row.personName} size="sm" avatarUrl={row.avatarUrl} />
-      <span className="min-w-0 flex-1 truncate text-foreground">{row.personName}</span>
+    <li className="flex flex-col gap-2 rounded-lg bg-overlay-faint p-3 text-sm sm:flex-row sm:flex-wrap sm:items-center sm:gap-3 sm:p-2">
+      <div className="flex items-center gap-3 sm:contents">
+        <Avatar name={row.personName} size="sm" avatarUrl={row.avatarUrl} />
+        <span className="min-w-0 flex-1 truncate text-foreground">{row.personName}</span>
+      </div>
       <StatusBadge status={row.status} />
       {isNotRelevant ? (
         row.notRelevantReason ? <span className="text-xs text-muted-2">{row.notRelevantReason}</span> : null
       ) : (
-        <>
+        <div className="flex flex-col gap-0.5 sm:contents">
           <span className="text-xs text-muted-2">{row.baselineDate ? `אחרון: ${formatReportOneDateSlash(row.baselineDate)}` : "אין נתונים"}</span>
           {row.expiryDate ? <span className="text-xs text-muted-2">תוקף: {formatReportOneDateSlash(row.expiryDate)}</span> : null}
-        </>
+        </div>
       )}
-      {row.plannedRange ? (
-        <Badge tone={row.plannedRange.status === "pending_confirmation" ? "critical" : "neutral"}>
-          {row.plannedRange.status === "pending_confirmation" ? "ממתין לאישור" : `🎯 ${formatReportOneDateDot(row.plannedRange.rangeDate)}`}
-        </Badge>
+      {row.plannedRange || row.hasPendingSelfReport ? (
+        <div className="flex flex-wrap gap-2 sm:contents">
+          {row.plannedRange ? (
+            <Badge tone={row.plannedRange.status === "pending_confirmation" ? "critical" : "neutral"}>
+              {row.plannedRange.status === "pending_confirmation" ? "ממתין לאישור" : `🎯 ${formatReportOneDateDot(row.plannedRange.rangeDate)}`}
+            </Badge>
+          ) : null}
+          {row.hasPendingSelfReport ? <Badge tone="warning">דיווח ממתין</Badge> : null}
+        </div>
       ) : null}
-      {row.hasPendingSelfReport ? <Badge tone="warning">דיווח ממתין</Badge> : null}
     </li>
   );
 }
@@ -333,7 +354,7 @@ export function ShootingRangeManagerPanel({
       <SelfReportQueue reports={pendingSelfReports} />
 
       <Panel variant="panel" className="flex flex-col gap-4">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-semibold text-foreground">אנשי צוות</h2>
           <label className="flex items-center gap-2 text-xs text-muted">
             <input type="checkbox" checked={attentionOnly} onChange={(e) => setAttentionOnly(e.target.checked)} className="h-4 w-4" />

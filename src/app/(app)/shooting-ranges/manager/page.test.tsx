@@ -285,4 +285,74 @@ describe("ShootingRangeManagerPage", () => {
       expect(pickerLabels).not.toContain("לא רלוונטי בדיקה");
     });
   });
+
+  describe("mobile-responsive team row layout", () => {
+    async function renderRow(overrides: Partial<ManagerShootingRangeRow> = {}) {
+      loadShootingRangeManagerOverview.mockResolvedValue({
+        status: "ok",
+        manager: manager(),
+        model: {
+          ...emptyModel(),
+          rows: [row(overrides)],
+          summary: { qualifiedCount: 1, nearingExpiryCount: 0, notQualifiedCount: 0, notRelevantCount: 0, totalCount: 1 },
+        },
+        avatarUrl: null,
+      });
+      return render(await ShootingRangeManagerPage());
+    }
+
+    it("stacks the row into separate lines on mobile (flex-col) and reflows to a single line on desktop (sm:flex-row) -- never a fixed one-line-only layout", async () => {
+      const { container } = await renderRow();
+      const li = container.querySelector("li");
+      expect(li?.className).toMatch(/\bflex-col\b/);
+      expect(li?.className).toMatch(/\bsm:flex-row\b/);
+    });
+
+    it("groups avatar+name as their own unit -- a mobile-only wrapper that dissolves at sm: via display:contents, so desktop stays the same flat single-row flex layout as before", async () => {
+      await renderRow({ personName: "שם לבדיקת שורה" });
+      const nameEl = screen.getByText("שם לבדיקת שורה");
+      const wrapper = nameEl.parentElement;
+      expect(wrapper?.className).toMatch(/\bsm:contents\b/);
+      // The avatar sits in the SAME wrapper as the name, not as a separate top-level row item.
+      expect(wrapper?.children.length).toBe(2);
+    });
+
+    it("groups the baseline/expiry metadata into its own wrapper that stacks on mobile and dissolves into the flat row on desktop", async () => {
+      await renderRow({ baselineDate: "2026-06-01", expiryDate: "2026-12-01" });
+      const baselineEl = screen.getByText(/אחרון:/);
+      const expiryEl = screen.getByText(/תוקף:/);
+      expect(baselineEl.parentElement).toBe(expiryEl.parentElement);
+      expect(baselineEl.parentElement?.className).toMatch(/\bsm:contents\b/);
+    });
+
+    it("groups planned-range/pending-report badges so they wrap cleanly on mobile instead of forcing the row wider", async () => {
+      await renderRow({
+        plannedRange: { rangeDate: "2026-09-03", status: "planned" },
+        hasPendingSelfReport: true,
+      });
+      const plannedBadge = screen.getByText(/🎯/);
+      const pendingBadge = screen.getByText("דיווח ממתין");
+      expect(plannedBadge.parentElement).toBe(pendingBadge.parentElement);
+      expect(plannedBadge.parentElement?.className).toMatch(/flex-wrap/);
+      expect(plannedBadge.parentElement?.className).toMatch(/\bsm:contents\b/);
+    });
+
+    it("renders a לא רלוונטי reason as a standalone element, not grouped inside the metadata wrapper (so it lands clearly on its own line)", async () => {
+      await renderRow({ status: "not_relevant", notRelevantReason: "פטור שמירות" });
+      const reasonEl = screen.getByText("פטור שמירות");
+      expect(reasonEl.tagName).toBe("SPAN");
+      expect(reasonEl.parentElement?.tagName).toBe("LI");
+    });
+  });
+
+  describe("the 'הצג רק דורשי טיפול' toggle row stays wrap-safe at narrow widths", () => {
+    it("allows the header row to wrap rather than forcing the heading and the filter label onto one unbreakable line", async () => {
+      loadShootingRangeManagerOverview.mockResolvedValue({ status: "ok", manager: manager(), model: emptyModel(), avatarUrl: null });
+      render(await ShootingRangeManagerPage());
+
+      const heading = screen.getByText("אנשי צוות");
+      const headerRow = heading.parentElement;
+      expect(headerRow?.className).toMatch(/flex-wrap/);
+    });
+  });
 });
