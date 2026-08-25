@@ -33,6 +33,11 @@ const REGULAR_MANAGER_ROWS: (string | boolean)[][] = [
   ["דני מנהל", "dani@example.invalid", true, "חובה"],
 ];
 
+const NON_MANAGER_ROWS: (string | boolean)[][] = [
+  ["שם", "מייל", "מנהל", 'סוג כ"א'],
+  ["דני עובד", "dani@example.invalid", false, "חובה"],
+];
+
 function snapshot(personnelRows: (string | boolean)[][], scheduleRows: (string | number)[][] = []) {
   return {
     fetchedAt: "2026-08-25T08:00:00.000Z",
@@ -63,9 +68,9 @@ describe("loadReportOneTomorrow — auth pass-through states", () => {
   });
 });
 
-describe("loadReportOneTomorrow — eligibility: permanent AND manager only, same gate as PermanentManagerHome", () => {
-  it("manager but NOT permanent (חובה): forbidden", async () => {
-    getWorkbookSnapshot.mockResolvedValue(snapshot(REGULAR_MANAGER_ROWS));
+describe("loadReportOneTomorrow — eligibility: any manager, same isManager-only gate as /manager (never permanent-only)", () => {
+  it("not a manager at all: forbidden, regardless of personnelType", async () => {
+    getWorkbookSnapshot.mockResolvedValue(snapshot(NON_MANAGER_ROWS));
     const result = await loadReportOneTomorrow();
     expect(result).toEqual({ status: "forbidden" });
   });
@@ -76,6 +81,22 @@ describe("loadReportOneTomorrow — eligibility: permanent AND manager only, sam
     if (result.status === "ok") {
       expect(result.draft.targetDate).toBe("2026-08-26");
     }
+  });
+
+  it("a shift-working manager who is NOT permanent (חובה) is equally authorized -- ok, never forbidden", async () => {
+    getWorkbookSnapshot.mockResolvedValue(snapshot(REGULAR_MANAGER_ROWS));
+    const result = await loadReportOneTomorrow();
+    expect(result.status).toBe("ok");
+  });
+
+  it("a מילואים (reserve) manager is equally authorized -- ok, never forbidden", async () => {
+    const reserveManagerRows: (string | boolean)[][] = [
+      ["שם", "מייל", "מנהל", 'סוג כ"א'],
+      ["דני מנהל", "dani@example.invalid", true, "מילואים"],
+    ];
+    getWorkbookSnapshot.mockResolvedValue(snapshot(reserveManagerRows));
+    const result = await loadReportOneTomorrow();
+    expect(result.status).toBe("ok");
   });
 });
 

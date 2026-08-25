@@ -329,3 +329,93 @@ describe("DashboardPage — permanent-manager Home eligibility", () => {
     expect(getRequestDashboardVisitRecap).not.toHaveBeenCalled();
   });
 });
+
+describe("DashboardPage — 'דוח 1 למחר' Home quick action reaches every manager, not only permanent managers", () => {
+  const reportOneDraft = {
+    targetDate: "2026-08-26",
+    sections: [
+      { section: "permanent" as const, label: "אנשי קבע💛:", people: [] },
+      { section: "reserve" as const, label: "מילואים😍:", people: [] },
+      { section: "regular_manager" as const, label: 'סדיר - אחמשים🧑🏻‍💻:', people: [] },
+      { section: "regular_technician" as const, label: 'סדיר - טכנאים🧑🏻‍🔧:', people: [] },
+    ],
+  };
+
+  it("permanent + manager: PermanentManagerHome receives the Report 1 draft", async () => {
+    getRequestPersonalSchedule.mockResolvedValue({
+      status: "ok",
+      model: model({
+        person: { id: "p_mgr", name: "מנהל בדיקה", isManager: true, isTechnician: false, isSupervisor: false, personnelType: "קבע" },
+      }),
+    });
+    getRequestPermanentManagerHome.mockResolvedValue({ status: "ok", model: permanentManagerHomeModel() });
+    getRequestReportOneTomorrow.mockResolvedValue({ status: "ok", draft: reportOneDraft });
+
+    const element = await DashboardPage();
+    render(element);
+
+    expect(getRequestReportOneTomorrow).toHaveBeenCalled();
+    expect(screen.getByText("🛰️ דוח 1 למחר")).toBeInTheDocument();
+  });
+
+  it("regular (חובה) + manager -- a shift-working אחמ\"ש with manager access: the normal Dashboard ALSO receives the Report 1 draft, never forbidden", async () => {
+    getRequestPersonalSchedule.mockResolvedValue({
+      status: "ok",
+      model: model({
+        person: { id: "p_mgr2", name: "מנהל חובה", isManager: true, isTechnician: false, isSupervisor: true, personnelType: "חובה" },
+      }),
+    });
+    getRequestReportOneTomorrow.mockResolvedValue({ status: "ok", draft: reportOneDraft });
+
+    const element = await DashboardPage();
+    render(element);
+
+    expect(screen.queryByText("מה קורה עכשיו במחלקה?")).toBeNull();
+    expect(getRequestReportOneTomorrow).toHaveBeenCalled();
+    expect(screen.getByText("🛰️ דוח 1 למחר")).toBeInTheDocument();
+  });
+
+  it("reserve (מילואים) manager: the normal Dashboard also receives the Report 1 draft", async () => {
+    getRequestPersonalSchedule.mockResolvedValue({
+      status: "ok",
+      model: model({
+        person: { id: "p_res_mgr", name: "מנהל מילואים", isManager: true, isTechnician: true, isSupervisor: false, personnelType: "מילואים" },
+      }),
+    });
+    getRequestReportOneTomorrow.mockResolvedValue({ status: "ok", draft: reportOneDraft });
+
+    const element = await DashboardPage();
+    render(element);
+
+    expect(getRequestReportOneTomorrow).toHaveBeenCalled();
+    expect(screen.getByText("🛰️ דוח 1 למחר")).toBeInTheDocument();
+  });
+
+  it("a non-manager never triggers getRequestReportOneTomorrow at all, and never sees the quick action", async () => {
+    getRequestPersonalSchedule.mockResolvedValue({
+      status: "ok",
+      model: model({ person: { id: "p_1", name: "עובד בדיקה", isManager: false, isTechnician: true, isSupervisor: false, personnelType: "חובה" } }),
+    });
+
+    const element = await DashboardPage();
+    render(element);
+
+    expect(getRequestReportOneTomorrow).not.toHaveBeenCalled();
+    expect(screen.queryByText("🛰️ דוח 1 למחר")).toBeNull();
+  });
+
+  it("a manager still lands on the normal Dashboard (never the quick action) when Report 1 itself is forbidden/unavailable", async () => {
+    getRequestPersonalSchedule.mockResolvedValue({
+      status: "ok",
+      model: model({
+        person: { id: "p_mgr3", name: "מנהל חובה", isManager: true, isTechnician: false, isSupervisor: true, personnelType: "חובה" },
+      }),
+    });
+    getRequestReportOneTomorrow.mockResolvedValue({ status: "forbidden" });
+
+    const element = await DashboardPage();
+    render(element);
+
+    expect(screen.queryByText("🛰️ דוח 1 למחר")).toBeNull();
+  });
+});
