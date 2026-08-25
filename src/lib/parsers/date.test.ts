@@ -20,6 +20,31 @@ describe("parseLocalDate", () => {
     expect(parseLocalDate("")).toBeNull();
   });
 
+  describe("a trailing time-of-day component is tolerated and discarded", () => {
+    it("DD/MM/YYYY with a midnight time suffix (Google Sheets 'Date time' cell format rendering)", () => {
+      expect(parseLocalDate("29/06/2026 0:00:00")).toBe("2026-06-29");
+      expect(parseLocalDate("29/06/2026 00:00:00")).toBe("2026-06-29");
+      expect(parseLocalDate("29/06/2026 00:00")).toBe("2026-06-29");
+    });
+
+    it("DD.MM.YYYY with a non-midnight time suffix -- only the date part is ever used", () => {
+      expect(parseLocalDate("29.06.2026 14:35:07")).toBe("2026-06-29");
+    });
+
+    it("ISO date with a 'T' time suffix", () => {
+      expect(parseLocalDate("2026-06-29T00:00:00")).toBe("2026-06-29");
+    });
+
+    it("ISO date with a space-separated time suffix", () => {
+      expect(parseLocalDate("2026-06-29 00:00:00")).toBe("2026-06-29");
+    });
+
+    it("still rejects genuinely malformed trailing text -- never a partial/fuzzy match", () => {
+      expect(parseLocalDate("29/06/2026 not-a-time")).toBeNull();
+      expect(parseLocalDate("29/06/2026extra")).toBeNull();
+    });
+  });
+
   describe("timezone independence", () => {
     const originalTz = process.env.TZ;
     afterEach(() => {

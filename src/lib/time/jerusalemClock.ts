@@ -91,3 +91,26 @@ export function jerusalemLocalTimeToInstant(dateStr: string, hour: number, minut
   const secondOffset = jerusalemUtcOffsetMinutesAt(new Date(correctedMs));
   return new Date(naiveUtcMs - secondOffset * 60_000);
 }
+
+/**
+ * The real UTC instant of 00:00:00.000 Asia/Jerusalem on `dateStr`
+ * ("YYYY-MM-DD"). Built on `jerusalemLocalTimeToInstant` -- same DST-safe
+ * correction pass, no hard-coded offset.
+ */
+export function jerusalemStartOfDayInstant(dateStr: string): Date {
+  return jerusalemLocalTimeToInstant(dateStr, 0, 0);
+}
+
+/**
+ * The real UTC instant of the LAST millisecond (23:59:59.999) of
+ * Asia/Jerusalem `dateStr`. Used to express "valid through the end of the
+ * expiry calendar day" (qualification/expiry semantics, see
+ * `lib/domain/shootingRangeQualification.ts`) as a genuine instant rather
+ * than a bare date string -- deliberately the end of THIS day, not
+ * `jerusalemStartOfDayInstant` of the next one, so a caller never needs to
+ * separately reason about month/year rollover just to find "one ms before
+ * midnight".
+ */
+export function jerusalemEndOfDayInstant(dateStr: string): Date {
+  return new Date(jerusalemLocalTimeToInstant(dateStr, 23, 59).getTime() + 59_999);
+}

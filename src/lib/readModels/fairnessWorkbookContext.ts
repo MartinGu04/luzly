@@ -5,7 +5,7 @@ import { SHEET_SOURCES, type RawSheet, type RawWorkbookSnapshot, type SheetSourc
 import type { Person } from "@/lib/domain/types";
 import { parsePersonnelSheet } from "@/lib/parsers/personnel";
 import { getWorkbookSnapshot } from "@/lib/sync";
-import { fetchEmailToAvatarUrl, resolveAvatarUrlsByPersonId } from "./fairnessAvatarLookup";
+import { fetchEmailToAvatarUrl, resolveAvatarUrlsByPersonId } from "./personAvatarLookup";
 import { getRequestPersonalSchedule } from "./getRequestPersonalSchedule";
 
 export type FairnessWorkbookContextResult =
@@ -22,7 +22,7 @@ export interface FairnessWorkbookContext {
   snapshot: RawWorkbookSnapshot;
   /**
    * Every roster person's presentation-only Google avatar photo, keyed by
-   * `Person.id` -- resolved via `fairnessAvatarLookup.ts` (the same
+   * `Person.id` -- resolved via `personAvatarLookup.ts` (the same
    * Supabase Admin API bulk `listUsers()` primitive `fetchAllUserIdsByEmail`
    * already established for the notification worker and the manager-only
    * adoption view, cached and reused here rather than a second lookup
@@ -120,7 +120,7 @@ export async function loadFairnessWorkbookContext(): Promise<FairnessWorkbookCon
   if (personalResult.status === "ambiguous_identity") return { status: "ambiguous_identity" };
 
   // Started now, concurrently with the workbook fetch below -- it depends
-  // on no roster/identity data (see `fairnessAvatarLookup.ts`'s own docs),
+  // on no roster/identity data (see `personAvatarLookup.ts`'s own docs),
   // so there's no reason to wait for either to resolve first. Caught here
   // (never left to reject into the `await` below) so a Supabase Admin API
   // hiccup degrades to "nobody has a known photo yet" rather than failing
