@@ -1,12 +1,19 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import Link from "next/link";
-import { ArrowRight, Bell, BellOff, BellRing, Loader2, RefreshCw, Settings } from "lucide-react";
+import { ArrowRight, Bell, BellOff, BellRing, ChevronDown, ChevronUp, Download, Loader2, RefreshCw, Settings } from "lucide-react";
 import type { NotificationInboxItem } from "@/lib/readModels/notificationInboxTypes";
 import { formatRecentChangeRelativeTime } from "@/lib/presentation/relativeChangeTime";
 import { usePushSubscription } from "./usePushSubscription";
 import { useNotificationInbox } from "./useNotificationInbox";
+import { type InstallPromptOutcome, usePwaInstall } from "./PwaInstallProvider";
+import { type BellOnboardingCard, type InstallGuidance, deriveBellOnboardingCard, deriveInstallGuidance } from "./bellOnboarding";
+import {
+  isInstallPromptDismissalActive,
+  markInstallPromptDismissed,
+  readInstallPromptDismissedAt,
+} from "@/lib/pwa/installPromptPreference";
 
 interface NotificationBellProps {
   /** Only affects the trigger button's own visual treatment -- the popover panel's CONTENT looks identical in every context; only its anchor side (see `PANEL_POSITION_CLASSES`) varies by variant. */
@@ -21,6 +28,15 @@ interface NotificationBellProps {
 }
 
 type BellView = "inbox" | "settings";
+
+/** `useSyncExternalStore` plumbing for the install-dismissal localStorage read below -- see that call site's own comment. */
+function subscribeToNothing(): () => void {
+  return () => {};
+}
+
+function noStoredDismissalOnFirstRender(): number | null {
+  return null;
+}
 
 const TRIGGER_CLASSES: Record<NotificationBellProps["variant"], string> = {
   sidebar:
@@ -101,6 +117,49 @@ export function NotificationBell({ variant, userId }: NotificationBellProps) {
 
   const { state, errorMessage, testStatus, enable, disable, sendTest } = usePushSubscription(userId);
   const { status: inboxStatus, items, unreadCount, refresh, markRead, markAllRead, clear } = useNotificationInbox();
+  const { isReady: isInstallStateReady, isStandalone, canPromptInstall, isIos, installCompleted, promptInstall } = usePwaInstall();
+
+  // `useSyncExternalStore` rather than a plain
+  // `useState(() => readInstallPromptDismissedAt(...))` initializer or a
+  // `useEffect` that reads storage and calls `setState` -- same
+  // SSR-safety reasoning as `PwaInstallProvider`'s own `isStandalone`/
+  // `isIos` (see its docstring): a lazy `useState` initializer runs again,
+  // with a real localStorage answer, on the client's first hydration
+  // render, which can disagree with what the server rendered (`null`,
+  // since `readInstallPromptDismissedAt` degrades safely with no
+  // `window`). `getServerSnapshot` below keeps that first render at the
+  // same deterministic `null` server and client agree on; React's own
+  // hydration reconciliation resolves it to the real stored value right
+  // after. A completely separate localStorage key from the Push
+  // preference -- see `installPromptPreference.ts`'s own docstring.
+  const storedInstallDismissedAt = useSyncExternalStore(
+    subscribeToNothing,
+    () => (userId ? readInstallPromptDismissedAt(userId) : null),
+    noStoredDismissalOnFirstRender,
+  );
+  // An explicit "לא עכשיו" click during THIS render session is known
+  // immediately (it's the click handler's own `Date.now()`, not a storage
+  // re-read) and always wins over whatever the store above still reports --
+  // this is an ordinary user-event-driven `setState`, not a render- or
+  // effect-body read of browser state, so it carries none of the
+  // SSR-safety concerns above.
+  const [explicitInstallDismissedAt, setExplicitInstallDismissedAt] = useState<number | null>(null);
+  const installDismissedAt = explicitInstallDismissedAt ?? storedInstallDismissedAt;
+
+  function dismissInstallCard() {
+    if (userId) markInstallPromptDismissed(userId);
+    setExplicitInstallDismissedAt(Date.now());
+  }
+
+  const onboardingCard = deriveBellOnboardingCard({
+    isReady: isInstallStateReady,
+    isStandalone,
+    pushState: state,
+    isIos,
+    canPromptInstall,
+    installCompleted,
+    installDismissalActive: isInstallPromptDismissalActive(installDismissedAt),
+  });
 
   function closePopover() {
     setOpen(false);
@@ -178,15 +237,24 @@ export function NotificationBell({ variant, userId }: NotificationBellProps) {
           className={`absolute ${PANEL_POSITION_CLASSES[variant]} top-full z-50 mt-2 w-80 max-w-[calc(100vw-2.5rem)] rounded-xl bg-surface-1 p-3 text-foreground shadow-[var(--shadow-elevated)] ring-1 ring-border-strong`}
         >
           {view === "inbox" ? (
-            <InboxView
-              status={inboxStatus}
-              items={items}
-              unreadCount={unreadCount}
-              onOpenSettings={() => setView("settings")}
-              onItemClick={handleItemClick}
-              onMarkAllRead={markAllRead}
-              onClear={clear}
-            />
+            <>
+              <BellOnboardingCardView
+                card={onboardingCard}
+                onEnablePush={enable}
+                onOpenSettings={() => setView("settings")}
+                onPromptInstall={promptInstall}
+                onDismissInstall={dismissInstallCard}
+              />
+              <InboxView
+                status={inboxStatus}
+                items={items}
+                unreadCount={unreadCount}
+                onOpenSettings={() => setView("settings")}
+                onItemClick={handleItemClick}
+                onMarkAllRead={markAllRead}
+                onClear={clear}
+              />
+            </>
           ) : (
             <SettingsView
               onBack={() => setView("inbox")}
@@ -196,6 +264,12 @@ export function NotificationBell({ variant, userId }: NotificationBellProps) {
               onEnable={enable}
               onDisable={disable}
               onSendTest={sendTest}
+              isInstallStateReady={isInstallStateReady}
+              isStandalone={isStandalone}
+              isIos={isIos}
+              canPromptInstall={canPromptInstall}
+              installCompleted={installCompleted}
+              onPromptInstall={promptInstall}
             />
           )}
         </div>
@@ -319,6 +393,12 @@ function SettingsView({
   onEnable,
   onDisable,
   onSendTest,
+  isInstallStateReady,
+  isStandalone,
+  isIos,
+  canPromptInstall,
+  installCompleted,
+  onPromptInstall,
 }: {
   onBack: () => void;
   state: ReturnType<typeof usePushSubscription>["state"];
@@ -327,7 +407,30 @@ function SettingsView({
   onEnable: () => void;
   onDisable: () => void;
   onSendTest: () => void;
+  isInstallStateReady: boolean;
+  isStandalone: boolean;
+  isIos: boolean;
+  canPromptInstall: boolean;
+  installCompleted: boolean;
+  onPromptInstall: () => Promise<InstallPromptOutcome>;
 }) {
+  // Spec point 6: install state must be considered BEFORE a misleading Push
+  // message -- specifically, `unsupported` on an iPhone/iPad browser tab
+  // usually just means "Push APIs aren't available outside standalone",
+  // never a genuine device limitation. A non-iOS `unsupported` browser
+  // (installing would not add Push support there either) keeps its
+  // existing truthful `UnsupportedPanel` untouched. While install-state
+  // detection has not finished (`!isInstallStateReady` -- see
+  // `PwaInstallProvider`'s own docstring), `isIos` cannot be trusted yet,
+  // so this always falls through to the ordinary, always-safe push panel
+  // rather than possibly skipping it based on a not-yet-known iOS guess.
+  const showPushStateSwitch = !isInstallStateReady || isStandalone || !(isIos && state === "unsupported");
+  // Section 8's manual install entry point is itself install-guidance UI --
+  // same rule as the bell's automatic card: never rendered before
+  // detection has actually finished (see `deriveBellOnboardingCard`'s
+  // identical `isReady` gate).
+  const showInstallSection = isInstallStateReady && !isStandalone;
+
   return (
     <div>
       <div className="flex items-center gap-2 px-1">
@@ -343,19 +446,35 @@ function SettingsView({
       </div>
 
       <div className="mt-2 px-1">
-        {state === "checking" ? <CheckingPanel /> : null}
-        {state === "unsupported" ? <UnsupportedPanel /> : null}
-        {state === "permission_denied" ? <PermissionDeniedPanel /> : null}
-        {state === "not_enabled" || state === "enabling" ? (
-          <NotEnabledPanel pending={state === "enabling"} errorMessage={errorMessage} onEnable={onEnable} />
-        ) : null}
-        {state === "enabled" || state === "disabling" ? (
-          <EnabledPanel
-            disabling={state === "disabling"}
-            testStatus={testStatus}
-            onDisable={onDisable}
-            onSendTest={onSendTest}
+        {/* Section 8: a manual re-entry point into installation guidance,
+            reachable from Settings whenever the app is not standalone --
+            deliberately IGNORES the bell's automatic-card dismissal
+            cooldown (that cooldown only suppresses the unsolicited card;
+            an intentional visit here must always work). */}
+        {showInstallSection ? (
+          <InstallSettingsSection
+            guidance={deriveInstallGuidance({ isIos, canPromptInstall, installCompleted })}
+            onPromptInstall={onPromptInstall}
           />
+        ) : null}
+
+        {showPushStateSwitch ? (
+          <div className={showInstallSection ? "mt-4 border-t border-border pt-3" : undefined}>
+            {state === "checking" ? <CheckingPanel /> : null}
+            {state === "unsupported" ? <UnsupportedPanel /> : null}
+            {state === "permission_denied" ? <PermissionDeniedPanel /> : null}
+            {state === "not_enabled" || state === "enabling" ? (
+              <NotEnabledPanel pending={state === "enabling"} errorMessage={errorMessage} onEnable={onEnable} />
+            ) : null}
+            {state === "enabled" || state === "disabling" ? (
+              <EnabledPanel
+                disabling={state === "disabling"}
+                testStatus={testStatus}
+                onDisable={onDisable}
+                onSendTest={onSendTest}
+              />
+            ) : null}
+          </div>
         ) : null}
       </div>
     </div>
@@ -465,6 +584,227 @@ function EnabledPanel({
         )}
         {disabling ? "מכבה..." : "כבה התראות"}
       </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Contextual onboarding card (bell inbox view, spec priority A-G) -- always
+// rendered ABOVE `InboxView`, never in place of it, so reading/marking/
+// clearing notifications keeps working regardless of install/Push state.
+// ---------------------------------------------------------------------------
+
+function OnboardingCardShell({ children }: { children: ReactNode }) {
+  return <div className="mb-3 rounded-xl bg-overlay-soft p-3 ring-1 ring-border">{children}</div>;
+}
+
+function BellOnboardingCardView({
+  card,
+  onEnablePush,
+  onOpenSettings,
+  onPromptInstall,
+  onDismissInstall,
+}: {
+  card: BellOnboardingCard;
+  onEnablePush: () => void;
+  onOpenSettings: () => void;
+  onPromptInstall: () => Promise<InstallPromptOutcome>;
+  onDismissInstall: () => void;
+}) {
+  if (card.kind === "none") return null;
+
+  if (card.kind === "enable_push") {
+    // (B) standalone + Push not yet enabled -- the CTA calls the EXISTING
+    // `usePushSubscription().enable()` directly; this click IS the user
+    // gesture that hook's own permission-request call relies on.
+    return (
+      <OnboardingCardShell>
+        <p className="text-sm font-semibold text-foreground">🔔 הפעילו התראות</p>
+        <p className="mt-1 text-xs text-muted">קבלו תזכורות ועדכונים חשובים גם כשמי-מה-מו סגור.</p>
+        <button
+          type="button"
+          onClick={onEnablePush}
+          className="mt-2.5 inline-flex w-full items-center justify-center rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-colors duration-200 hover:bg-primary-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        >
+          הפעל התראות
+        </button>
+      </OnboardingCardShell>
+    );
+  }
+
+  if (card.kind === "push_blocked") {
+    // (C) standalone + permission denied -- guidance only, never a repeated
+    // `requestPermission()` call. "לפרטים" opens Settings, where
+    // `PermissionDeniedPanel` already carries the full recovery copy.
+    return (
+      <OnboardingCardShell>
+        <p className="text-sm font-semibold text-foreground">התראות חסומות</p>
+        <p className="mt-1 text-xs text-muted">ההתראות חסומות בהגדרות הדפדפן או המערכת.</p>
+        <button
+          type="button"
+          onClick={onOpenSettings}
+          className="mt-2 text-xs font-medium text-primary transition-colors duration-150 hover:underline"
+        >
+          לפרטים
+        </button>
+      </OnboardingCardShell>
+    );
+  }
+
+  if (card.kind === "install_completed") {
+    // (F) installed this session, but the current tab itself is still not
+    // standalone -- installing does not retroactively make THIS tab
+    // standalone. Truthful next step only; never an auto permission prompt.
+    return (
+      <OnboardingCardShell>
+        <p className="text-sm font-semibold text-foreground">ההתקנה הושלמה</p>
+        <p className="mt-1 text-xs text-muted">עכשיו פתח/י את מי-מה-מו מהסמל במסך הבית כדי להפעיל התראות.</p>
+      </OnboardingCardShell>
+    );
+  }
+
+  // (D/E/G) card.kind === "install"
+  return <InstallOnboardingCard guidance={card.guidance} onPromptInstall={onPromptInstall} onDismiss={onDismissInstall} />;
+}
+
+function InstallOnboardingCard({
+  guidance,
+  onPromptInstall,
+  onDismiss,
+}: {
+  guidance: Exclude<InstallGuidance, "completed">;
+  onPromptInstall: () => Promise<InstallPromptOutcome>;
+  onDismiss: () => void;
+}) {
+  if (guidance === "fallback") {
+    // (G) No native prompt, not iOS -- a truthful low-key note, never a
+    // dead "Install" button. Never dismissible: there is no CTA here to
+    // nag with in the first place.
+    return <p className="mb-3 px-1 text-xs text-muted">אפשר להוסיף את מי-מה-מו למסך הבית דרך תפריט הדפדפן.</p>;
+  }
+
+  return (
+    <OnboardingCardShell>
+      <InstallGuidanceBody guidance={guidance} onPromptInstall={onPromptInstall} />
+      <button
+        type="button"
+        onClick={onDismiss}
+        className="mt-2 text-xs font-medium text-muted transition-colors duration-150 hover:text-foreground"
+      >
+        לא עכשיו
+      </button>
+    </OnboardingCardShell>
+  );
+}
+
+/** Device-appropriate install pitch body, with no outer card chrome and no dismiss control -- shared between the bell's dismissible card (`InstallOnboardingCard`) and Settings' always-available manual entry point (`InstallSettingsSection`). */
+function InstallGuidanceBody({
+  guidance,
+  onPromptInstall,
+}: {
+  guidance: Exclude<InstallGuidance, "completed">;
+  onPromptInstall: () => Promise<InstallPromptOutcome>;
+}) {
+  if (guidance === "ios") return <IosInstallInstructions />;
+  if (guidance === "native") return <NativeInstallPitch onPromptInstall={onPromptInstall} />;
+  return <p className="text-xs text-muted">אפשר להוסיף את מי-מה-מו למסך הבית דרך תפריט הדפדפן.</p>;
+}
+
+/** (D) Non-iOS browser exposing a real `beforeinstallprompt` -- the ONLY place `promptInstall()` is ever invoked from, itself only ever reachable via this button's own click. */
+function NativeInstallPitch({ onPromptInstall }: { onPromptInstall: () => Promise<InstallPromptOutcome> }) {
+  const [pending, setPending] = useState(false);
+
+  async function handleClick() {
+    setPending(true);
+    try {
+      await onPromptInstall();
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <div>
+      <p className="text-sm font-semibold text-foreground">📲 התקינו את מי-מה-מו</p>
+      <p className="mt-1 text-xs text-muted">הוסיפו אותה למסך הבית לחוויית אפליקציה מלאה ולהתראות אמינות.</p>
+      <button
+        type="button"
+        onClick={handleClick}
+        disabled={pending}
+        className="mt-2.5 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-colors duration-200 hover:bg-primary-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-70"
+      >
+        {pending ? (
+          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" strokeWidth={1.75} />
+        ) : (
+          <Download className="h-4 w-4" aria-hidden="true" strokeWidth={1.75} />
+        )}
+        התקנה
+      </button>
+    </div>
+  );
+}
+
+/** (E) iPhone/iPad, not standalone -- no native install API exists here, so this is instructions only, never a fake install action. Steps default collapsed; the trigger owns its own `aria-expanded`/`aria-controls`. */
+function IosInstallInstructions() {
+  const [expanded, setExpanded] = useState(false);
+  const stepsId = useId();
+
+  return (
+    <div>
+      <p className="text-sm font-semibold text-foreground">הוסיפו את מי-מה-מו למסך הבית</p>
+      <p className="mt-1 text-xs text-muted">כדי להשתמש באפליקציה במסך מלא ולקבל התראות בצורה אמינה, הוסיפו אותה למסך הבית.</p>
+      <button
+        type="button"
+        onClick={() => setExpanded((prev) => !prev)}
+        aria-expanded={expanded}
+        aria-controls={stepsId}
+        className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors duration-150 hover:underline"
+      >
+        {expanded ? (
+          <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" strokeWidth={2} />
+        ) : (
+          <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" strokeWidth={2} />
+        )}
+        איך מוסיפים למסך הבית?
+      </button>
+      {expanded ? (
+        <ol id={stepsId} className="mt-2 list-decimal space-y-1 ps-4 text-xs text-muted">
+          <li>לחצו על כפתור השיתוף</li>
+          <li>בחרו „הוסף למסך הבית”</li>
+          <li>פתחו את מי-מה-מו מהסמל החדש</li>
+        </ol>
+      ) : null}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Settings view's manual installation entry point (spec point 8) -- always
+// rendered whenever the app is not standalone, deliberately IGNORING the
+// bell card's own dismissal cooldown (an intentional visit here must
+// always work, even mid-cooldown).
+// ---------------------------------------------------------------------------
+
+function InstallSettingsSection({
+  guidance,
+  onPromptInstall,
+}: {
+  guidance: InstallGuidance;
+  onPromptInstall: () => Promise<InstallPromptOutcome>;
+}) {
+  return (
+    <div>
+      <p className="text-xs font-semibold text-muted-2">התקנת האפליקציה</p>
+      <div className="mt-1.5">
+        {guidance === "completed" ? (
+          <div>
+            <p className="text-sm font-semibold text-foreground">ההתקנה הושלמה</p>
+            <p className="mt-1 text-xs text-muted">עכשיו פתח/י את מי-מה-מו מהסמל במסך הבית כדי להפעיל התראות.</p>
+          </div>
+        ) : (
+          <InstallGuidanceBody guidance={guidance} onPromptInstall={onPromptInstall} />
+        )}
+      </div>
     </div>
   );
 }
