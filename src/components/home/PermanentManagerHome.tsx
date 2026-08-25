@@ -1,11 +1,15 @@
 import { Header } from "@/components/dashboard/Header";
 import { DataFreshnessStatus } from "@/components/ui/DataFreshnessStatus";
+import type { ReportOneDraft } from "@/lib/domain/reportOne";
 import type { PermanentManagerHomeReadModel } from "@/lib/readModels/permanentManagerHomeTypes";
+import { ReportOneQuickAction } from "./ReportOneQuickAction";
 import { ShiftSnapshotCard } from "./ShiftSnapshotCard";
 import { TodayOperationalContext } from "./TodayOperationalContext";
 
 interface PermanentManagerHomeProps {
   model: PermanentManagerHomeReadModel;
+  /** `null`/omitted whenever "דוח 1 למחר" itself failed to load (e.g. a transient auth/config issue) -- the quick action simply doesn't render rather than breaking the rest of Home. */
+  reportOneDraft?: ReportOneDraft | null;
 }
 
 /**
@@ -21,12 +25,14 @@ interface PermanentManagerHomeProps {
  * the `order-*` classes below), current-first stacked on mobile, followed
  * by the smaller "today" section.
  */
-export function PermanentManagerHome({ model }: PermanentManagerHomeProps) {
+export function PermanentManagerHome({ model, reportOneDraft }: PermanentManagerHomeProps) {
   const todayDate = model.localNow.date;
 
   return (
     <div className="flex flex-col gap-6">
       <Header personName={model.person.name} localNow={model.localNow} />
+
+      {reportOneDraft ? <ReportOneQuickAction draft={reportOneDraft} /> : null}
       {/*
        * `DataFreshnessStatus` (shared across every route) lays itself out as
        * a `justify-between` row -- on this page's wide desktop content

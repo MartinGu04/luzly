@@ -12,6 +12,9 @@ vi.mock("@/lib/readModels/getRequestRecentDashboardChanges", () => ({ getRequest
 const getRequestPermanentManagerHome = vi.fn();
 vi.mock("@/lib/readModels/getRequestPermanentManagerHome", () => ({ getRequestPermanentManagerHome }));
 
+const getRequestReportOneTomorrow = vi.fn();
+vi.mock("@/lib/readModels/getRequestReportOneTomorrow", () => ({ getRequestReportOneTomorrow }));
+
 const recordDashboardVisitAction = vi.fn().mockResolvedValue({ ok: true });
 vi.mock("@/lib/dashboardVisit/actions", () => ({ recordDashboardVisitAction }));
 
@@ -31,6 +34,8 @@ beforeEach(() => {
   getRequestDashboardVisitRecap.mockReset();
   getRequestDashboardVisitRecap.mockResolvedValue({ visitStartedAt: "2026-08-25T10:00:00.000Z", items: [], totalCount: 0 });
   getRequestPermanentManagerHome.mockReset();
+  getRequestReportOneTomorrow.mockReset();
+  getRequestReportOneTomorrow.mockResolvedValue({ status: "forbidden" });
   recordDashboardVisitAction.mockClear();
 });
 

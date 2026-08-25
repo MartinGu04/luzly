@@ -5,6 +5,7 @@ import { classifyPersonnelType } from "@/lib/domain/personnelType";
 import { getRequestPermanentManagerHome } from "@/lib/readModels/getRequestPermanentManagerHome";
 import { getRequestPersonalSchedule } from "@/lib/readModels/getRequestPersonalSchedule";
 import { getRequestDashboardVisitRecap } from "@/lib/readModels/getRequestRecentDashboardChanges";
+import { getRequestReportOneTomorrow } from "@/lib/readModels/getRequestReportOneTomorrow";
 
 /**
  * By the time this page renders, the protected layout has already gated
@@ -68,7 +69,9 @@ export default async function DashboardPage() {
   if (isPermanentManager) {
     const homeResult = await getRequestPermanentManagerHome();
     if (homeResult.status === "ok") {
-      return <PermanentManagerHome model={homeResult.model} />;
+      const reportOneResult = await getRequestReportOneTomorrow();
+      const reportOneDraft = reportOneResult.status === "ok" ? reportOneResult.draft : null;
+      return <PermanentManagerHome model={homeResult.model} reportOneDraft={reportOneDraft} />;
     }
   }
 
