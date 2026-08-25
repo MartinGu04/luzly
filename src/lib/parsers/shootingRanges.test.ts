@@ -244,4 +244,25 @@ describe("parseShootingRangesSheet", () => {
       expect(result[0].resolvedPersonId).toBeNull();
     });
   });
+
+  it("recognizes the real production sheet's actual performed-on header -- 'תאריך ביצוע מטווחים' (plural), not just the previously-assumed singular alias -- and still ignores the manual expiry/status/relevance columns (regression: a header mismatch here silently returned [] for the WHOLE sheet, not just one row)", () => {
+    const LEV = syntheticPerson("לב סיניצקי");
+    const result = parseShootingRangesSheet(
+      sheet([
+        ["שם", "תאריך ביצוע מטווחים", "תאריך תפוגה", "סטטוס", "רלוונטיות"],
+        ["לב סיניצקי", "29/06/2026", "29/12/2026", "תקף", "רלוונטי"],
+      ]),
+      [LEV],
+    );
+
+    expect(result).toEqual([
+      {
+        sourceName: "לב סיניצקי",
+        resolvedPersonId: LEV.id,
+        performedOn: "2026-06-29",
+        sourceSheet: "מטווחים",
+        sourceCell: "A2",
+      },
+    ]);
+  });
 });

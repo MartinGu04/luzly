@@ -4,7 +4,7 @@ import { parseLocalDate } from "./date";
 import { cellToTrimmedString, findColumnIndexByHeader, toA1Cell } from "./sheetGrid";
 
 const NAME_HEADERS = ["שם", "שם מלא", "שם עובד"];
-const PERFORMED_ON_HEADERS = ["תאריך ביצוע מטווח", "תאריך ביצוע", "תאריך"];
+const PERFORMED_ON_HEADERS = ["תאריך ביצוע מטווחים", "תאריך ביצוע מטווח", "תאריך ביצוע", "תאריך"];
 
 /**
  * Any one of these being present is enough to recognize the "מטווחים"

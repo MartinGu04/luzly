@@ -354,5 +354,25 @@ describe("loadShootingRangeManagerOverview", () => {
       expect(row?.status).not.toBe("none");
       expect(result.model.unresolvedSheetRowCount).toBe(0);
     });
+
+    it("resolves the same real completion when the sheet uses the ACTUAL production header 'תאריך ביצוע מטווחים' (plural) alongside the real 'תאריך תפוגה' / 'סטטוס' / 'רלוונטיות' columns -- regression for a header-name mismatch that silently dropped every row in the whole sheet, not just one person's", async () => {
+      const lev = person({ id: "p_lev", name: "לב סיניצקי", isSupervisor: false, isTechnician: true, personnelType: "חובה" });
+      loadManagerWorkbookContext.mockResolvedValue(
+        okContext([lev], [
+          ["שם", "תאריך ביצוע מטווחים", "תאריך תפוגה", "סטטוס", "רלוונטיות"],
+          ["לב סיניצקי", "29/06/2026", "29/12/2026", "תקף", "רלוונטי"],
+        ]),
+      );
+      getJerusalemLocalNow.mockReturnValue({ date: "2026-08-25", minuteOfDay: 600 });
+
+      const result = await loadShootingRangeManagerOverview();
+
+      expect(result.status).toBe("ok");
+      if (result.status !== "ok") throw new Error("unreachable");
+      const row = result.model.rows.find((r) => r.personId === "p_lev");
+      expect(row?.baselineDate).toBe("2026-06-29");
+      expect(row?.expiryDate).toBe("2026-12-29");
+      expect(result.model.unresolvedSheetRowCount).toBe(0);
+    });
   });
 });
