@@ -3,11 +3,10 @@ import { DataFreshnessStatus } from "@/components/ui/DataFreshnessStatus";
 import { buildPersonalWeekOverview } from "@/lib/presentation/personalWeekOverview";
 import type { PersonalEventView, PersonalScheduleReadModel } from "@/lib/readModels/types";
 import type { DashboardVisitRecap } from "@/lib/readModels/recentDashboardChangesTypes";
-import { DashboardVisitMarker } from "./DashboardVisitMarker";
+import { DashboardVisitSession } from "./DashboardVisitSession";
 import { Header } from "./Header";
 import { Hero } from "./Hero";
 import { IssuesPanel } from "./IssuesPanel";
-import { RecentChangesPanel } from "./RecentChangesPanel";
 import { TodayTimeline } from "./TodayTimeline";
 import { UpcomingSection } from "./UpcomingSection";
 import { WeekOverviewSection } from "./WeekOverviewSection";
@@ -20,9 +19,11 @@ interface DashboardProps {
    * -- `null`/omitted for every existing caller/test (regression-safe),
    * and whenever `page.tsx` decided this person is ineligible
    * (permanent/unclassified personnel never receive this prop at all).
-   * `RecentChangesPanel` itself still renders nothing for an empty
-   * `items` list; `DashboardVisitMarker` only mounts when this is
-   * non-null -- see below.
+   * Handed to `DashboardVisitSession` (mounted only when non-null),
+   * which freezes it for the lifetime of one mounted Home visit -- see
+   * that component's own docstring for why a plain pass-through here
+   * would let an `AppRevalidator` refresh silently replace/empty a recap
+   * the user is still looking at.
    */
   visitRecap?: DashboardVisitRecap | null;
 }
@@ -89,7 +90,6 @@ export function Dashboard({ model, visitRecap = null }: DashboardProps) {
 
   return (
     <div className="flex flex-col gap-4">
-      {visitRecap ? <DashboardVisitMarker visitStartedAt={visitRecap.visitStartedAt} /> : null}
       <Header personName={model.person.name} localNow={model.localNow} />
       <DataFreshnessStatus fetchedAt={model.fetchedAt} />
 
@@ -115,11 +115,7 @@ export function Dashboard({ model, visitRecap = null }: DashboardProps) {
             />
           </div>
 
-          {visitRecap && visitRecap.items.length > 0 ? (
-            <div className="animate-fade-up" style={{ animationDelay: "120ms" }}>
-              <RecentChangesPanel changes={visitRecap.items} totalCount={visitRecap.totalCount} />
-            </div>
-          ) : null}
+          {visitRecap ? <DashboardVisitSession visitRecap={visitRecap} /> : null}
         </div>
 
         <div className="flex flex-col gap-6 lg:order-2">

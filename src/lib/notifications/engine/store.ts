@@ -651,6 +651,14 @@ export interface RecentSettledJobsResult {
  * "since your previous visit" upgrade, the user's own previous-visit
  * cutoff from `lib/dashboardVisit/store.ts`).
  *
+ * STRICTLY after `sinceIso` (`.gt`, never `.gte`): a job whose
+ * `created_at` is exactly equal to the caller's cutoff belongs to the
+ * boundary itself, not to the period after it. For the "since your
+ * previous visit" recap specifically, that cutoff IS a previously
+ * recorded visit instant -- a settled change created at that exact
+ * instant was already visible (or eligible to be) on the visit that
+ * produced the cutoff, so `.gte` would risk showing it again.
+ *
  * Requests an EXACT row count (`{ count: "exact" }`) in the SAME request
  * as the bounded/limited rows -- postgrest computes `count` over the
  * whole filtered match set independent of `limit`, so this is one round
@@ -668,7 +676,7 @@ export async function getRecentSettledJobsForRecipient(
     .select("id, category, title, body, path, source_ref, created_at", { count: "exact" })
     .eq("recipient_user_id", recipientUserId)
     .in("category", categories)
-    .gte("created_at", sinceIso)
+    .gt("created_at", sinceIso)
     .order("created_at", { ascending: false })
     .limit(limit);
   if (error) throw error;

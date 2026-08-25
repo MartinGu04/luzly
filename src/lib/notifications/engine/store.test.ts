@@ -288,7 +288,7 @@ describe("getRecentSettledJobsForRecipient (personal Home 'since your previous v
     status?: string;
   }
 
-  /** A minimal, faithful fake of `.from("notification_jobs").select(cols, {count:'exact'}).eq().in().gte().order().limit()` -- same style as `makeStatefulFakeSupabase` above, scoped to this one query shape. `count` mirrors postgrest's real `count: "exact"` behavior: computed over the WHOLE filtered match set, independent of `limit()`. */
+  /** A minimal, faithful fake of `.from("notification_jobs").select(cols, {count:'exact'}).eq().in().gt().order().limit()` -- same style as `makeStatefulFakeSupabase` above, scoped to this one query shape. `count` mirrors postgrest's real `count: "exact"` behavior: computed over the WHOLE filtered match set, independent of `limit()`. */
   function makeJobsFakeSupabase(rows: FakeJobRow[]) {
     const calls: Record<string, unknown> = {};
     const client = {
@@ -311,9 +311,9 @@ describe("getRecentSettledJobsForRecipient (personal Home 'since your previous v
             filtered = filtered.filter((row) => values.includes((row as unknown as Record<string, unknown>)[column]));
             return builder;
           },
-          gte: (column: string, value: string) => {
-            calls.gte = [column, value];
-            filtered = filtered.filter((row) => String((row as unknown as Record<string, unknown>)[column]) >= value);
+          gt: (column: string, value: string) => {
+            calls.gt = [column, value];
+            filtered = filtered.filter((row) => String((row as unknown as Record<string, unknown>)[column]) > value);
             return builder;
           },
           order: (column: string, opts: { ascending: boolean }) => {
@@ -352,7 +352,7 @@ describe("getRecentSettledJobsForRecipient (personal Home 'since your previous v
     };
   }
 
-  it("filters by recipient_user_id, category IN (...), and created_at >= sinceIso", async () => {
+  it("filters by recipient_user_id, category IN (...), and created_at STRICTLY AFTER sinceIso (.gt, never .gte)", async () => {
     const { client, calls } = makeJobsFakeSupabase([jobRow()]);
     const { getRecentSettledJobsForRecipient } = await loadModule(client);
 
@@ -365,9 +365,43 @@ describe("getRecentSettledJobsForRecipient (personal Home 'since your previous v
 
     expect(calls.eq).toEqual(["recipient_user_id", "u_me"]);
     expect(calls.in).toEqual(["category", ["shift_change", "team_change", "duty_change"]]);
-    expect(calls.gte).toEqual(["created_at", "2026-08-13T10:00:00.000Z"]);
+    expect(calls.gt).toEqual(["created_at", "2026-08-13T10:00:00.000Z"]);
     expect(rows).toHaveLength(1);
     expect(rows[0].id).toBe("job_1");
+  });
+
+  describe("previous-visit boundary is strictly AFTER, never >= (a job created exactly AT the cutoff belongs to that boundary, not the next period)", () => {
+    const CUTOFF = "2026-08-24T20:00:00.000Z";
+
+    it("created_at < cutoff -> excluded", async () => {
+      const { client } = makeJobsFakeSupabase([jobRow({ id: "before", created_at: "2026-08-24T19:59:59.999Z" })]);
+      const { getRecentSettledJobsForRecipient } = await loadModule(client);
+
+      const { rows, totalCount } = await getRecentSettledJobsForRecipient("u_me", ["shift_change"], CUTOFF, 10);
+
+      expect(rows).toEqual([]);
+      expect(totalCount).toBe(0);
+    });
+
+    it("created_at == cutoff -> excluded", async () => {
+      const { client } = makeJobsFakeSupabase([jobRow({ id: "exact", created_at: CUTOFF })]);
+      const { getRecentSettledJobsForRecipient } = await loadModule(client);
+
+      const { rows, totalCount } = await getRecentSettledJobsForRecipient("u_me", ["shift_change"], CUTOFF, 10);
+
+      expect(rows).toEqual([]);
+      expect(totalCount).toBe(0);
+    });
+
+    it("created_at > cutoff -> included", async () => {
+      const { client } = makeJobsFakeSupabase([jobRow({ id: "after", created_at: "2026-08-24T20:00:00.001Z" })]);
+      const { getRecentSettledJobsForRecipient } = await loadModule(client);
+
+      const { rows, totalCount } = await getRecentSettledJobsForRecipient("u_me", ["shift_change"], CUTOFF, 10);
+
+      expect(rows.map((r) => r.id)).toEqual(["after"]);
+      expect(totalCount).toBe(1);
+    });
   });
 
   it("requests an exact count in the SAME select call -- never a second query (no N+1)", async () => {

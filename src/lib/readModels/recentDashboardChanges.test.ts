@@ -79,11 +79,13 @@ describe("loadDashboardVisitRecap -- true 'since previous visit' lower bound (4,
     expect(sinceIso).toBe(PREVIOUS_VISIT);
   });
 
-  it("7. a change immediately BEFORE the previous visit is excluded -- proven at the store boundary (gte semantics), never re-filtered here", async () => {
+  it("7. a change immediately BEFORE (or exactly AT) the previous visit is excluded -- proven at the store boundary (strictly-after / .gt semantics), never re-filtered here", async () => {
     // loadDashboardVisitRecap trusts the store's own sinceIso filter (see
-    // notifications/engine/store.test.ts's own "created_at >= sinceIso"
-    // coverage) -- this only proves the EXACT previous-visit instant is
-    // what gets passed down.
+    // notifications/engine/store.test.ts's own "previous-visit boundary
+    // is strictly AFTER, never >=" coverage, which proves created_at <
+    // cutoff and created_at === cutoff are BOTH excluded) -- this only
+    // proves the EXACT previous-visit instant is what gets passed down
+    // as that boundary.
     await loadDashboardVisitRecap(NOW);
     const [, , sinceIso] = getRecentSettledJobsForRecipient.mock.calls[0];
     expect(sinceIso).toBe(PREVIOUS_VISIT);
