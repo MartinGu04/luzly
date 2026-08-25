@@ -34,3 +34,23 @@ export function formatDurationUnitsLabel(parts: DurationParts): string {
   const pad2 = (n: number) => String(n).padStart(2, "0");
   return `${pad2(parts.hours)} שעות · ${pad2(parts.minutes)} דקות · ${pad2(parts.seconds)} שניות`;
 }
+
+/**
+ * Fraction of the `[startMs, expiryMs)` qualification window still
+ * REMAINING at `nowMs`, clamped to `0..1`. `1` at/before `startMs` (freshly
+ * qualified -- nothing elapsed yet), `0` at/after `expiryMs` (including any
+ * time after expiry, not just exactly at it). This is deliberately the
+ * inverse of elapsed fraction: the progress ring visualizes REMAINING
+ * validity, so a mostly-full ring reads naturally as "plenty of time
+ * left", matching the large days-remaining number shown next to it (a
+ * mostly-EMPTY ring for someone who just qualified would visually
+ * contradict that number). Pure presentation math over already-computed
+ * instants -- the expiry instant itself is still derived exactly once,
+ * server-side, from the qualification's own calendar-month semantics
+ * (`lib/domain/shootingRangeQualification.ts`); this never recomputes or
+ * duplicates that.
+ */
+export function computeRemainingProgress(nowMs: number, startMs: number, expiryMs: number): number {
+  const totalWindowMs = Math.max(1, expiryMs - startMs);
+  return Math.min(1, Math.max(0, (expiryMs - nowMs) / totalWindowMs));
+}

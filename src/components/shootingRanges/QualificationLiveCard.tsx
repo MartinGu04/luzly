@@ -1,9 +1,8 @@
 "use client";
 
 import { Badge } from "@/components/ui/Badge";
-import { PulseIndicator } from "@/components/dashboard/PulseIndicator";
 import type { QualificationStatus } from "@/lib/domain/shootingRangeQualification";
-import { formatDurationParts, formatDurationUnitsLabel } from "@/lib/presentation/shootingRangeDuration";
+import { computeRemainingProgress, formatDurationParts, formatDurationUnitsLabel } from "@/lib/presentation/shootingRangeDuration";
 import { presentQualificationStatus } from "@/lib/presentation/shootingRangeStatus";
 import { ProgressRing } from "./ProgressRing";
 import { useLiveClock } from "./useLiveClock";
@@ -56,15 +55,19 @@ export function QualificationLiveCard(props: QualificationLiveCardProps) {
   const isLive = nowMs !== null;
   const isExpired = isLive ? nowMs > expiryMs : (props.initialDaysRemaining ?? 0) < 0;
 
+  // Fraction of the qualification window REMAINING (1 = just qualified, 0
+  // = at/after expiry) -- the ring visualizes how much validity is left,
+  // not how much has elapsed, so it reads consistently with the large
+  // days-remaining number in its center (see `computeRemainingProgress`).
   let progress: number;
   let displayMs: number;
 
   if (isLive) {
-    progress = isExpired ? 1 : Math.min(1, Math.max(0, (nowMs - startMs) / totalWindowMs));
+    progress = computeRemainingProgress(nowMs, startMs, expiryMs);
     displayMs = isExpired ? nowMs - expiryMs : expiryMs - nowMs;
   } else {
     const daysRemaining = props.initialDaysRemaining ?? 0;
-    progress = isExpired ? 1 : Math.min(1, Math.max(0, 1 - (daysRemaining * DAY_MS) / totalWindowMs));
+    progress = Math.min(1, Math.max(0, (daysRemaining * DAY_MS) / totalWindowMs));
     displayMs = Math.abs(daysRemaining) * DAY_MS;
   }
 
@@ -74,7 +77,7 @@ export function QualificationLiveCard(props: QualificationLiveCardProps) {
     <div className="flex flex-col items-center gap-4 py-2 text-center">
       <p className="text-lg font-semibold text-foreground">כשירות מטווח</p>
 
-      <ProgressRing progress={progress} toneClassName={presentation.ringToneClassName}>
+      <ProgressRing progress={progress} toneClassName={presentation.ringToneClassName} showLiveMarker={isLive && progress > 0}>
         <div className="flex flex-col items-center">
           <span className="text-3xl font-bold tabular-nums text-foreground">{parts.days}</span>
           <span className="text-xs text-muted">ימים</span>
@@ -83,12 +86,9 @@ export function QualificationLiveCard(props: QualificationLiveCardProps) {
 
       <Badge tone={presentation.badgeTone}>{presentation.label}</Badge>
 
-      <div className="flex items-center gap-2 text-sm text-muted">
-        {isLive ? <PulseIndicator tone={isExpired ? "critical" : "primary"} /> : null}
-        <span className="tabular-nums">
-          {isLive ? formatDurationUnitsLabel(parts) : "-- שעות · -- דקות · -- שניות"}
-        </span>
-      </div>
+      <span className="text-sm tabular-nums text-muted">
+        {isLive ? formatDurationUnitsLabel(parts) : "-- שעות · -- דקות · -- שניות"}
+      </span>
 
       <p className="text-xs text-muted-2">{isExpired ? "מאז פקיעת הכשירות" : "נותרו עד לפקיעת הכשירות"}</p>
 
