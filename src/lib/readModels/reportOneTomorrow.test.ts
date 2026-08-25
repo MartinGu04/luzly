@@ -5,10 +5,12 @@ import type { RawSheet } from "@/lib/google";
 const getAuthenticatedIdentity = vi.fn();
 const getWorkbookSnapshot = vi.fn();
 const getJerusalemLocalNow = vi.fn();
+const getReserveInclusionPreferences = vi.fn();
 
 vi.mock("@/lib/auth/currentUser", () => ({ getAuthenticatedIdentity }));
 vi.mock("@/lib/sync", () => ({ getWorkbookSnapshot }));
 vi.mock("@/lib/time/jerusalemClock", () => ({ getJerusalemLocalNow }));
+vi.mock("@/lib/reportOne/store", () => ({ getReserveInclusionPreferences }));
 
 const { loadReportOneTomorrow } = await import("./reportOneTomorrow");
 
@@ -49,6 +51,7 @@ beforeEach(() => {
   getAuthenticatedIdentity.mockReset();
   getWorkbookSnapshot.mockReset();
   getJerusalemLocalNow.mockReset();
+  getReserveInclusionPreferences.mockReset();
   getJerusalemLocalNow.mockReturnValue({ date: "2026-08-25", minuteOfDay: 600 });
   getAuthenticatedIdentity.mockResolvedValue({
     status: "authenticated",
@@ -57,6 +60,7 @@ beforeEach(() => {
     avatarUrl: null,
   });
   getWorkbookSnapshot.mockResolvedValue(snapshot(PERMANENT_MANAGER_ROWS));
+  getReserveInclusionPreferences.mockResolvedValue(new Map());
 });
 
 describe("loadReportOneTomorrow — auth pass-through states", () => {
@@ -115,5 +119,59 @@ describe("loadReportOneTomorrow — draft content", () => {
       const managers = result.draft.sections.find((s) => s.section === "regular_manager")!;
       expect(managers.people.map((p) => `${p.name} - ${p.generatedStatus}`)).toContain('עילאי שפירא - נוכח, אחמ"ש יום');
     }
+  });
+});
+
+// --- Reserve-inclusion toggle: read-model defaulting + persistence lookup --
+
+describe("loadReportOneTomorrow — reserve inclusion", () => {
+  const RESERVE_ROWS: (string | boolean)[][] = [
+    ["שם", "מייל", "מנהל", 'סוג כ"א'],
+    ["דני מנהל", "dani@example.invalid", true, "קבע"],
+    ["רועי לוין", "", false, "מילואים"],
+    ["הילה גלבוע", "", false, "מילואים"],
+  ];
+
+  it("1. defaults every reserve person to included=true when no preference has ever been saved", async () => {
+    getWorkbookSnapshot.mockResolvedValue(snapshot(RESERVE_ROWS));
+    getReserveInclusionPreferences.mockResolvedValue(new Map());
+
+    const result = await loadReportOneTomorrow();
+    expect(result.status).toBe("ok");
+    if (result.status === "ok") {
+      const reserveIds = result.draft.sections.find((s) => s.section === "reserve")!.people.map((p) => p.personId);
+      for (const id of reserveIds) {
+        expect(result.reserveInclusionByPersonId[id]).toBe(true);
+      }
+    }
+  });
+
+  it("5. an explicit persisted preference is honored, per person, on this and every future draft load", async () => {
+    getWorkbookSnapshot.mockResolvedValue(snapshot(RESERVE_ROWS));
+
+    const result = await loadReportOneTomorrow();
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    const roiId = result.draft.sections.find((s) => s.section === "reserve")!.people.find((p) => p.name === "רועי לוין")!.personId;
+    const hilaId = result.draft.sections.find((s) => s.section === "reserve")!.people.find((p) => p.name === "הילה גלבוע")!.personId;
+    getReserveInclusionPreferences.mockResolvedValue(new Map([[roiId, false]]));
+
+    const secondResult = await loadReportOneTomorrow();
+    expect(secondResult.status).toBe("ok");
+    if (secondResult.status !== "ok") return;
+    expect(secondResult.reserveInclusionByPersonId[roiId]).toBe(false);
+    expect(secondResult.reserveInclusionByPersonId[hilaId]).toBe(true);
+  });
+
+  it("4. reserveInclusionByPersonId only ever has entries for reserve-section personIds, never permanent/regular ones", async () => {
+    getWorkbookSnapshot.mockResolvedValue(snapshot(RESERVE_ROWS));
+    getReserveInclusionPreferences.mockResolvedValue(new Map());
+
+    const result = await loadReportOneTomorrow();
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    const managerId = result.draft.sections.find((s) => s.section === "permanent")!.people[0].personId;
+    expect(result.reserveInclusionByPersonId[managerId]).toBeUndefined();
+    expect(getReserveInclusionPreferences).toHaveBeenCalledWith(expect.not.arrayContaining([managerId]));
   });
 });

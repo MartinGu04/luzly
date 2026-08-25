@@ -12,17 +12,21 @@ import path from "node:path";
  *
  * Two invariants:
  *  1. `createSupabaseServiceRoleClient` is referenced by name in exactly
- *     four files: its own definition,
+ *     five files: its own definition,
  *     `src/lib/notifications/engine/serviceClient.ts` (the notification
  *     worker's call site -- no session exists for a Cron-triggered
  *     request), `src/lib/calendar/serviceClient.ts` (the personal
  *     calendar feed's call site -- no session exists for an external
  *     calendar client's token-authenticated request either, see that
- *     file's own docstring), and `src/lib/dashboardVisit/serviceClient.ts`
+ *     file's own docstring), `src/lib/dashboardVisit/serviceClient.ts`
  *     (the personal Home "since your previous visit" recap's own
  *     independent call site for the zero-RLS-policy `dashboard_visit_state`
  *     table -- see that file's own docstring for why this is a separate
- *     domain boundary from the notification engine's). No other file --
+ *     domain boundary from the notification engine's), and
+ *     `src/lib/reportOne/serviceClient.ts` (the Report 1
+ *     reserve-inclusion toggle's own independent call site for the
+ *     zero-RLS-policy `report_one_reserve_inclusion` table -- same
+ *     reasoning, its own separate domain boundary). No other file --
  *     not a route, not a Server Component/Action, not a client component
  *     -- may import or call it directly.
  *  2. No "use client" component, and no file under `src/app` reachable
@@ -52,14 +56,16 @@ const SERVICE_ROLE_DEFINITION_FILE = path.join(srcRoot, "lib", "supabase", "serv
 const NOTIFICATION_SERVICE_ROLE_CALL_SITE_FILE = path.join(srcRoot, "lib", "notifications", "engine", "serviceClient.ts");
 const CALENDAR_SERVICE_ROLE_CALL_SITE_FILE = path.join(srcRoot, "lib", "calendar", "serviceClient.ts");
 const DASHBOARD_VISIT_SERVICE_ROLE_CALL_SITE_FILE = path.join(srcRoot, "lib", "dashboardVisit", "serviceClient.ts");
+const REPORT_ONE_SERVICE_ROLE_CALL_SITE_FILE = path.join(srcRoot, "lib", "reportOne", "serviceClient.ts");
 const ALLOWED_SERVICE_ROLE_REFERENCE_FILES = new Set([
   SERVICE_ROLE_DEFINITION_FILE,
   NOTIFICATION_SERVICE_ROLE_CALL_SITE_FILE,
   CALENDAR_SERVICE_ROLE_CALL_SITE_FILE,
   DASHBOARD_VISIT_SERVICE_ROLE_CALL_SITE_FILE,
+  REPORT_ONE_SERVICE_ROLE_CALL_SITE_FILE,
 ]);
 
-describe("notification worker + calendar feed + dashboard visit service-role boundary guard", () => {
+describe("notification worker + calendar feed + dashboard visit + report one service-role boundary guard", () => {
   it("finds source files (sanity check the scan itself works)", () => {
     expect(sourceFiles.length).toBeGreaterThan(0);
   });

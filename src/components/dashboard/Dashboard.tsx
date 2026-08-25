@@ -37,6 +37,8 @@ interface DashboardProps {
    * instead; see `(dashboard)/page.tsx` for the routing.
    */
   reportOneDraft?: ReportOneDraft | null;
+  /** Passed straight through to `ReportOneQuickAction` -- see `ReportOneEditorOverlay`'s own docs. `undefined`/omitted whenever `reportOneDraft` itself is `null`. */
+  reportOneReserveInclusion?: Readonly<Record<string, boolean>>;
 }
 
 /** A known blocking absence (vacation/abroad/medical/day_off) dated today, reusing the domain's own "blocking" semantics -- never redefined here. */
@@ -73,7 +75,7 @@ function findVacationEvent(todayEvents: readonly PersonalEventView[]): PersonalE
  * purely from `calendarEvents` (never `upcomingEvents`, which excludes
  * finished history) via `buildPersonalWeekOverview`.
  */
-export function Dashboard({ model, visitRecap = null, reportOneDraft = null }: DashboardProps) {
+export function Dashboard({ model, visitRecap = null, reportOneDraft = null, reportOneReserveInclusion }: DashboardProps) {
   const hasCurrentAssignment = model.currentAssignments.length > 0;
 
   // Vacation only becomes the hero's story when nothing is currently
@@ -102,7 +104,9 @@ export function Dashboard({ model, visitRecap = null, reportOneDraft = null }: D
   return (
     <div className="flex flex-col gap-4">
       <Header personName={model.person.name} localNow={model.localNow} />
-      {reportOneDraft ? <ReportOneQuickAction draft={reportOneDraft} /> : null}
+      {reportOneDraft ? (
+        <ReportOneQuickAction draft={reportOneDraft} reserveInclusionByPersonId={reportOneReserveInclusion} />
+      ) : null}
       <DataFreshnessStatus fetchedAt={model.fetchedAt} />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">

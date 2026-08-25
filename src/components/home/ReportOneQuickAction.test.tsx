@@ -1,7 +1,9 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReportOneDraft } from "@/lib/domain/reportOne";
 import { ReportOneQuickAction } from "./ReportOneQuickAction";
+
+vi.mock("@/lib/reportOne/actions", () => ({ setReserveInclusionPreferenceAction: vi.fn().mockResolvedValue({ ok: true }) }));
 
 function draft(): ReportOneDraft {
   return { targetDate: "2026-08-26", sections: [] };

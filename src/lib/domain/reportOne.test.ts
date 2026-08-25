@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildReportOneDraft,
   classifyReportOneSection,
+  reportOnePersonHasMeaningfulTomorrowEvent,
   resolveReportOneTargetDate,
   resolveRegularOrReserveStatus,
   UNKNOWN_REPORT_ONE_STATUS,
@@ -327,5 +328,47 @@ describe("buildReportOneDraft — structural invariants (19, 21)", () => {
   it("section ordering is always אנשי קבע -> מילואים -> אחמשים -> טכנאים, even if empty", () => {
     const draft = buildReportOneDraft({ people: [], events: [], targetDate: "2026-08-26", prevDate: "2026-08-25" });
     expect(draft.sections.map((s) => s.section)).toEqual(["permanent", "reserve", "regular_manager", "regular_technician"]);
+  });
+
+  it("17. existing hard exclusions (דימה מירו/מרטין בדיקות/נדב וקנין) never appear in any section, regardless of personnelType or events -- the reserve-inclusion feature never touches this", () => {
+    const people = [
+      person({ id: "p_dima", name: "דימה מירו", personnelType: "מילואים" }),
+      person({ id: "p_martin", name: "מרטין בדיקות", personnelType: "מילואים" }),
+      person({ id: "p_nadav2", name: "נדב וקנין", personnelType: "מילואים" }),
+    ];
+    const events = people.map((p) => shiftEvent("technician", "day", { personId: p.id, date: "2026-08-26" }));
+    const draft = buildReportOneDraft({ people, events, targetDate: "2026-08-26", prevDate: "2026-08-25" });
+    const allNames = draft.sections.flatMap((s) => s.people).map((p) => p.name);
+    expect(allNames).not.toContain("דימה מירו");
+    expect(allNames).not.toContain("מרטין בדיקות");
+    expect(allNames).not.toContain("נדב וקנין");
+  });
+});
+
+// --- reportOnePersonHasMeaningfulTomorrowEvent (reserve-inclusion warning/confirm gate) --
+
+describe("reportOnePersonHasMeaningfulTomorrowEvent", () => {
+  it("no data at all ('?') -> not meaningful", () => {
+    expect(reportOnePersonHasMeaningfulTomorrowEvent({ generatedStatus: UNKNOWN_REPORT_ONE_STATUS })).toBe(false);
+  });
+
+  it("a day shift status -> meaningful", () => {
+    expect(reportOnePersonHasMeaningfulTomorrowEvent({ generatedStatus: 'נוכח, אחמ"ש יום' })).toBe(true);
+  });
+
+  it("a night shift status -> meaningful", () => {
+    expect(reportOnePersonHasMeaningfulTomorrowEvent({ generatedStatus: "נוכח, טכנאי לילה" })).toBe(true);
+  });
+
+  it("a blocking absence status (e.g. חופש) -> meaningful", () => {
+    expect(reportOnePersonHasMeaningfulTomorrowEvent({ generatedStatus: "חופש" })).toBe(true);
+  });
+
+  it("an additive-duty-only status ('?, כונן פינויים') -> meaningful, even though the primary itself is unresolved", () => {
+    expect(reportOnePersonHasMeaningfulTomorrowEvent({ generatedStatus: "?, כונן פינויים" })).toBe(true);
+  });
+
+  it("after-night carryover -> meaningful", () => {
+    expect(reportOnePersonHasMeaningfulTomorrowEvent({ generatedStatus: "נוכח, אחרי לילה" })).toBe(true);
   });
 });

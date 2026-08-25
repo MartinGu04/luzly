@@ -2,6 +2,7 @@ import "server-only";
 import { buildReportOneDraft, resolveReportOneTargetDate, type ReportOneDraft } from "@/lib/domain/reportOne";
 import { parseEvent } from "@/lib/parsers/event";
 import { parseScheduleSheet } from "@/lib/parsers/schedule";
+import { getReserveInclusionPreferences } from "@/lib/reportOne/store";
 import { getJerusalemLocalNow } from "@/lib/time/jerusalemClock";
 import { getManagerWorkbookSheet, loadManagerWorkbookContext, MANAGER_WORKBOOK_SOURCES } from "./managerWorkbookContext";
 
@@ -12,7 +13,14 @@ export type ReportOneTomorrowLoadResult =
   | { status: "ambiguous_identity" }
   /** Authenticated + mapped, but `person.isManager !== true` -- same boundary as `/manager` itself. */
   | { status: "forbidden" }
-  | { status: "ok"; draft: ReportOneDraft };
+  /**
+   * `reserveInclusionByPersonId` -- one entry for every מילואים person in
+   * `draft`'s own reserve section (never any other section), already
+   * DEFAULTED to `true` for anyone who has never had an explicit
+   * preference saved (see `lib/reportOne/store.ts`'s own docs) -- the
+   * UI never has to apply that default itself.
+   */
+  | { status: "ok"; draft: ReportOneDraft; reserveInclusionByPersonId: Record<string, boolean> };
 
 /**
  * Server-only orchestration for "דוח 1 למחר". Reuses `loadManagerWorkbookContext`
@@ -53,5 +61,13 @@ export async function loadReportOneTomorrow(): Promise<ReportOneTomorrowLoadResu
 
   const draft = buildReportOneDraft({ people, events, targetDate, prevDate: now.date });
 
-  return { status: "ok", draft };
+  const reserveSection = draft.sections.find((section) => section.section === "reserve");
+  const reservePersonIds = reserveSection?.people.map((person) => person.personId) ?? [];
+  const explicitPreferences = await getReserveInclusionPreferences(reservePersonIds);
+  const reserveInclusionByPersonId: Record<string, boolean> = {};
+  for (const personId of reservePersonIds) {
+    reserveInclusionByPersonId[personId] = explicitPreferences.get(personId) ?? true;
+  }
+
+  return { status: "ok", draft, reserveInclusionByPersonId };
 }

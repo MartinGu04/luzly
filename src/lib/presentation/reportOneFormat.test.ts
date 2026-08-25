@@ -80,3 +80,42 @@ describe("formatReportOneText", () => {
     expect(lines).toContain("הודיה טריקי - ?");
   });
 });
+
+// --- Reserve-inclusion toggle: copy behavior -------------------------------
+
+describe("formatReportOneText — reserve inclusion", () => {
+  it("2. omitting includeInReportOneByPersonId includes every reserve person (default true, backwards-compatible)", () => {
+    const lines = formatReportOneText(draft(), {}).split("\n");
+    expect(lines).toContain('רועי לוין - נוכח, אחמ"ש לילה');
+  });
+
+  it("2. a reserve person explicitly marked included (true) still appears", () => {
+    const lines = formatReportOneText(draft(), {}, { p_3: true }).split("\n");
+    expect(lines).toContain('רועי לוין - נוכח, אחמ"ש לילה');
+  });
+
+  it("3. a reserve person explicitly marked excluded (false) is completely omitted -- no line, no placeholder", () => {
+    const lines = formatReportOneText(draft(), {}, { p_3: false }).split("\n");
+    expect(lines).not.toContain('רועי לוין - נוכח, אחמ"ש לילה');
+    expect(lines.some((line) => line.includes("רועי לוין"))).toBe(false);
+  });
+
+  it("no blank/empty placeholder line is left behind for an excluded reserve person -- only that person's own line disappears", () => {
+    const withReserve = formatReportOneText(draft(), {}).split("\n");
+    const withoutReserve = formatReportOneText(draft(), {}, { p_3: false }).split("\n");
+    expect(withoutReserve.length).toBe(withReserve.length - 1);
+    // Every OTHER line (section headers, blank section separators, other people) is unchanged.
+    expect(withoutReserve).toEqual(withReserve.filter((line) => line !== 'רועי לוין - נוכח, אחמ"ש לילה'));
+  });
+
+  it("the מילואים section header itself still prints even when its only person is excluded", () => {
+    const lines = formatReportOneText(draft(), {}, { p_3: false }).split("\n");
+    expect(lines).toContain("מילואים😍:");
+  });
+
+  it("4. exclusion only applies to the reserve section -- a matching personId in another section is unaffected", () => {
+    // p_4 belongs to regular_manager in the fixture; marking it "false" must never hide it.
+    const lines = formatReportOneText(draft(), {}, { p_4: false }).split("\n");
+    expect(lines).toContain('עילאי שפירא - נוכח, אחמ"ש יום');
+  });
+});

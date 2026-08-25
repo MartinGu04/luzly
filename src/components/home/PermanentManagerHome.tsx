@@ -10,6 +10,8 @@ interface PermanentManagerHomeProps {
   model: PermanentManagerHomeReadModel;
   /** `null`/omitted whenever "דוח 1 למחר" itself failed to load (e.g. a transient auth/config issue) -- the quick action simply doesn't render rather than breaking the rest of Home. */
   reportOneDraft?: ReportOneDraft | null;
+  /** Passed straight through to `ReportOneQuickAction` -- see `ReportOneEditorOverlay`'s own docs. `undefined`/omitted whenever `reportOneDraft` itself is `null`. */
+  reportOneReserveInclusion?: Readonly<Record<string, boolean>>;
 }
 
 /**
@@ -25,14 +27,16 @@ interface PermanentManagerHomeProps {
  * the `order-*` classes below), current-first stacked on mobile, followed
  * by the smaller "today" section.
  */
-export function PermanentManagerHome({ model, reportOneDraft }: PermanentManagerHomeProps) {
+export function PermanentManagerHome({ model, reportOneDraft, reportOneReserveInclusion }: PermanentManagerHomeProps) {
   const todayDate = model.localNow.date;
 
   return (
     <div className="flex flex-col gap-6">
       <Header personName={model.person.name} localNow={model.localNow} />
 
-      {reportOneDraft ? <ReportOneQuickAction draft={reportOneDraft} /> : null}
+      {reportOneDraft ? (
+        <ReportOneQuickAction draft={reportOneDraft} reserveInclusionByPersonId={reportOneReserveInclusion} />
+      ) : null}
       {/*
        * `DataFreshnessStatus` (shared across every route) lays itself out as
        * a `justify-between` row -- on this page's wide desktop content
