@@ -60,6 +60,34 @@ this is a one-function change, not a redesign.
   (`buildShootingRangeQualificationReadModel`'s `selectPlannedRangeView`),
   never a third stored status.
 
+## Bulk manager confirmation is one atomic database statement
+
+`confirmPlannedShootingRangeAction` does NOT read the planned occurrences,
+decide confirm/reject in application code, then issue separate
+update/insert calls -- that shape has a real TOCTOU race: two concurrent
+confirmations of the same occurrence (a double-click, two manager tabs, a
+retried request) could each read the same "still planned" rows and each
+independently insert an approved `shooting_range_completions` row, a
+genuine duplicate baseline record.
+
+Instead, the whole operation -- transitioning `shooting_range_planned_occurrences`
+out of `'planned'` AND inserting the resulting `shooting_range_completions`
+rows -- happens inside the single `confirm_shooting_range_occurrences` SQL
+function (`supabase/migrations/20260825130000_add_confirm_shooting_range_occurrences_rpc.sql`,
+wrapped by `lib/shootingRanges/store.ts`'s `confirmShootingRangeOccurrences`).
+Each completion insert is driven by its own update's own `RETURNING` set,
+so a concurrent call that loses the race (its `where status = 'planned'`
+no longer matches, once the winner has committed) affects zero rows and
+therefore creates zero completions -- idempotent and race-safe by
+construction, not by an application-side pre-check. This also means a
+foreign/stale person id in the confirmed list can never fabricate a
+completion: the database itself only ever resolves rows that are
+genuinely `'planned'` for that exact date.
+
+Proven against a real PostgreSQL (not just mocked) in
+`confirmShootingRangeOccurrencesRpc.integration.test.ts`, including two
+genuinely concurrent connections racing over the same occurrence.
+
 ## Notifications
 
 All job creation goes through the existing `notification_jobs` outbox

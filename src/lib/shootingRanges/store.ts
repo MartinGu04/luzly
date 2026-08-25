@@ -101,72 +101,6 @@ export async function insertSelfReport(input: InsertSelfReportInput): Promise<Co
   return fromCompletionDbRow(data as CompletionDbRow);
 }
 
-export interface InsertApprovedCompletionInput {
-  personId: string;
-  performedOn: string;
-  source: Extract<CompletionSource, "planned_range_confirmation" | "manager_manual">;
-  submittedByPersonId: string;
-  submittedByPersonName: string;
-  approvedByPersonId: string;
-  approvedByPersonName: string;
-  linkedPlannedDate: string | null;
-}
-
-/** A completion that is ALREADY approved at creation time -- a manager bulk-confirming a planned occurrence, or recording a completion directly. Never used for a self-report (see `insertSelfReport`, always 'pending'). */
-export async function insertApprovedCompletion(input: InsertApprovedCompletionInput): Promise<CompletionRow> {
-  const supabase = getShootingRangesServiceClient();
-  const { data, error } = await supabase
-    .from("shooting_range_completions")
-    .insert({
-      person_id: input.personId,
-      performed_on: input.performedOn,
-      source: input.source,
-      status: "approved",
-      submitted_by_person_id: input.submittedByPersonId,
-      submitted_by_person_name: input.submittedByPersonName,
-      approved_by_person_id: input.approvedByPersonId,
-      approved_by_person_name: input.approvedByPersonName,
-      approved_at: new Date().toISOString(),
-      linked_planned_date: input.linkedPlannedDate,
-    })
-    .select(COMPLETION_COLUMNS)
-    .single();
-  if (error) throw error;
-
-  return fromCompletionDbRow(data as CompletionDbRow);
-}
-
-/** A rejected planned-range occurrence, recorded for history/traceability alongside its `shooting_range_planned_occurrences` row -- never a baseline candidate. */
-export async function insertRejectedPlannedCompletion(input: {
-  personId: string;
-  performedOn: string;
-  submittedByPersonId: string;
-  submittedByPersonName: string;
-  approvedByPersonId: string;
-  approvedByPersonName: string;
-}): Promise<CompletionRow> {
-  const supabase = getShootingRangesServiceClient();
-  const { data, error } = await supabase
-    .from("shooting_range_completions")
-    .insert({
-      person_id: input.personId,
-      performed_on: input.performedOn,
-      source: "planned_range_confirmation",
-      status: "rejected",
-      submitted_by_person_id: input.submittedByPersonId,
-      submitted_by_person_name: input.submittedByPersonName,
-      approved_by_person_id: input.approvedByPersonId,
-      approved_by_person_name: input.approvedByPersonName,
-      approved_at: new Date().toISOString(),
-      linked_planned_date: input.performedOn,
-    })
-    .select(COMPLETION_COLUMNS)
-    .single();
-  if (error) throw error;
-
-  return fromCompletionDbRow(data as CompletionDbRow);
-}
-
 /**
  * Resolves ONE pending self-report -- guarded by `status = 'pending'` in
  * the WHERE clause of a genuine UPDATE (not an upsert -- see
@@ -311,50 +245,54 @@ export async function createPlannedOccurrences(
   return getPlannedOccurrencesByDate(rangeDate);
 }
 
+export interface ConfirmShootingRangeOccurrencesResult {
+  confirmedPersonIds: string[];
+  rejectedPersonIds: string[];
+}
+
+interface ConfirmShootingRangeOccurrencesRpcRow {
+  person_id: string;
+  resolved_status: "confirmed" | "not_completed";
+}
+
 /**
- * Resolves every STILL-'planned' occurrence for `rangeDate`: `confirmedPersonIds`
- * become 'confirmed', everyone else still 'planned' for that date becomes
- * 'not_completed' -- so a person the caller's roster snapshot no longer
- * even lists is still correctly resolved (never left dangling in
- * 'planned'). Already-resolved rows ('confirmed'/'not_completed' from an
- * earlier action) are never touched again -- the `.eq("status","planned")`
- * guard on both updates is load-bearing, exactly like `resolveSelfReport`'s.
+ * The ONE call site of the `confirm_shooting_range_occurrences` RPC
+ * (`supabase/migrations/20260825130000_add_confirm_shooting_range_occurrences_rpc.sql`)
+ * -- atomically resolves every still-`'planned'` occurrence for `rangeDate`
+ * (confirmed -> `'confirmed'` + a new approved completion; everyone else
+ * still `'planned'` -> `'not_completed'` + a new rejected completion) AND
+ * creates the resulting `shooting_range_completions` rows in the SAME
+ * database statement.
+ *
+ * This -- not a separate update-then-insert sequence -- is what makes two
+ * concurrent confirmations of the same occurrence safe: see the migration
+ * file's own top comment for the exact mechanism (a completion is only
+ * ever inserted for a row this call's own update just transitioned, so a
+ * losing concurrent call or a client retry affects zero rows and creates
+ * zero completions, never a duplicate). The returned sets reflect ONLY
+ * what THIS call actually caused -- a person already resolved by an
+ * earlier call (or not genuinely `'planned'` for this date at all, e.g. a
+ * foreign/stale id) appears in neither set, exactly mirroring what the
+ * database did, never the caller's requested input.
  */
-export async function resolvePlannedOccurrencesForDate(
+export async function confirmShootingRangeOccurrences(
   rangeDate: string,
   confirmedPersonIds: readonly string[],
   resolvedByPersonId: string,
   resolvedByPersonName: string,
-): Promise<PlannedOccurrenceRow[]> {
+): Promise<ConfirmShootingRangeOccurrencesResult> {
   const supabase = getShootingRangesServiceClient();
-  const resolvedAt = new Date().toISOString();
+  const { data, error } = await supabase.rpc("confirm_shooting_range_occurrences", {
+    p_range_date: rangeDate,
+    p_confirmed_person_ids: [...confirmedPersonIds],
+    p_resolver_person_id: resolvedByPersonId,
+    p_resolver_person_name: resolvedByPersonName,
+  });
+  if (error) throw error;
 
-  if (confirmedPersonIds.length > 0) {
-    const { error } = await supabase
-      .from("shooting_range_planned_occurrences")
-      .update({
-        status: "confirmed",
-        resolved_by_person_id: resolvedByPersonId,
-        resolved_by_person_name: resolvedByPersonName,
-        resolved_at: resolvedAt,
-      })
-      .eq("range_date", rangeDate)
-      .eq("status", "planned")
-      .in("person_id", confirmedPersonIds);
-    if (error) throw error;
-  }
-
-  const { error: rejectError } = await supabase
-    .from("shooting_range_planned_occurrences")
-    .update({
-      status: "not_completed",
-      resolved_by_person_id: resolvedByPersonId,
-      resolved_by_person_name: resolvedByPersonName,
-      resolved_at: resolvedAt,
-    })
-    .eq("range_date", rangeDate)
-    .eq("status", "planned");
-  if (rejectError) throw rejectError;
-
-  return getPlannedOccurrencesByDate(rangeDate);
+  const rows = (data ?? []) as ConfirmShootingRangeOccurrencesRpcRow[];
+  return {
+    confirmedPersonIds: rows.filter((row) => row.resolved_status === "confirmed").map((row) => row.person_id),
+    rejectedPersonIds: rows.filter((row) => row.resolved_status === "not_completed").map((row) => row.person_id),
+  };
 }

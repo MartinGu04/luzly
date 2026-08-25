@@ -1,0 +1,210 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { RawSheet } from "@/lib/google";
+
+const getRequestAuthenticatedIdentity = vi.fn();
+const getWorkbookSnapshot = vi.fn();
+const getJerusalemLocalNow = vi.fn();
+const getCompletionsForPersonIds = vi.fn();
+const getPlannedOccurrencesForPersonIds = vi.fn();
+
+vi.mock("@/lib/auth/getRequestAuthenticatedIdentity", () => ({ getRequestAuthenticatedIdentity }));
+vi.mock("@/lib/sync", () => ({ getWorkbookSnapshot }));
+vi.mock("@/lib/time/jerusalemClock", () => ({ getJerusalemLocalNow }));
+vi.mock("@/lib/shootingRanges/store", () => ({ getCompletionsForPersonIds, getPlannedOccurrencesForPersonIds }));
+
+const { loadShootingRangeQualification, selectSheetBaselineForPerson } = await import("./shootingRangeQualification");
+
+function personnelSheet(rows: string[][]): RawSheet {
+  return { name: 'כ"א', values: rows };
+}
+
+function shootingRangesSheet(rows: (string | number)[][]): RawSheet {
+  return { name: "מטווחים", values: rows };
+}
+
+const PERSONNEL_ROWS: string[][] = [
+  ["שם", "מייל"],
+  ["דני בדיקה", "dani@example.invalid"],
+];
+
+function snapshot(shootingRangesRows: (string | number)[][] = []) {
+  return {
+    fetchedAt: "2026-08-25T08:00:00.000Z",
+    sheets: [personnelSheet(PERSONNEL_ROWS), shootingRangesSheet(shootingRangesRows)],
+  };
+}
+
+describe("loadShootingRangeQualification", () => {
+  beforeEach(() => {
+    getRequestAuthenticatedIdentity.mockReset();
+    getWorkbookSnapshot.mockReset();
+    getJerusalemLocalNow.mockReset();
+    getCompletionsForPersonIds.mockReset();
+    getPlannedOccurrencesForPersonIds.mockReset();
+
+    getJerusalemLocalNow.mockReturnValue({ date: "2026-08-25", minuteOfDay: 600 });
+    getCompletionsForPersonIds.mockResolvedValue([]);
+    getPlannedOccurrencesForPersonIds.mockResolvedValue([]);
+  });
+
+  it("returns unauthenticated without ever fetching the workbook or the app-owned tables", async () => {
+    getRequestAuthenticatedIdentity.mockResolvedValue({ status: "unauthenticated" });
+
+    const result = await loadShootingRangeQualification();
+
+    expect(result).toEqual({ status: "unauthenticated" });
+    expect(getWorkbookSnapshot).not.toHaveBeenCalled();
+    expect(getCompletionsForPersonIds).not.toHaveBeenCalled();
+  });
+
+  it("returns missing_email without fetching anything", async () => {
+    getRequestAuthenticatedIdentity.mockResolvedValue({ status: "missing_email", userId: "u1" });
+
+    const result = await loadShootingRangeQualification();
+
+    expect(result).toEqual({ status: "missing_email" });
+    expect(getWorkbookSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("fetches personnel + מטווחים as one batch, resolves identity by email, and returns unmapped for an email absent from כ״א", async () => {
+    getRequestAuthenticatedIdentity.mockResolvedValue({ status: "authenticated", userId: "u1", email: "ghost@example.invalid", avatarUrl: null });
+    getWorkbookSnapshot.mockResolvedValue(snapshot());
+
+    const result = await loadShootingRangeQualification();
+
+    expect(getWorkbookSnapshot).toHaveBeenCalledWith(["personnel", "shootingRanges"]);
+    expect(result).toEqual({ status: "unmapped", email: "ghost@example.invalid" });
+    // The identity check fails BEFORE any app-owned table is ever read for this caller.
+    expect(getCompletionsForPersonIds).not.toHaveBeenCalled();
+  });
+
+  it("returns ambiguous_identity when the email matches more than one כ״א record -- fails closed, never a first-match guess", async () => {
+    getRequestAuthenticatedIdentity.mockResolvedValue({ status: "authenticated", userId: "u1", email: "dani@example.invalid", avatarUrl: null });
+    getWorkbookSnapshot.mockResolvedValue({
+      fetchedAt: "2026-08-25T08:00:00.000Z",
+      sheets: [
+        personnelSheet([
+          ["שם", "מייל"],
+          ["דני בדיקה", "dani@example.invalid"],
+          ["דני בדיקה 2", "dani@example.invalid"],
+        ]),
+        shootingRangesSheet([]),
+      ],
+    });
+
+    const result = await loadShootingRangeQualification();
+
+    expect(result).toEqual({ status: "ambiguous_identity" });
+  });
+
+  it("A. loads the Google Sheet baseline for the identified person -- a genuinely past-dated מטווחים row becomes the qualification baseline", async () => {
+    getRequestAuthenticatedIdentity.mockResolvedValue({ status: "authenticated", userId: "u1", email: "dani@example.invalid", avatarUrl: "https://photo" });
+    getWorkbookSnapshot.mockResolvedValue(
+      snapshot([
+        ["שם", "תאריך ביצוע מטווח"],
+        ["דני בדיקה", "29/06/2026"],
+      ]),
+    );
+
+    const result = await loadShootingRangeQualification();
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") throw new Error("unreachable");
+    expect(result.person.name).toBe("דני בדיקה");
+    expect(result.avatarUrl).toBe("https://photo");
+    expect(result.model.baselineDate).toBe("2026-06-29");
+    expect(result.model.baselineSource).toBe("sheet");
+    expect(result.model.expiryDate).toBe("2026-12-29");
+    // Requests this person's own history/planned rows, keyed by their resolved stable id -- never every person's.
+    expect(getCompletionsForPersonIds).toHaveBeenCalledWith([expect.any(String)]);
+    expect(getPlannedOccurrencesForPersonIds).toHaveBeenCalledWith([expect.any(String)]);
+  });
+
+  it("a FUTURE-dated מטווחים row is never treated as the sheet baseline (it's a planned occurrence's concern, not this loader's)", async () => {
+    getRequestAuthenticatedIdentity.mockResolvedValue({ status: "authenticated", userId: "u1", email: "dani@example.invalid", avatarUrl: null });
+    getWorkbookSnapshot.mockResolvedValue(
+      snapshot([
+        ["שם", "תאריך ביצוע מטווח"],
+        ["דני בדיקה", "01/01/2030"],
+      ]),
+    );
+
+    const result = await loadShootingRangeQualification();
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") throw new Error("unreachable");
+    expect(result.model.baselineDate).toBeNull();
+  });
+
+  it("B. an approved app-owned completion (from the store) unconditionally wins over the sheet baseline", async () => {
+    getRequestAuthenticatedIdentity.mockResolvedValue({ status: "authenticated", userId: "u1", email: "dani@example.invalid", avatarUrl: null });
+    getWorkbookSnapshot.mockResolvedValue(
+      snapshot([
+        ["שם", "תאריך ביצוע מטווח"],
+        ["דני בדיקה", "01/01/2026"],
+      ]),
+    );
+    getCompletionsForPersonIds.mockResolvedValue([
+      {
+        id: "c1",
+        personId: "p_whatever",
+        performedOn: "2026-08-01",
+        source: "self_report",
+        status: "approved",
+        notes: null,
+        submittedByPersonId: "u1",
+        submittedByPersonName: "דני בדיקה",
+        approvedByPersonId: "mgr1",
+        approvedByPersonName: "מנהל",
+        approvedAt: "2026-08-02T00:00:00.000Z",
+        linkedPlannedDate: null,
+        createdAt: "2026-08-01T00:00:00.000Z",
+      },
+    ]);
+
+    const result = await loadShootingRangeQualification();
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") throw new Error("unreachable");
+    expect(result.model.baselineDate).toBe("2026-08-01");
+    expect(result.model.baselineSource).toBe("app");
+  });
+
+  it("degrades gracefully (never throws) when the מטווחים sheet has no recognizable header row at all -- baseline stays null, not a crash", async () => {
+    getRequestAuthenticatedIdentity.mockResolvedValue({ status: "authenticated", userId: "u1", email: "dani@example.invalid", avatarUrl: null });
+    getWorkbookSnapshot.mockResolvedValue(snapshot([["הערות כלליות"], ["טקסט חופשי"]]));
+
+    const result = await loadShootingRangeQualification();
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") throw new Error("unreachable");
+    expect(result.model.baselineDate).toBeNull();
+    expect(result.model.status).toBe("none");
+  });
+
+  it("throws when the workbook snapshot is missing the מטווחים sheet entirely -- a real configuration problem, never silently ignored", async () => {
+    getRequestAuthenticatedIdentity.mockResolvedValue({ status: "authenticated", userId: "u1", email: "dani@example.invalid", avatarUrl: null });
+    getWorkbookSnapshot.mockResolvedValue({ fetchedAt: "2026-08-25T08:00:00.000Z", sheets: [personnelSheet(PERSONNEL_ROWS)] });
+
+    await expect(loadShootingRangeQualification()).rejects.toThrow(/מטווחים/);
+  });
+});
+
+describe("selectSheetBaselineForPerson", () => {
+  it("picks the LATEST past-or-today row for the person, ignoring other people and future dates", () => {
+    const records = [
+      { sourceName: "a", resolvedPersonId: "p1", performedOn: "2026-01-01", sourceSheet: "מטווחים", sourceCell: "A2" },
+      { sourceName: "a", resolvedPersonId: "p1", performedOn: "2026-06-01", sourceSheet: "מטווחים", sourceCell: "A3" },
+      { sourceName: "a", resolvedPersonId: "p1", performedOn: "2030-01-01", sourceSheet: "מטווחים", sourceCell: "A4" },
+      { sourceName: "b", resolvedPersonId: "p2", performedOn: "2026-08-01", sourceSheet: "מטווחים", sourceCell: "A5" },
+    ];
+
+    const result = selectSheetBaselineForPerson(records, "p1", "2026-08-25");
+
+    expect(result?.performedOn).toBe("2026-06-01");
+  });
+
+  it("returns null when the person has no resolved row at all", () => {
+    expect(selectSheetBaselineForPerson([], "p1", "2026-08-25")).toBeNull();
+  });
+});

@@ -11,12 +11,10 @@ import {
 import { loadManagerPersonnelContext } from "@/lib/readModels/managerWorkbookContext";
 import { getJerusalemLocalNow } from "@/lib/time/jerusalemClock";
 import {
+  confirmShootingRangeOccurrences,
   createPlannedOccurrences,
   getPlannedOccurrencesByDate,
-  insertApprovedCompletion,
-  insertRejectedPlannedCompletion,
   insertSelfReport,
-  resolvePlannedOccurrencesForDate,
   resolveSelfReport,
 } from "./store";
 
@@ -143,11 +141,20 @@ export type ConfirmPlannedShootingRangeResult =
  * `'not_completed'` with a matching rejected completion row, never
  * touching their baseline.
  *
- * `confirmedPersonIds` is re-validated against the ACTUAL current planned
- * roster for `rangeDate` (fetched fresh, never trusted from the client) --
- * an id for a person not genuinely scheduled for this date is silently
- * ignored, never able to fabricate a baseline update for an unscheduled
- * person.
+ * The status transition AND the resulting `shooting_range_completions`
+ * inserts happen in ONE atomic database statement
+ * (`confirmShootingRangeOccurrences` -> the `confirm_shooting_range_occurrences`
+ * RPC) -- NOT a read-then-write sequence here. That is what makes this
+ * safe against two concurrent confirmations of the same occurrence (a
+ * double-click, two manager tabs, a retried request): seeing the RPC's own
+ * migration file for the exact mechanism. `confirmedPersonIds` is never
+ * trusted at face value even so -- the RPC itself only ever resolves rows
+ * that are ACTUALLY `'planned'` for `rangeDate`, so a foreign/stale id
+ * (whether from a malicious client or a stale UI) structurally cannot
+ * fabricate a completion; this is enforced at the database boundary, not
+ * only by the `getPlannedOccurrencesByDate` pre-check below (which exists
+ * purely to return a friendly `"no_pending_occurrence"` error early, not
+ * as the authorization boundary).
  */
 export async function confirmPlannedShootingRangeAction(
   rangeDate: string,
@@ -161,41 +168,17 @@ export async function confirmPlannedShootingRangeAction(
   const { manager, people } = contextResult.context;
 
   const beforeOccurrences = await getPlannedOccurrencesByDate(rangeDate);
-  const previouslyPlannedIds = beforeOccurrences
-    .filter((occurrence) => occurrence.status === "planned")
-    .map((occurrence) => occurrence.personId);
-  if (previouslyPlannedIds.length === 0) return { ok: false, error: "no_pending_occurrence" };
+  const hasPendingOccurrence = beforeOccurrences.some((occurrence) => occurrence.status === "planned");
+  if (!hasPendingOccurrence) return { ok: false, error: "no_pending_occurrence" };
 
-  const previouslyPlannedSet = new Set(previouslyPlannedIds);
-  const confirmedIds = [...new Set(confirmedPersonIds)].filter((id) => previouslyPlannedSet.has(id));
-  const rejectedIds = previouslyPlannedIds.filter((id) => !confirmedIds.includes(id));
+  const sanitizedConfirmedIds = [...new Set(confirmedPersonIds.filter((id) => typeof id === "string" && id.length > 0))];
 
-  await resolvePlannedOccurrencesForDate(rangeDate, confirmedIds, manager.id, manager.name);
-
-  await Promise.all([
-    ...confirmedIds.map((personId) =>
-      insertApprovedCompletion({
-        personId,
-        performedOn: rangeDate,
-        source: "planned_range_confirmation",
-        submittedByPersonId: manager.id,
-        submittedByPersonName: manager.name,
-        approvedByPersonId: manager.id,
-        approvedByPersonName: manager.name,
-        linkedPlannedDate: rangeDate,
-      }),
-    ),
-    ...rejectedIds.map((personId) =>
-      insertRejectedPlannedCompletion({
-        personId,
-        performedOn: rangeDate,
-        submittedByPersonId: manager.id,
-        submittedByPersonName: manager.name,
-        approvedByPersonId: manager.id,
-        approvedByPersonName: manager.name,
-      }),
-    ),
-  ]);
+  const { confirmedPersonIds: confirmedIds, rejectedPersonIds: rejectedIds } = await confirmShootingRangeOccurrences(
+    rangeDate,
+    sanitizedConfirmedIds,
+    manager.id,
+    manager.name,
+  );
 
   await cancelManagerConfirmationRequiredJob(people, rangeDate);
 
