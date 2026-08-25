@@ -1,6 +1,6 @@
 import { nextCalendarDateString } from "./operationalWeek";
 import { classifyPersonnelType, classifyRoleGroup } from "./personnelType";
-import type { AbsenceKind, Event } from "./event";
+import type { AbsenceKind, DutyFamily, Event } from "./event";
 import { BLOCKING_ABSENCE_KINDS } from "./operationalIssues";
 import type { LocalNow } from "./localNow";
 import type { Person } from "./types";
@@ -128,50 +128,126 @@ function shiftStatusWording(role: "supervisor" | "technician", period: "day" | "
 const AFTER_NIGHT_STATUS = "נוכח, אחרי לילה";
 
 /**
- * Resolves one סדיר/מילואים person's Report 1 status for `targetDate` from
- * their own already-typed `Event[]` on `targetDate` and the immediately
- * preceding calendar date -- never a fresh parse, never a guess. Reuses:
+ * Audit of every `EventCategory`/`AbsenceKind`/`DutyFamily` value this app's
+ * parser (`lib/parsers/event.ts`) can produce, classified for Report 1
+ * purposes into PRIMARY (mutually exclusive -- determines the day's main
+ * state) vs ADDITIVE (layered on top of whichever primary state was
+ * resolved, never replacing it) vs neither (not an attendance/operational
+ * fact about the person's day, so Report 1 never surfaces it):
  *
- * - `Event.category`/`role`/`period`/`absenceKind`, exactly as
- *   `lib/parsers/event.ts` already classified them from the schedule sheet;
- * - `BLOCKING_ABSENCE_KINDS` (`lib/domain/operationalIssues.ts`), the SAME
- *   set `detectBlockingAbsenceIssues` uses to flag a person as having both
- *   a blocking absence and a real assignment on one date -- when that
- *   conflict is present here too, this returns "?" rather than inventing
- *   a precedence the rest of the app doesn't have (never a person shown as
- *   both on leave and on a shift);
- * - the day/night shift-carryover structure `lib/domain/shiftSchedule.ts`
- *   documents (a night shift's 12h window always runs from that day's
- *   shift-end into the FOLLOWING calendar date, regardless of the
- *   configured start time) -- a night-period shift dated the day before
- *   `targetDate` is read as "still present, after that night" on
- *   `targetDate` without needing to resolve exact minutes.
+ * PRIMARY:
+ * - category "shift" (role + day/night period)
+ * - category "absence", kind "vacation"/"abroad"/"medical"/"day_off"
+ *   (`BLOCKING_ABSENCE_KINDS` -- a whole-day state that structurally
+ *   conflicts with any real assignment, exactly per
+ *   `detectBlockingAbsenceIssues`)
+ * - category "absence", kind "referral" (a whole-day state, but -- unlike
+ *   the blocking kinds above -- the domain's own `isBlockingAbsence` never
+ *   flags it as conflicting with an assignment; only a same-day SHIFT is
+ *   treated as a second, contradictory primary signal here)
+ * - category "absence", kind "after" (a structural marker read together
+ *   with a night-period shift dated the day before -- contributes to the
+ *   SAME `AFTER_NIGHT_STATUS` primary, never a separate item)
  *
- * Returns "?" whenever the available Events don't unambiguously resolve to
- * one of the report's known phrasings -- never a silent guess.
+ * ADDITIVE:
+ * - category "duty" (every `DutyFamily`: guard/reserve/evacuation_on_call/
+ *   full_kitchen/daily_kitchen/weekend_kitchen/rasar/oxid/callup) -- a
+ *   rotating extra responsibility layered on top of the day's primary
+ *   state (e.g. "נוכח, אחרי לילה" + "כונן פינויים"), never a replacement
+ *   for it. The ONE exception, still matching existing domain semantics
+ *   rather than inventing a new one: `isAssignmentEvent` (shift OR duty)
+ *   is exactly what `detectBlockingAbsenceIssues` treats as conflicting
+ *   with a BLOCKING absence -- so a duty coexisting with vacation/abroad/
+ *   medical/day_off is still a genuine unresolved conflict ("?", no duty
+ *   text appended), not silently combined.
+ *
+ * NEITHER (Report 1 never surfaces these -- not a person's own operational
+ * presence fact):
+ * - category "constraint" (אילוץ -- a scheduling preference, not an actual
+ *   event)
+ * - category "status" (סוגר / ריווח -- planning/administrative markers)
+ * - category "context" (מלחמה -- an org-wide context flag, not personal)
+ * - category "change_note" -- its own docstring is explicit: "a note about
+ *   a swap, not an active duty"
+ * - category "other"/"unknown" -- unrecognized text; never guessed
  */
-export function resolveRegularOrReserveStatus(
+function isAdditiveDutyEvent(event: Event): event is Event & { dutyFamily: DutyFamily } {
+  return event.category === "duty" && event.dutyFamily !== null;
+}
+
+const DUTY_FAMILY_WORDING: Record<DutyFamily, string> = {
+  guard: "שמירה",
+  reserve: "עתודה",
+  evacuation_on_call: "כונן פינויים",
+  full_kitchen: "מטבח מלא",
+  daily_kitchen: "מטבח יומי",
+  weekend_kitchen: 'מטבח סופ"ש',
+  rasar: 'רס"ר',
+  oxid: "אוקסיד",
+  callup: "הקפצה",
+};
+
+/** Mirrors the canonical declaration order of `DutyFamily` in `lib/domain/event.ts`, so several additive duties on the same day always print in the same stable order regardless of the source Event array's own order. */
+const DUTY_FAMILY_ORDER: readonly DutyFamily[] = [
+  "guard",
+  "reserve",
+  "evacuation_on_call",
+  "full_kitchen",
+  "daily_kitchen",
+  "weekend_kitchen",
+  "rasar",
+  "oxid",
+  "callup",
+];
+
+/** "שמירה 2" -- the duty family's Hebrew wording, with its slot appended only when the family actually has one. Deliberately duplicated from (never imported from) `lib/presentation/duty.ts`'s `dutyBlockTitle` -- this domain module never reaches into `lib/presentation` (see this repo's engineering rules on layer separation); the same duplication already exists between the parser's own duty phrase table and the presentation label table. */
+function dutyAddendumText(event: Event & { dutyFamily: DutyFamily }): string {
+  const label = DUTY_FAMILY_WORDING[event.dutyFamily];
+  return event.slot !== null ? `${label} ${event.slot}` : label;
+}
+
+/** Every distinct additive duty text for `eventsToday`, deduplicated and in a stable, deterministic order -- never the raw Event array's own (incidental) order. */
+function resolveAdditiveDutyTexts(eventsToday: readonly Event[]): string[] {
+  const dutyEvents = eventsToday.filter(isAdditiveDutyEvent);
+  if (dutyEvents.length === 0) return [];
+
+  const texts = new Set(
+    [...dutyEvents]
+      .sort((a, b) => {
+        const familyDiff = DUTY_FAMILY_ORDER.indexOf(a.dutyFamily) - DUTY_FAMILY_ORDER.indexOf(b.dutyFamily);
+        if (familyDiff !== 0) return familyDiff;
+        return (a.slot ?? -1) - (b.slot ?? -1);
+      })
+      .map(dutyAddendumText),
+  );
+  return [...texts];
+}
+
+/** The day's PRIMARY status only (see the audit above) -- never includes additive duty text; `resolveRegularOrReserveStatus` appends that separately. */
+function resolvePrimaryStatus(
   eventsToday: readonly Event[],
   eventsPrevDay: readonly Event[],
+  blockingAbsencesToday: readonly (Event & { absenceKind: AbsenceKind })[],
+  referralsToday: readonly Event[],
 ): string {
-  const assignmentsToday = eventsToday.filter(isAssignmentEvent);
-  const blockingAbsencesToday = eventsToday.filter(isBlockingAbsence);
-  const referralsToday = eventsToday.filter((event) => event.category === "absence" && event.absenceKind === "referral");
-
   if (blockingAbsencesToday.length > 0) {
-    if (assignmentsToday.length > 0) return UNKNOWN_REPORT_ONE_STATUS;
     const distinctKinds = new Set(blockingAbsencesToday.map((event) => event.absenceKind));
     if (distinctKinds.size > 1) return UNKNOWN_REPORT_ONE_STATUS;
-    const kind = blockingAbsencesToday[0].absenceKind as AbsenceKind;
+    const kind = blockingAbsencesToday[0].absenceKind;
     return BLOCKING_ABSENCE_WORDING[kind] ?? UNKNOWN_REPORT_ONE_STATUS;
   }
 
+  const shiftEventsToday = eventsToday.filter((event) => event.category === "shift");
+
   if (referralsToday.length > 0) {
-    if (assignmentsToday.length > 0) return UNKNOWN_REPORT_ONE_STATUS;
+    // A same-day SHIFT is a second, contradictory primary signal (never
+    // guessed which one wins) -- but referral itself is NOT in
+    // `BLOCKING_ABSENCE_KINDS`, so a same-day DUTY is not a conflict here;
+    // it's handled as an additive addendum by the caller instead.
+    if (shiftEventsToday.length > 0) return UNKNOWN_REPORT_ONE_STATUS;
     return "הפנייה";
   }
 
-  const shiftEventsToday = eventsToday.filter((event) => event.category === "shift");
   if (shiftEventsToday.length > 0) {
     const wordings = new Set(
       shiftEventsToday
@@ -198,6 +274,54 @@ export function resolveRegularOrReserveStatus(
   if (hasAfterMarkerToday || hasNightShiftPrevDay) return AFTER_NIGHT_STATUS;
 
   return UNKNOWN_REPORT_ONE_STATUS;
+}
+
+/**
+ * Resolves one סדיר/מילואים person's Report 1 status for `targetDate` from
+ * their own already-typed `Event[]` on `targetDate` and the immediately
+ * preceding calendar date -- never a fresh parse, never a guess. Reuses:
+ *
+ * - `Event.category`/`role`/`period`/`absenceKind`/`dutyFamily`, exactly as
+ *   `lib/parsers/event.ts` already classified them from the schedule sheet;
+ * - `BLOCKING_ABSENCE_KINDS` (`lib/domain/operationalIssues.ts`), the SAME
+ *   set `detectBlockingAbsenceIssues` uses to flag a person as having both
+ *   a blocking absence and a real assignment (shift OR duty) on one date --
+ *   when that conflict is present here too, this returns "?" rather than
+ *   inventing a precedence the rest of the app doesn't have (never a
+ *   person shown as both on leave and on a shift/duty);
+ * - the day/night shift-carryover structure `lib/domain/shiftSchedule.ts`
+ *   documents (a night shift's 12h window always runs from that day's
+ *   shift-end into the FOLLOWING calendar date, regardless of the
+ *   configured start time) -- a night-period shift dated the day before
+ *   `targetDate` is read as "still present, after that night" on
+ *   `targetDate` without needing to resolve exact minutes.
+ *
+ * A resolved PRIMARY status (see the audit above `resolvePrimaryStatus`)
+ * has every ADDITIVE duty for the day appended to it (e.g. "נוכח, אחרי
+ * לילה, כונן פינויים") -- duties are real, already-typed facts, never a
+ * guess, so they're appended even when the primary itself is "?" for lack
+ * of other data. The one case that stays a bare "?" with nothing appended
+ * is the genuine blocking-absence-vs-assignment conflict above, so the
+ * report keeps flagging that specific contradiction for manual review
+ * rather than implying it was resolved.
+ */
+export function resolveRegularOrReserveStatus(
+  eventsToday: readonly Event[],
+  eventsPrevDay: readonly Event[],
+): string {
+  const assignmentsToday = eventsToday.filter(isAssignmentEvent);
+  const blockingAbsencesToday = eventsToday.filter(isBlockingAbsence);
+  const referralsToday = eventsToday.filter((event) => event.category === "absence" && event.absenceKind === "referral");
+
+  if (blockingAbsencesToday.length > 0 && assignmentsToday.length > 0) {
+    return UNKNOWN_REPORT_ONE_STATUS;
+  }
+
+  const primary = resolvePrimaryStatus(eventsToday, eventsPrevDay, blockingAbsencesToday, referralsToday);
+  const additiveDutyTexts = resolveAdditiveDutyTexts(eventsToday);
+
+  if (additiveDutyTexts.length === 0) return primary;
+  return [primary, ...additiveDutyTexts].join(", ");
 }
 
 export interface BuildReportOneDraftInput {

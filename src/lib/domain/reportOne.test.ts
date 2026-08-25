@@ -61,6 +61,10 @@ function absenceEvent(absenceKind: NonNullable<Event["absenceKind"]>, overrides:
   return event({ category: "absence", role: null, period: "unspecified", absenceKind, ...overrides });
 }
 
+function dutyEvent(dutyFamily: NonNullable<Event["dutyFamily"]>, overrides: Partial<Event> = {}): Event {
+  return event({ category: "duty", role: null, period: "unspecified", dutyFamily, slot: null, ...overrides });
+}
+
 // --- 1-3. Tomorrow calculation --------------------------------------------
 
 describe("resolveReportOneTargetDate", () => {
@@ -202,6 +206,74 @@ describe("resolveRegularOrReserveStatus", () => {
   it("two conflicting shift events on the same day never guess -- '?'", () => {
     const events = [shiftEvent("supervisor", "day"), shiftEvent("technician", "night")];
     expect(resolveRegularOrReserveStatus(events, [])).toBe(UNKNOWN_REPORT_ONE_STATUS);
+  });
+});
+
+// --- Additive duty statuses: layered onto the primary status, never dropped --
+
+describe("resolveRegularOrReserveStatus — additive duty statuses (the Martin bug + full audit)", () => {
+  it("the reported bug: after-night + כונן פינויים -> 'נוכח, אחרי לילה, כונן פינויים', never dropped", () => {
+    const prevDay = [shiftEvent("technician", "night", { date: "2026-08-25" })];
+    const today = [dutyEvent("evacuation_on_call")];
+    expect(resolveRegularOrReserveStatus(today, prevDay)).toBe("נוכח, אחרי לילה, כונן פינויים");
+  });
+
+  it("day shift + duty combines: 'נוכח, אחמ\"ש יום, כונן פינויים'", () => {
+    const events = [shiftEvent("supervisor", "day"), dutyEvent("evacuation_on_call")];
+    expect(resolveRegularOrReserveStatus(events, [])).toBe('נוכח, אחמ"ש יום, כונן פינויים');
+  });
+
+  it("night shift + guard duty with a slot appends 'שמירה 2'", () => {
+    const events = [shiftEvent("technician", "night"), dutyEvent("guard", { slot: 2 })];
+    expect(resolveRegularOrReserveStatus(events, [])).toBe("נוכח, טכנאי לילה, שמירה 2");
+  });
+
+  it("referral + duty is NOT treated as a conflict (unlike referral + shift) -- combines instead of dropping the duty", () => {
+    const events = [absenceEvent("referral"), dutyEvent("rasar")];
+    expect(resolveRegularOrReserveStatus(events, [])).toBe('הפנייה, רס"ר');
+  });
+
+  it("multiple additive duties the same day all appear, in stable canonical order regardless of input order", () => {
+    const events = [
+      shiftEvent("supervisor", "day"),
+      dutyEvent("oxid"),
+      dutyEvent("guard", { slot: 1 }),
+      dutyEvent("evacuation_on_call"),
+    ];
+    expect(resolveRegularOrReserveStatus(events, [])).toBe('נוכח, אחמ"ש יום, שמירה 1, כונן פינויים, אוקסיד');
+  });
+
+  it("duty-only, no other data -> the unresolved primary '?' still carries the duty fact: '?, כונן פינויים'", () => {
+    const events = [dutyEvent("evacuation_on_call")];
+    expect(resolveRegularOrReserveStatus(events, [])).toBe("?, כונן פינויים");
+  });
+
+  it("every DutyFamily produces its own distinct additive wording", () => {
+    const cases: Array<[NonNullable<Event["dutyFamily"]>, string]> = [
+      ["guard", "שמירה"],
+      ["reserve", "עתודה"],
+      ["evacuation_on_call", "כונן פינויים"],
+      ["full_kitchen", "מטבח מלא"],
+      ["daily_kitchen", "מטבח יומי"],
+      ["weekend_kitchen", 'מטבח סופ"ש'],
+      ["rasar", 'רס"ר'],
+      ["oxid", "אוקסיד"],
+      ["callup", "הקפצה"],
+    ];
+    for (const [dutyFamily, wording] of cases) {
+      const events = [shiftEvent("technician", "day"), dutyEvent(dutyFamily)];
+      expect(resolveRegularOrReserveStatus(events, [])).toBe(`נוכח, טכנאי יום, ${wording}`);
+    }
+  });
+
+  it("a blocking absence (vacation) + duty is STILL a genuine unresolved conflict -- bare '?', no duty appended (matches detectBlockingAbsenceIssues, which treats duty as a conflicting assignment too)", () => {
+    const events = [absenceEvent("vacation"), dutyEvent("evacuation_on_call")];
+    expect(resolveRegularOrReserveStatus(events, [])).toBe(UNKNOWN_REPORT_ONE_STATUS);
+  });
+
+  it("duplicate identical duty events the same day are not doubled in the appended text", () => {
+    const events = [shiftEvent("technician", "day"), dutyEvent("evacuation_on_call"), dutyEvent("evacuation_on_call")];
+    expect(resolveRegularOrReserveStatus(events, [])).toBe("נוכח, טכנאי יום, כונן פינויים");
   });
 });
 
