@@ -9,6 +9,7 @@ import { parseScheduleSheet } from "@/lib/parsers/schedule";
 import { parseSettingsSheet } from "@/lib/parsers/settings";
 import { getWorkbookSnapshot } from "@/lib/sync";
 import { getJerusalemLocalNow } from "@/lib/time/jerusalemClock";
+import { resolveOperationalMode } from "@/lib/emergencyMode/state";
 import { buildSearchReadModel } from "./buildSearchReadModel";
 import type { SearchReadModel } from "./searchTypes";
 
@@ -85,7 +86,23 @@ export async function loadSearchReadModel(): Promise<SearchReadModelLoadResult> 
   }
 
   const rawAssignments = parseScheduleSheet(getSheetByKey(snapshot, "schedule"), people);
-  const events = rawAssignments.map(parseEvent);
+  const parsedEvents = rawAssignments.map(parseEvent);
+
+  /**
+   * Emergency Mode (spec section 15) -- global search's roster/directory
+   * stays searchable either way (names are not an operational claim), but
+   * regular shift events must never appear as current/next operational
+   * truth while Emergency Mode is active (spec section 4/29). Rather than
+   * projecting emergency desk assignments into `SearchShiftEvent`'s
+   * regular-shift-shaped fields (`role: EventRole`, day/night period only
+   * -- no desk concept at all), this simply omits shift events entirely
+   * while active: an honest "no known current/next shift" state, the same
+   * choice already made for duty pace (`"suspended"`) and the /duties
+   * upcoming tab, rather than fabricating a comparable structure that
+   * doesn't exist for desk-based staffing.
+   */
+  const operationalMode = await resolveOperationalMode();
+  const events = operationalMode.kind === "regular" ? parsedEvents : [];
 
   const model = buildSearchReadModel({
     people,

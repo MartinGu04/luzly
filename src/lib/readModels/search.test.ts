@@ -4,10 +4,12 @@ import type { RawSheet } from "@/lib/google";
 const getRequestAuthenticatedIdentity = vi.fn();
 const getWorkbookSnapshot = vi.fn();
 const getJerusalemLocalNow = vi.fn();
+const resolveOperationalMode = vi.fn();
 
 vi.mock("@/lib/auth/getRequestAuthenticatedIdentity", () => ({ getRequestAuthenticatedIdentity }));
 vi.mock("@/lib/sync", () => ({ getWorkbookSnapshot }));
 vi.mock("@/lib/time/jerusalemClock", () => ({ getJerusalemLocalNow }));
+vi.mock("@/lib/emergencyMode/state", () => ({ resolveOperationalMode }));
 
 const { loadSearchReadModel } = await import("./search");
 
@@ -45,6 +47,8 @@ beforeEach(() => {
   getJerusalemLocalNow.mockReset();
   getJerusalemLocalNow.mockReturnValue({ date: "2026-08-12", minuteOfDay: 600 });
   getWorkbookSnapshot.mockResolvedValue(validSnapshot());
+  resolveOperationalMode.mockReset();
+  resolveOperationalMode.mockResolvedValue({ kind: "regular" });
 });
 
 describe("loadSearchReadModel — auth pass-through states", () => {
@@ -150,5 +154,80 @@ describe("loadSearchReadModel — success", () => {
     });
     await loadSearchReadModel();
     expect(getRequestAuthenticatedIdentity).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("loadSearchReadModel — Emergency Mode (spec section 15)", () => {
+  function snapshotWithShift() {
+    return {
+      fetchedAt: "2026-08-12T08:00:00.000Z",
+      sheets: [
+        personnelSheet(PERSONNEL_ROWS),
+        scheduleSheet([
+          ["תאריך", "יום", "דני בדיקה", "נועה דוגמה"],
+          ["10/08/2026", "ב", "טכנאי לילה", "חופש"],
+        ]),
+        settingsSheet(SETTINGS_ROWS_VALID),
+      ],
+    };
+  }
+
+  beforeEach(() => {
+    getRequestAuthenticatedIdentity.mockResolvedValue({
+      status: "authenticated",
+      userId: "u1",
+      email: "dani@example.invalid",
+      avatarUrl: null,
+    });
+  });
+
+  it("regular mode (the default) builds real shiftEvents from the schedule sheet, byte-for-byte unchanged", async () => {
+    getWorkbookSnapshot.mockResolvedValue(snapshotWithShift());
+    resolveOperationalMode.mockResolvedValue({ kind: "regular" });
+
+    const result = await loadSearchReadModel();
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.model.shiftEvents.length).toBeGreaterThan(0);
+  });
+
+  it("while Emergency Mode is active, shiftEvents is empty -- regular shift data never appears as current/next operational truth", async () => {
+    getWorkbookSnapshot.mockResolvedValue(snapshotWithShift());
+    resolveOperationalMode.mockResolvedValue({ kind: "emergency" });
+
+    const result = await loadSearchReadModel();
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.model.shiftEvents).toEqual([]);
+    // The roster/directory itself stays searchable -- names are not an operational claim.
+    expect(result.model.roster.map((p) => p.name)).toEqual(expect.arrayContaining(["דני בדיקה", "נועה דוגמה"]));
+  });
+
+  it("never fetches the emergency workbook itself -- search doesn't display desk data, so resolveOperationalMode (DB-only) is enough, never resolveOperationalRoster", async () => {
+    getWorkbookSnapshot.mockResolvedValue(snapshotWithShift());
+    resolveOperationalMode.mockResolvedValue({
+      kind: "emergency",
+      period: {
+        id: "p1",
+        startDate: "2026-08-10",
+        endDate: null,
+        activatedAt: "2026-08-10T00:00:00.000Z",
+        activatedByUserId: "u1",
+        activatedByPersonId: "p1",
+        activatedByPersonName: "מנהל",
+        deactivatedAt: null,
+        deactivatedByUserId: null,
+        deactivatedByPersonId: null,
+        deactivatedByPersonName: null,
+      },
+    });
+
+    const result = await loadSearchReadModel();
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.model.shiftEvents).toEqual([]);
   });
 });
