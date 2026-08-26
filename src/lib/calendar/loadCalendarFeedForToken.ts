@@ -1,7 +1,10 @@
 import "server-only";
 import { findPersonByEmail } from "@/lib/auth/resolveCurrentPerson";
+import { groupEmergencyAssignmentsIntoShifts } from "@/lib/domain/emergencyShift";
 import { buildPotentialDutyEvents } from "@/lib/domain/potentialDutyEvents";
 import { ShiftConfigurationError, buildShiftSchedule, type ShiftSchedule } from "@/lib/domain/shiftSchedule";
+import type { Person } from "@/lib/domain/types";
+import { resolveOperationalMode } from "@/lib/emergencyMode/state";
 import { SHEET_SOURCES, type RawSheet, type RawWorkbookSnapshot, type SheetSourceKey } from "@/lib/google";
 import { parseEvent } from "@/lib/parsers/event";
 import { parsePersonnelSheet } from "@/lib/parsers/personnel";
@@ -9,11 +12,13 @@ import { parsePotentialSheet } from "@/lib/parsers/potential";
 import { parseScheduleSheet } from "@/lib/parsers/schedule";
 import { parseSettingsSheet } from "@/lib/parsers/settings";
 import { isCalendarDisplayEvent } from "@/lib/readModels/buildPersonalScheduleReadModel";
+import { resolveOperationalRoster } from "@/lib/readModels/operationalMode";
 import { getWorkbookSnapshot } from "@/lib/sync";
 import { getJerusalemLocalNow } from "@/lib/time/jerusalemClock";
 import { resolveCalendarFeedOwnerByToken } from "./feedOwnerLookup";
 import { isWithinIcsFeedWindow } from "./icsWindow";
 import { buildCalendarItem } from "./icsItems";
+import { buildEmergencyShiftCalendarItem } from "./icsEmergencyItems";
 import { renderIcsFeed } from "./icsRender";
 
 /**
@@ -90,6 +95,23 @@ export async function loadCalendarFeedForToken(token: string): Promise<CalendarF
     if (!(error instanceof ShiftConfigurationError)) throw error;
   }
 
+  /**
+   * Emergency Mode (spec section 16) -- the external ICS subscription has
+   * no in-app "unavailable" screen to show, so this branches entirely
+   * before touching any regular schedule/Potential data: while Emergency
+   * Mode is active, the feed comes EXCLUSIVELY from the person's own
+   * desk assignments, never regular shift/duty Events (spec section 4/29
+   * -- "never show regular data as current truth"). A broken emergency
+   * workbook (`roster.mode === "emergency_unavailable"`) renders an empty
+   * but still valid feed rather than ever falling back to regular data --
+   * the subscription itself stays alive (never a 404), it simply has
+   * nothing to show until the emergency workbook is readable again.
+   */
+  const operationalMode = await resolveOperationalMode();
+  if (operationalMode.kind === "emergency") {
+    return loadEmergencyCalendarFeed(person, people, shiftSchedule);
+  }
+
   const allEvents = parseScheduleSheet(getSheetByKey(snapshot, "schedule"), people).map(parseEvent);
   const personEvents = allEvents.filter((event) => event.personId === person.id);
 
@@ -112,6 +134,45 @@ export async function loadCalendarFeedForToken(token: string): Promise<CalendarF
   // out of this set.
   const items = calendarEvents
     .map((event) => buildCalendarItem(event, shiftSchedule, allEvents))
+    .filter((item) => item !== null);
+
+  const icsText = renderIcsFeed({ personName: person.name, items, generatedAt: new Date() });
+  return { status: "ok", icsText };
+}
+
+/**
+ * Emergency Mode branch of the ICS feed (spec section 16) -- mirrors the
+ * regular branch's own "resolve -> filter to window -> build items ->
+ * render" shape, but sourced entirely from `resolveOperationalRoster`'s
+ * desk assignments via `groupEmergencyAssignmentsIntoShifts`, never the
+ * regular schedule/Potential sheets (not even fetched here). `roster.mode
+ * === "regular"` is structurally unreachable within one request (the
+ * caller already observed "emergency" moments earlier, via the SAME
+ * request-scoped `resolveOperationalMode()` cache `resolveOperationalRoster`
+ * itself calls) -- guarded explicitly rather than silently narrowing the
+ * type away, same convention `schedule.ts`'s own emergency branch uses.
+ */
+async function loadEmergencyCalendarFeed(
+  person: Person,
+  people: readonly Person[],
+  shiftSchedule: ShiftSchedule | null,
+): Promise<CalendarFeedLoadResult> {
+  const roster = await resolveOperationalRoster(people);
+  if (roster.mode === "regular") {
+    throw new Error("resolveOperationalRoster reported 'regular' inconsistently within the same request.");
+  }
+  if (roster.mode === "emergency_unavailable") {
+    const icsText = renderIcsFeed({ personName: person.name, items: [], generatedAt: new Date() });
+    return { status: "ok", icsText };
+  }
+
+  const now = getJerusalemLocalNow();
+  const shifts = groupEmergencyAssignmentsIntoShifts(roster.assignments).filter(
+    (shift) => isWithinIcsFeedWindow(shift.date, now) && shift.assignments.some((assignment) => assignment.personId === person.id),
+  );
+
+  const items = shifts
+    .map((shift) => buildEmergencyShiftCalendarItem(shift, person.id, shiftSchedule))
     .filter((item) => item !== null);
 
   const icsText = renderIcsFeed({ personName: person.name, items, generatedAt: new Date() });
