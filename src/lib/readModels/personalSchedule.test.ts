@@ -4,10 +4,12 @@ import type { RawSheet } from "@/lib/google";
 const getAuthenticatedIdentity = vi.fn();
 const getWorkbookSnapshot = vi.fn();
 const getJerusalemLocalNow = vi.fn();
+const resolveOperationalRoster = vi.fn();
 
 vi.mock("@/lib/auth/currentUser", () => ({ getAuthenticatedIdentity }));
 vi.mock("@/lib/sync", () => ({ getWorkbookSnapshot }));
 vi.mock("@/lib/time/jerusalemClock", () => ({ getJerusalemLocalNow }));
+vi.mock("./operationalMode", () => ({ resolveOperationalRoster }));
 
 const { loadPersonalScheduleReadModel } = await import("./personalSchedule");
 
@@ -60,6 +62,8 @@ describe("loadPersonalScheduleReadModel", () => {
     getWorkbookSnapshot.mockReset();
     getJerusalemLocalNow.mockReset();
     getJerusalemLocalNow.mockReturnValue({ date: "2026-08-12", minuteOfDay: 600 });
+    resolveOperationalRoster.mockReset();
+    resolveOperationalRoster.mockResolvedValue({ mode: "regular" });
   });
 
   it("8. returns unauthenticated without fetching anything", async () => {
@@ -254,6 +258,8 @@ describe("loadPersonalScheduleReadModel — avatarUrl (presentation-only, source
     getWorkbookSnapshot.mockReset();
     getJerusalemLocalNow.mockReset();
     getJerusalemLocalNow.mockReturnValue({ date: "2026-08-12", minuteOfDay: 600 });
+    resolveOperationalRoster.mockReset();
+    resolveOperationalRoster.mockResolvedValue({ mode: "regular" });
   });
 
   it("carries the identity's avatarUrl straight through on an 'ok' result", async () => {
@@ -321,5 +327,110 @@ describe("loadPersonalScheduleReadModel — avatarUrl (presentation-only, source
 
     const result = await loadPersonalScheduleReadModel();
     expect(result).toEqual({ status: "unmapped" });
+  });
+});
+
+describe("loadPersonalScheduleReadModel — Emergency Mode", () => {
+  beforeEach(() => {
+    getAuthenticatedIdentity.mockReset();
+    getWorkbookSnapshot.mockReset();
+    getJerusalemLocalNow.mockReset();
+    getJerusalemLocalNow.mockReturnValue({ date: "2026-08-12", minuteOfDay: 600 });
+    resolveOperationalRoster.mockReset();
+
+    getAuthenticatedIdentity.mockResolvedValue({
+      status: "authenticated",
+      userId: "u1",
+      email: "dani@example.invalid",
+      avatarUrl: null,
+      createdAt: "2020-01-01T00:00:00.000Z",
+    });
+    getWorkbookSnapshot.mockResolvedValue(validSnapshot());
+  });
+
+  it("returns status 'emergency' with the built EmergencyPersonalHomeReadModel when the roster is available, never the regular model", async () => {
+    resolveOperationalRoster.mockResolvedValue({
+      mode: "emergency",
+      period: {
+        id: "period1",
+        activatedAt: "2026-08-12T08:00:00.000Z",
+        activatedByUserId: "u_mgr",
+        activatedByPersonId: "p_mgr",
+        activatedByPersonName: "מנהל בדיקה",
+        startDate: "2026-08-12",
+        deactivatedAt: null,
+        deactivatedByUserId: null,
+        deactivatedByPersonId: null,
+        deactivatedByPersonName: null,
+        endDate: null,
+      },
+      assignments: [],
+      diagnostics: [],
+      fetchedAt: "2026-08-12T09:00:00.000Z",
+    });
+
+    const result = await loadPersonalScheduleReadModel();
+
+    expect(result.status).toBe("emergency");
+    if (result.status !== "emergency") throw new Error("unreachable");
+    expect(result.person.name).toBe("דני בדיקה");
+    expect(result.emergencyHome.period.id).toBe("period1");
+    expect(result.emergencyHome.fetchedAt).toBe("2026-08-12T09:00:00.000Z");
+  });
+
+  it("returns status 'emergency_unavailable' (never falls back to regular data) when the emergency roster is unreadable", async () => {
+    resolveOperationalRoster.mockResolvedValue({
+      mode: "emergency_unavailable",
+      period: {
+        id: "period1",
+        activatedAt: "2026-08-12T08:00:00.000Z",
+        activatedByUserId: "u_mgr",
+        activatedByPersonId: "p_mgr",
+        activatedByPersonName: "מנהל בדיקה",
+        startDate: "2026-08-12",
+        deactivatedAt: null,
+        deactivatedByUserId: null,
+        deactivatedByPersonId: null,
+        deactivatedByPersonName: null,
+        endDate: null,
+      },
+      message: "Missing Google Sheets configuration: GOOGLE_EMERGENCY_SPREADSHEET_ID.",
+    });
+
+    const result = await loadPersonalScheduleReadModel();
+
+    expect(result.status).toBe("emergency_unavailable");
+    if (result.status !== "emergency_unavailable") throw new Error("unreachable");
+    expect(result.person.name).toBe("דני בדיקה");
+  });
+
+  it("a broken regular shift-time configuration does not block the emergency view -- best-effort schedule is used, never a hard failure", async () => {
+    getWorkbookSnapshot.mockResolvedValue({
+      fetchedAt: "2026-08-12T08:00:00.000Z",
+      sheets: [scheduleSheet([]), settingsSheet([["הגדרה", "ערך"]]), personnelSheet(PERSONNEL_ROWS), potentialH1Sheet([]), potentialH2Sheet([])],
+    });
+    resolveOperationalRoster.mockResolvedValue({
+      mode: "emergency",
+      period: {
+        id: "period1",
+        activatedAt: "2026-08-12T08:00:00.000Z",
+        activatedByUserId: "u_mgr",
+        activatedByPersonId: "p_mgr",
+        activatedByPersonName: "מנהל בדיקה",
+        startDate: "2026-08-12",
+        deactivatedAt: null,
+        deactivatedByUserId: null,
+        deactivatedByPersonId: null,
+        deactivatedByPersonName: null,
+        endDate: null,
+      },
+      assignments: [],
+      diagnostics: [],
+      fetchedAt: "2026-08-12T09:00:00.000Z",
+    });
+
+    const result = await loadPersonalScheduleReadModel();
+
+    expect(result.status).toBe("emergency");
   });
 });

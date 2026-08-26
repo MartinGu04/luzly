@@ -11,6 +11,9 @@ import { parseScheduleSheet } from "@/lib/parsers/schedule";
 import { parseSettingsSheet } from "@/lib/parsers/settings";
 import { getWorkbookSnapshot } from "@/lib/sync";
 import { getJerusalemLocalNow } from "@/lib/time/jerusalemClock";
+import { resolveOperationalRoster } from "./operationalMode";
+import { buildEmergencyPersonalHome } from "./buildEmergencyPersonalHome";
+import type { EmergencyPersonalHomeReadModel } from "./emergencyPersonalHomeTypes";
 import { buildPersonalScheduleReadModel, toPersonalProfile } from "./buildPersonalScheduleReadModel";
 import type { PersonalProfile, PersonalScheduleReadModel } from "./types";
 
@@ -58,7 +61,37 @@ export type PersonalScheduleLoadResult =
       userId: string;
       accountCreatedAt: string;
     }
-  | { status: "ok"; model: PersonalScheduleReadModel; avatarUrl: string | null; userId: string; accountCreatedAt: string };
+  | { status: "ok"; model: PersonalScheduleReadModel; avatarUrl: string | null; userId: string; accountCreatedAt: string }
+  /**
+   * Emergency Mode is active and its workbook is readable -- the
+   * personal operational shift model comes EXCLUSIVELY from
+   * `emergencyHome` (spec section 9). Regular duty/Potential content is
+   * never generated here.
+   */
+  | {
+      status: "emergency";
+      person: PersonalProfile;
+      emergencyHome: EmergencyPersonalHomeReadModel;
+      avatarUrl: string | null;
+      userId: string;
+      accountCreatedAt: string;
+    }
+  /**
+   * Emergency Mode is active but its own workbook could not be
+   * configured/read/parsed -- a DISTINCT status from `configuration_error`
+   * (which is about the REGULAR shift-time setting): this must render a
+   * clear "emergency data unavailable" state, and must NEVER fall back to
+   * regular Schedule data while the system claims Emergency Mode is
+   * active (spec section 4/29).
+   */
+  | {
+      status: "emergency_unavailable";
+      message: string;
+      person: PersonalProfile;
+      avatarUrl: string | null;
+      userId: string;
+      accountCreatedAt: string;
+    };
 
 /**
  * Everything this read model needs from the workbook. `potentialH1`/
@@ -135,6 +168,50 @@ async function loadPersonalScheduleReadModelInner(): Promise<PersonalScheduleLoa
   if (identityResult.status !== "ok") return { status: identityResult.status };
 
   const settings = timedSyncStage("settings.parse", () => parseSettingsSheet(getSheetByKey(snapshot, "settings")));
+
+  // Best-effort only here -- a broken regular shift-time configuration
+  // must never block the Emergency Mode personal view (that's a
+  // REGULAR-mode configuration_error concern below); it only means
+  // `buildEmergencyPersonalHome` can't report exact shift minute
+  // boundaries and can't determine "current" (see that function's own
+  // docs), never a hard failure for the emergency branch.
+  let bestEffortShiftSchedule: ShiftSchedule | null = null;
+  try {
+    bestEffortShiftSchedule = buildShiftSchedule(settings.shiftStartTimeDay);
+  } catch (error) {
+    if (!(error instanceof ShiftConfigurationError)) throw error;
+  }
+
+  const operationalRoster = await resolveOperationalRoster(people);
+  if (operationalRoster.mode === "emergency_unavailable") {
+    return {
+      status: "emergency_unavailable",
+      message: operationalRoster.message,
+      person: toPersonalProfile(identityResult.person),
+      avatarUrl: identity.avatarUrl,
+      userId: identity.userId,
+      accountCreatedAt: identity.createdAt,
+    };
+  }
+  if (operationalRoster.mode === "emergency") {
+    const emergencyHome = buildEmergencyPersonalHome({
+      period: operationalRoster.period,
+      assignments: operationalRoster.assignments,
+      personId: identityResult.person.id,
+      now: getJerusalemLocalNow(),
+      schedule: bestEffortShiftSchedule,
+      fetchedAt: operationalRoster.fetchedAt,
+      diagnostics: operationalRoster.diagnostics,
+    });
+    return {
+      status: "emergency",
+      person: toPersonalProfile(identityResult.person),
+      emergencyHome,
+      avatarUrl: identity.avatarUrl,
+      userId: identity.userId,
+      accountCreatedAt: identity.createdAt,
+    };
+  }
 
   let shiftSchedule: ShiftSchedule;
   try {

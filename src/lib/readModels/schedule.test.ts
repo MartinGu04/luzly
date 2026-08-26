@@ -5,10 +5,12 @@ import type { ScheduleParams } from "./schedule";
 const getRequestPersonalSchedule = vi.fn();
 const getAuthenticatedIdentity = vi.fn();
 const getWorkbookSnapshot = vi.fn();
+const resolveOperationalRoster = vi.fn();
 
 vi.mock("./getRequestPersonalSchedule", () => ({ getRequestPersonalSchedule }));
 vi.mock("@/lib/auth/currentUser", () => ({ getAuthenticatedIdentity }));
 vi.mock("@/lib/sync", () => ({ getWorkbookSnapshot }));
+vi.mock("./operationalMode", () => ({ resolveOperationalRoster }));
 
 const { loadScheduleReadModel } = await import("./schedule");
 
@@ -88,6 +90,7 @@ beforeEach(() => {
   getRequestPersonalSchedule.mockReset();
   getAuthenticatedIdentity.mockReset();
   getWorkbookSnapshot.mockReset();
+  resolveOperationalRoster.mockReset();
   getAuthenticatedIdentity.mockResolvedValue({
     status: "authenticated",
     userId: "u1",
@@ -312,5 +315,129 @@ describe("loadScheduleReadModel — תקשא\"ס period (Potential) duty complet
     } else {
       throw new Error("expected 'all' perspective");
     }
+  });
+});
+
+describe("loadScheduleReadModel — Emergency Mode", () => {
+  const PERIOD = {
+    id: "period1",
+    activatedAt: "2026-08-13T08:00:00.000Z",
+    activatedByUserId: "u_mgr",
+    activatedByPersonId: "p_martin",
+    activatedByPersonName: "מרטין גוסין",
+    startDate: "2026-08-13",
+    deactivatedAt: null,
+    deactivatedByUserId: null,
+    deactivatedByPersonId: null,
+    deactivatedByPersonName: null,
+    endDate: null,
+  };
+
+  function emergencyPersonalResult(isManager: boolean) {
+    return {
+      status: "emergency" as const,
+      person: { id: "p_martin", name: "מרטין גוסין", isManager },
+      emergencyHome: {
+        period: PERIOD,
+        localNow: { date: "2026-08-13", minuteOfDay: 600 },
+        fetchedAt: "2026-08-13T09:00:00.000Z",
+        current: null,
+        next: null,
+        diagnostics: [],
+      },
+      avatarUrl: null,
+      userId: "u1",
+      accountCreatedAt: "2020-01-01T00:00:00.000Z",
+    };
+  }
+
+  it("propagates emergency_unavailable without ever building a regular ScheduleReadModel", async () => {
+    getRequestPersonalSchedule.mockResolvedValue({
+      status: "emergency_unavailable",
+      message: "boom",
+      person: { id: "p_martin", name: "מרטין גוסין", isManager: false },
+      avatarUrl: null,
+      userId: "u1",
+      accountCreatedAt: "2020-01-01T00:00:00.000Z",
+    });
+
+    const result = await loadScheduleReadModel(DEFAULT_PARAMS);
+
+    expect(result).toEqual({ status: "emergency_unavailable", message: "boom" });
+    expect(getWorkbookSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("a non-manager gets a self-only emergency model, never a manager selector", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(emergencyPersonalResult(false));
+    resolveOperationalRoster.mockResolvedValue({
+      mode: "emergency",
+      period: PERIOD,
+      assignments: [
+        { date: "2026-08-13", period: "day", desk: "הוגוורט", personId: "p_martin", personName: "מרטין גוסין", sourceCell: "C2" },
+      ],
+      diagnostics: [],
+      fetchedAt: "2026-08-13T09:00:00.000Z",
+    });
+
+    const result = await loadScheduleReadModel(DEFAULT_PARAMS);
+
+    expect(result.status).toBe("emergency");
+    if (result.status !== "emergency") throw new Error("unreachable");
+    expect(result.model.manager).toBeNull();
+    expect(result.model.roster).toEqual([]);
+    expect(result.model.perspective).toBe("self");
+    expect(result.model.personalShifts?.[0].ownDesks).toEqual(["הוגוורט"]);
+  });
+
+  it("a manager requesting 'all' gets desk staffing, never role coverage", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(emergencyPersonalResult(true));
+    resolveOperationalRoster.mockResolvedValue({
+      mode: "emergency",
+      period: PERIOD,
+      assignments: [
+        { date: "2026-08-13", period: "day", desk: "הוגוורט", personId: "p_martin", personName: "מרטין גוסין", sourceCell: "C2" },
+        { date: "2026-08-13", period: "day", desk: "תיעוד", personId: "p_daniel", personName: "דניאל כהן", sourceCell: "J2" },
+      ],
+      diagnostics: [],
+      fetchedAt: "2026-08-13T09:00:00.000Z",
+    });
+
+    const result = await loadScheduleReadModel({ rawMonth: null, personId: "all" });
+
+    expect(result.status).toBe("emergency");
+    if (result.status !== "emergency") throw new Error("unreachable");
+    expect(result.model.perspective).toBe("all");
+    expect(result.model.everyoneShifts?.[0].desks).toHaveLength(10);
+    const staffed = result.model.everyoneShifts?.[0].desks.filter((d) => d.personName !== null);
+    expect(staffed?.map((d) => d.personName)).toEqual(expect.arrayContaining(["מרטין גוסין", "דניאל כהן"]));
+  });
+
+  it("a manager selecting a specific person gets that person's own emergency shifts", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(emergencyPersonalResult(true));
+    resolveOperationalRoster.mockResolvedValue({
+      mode: "emergency",
+      period: PERIOD,
+      assignments: [
+        { date: "2026-08-13", period: "day", desk: "תיעוד", personId: "p_daniel", personName: "דניאל כהן", sourceCell: "J2" },
+      ],
+      diagnostics: [],
+      fetchedAt: "2026-08-13T09:00:00.000Z",
+    });
+
+    const result = await loadScheduleReadModel({ rawMonth: null, personId: "daniel_id_nonexistent" });
+
+    // Not in `people` -> falls back to self, per resolvePerspective's fail-closed convention.
+    expect(result.status).toBe("emergency");
+    if (result.status !== "emergency") throw new Error("unreachable");
+    expect(result.model.perspective).toBe("self");
+  });
+
+  it("propagates emergency_unavailable discovered during the schedule loader's own roster resolution", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(emergencyPersonalResult(false));
+    resolveOperationalRoster.mockResolvedValue({ mode: "emergency_unavailable", period: PERIOD, message: "boom2" });
+
+    const result = await loadScheduleReadModel(DEFAULT_PARAMS);
+
+    expect(result).toEqual({ status: "emergency_unavailable", message: "boom2" });
   });
 });

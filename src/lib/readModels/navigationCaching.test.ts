@@ -54,6 +54,7 @@ vi.mock("next/cache", () => ({ unstable_cache: fakeUnstableCache, revalidateTag:
 const getAuthenticatedIdentity = vi.fn();
 const fetchRawWorkbookSnapshot = vi.fn();
 const getJerusalemLocalNow = vi.fn();
+const resolveOperationalRoster = vi.fn();
 
 vi.mock("@/lib/auth/currentUser", () => ({ getAuthenticatedIdentity }));
 vi.mock("@/lib/google", async () => {
@@ -61,6 +62,7 @@ vi.mock("@/lib/google", async () => {
   return { ...actual, fetchRawWorkbookSnapshot };
 });
 vi.mock("@/lib/time/jerusalemClock", () => ({ getJerusalemLocalNow }));
+vi.mock("./operationalMode", () => ({ resolveOperationalRoster }));
 
 const { loadPersonalScheduleReadModel } = await import("./personalSchedule");
 
@@ -107,6 +109,8 @@ beforeEach(() => {
   fetchRawWorkbookSnapshot.mockReset();
   getJerusalemLocalNow.mockReset();
   getJerusalemLocalNow.mockReturnValue({ date: "2026-08-12", minuteOfDay: 600 });
+  resolveOperationalRoster.mockReset();
+  resolveOperationalRoster.mockResolvedValue({ mode: "regular" });
   getAuthenticatedIdentity.mockResolvedValue({
     status: "authenticated",
     userId: "u1",
