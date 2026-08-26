@@ -1,5 +1,7 @@
 import { Dashboard } from "@/components/dashboard/Dashboard";
 import { ConfigurationErrorState } from "@/components/dashboard/ConfigurationErrorState";
+import { EmergencyDashboard } from "@/components/dashboard/EmergencyDashboard";
+import { EmergencyUnavailableState } from "@/components/emergencyMode/EmergencyUnavailableState";
 import { PermanentManagerHome } from "@/components/home/PermanentManagerHome";
 import { getCalendarFeedForCurrentUser } from "@/lib/calendar/feedStore";
 import { isEligibleForOnboarding } from "@/lib/config/onboardingRollout";
@@ -89,6 +91,12 @@ import { getRequestReportOneTomorrow } from "@/lib/readModels/getRequestReportOn
 export default async function DashboardPage() {
   const result = await getRequestPersonalSchedule();
 
+  if (result.status === "emergency_unavailable") {
+    return <EmergencyUnavailableState />;
+  }
+  if (result.status === "emergency") {
+    return <EmergencyDashboard model={result.emergencyHome} />;
+  }
   if (result.status !== "ok") {
     return <ConfigurationErrorState />;
   }

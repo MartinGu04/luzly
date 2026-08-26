@@ -1,5 +1,8 @@
 import { ConfigurationErrorState } from "@/components/dashboard/ConfigurationErrorState";
+import { EmergencyUnavailableState } from "@/components/emergencyMode/EmergencyUnavailableState";
 import { MonthNav } from "@/components/schedule/MonthNav";
+import { EmergencyEveryoneScheduleList } from "@/components/schedule/EmergencyEveryoneScheduleList";
+import { EmergencyPersonalScheduleList } from "@/components/schedule/EmergencyPersonalScheduleList";
 import { ScheduleCalendar } from "@/components/schedule/ScheduleCalendar";
 import { ScheduleEveryoneCalendar } from "@/components/schedule/ScheduleEveryoneCalendar";
 import { ScheduleHeader } from "@/components/schedule/ScheduleHeader";
@@ -21,6 +24,7 @@ import { formatHebrewCalendarDate, formatHebrewMonthRange, getHolidayContext } f
 import { formatHebrewMonthYear, formatHebrewWeekdayAndDate } from "@/lib/presentation/hebrewDate";
 import { buildScheduleEveryoneDayViews } from "@/lib/presentation/scheduleEveryone";
 import { getRequestSchedule } from "@/lib/readModels/getRequestSchedule";
+import type { EmergencyScheduleReadModel } from "@/lib/readModels/emergencyScheduleTypes";
 import type { SchedulePerspective } from "@/lib/readModels/scheduleTypes";
 import type { PersonalEventView } from "@/lib/readModels/types";
 
@@ -115,6 +119,12 @@ export default async function SchedulePage({ searchParams }: SchedulePageProps) 
   const effectiveRawMonth = dateMonthOverride ?? rawMonth;
 
   const result = await getRequestSchedule(effectiveRawMonth, rawPerson);
+  if (result.status === "emergency_unavailable") {
+    return <EmergencyUnavailableState />;
+  }
+  if (result.status === "emergency") {
+    return <EmergencySchedulePage model={result.model} />;
+  }
   if (result.status !== "ok") {
     return <ConfigurationErrorState />;
   }
@@ -256,5 +266,45 @@ function PersonalPerspective({
         activeShiftDates={activeShiftDates}
       />
     </>
+  );
+}
+
+/**
+ * Emergency Mode's `/schedule` presentation (spec section 10) -- desk-
+ * based staffing, never regular Event/role coverage. Deliberately a
+ * simpler flat list (not the regular month-grid calendar, which is
+ * built around `CalendarGridCell`/`PersonalEventView` semantics) since
+ * an Emergency Mode period is typically a short, bounded window rather
+ * than a full recurring monthly schedule -- every known emergency shift
+ * renders, sorted chronologically, with no month pagination needed.
+ */
+function EmergencySchedulePage({ model }: { model: EmergencyScheduleReadModel }) {
+  return (
+    <div className="flex flex-col gap-4 sm:gap-6">
+      <ScheduleHeader monthLabel="סידור חירום" monthRangeSubtitle="משמרות חירום לפי דסקים" />
+
+      {model.manager ? (
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <ScheduleManagerSelector
+            managerName={model.manager.name}
+            people={model.roster}
+            perspective={model.perspective}
+            selectedPersonId={model.selectedPersonId}
+          />
+          <DataFreshnessStatus fetchedAt={model.fetchedAt} className="sm:w-auto" />
+        </div>
+      ) : (
+        <DataFreshnessStatus fetchedAt={model.fetchedAt} />
+      )}
+
+      {model.perspective === "all" && model.everyoneShifts ? (
+        <EmergencyEveryoneScheduleList shifts={model.everyoneShifts} />
+      ) : (
+        <EmergencyPersonalScheduleList
+          shifts={model.personalShifts ?? []}
+          emptyStateName={model.perspective === "person" ? model.selectedPersonName : null}
+        />
+      )}
+    </div>
   );
 }

@@ -529,3 +529,68 @@ describe("DashboardPage — onboarding eligibility wiring (pre-merge correction)
     expect(screen.queryByText("השלמת הגדרה")).toBeNull();
   });
 });
+
+describe("DashboardPage — Emergency Mode", () => {
+  it("renders EmergencyDashboard for status 'emergency', never the regular Dashboard/PermanentManagerHome", async () => {
+    getRequestPersonalSchedule.mockResolvedValue({
+      status: "emergency",
+      person: { id: "p_1", name: "דני בדיקה", isManager: false },
+      emergencyHome: {
+        period: {
+          id: "period1",
+          activatedAt: "2026-08-26T14:00:00.000Z",
+          activatedByUserId: "u_mgr",
+          activatedByPersonId: "p_mgr",
+          activatedByPersonName: "מנהל בדיקה",
+          startDate: "2026-08-26",
+          deactivatedAt: null,
+          deactivatedByUserId: null,
+          deactivatedByPersonId: null,
+          deactivatedByPersonName: null,
+          endDate: null,
+        },
+        localNow: { date: "2026-08-26", minuteOfDay: 600 },
+        fetchedAt: "2026-08-26T14:05:00.000Z",
+        current: {
+          date: "2026-08-26",
+          period: "day",
+          ownDesks: ["הוגוורט"],
+          startMinute: 480,
+          endMinute: 1200,
+          roster: [{ personId: "p_2", personName: "ליה", desk: "תיעוד" }],
+        },
+        next: null,
+        diagnostics: [],
+      },
+      userId: "u1",
+      avatarUrl: null,
+      accountCreatedAt: "2020-01-01T00:00:00.000Z",
+    });
+
+    const element = await DashboardPage();
+    render(element);
+
+    expect(screen.getByTestId("emergency-dashboard")).toBeInTheDocument();
+    expect(screen.getByText(/משמרת יום · דסק הוגוורט/)).toBeInTheDocument();
+    expect(screen.getByText("ליה")).toBeInTheDocument();
+    expect(getRequestPermanentManagerHome).not.toHaveBeenCalled();
+    expect(getRequestDashboardVisitRecap).not.toHaveBeenCalled();
+  });
+
+  it("renders EmergencyUnavailableState for status 'emergency_unavailable', never the generic ConfigurationErrorState copy", async () => {
+    getRequestPersonalSchedule.mockResolvedValue({
+      status: "emergency_unavailable",
+      message: "boom",
+      person: { id: "p_1", name: "דני בדיקה", isManager: false },
+      userId: "u1",
+      avatarUrl: null,
+      accountCreatedAt: "2020-01-01T00:00:00.000Z",
+    });
+
+    const element = await DashboardPage();
+    render(element);
+
+    expect(screen.getByText(/נתוני החירום אינם זמינים/)).toBeInTheDocument();
+    expect(screen.queryByText("לא ניתן לחשב כרגע את שעות המשמרות")).toBeNull();
+  });
+});
