@@ -40,6 +40,8 @@ function countDistinctDates(events: readonly Event[], predicate: (event: Event) 
   return dates.size;
 }
 
+const EMPTY_EXCLUDED_DATES: ReadonlySet<string> = new Set();
+
 /**
  * `personEvents` may already be filtered to one person, or the full period
  * Event set -- this filters to `personId`'s own Events within
@@ -48,15 +50,30 @@ function countDistinctDates(events: readonly Event[], predicate: (event: Event) 
  * when nothing is found -- an all-zero result simply means the caller
  * should render nothing (see `lib/presentation/fairnessCards.ts`), not that
  * the computation failed.
+ *
+ * `excludedDates` (Emergency Mode date exclusion, spec section 18) removes
+ * individual dates from the MIDDLE of `[periodStartDate, periodEndDate]`,
+ * not just its endpoints -- the caller's own `periodStartDate`/`periodEndDate`
+ * are derived from an already-filtered `periodDates` array, so they
+ * naturally shrink when an excluded date sits at either boundary, but a
+ * date excluded from the middle of an otherwise-contiguous range would
+ * still fall inside `[start, end]` without this. Passing the SAME excluded-
+ * date set the headline fairness numbers were filtered against is what
+ * keeps this tooltip from ever disagreeing with them.
  */
 export function computeShiftExpectationFactors(
   events: readonly Event[],
   personId: string,
   periodStartDate: string,
   periodEndDate: string,
+  excludedDates: ReadonlySet<string> = EMPTY_EXCLUDED_DATES,
 ): ShiftExpectationFactors {
   const relevantEvents = events.filter(
-    (event) => event.personId === personId && event.date >= periodStartDate && event.date <= periodEndDate,
+    (event) =>
+      event.personId === personId &&
+      event.date >= periodStartDate &&
+      event.date <= periodEndDate &&
+      !excludedDates.has(event.date),
   );
   if (relevantEvents.length === 0) return EMPTY_FACTORS;
 

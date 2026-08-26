@@ -7,6 +7,7 @@ const loadFairnessWorkbookContext = vi.fn();
 const getJerusalemLocalNow = vi.fn();
 const parseScheduleSheet = vi.fn();
 const parseEvent = vi.fn();
+const getEmergencyDateSet = vi.fn();
 
 vi.mock("./fairnessWorkbookContext", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./fairnessWorkbookContext")>();
@@ -15,6 +16,7 @@ vi.mock("./fairnessWorkbookContext", async (importOriginal) => {
 vi.mock("@/lib/time/jerusalemClock", () => ({ getJerusalemLocalNow }));
 vi.mock("@/lib/parsers/schedule", () => ({ parseScheduleSheet }));
 vi.mock("@/lib/parsers/event", () => ({ parseEvent }));
+vi.mock("@/lib/emergencyMode/state", () => ({ getEmergencyDateSet }));
 
 const { loadShiftFairnessReadModel } = await import("./shiftFairness");
 
@@ -87,6 +89,8 @@ beforeEach(() => {
   getJerusalemLocalNow.mockReset();
   parseScheduleSheet.mockReset();
   parseEvent.mockReset();
+  getEmergencyDateSet.mockReset();
+  getEmergencyDateSet.mockResolvedValue(new Set());
   getJerusalemLocalNow.mockReturnValue({ date: "2026-08-15", minuteOfDay: 600 });
   // `parseScheduleSheet` returns already-Event-shaped objects, `parseEvent` is the identity --
   // this loader calls `parseScheduleSheet(...).map(parseEvent)`, so together they let a test
@@ -273,5 +277,92 @@ describe("loadShiftFairnessReadModel — historical duty personnel never leaks i
     expect(allRows).toHaveLength(1);
     expect(allRows.every((row) => row.personId === "p_tech")).toBe(true);
     expect(allRows.some((row) => row.personId === "p_former")).toBe(false);
+  });
+});
+
+describe("loadShiftFairnessReadModel — Emergency Mode date exclusion (spec section 18)", () => {
+  it("an emergency date is excluded from completed shifts -- a confirmed shift ON that date never counts", async () => {
+    getEmergencyDateSet.mockResolvedValue(new Set(["2026-08-06"]));
+    parseScheduleSheet.mockReturnValue([shiftEvent({ personId: "p_tech", date: "2026-08-06", role: "technician" })]);
+    loadFairnessWorkbookContext.mockResolvedValue(okContext());
+
+    const result = await loadShiftFairnessReadModel("2026-08");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+
+    const row = result.model.groups.flatMap((g) => g.rows).find((r) => r.personId === "p_tech");
+    expect(row?.actualShifts).toBe(0);
+  });
+
+  it("passes the same excluded-date set to the tooltip explanation so it never disagrees with the headline number", async () => {
+    getEmergencyDateSet.mockResolvedValue(new Set(["2026-08-06"]));
+    // A leave (blocking absence) event on the SAME emergency date -- if the
+    // tooltip didn't honor the same exclusion, it would still count this
+    // as a "leaveDays" factor even though that date no longer contributes
+    // to the headline number at all.
+    parseScheduleSheet.mockReturnValue([
+      shiftEvent({ personId: "p_tech", date: "2026-08-05", role: "technician" }),
+      {
+        personName: "",
+        title: "חופש",
+        rawValue: "חופש",
+        category: "absence" as const,
+        certainty: "confirmed" as const,
+        role: null,
+        period: "unspecified" as const,
+        sourceSheet: "משמרות + תורנויות",
+        sourceCell: "A2",
+        slot: null,
+        shadow: false,
+        startTimeOverride: null,
+        endTimeOverride: null,
+        changeNote: null,
+        dutyFamily: null,
+        absenceKind: "vacation" as const,
+        personId: "p_tech",
+        date: "2026-08-06",
+      },
+    ]);
+    loadFairnessWorkbookContext.mockResolvedValue(okContext());
+
+    const result = await loadShiftFairnessReadModel("2026-08");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+
+    const row = result.model.groups.flatMap((g) => g.rows).find((r) => r.personId === "p_tech");
+    expect(row?.expectationFactors?.leaveDays).toBe(0);
+  });
+
+  it("resolves getEmergencyDateSet against the loader's own resolved 'today' date", async () => {
+    loadFairnessWorkbookContext.mockResolvedValue(okContext());
+
+    await loadShiftFairnessReadModel("2026-08");
+
+    expect(getEmergencyDateSet).toHaveBeenCalledWith("2026-08-15");
+  });
+
+  it("an empty excluded-date set (no Emergency Mode ever activated) changes nothing", async () => {
+    getEmergencyDateSet.mockResolvedValue(new Set());
+    parseScheduleSheet.mockReturnValue([shiftEvent({ personId: "p_tech", date: "2026-08-06", role: "technician" })]);
+    loadFairnessWorkbookContext.mockResolvedValue(okContext());
+
+    const result = await loadShiftFairnessReadModel("2026-08");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+
+    const row = result.model.groups.flatMap((g) => g.rows).find((r) => r.personId === "p_tech");
+    expect(row?.actualShifts).toBe(1);
+  });
+});
+
+describe("loadShiftFairnessReadModel — emergency date at the period boundary shrinks periodEndDate", () => {
+  it("excluding 'today' (the month's last evaluable date) shifts periodEndDate to the prior date", async () => {
+    getEmergencyDateSet.mockResolvedValue(new Set(["2026-08-15"]));
+    loadFairnessWorkbookContext.mockResolvedValue(okContext());
+
+    const result = await loadShiftFairnessReadModel("2026-08");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.model.periodEndDate).toBe("2026-08-14");
   });
 });

@@ -12,6 +12,7 @@ import {
   type ReserveRoleParticipationSource,
 } from "@/lib/domain/reserveParticipation";
 import type { Person } from "@/lib/domain/types";
+import { getEmergencyDateSet } from "@/lib/emergencyMode/state";
 import { parseSourcePeriodYear, type RawSheet } from "@/lib/google";
 import { parseEvent } from "@/lib/parsers/event";
 import { parseFairnessTable } from "@/lib/parsers/fairness";
@@ -81,7 +82,24 @@ export async function loadShiftFairnessReadModel(rawMonth: string | null): Promi
   };
   const reserveParticipation = resolveReserveRoleParticipation(reserveParticipationByPeriod, periodIdentity);
 
-  const model = buildShiftFairnessReadModel(people, events, month, now, snapshot.fetchedAt, reserveParticipation);
+  // Emergency Mode date exclusion (spec section 18) -- every calendar date
+  // any recorded Emergency Mode period ever touched (past or currently
+  // active) is excluded from regular shift fairness, consistently across
+  // the headline numbers and the tooltip explanation (see
+  // `buildShiftFairnessReadModel`'s own docs for exactly how this
+  // propagates). A deployment that has never activated Emergency Mode gets
+  // an empty set here and behaves byte-for-byte as before.
+  const excludedDates = await getEmergencyDateSet(now.date);
+
+  const model = buildShiftFairnessReadModel(
+    people,
+    events,
+    month,
+    now,
+    snapshot.fetchedAt,
+    reserveParticipation,
+    excludedDates,
+  );
 
   return { status: "ok", model: withAvatars(model, avatarByPersonId), person };
 }

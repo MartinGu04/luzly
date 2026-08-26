@@ -39,8 +39,21 @@ export function buildShiftFairnessReadModel(
   now: LocalNow,
   fetchedAt: string,
   reserveParticipation: ReserveRoleParticipation = EMPTY_RESERVE_ROLE_PARTICIPATION,
+  /**
+   * Emergency Mode date exclusion (spec section 18) -- any calendar date
+   * touched by an Emergency Mode period (past or currently active) is
+   * excluded from regular shift fairness entirely: filtered out of
+   * `periodDates` BEFORE the engine ever runs (so it affects completed
+   * shifts, expected shifts/opportunities, and distinct weekends worked
+   * identically, since the engine treats `periodDates` as a plain,
+   * shape-agnostic array -- no engine change needed), and threaded into
+   * `computeShiftExpectationFactors` below so the tooltip explanation can
+   * never disagree with the headline number by still analyzing an
+   * excluded date.
+   */
+  excludedDates: ReadonlySet<string> = EMPTY_EXCLUDED_DATES,
 ): ShiftFairnessReadModel {
-  const periodDates = resolveShiftFairnessPeriodDates(month, now);
+  const periodDates = resolveShiftFairnessPeriodDates(month, now).filter((date) => !excludedDates.has(date));
   const periodStatus = resolveShiftFairnessPeriodStatus(month, now);
 
   // periodStatus is threaded through explicitly -- a closed historical
@@ -71,14 +84,20 @@ export function buildShiftFairnessReadModel(
     periodStartDate: periodDates[0] ?? null,
     periodEndDate: periodDates[periodDates.length - 1] ?? null,
     periodStatus,
-    groups: [toGroupView(supervisorGroup, people, events), toGroupView(technicianGroup, people, events)],
+    groups: [
+      toGroupView(supervisorGroup, people, events, excludedDates),
+      toGroupView(technicianGroup, people, events, excludedDates),
+    ],
   };
 }
+
+const EMPTY_EXCLUDED_DATES: ReadonlySet<string> = new Set();
 
 function toGroupView(
   group: ShiftFairnessGroupResult,
   people: readonly Person[],
   events: readonly Event[],
+  excludedDates: ReadonlySet<string>,
 ): ShiftFairnessGroupView {
   const peopleById = new Map(people.map((person) => [person.id, person]));
 
@@ -105,7 +124,7 @@ function toGroupView(
     // A null target has no "expected value" to explain -- never computed for those rows.
     expectationFactors:
       personResult.target !== null && periodStartDate !== null && periodEndDate !== null
-        ? computeShiftExpectationFactors(events, personResult.personId, periodStartDate, periodEndDate)
+        ? computeShiftExpectationFactors(events, personResult.personId, periodStartDate, periodEndDate, excludedDates)
         : null,
   }));
 
