@@ -131,7 +131,7 @@ export function DutyFairnessCard({ view }: { view: DutyFairnessCardView }) {
 
       <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-1.5">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-2">
-          <span data-testid="metric-duty-weekend">
+          <span data-testid="metric-duty-weekend" title={view.weekendSuspendedNote ?? undefined}>
             סופ&quot;שים <span className="font-medium text-muted">{view.weekendLabel}</span>
           </span>
         </div>

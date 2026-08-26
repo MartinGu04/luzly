@@ -38,16 +38,20 @@ function emptyMembership(): EmergencyFairnessGroupMembership {
  * label appears in the same column (a defensive stop, in case the
  * sheet repeats headers vertically).
  *
- * ASSUMPTION FLAGGED FOR VERIFICATION: the real "גזירת נתונים" sheet's
- * exact layout was not available to verify this against a live sample.
- * This mirrors the "locate an exact header label, read data beneath
- * it" convention the regular workbook's own "טבלת צדק" side-table
- * parser (`fairness.ts`) uses. Never throws and never fabricates --
- * a label this cannot locate simply yields an empty group, and any
- * person who has real emergency assignments but ends up in no group
- * still gets a safe fallback presentation (see
- * `buildEmergencyFairnessReadModel.ts`), so a layout mismatch here
- * degrades gracefully rather than hiding anyone.
+ * VERIFIED against the real "גזירת נתונים" sheet layout: the four labels
+ * above are column headers, each with member names listed directly
+ * beneath it in that same column -- this mirrors the "locate an exact
+ * header label, read data beneath it" convention the regular workbook's
+ * own "טבלת צדק" side-table parser (`fairness.ts`) uses. Reading is
+ * scoped to the single column directly under each header, so any
+ * adjacent numeric COUNTIF total columns the real sheet carries are
+ * never touched by this parser -- it has no way to read them even by
+ * accident (group membership is genuinely all this module extracts).
+ * Never throws and never fabricates -- a label this cannot locate
+ * simply yields an empty group, and any person who has real emergency
+ * assignments but ends up in no group still gets a safe fallback
+ * presentation (see `buildEmergencyFairnessReadModel.ts`), so a future
+ * layout drift degrades gracefully rather than hiding anyone.
  */
 export function parseEmergencyFairnessGroups(sheet: RawSheet): EmergencyFairnessGroupMembership {
   const width = gridWidth(sheet.values);

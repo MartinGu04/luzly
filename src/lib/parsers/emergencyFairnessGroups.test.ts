@@ -41,4 +41,21 @@ describe("parseEmergencyFairnessGroups", () => {
     expect(result.membersByGroup['טבלת צדק - סדיר תקש"ל']).toEqual([]);
     expect(result.membersByGroup["טבלת צדק - מילואים"]).toEqual([]);
   });
+
+  it("real layout: numeric COUNTIF total columns sitting beside a group's name column are never consumed as membership -- group membership only", () => {
+    const result = parseEmergencyFairnessGroups(
+      sheet([
+        ['טבלת צדק - סדיר תקש"ל', "יום", "לילה", 'טבלת צדק - סדיר מ"א', "יום", "לילה"],
+        ["אליס בדיקה", "3", "2", "בוב בדיקה", "1", "4"],
+        ["איתן בדיקה", "0", "1", "", "", ""],
+      ]),
+    );
+
+    // Only the exact name-column beneath each header is read -- the
+    // adjacent numeric total columns are simply never scanned (this
+    // parser has no notion of "total" columns at all), so a real
+    // COUNTIF value can never leak into membership as a fake member name.
+    expect(result.membersByGroup['טבלת צדק - סדיר תקש"ל']).toEqual(["אליס בדיקה", "איתן בדיקה"]);
+    expect(result.membersByGroup['טבלת צדק - סדיר מ"א']).toEqual(["בוב בדיקה"]);
+  });
 });

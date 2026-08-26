@@ -23,6 +23,7 @@ function view(overrides: Partial<DutyFairnessCardView> = {}): DutyFairnessCardVi
     gapLabel: "-2.00",
     status: "below",
     weekendLabel: "2",
+    weekendSuspendedNote: null,
     exemptionBadges: [],
     hasTarget: true,
     progressRatio: 0.3625,
@@ -337,6 +338,24 @@ describe("DutyFairnessCard — weekend and exemptions still show, secondary row"
       </ul>,
     );
     expect(screen.getByText("🚫 מטבח")).toBeInTheDocument();
+  });
+
+  it("attaches the emergency-period suspension explanation to the weekend metric when set", () => {
+    render(
+      <ul>
+        <DutyFairnessCard view={view({ weekendLabel: "—", weekendSuspendedNote: "ספירת סופ\"שים מושהית בתקופה זו." })} />
+      </ul>,
+    );
+    expect(screen.getByTestId("metric-duty-weekend")).toHaveAttribute("title", 'ספירת סופ"שים מושהית בתקופה זו.');
+  });
+
+  it("carries no title explanation for an ordinary weekend count (no suspension)", () => {
+    render(
+      <ul>
+        <DutyFairnessCard view={view({ weekendLabel: "3", weekendSuspendedNote: null })} />
+      </ul>,
+    );
+    expect(screen.getByTestId("metric-duty-weekend")).not.toHaveAttribute("title");
   });
 });
 
