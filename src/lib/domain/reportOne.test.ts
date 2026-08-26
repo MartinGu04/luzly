@@ -278,6 +278,86 @@ describe("resolveRegularOrReserveStatus — additive duty statuses (the Martin b
   });
 });
 
+// --- Presence-implying duties: a bare "?" primary is synthesized to "נוכח" --
+
+describe("resolveRegularOrReserveStatus — presence-implying duties synthesize 'נוכח' when there is no other primary", () => {
+  it("1. guard-only -> 'נוכח, שמירה 1'", () => {
+    const events = [dutyEvent("guard", { slot: 1 })];
+    expect(resolveRegularOrReserveStatus(events, [])).toBe("נוכח, שמירה 1");
+  });
+
+  it("2. kitchen-only (daily_kitchen) -> 'נוכח, מטבח יומי'", () => {
+    const events = [dutyEvent("daily_kitchen")];
+    expect(resolveRegularOrReserveStatus(events, [])).toBe("נוכח, מטבח יומי");
+  });
+
+  it("2b. kitchen-only (full_kitchen) -> 'נוכח, מטבח מלא'", () => {
+    const events = [dutyEvent("full_kitchen")];
+    expect(resolveRegularOrReserveStatus(events, [])).toBe("נוכח, מטבח מלא");
+  });
+
+  it("2c. kitchen-only (weekend_kitchen) -> 'נוכח, מטבח סופ\"ש'", () => {
+    const events = [dutyEvent("weekend_kitchen")];
+    expect(resolveRegularOrReserveStatus(events, [])).toBe('נוכח, מטבח סופ"ש');
+  });
+
+  it('3. rasar-only -> \'נוכח, רס"ר\'', () => {
+    const events = [dutyEvent("rasar")];
+    expect(resolveRegularOrReserveStatus(events, [])).toBe('נוכח, רס"ר');
+  });
+
+  it("4. a non-presence-implying duty alone (כונן פינויים) stays '?, ...' -- never synthesized", () => {
+    const events = [dutyEvent("evacuation_on_call")];
+    expect(resolveRegularOrReserveStatus(events, [])).toBe("?, כונן פינויים");
+  });
+
+  it("4b. another non-presence-implying duty alone (עתודה) also stays '?, ...'", () => {
+    const events = [dutyEvent("reserve", { slot: 1 })];
+    expect(resolveRegularOrReserveStatus(events, [])).toBe("?, עתודה 1");
+  });
+
+  it("4c. an ambiguous-family duty (אוקסיד) also stays '?, ...' -- never guessed presence-implying", () => {
+    const events = [dutyEvent("oxid")];
+    expect(resolveRegularOrReserveStatus(events, [])).toBe("?, אוקסיד");
+  });
+
+  it("5. an existing real primary (day shift) is kept as-is, with the presence-implying duty simply appended -- never overwritten by synthesis", () => {
+    const events = [shiftEvent("technician", "day"), dutyEvent("rasar")];
+    expect(resolveRegularOrReserveStatus(events, [])).toBe('נוכח, טכנאי יום, רס"ר');
+  });
+
+  it("5b. after-night carryover + a presence-implying duty also keeps the real primary, duty simply appended", () => {
+    const prevDay = [shiftEvent("technician", "night", { date: "2026-08-25" })];
+    const today = [dutyEvent("guard", { slot: 3 })];
+    expect(resolveRegularOrReserveStatus(today, prevDay)).toBe("נוכח, אחרי לילה, שמירה 3");
+  });
+
+  it("6. a blocking absence (vacation) + a presence-implying duty (guard) is STILL a genuine unresolved conflict -- bare '?', never synthesized to 'נוכח'", () => {
+    const events = [absenceEvent("vacation"), dutyEvent("guard", { slot: 1 })];
+    expect(resolveRegularOrReserveStatus(events, [])).toBe(UNKNOWN_REPORT_ONE_STATUS);
+  });
+
+  it("6b. an ambiguous shift-wording conflict (two different shifts same day) + a presence-implying duty also stays a bare '?' primary -- the shift conflict is never silently resolved by the duty", () => {
+    const events = [shiftEvent("supervisor", "day"), shiftEvent("technician", "night"), dutyEvent("rasar")];
+    expect(resolveRegularOrReserveStatus(events, [])).toBe('?, רס"ר');
+  });
+
+  it("6c. a referral + shift conflict + a presence-implying duty also stays a bare '?' primary", () => {
+    const events = [absenceEvent("referral"), shiftEvent("supervisor", "night"), dutyEvent("rasar")];
+    expect(resolveRegularOrReserveStatus(events, [])).toBe('?, רס"ר');
+  });
+
+  it("7. multiple presence-implying duties with no other primary -> exactly one synthesized 'נוכח', all duties appended in stable canonical order", () => {
+    const events = [dutyEvent("rasar"), dutyEvent("guard", { slot: 2 }), dutyEvent("daily_kitchen")];
+    expect(resolveRegularOrReserveStatus(events, [])).toBe('נוכח, שמירה 2, מטבח יומי, רס"ר');
+  });
+
+  it("a mix of a presence-implying duty and a non-presence-implying duty, no other primary -> still synthesizes 'נוכח' (at least one presence-implying duty is enough)", () => {
+    const events = [dutyEvent("evacuation_on_call"), dutyEvent("guard", { slot: 1 })];
+    expect(resolveRegularOrReserveStatus(events, [])).toBe("נוכח, שמירה 1, כונן פינויים");
+  });
+});
+
 // --- 16-17. Reserve personnel ------------------------------------------------
 
 describe("buildReportOneDraft — reserve personnel (16, 17)", () => {

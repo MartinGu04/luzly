@@ -126,6 +126,7 @@ function shiftStatusWording(role: "supervisor" | "technician", period: "day" | "
 }
 
 const AFTER_NIGHT_STATUS = "נוכח, אחרי לילה";
+const PRESENT_STATUS = "נוכח";
 
 /**
  * Audit of every `EventCategory`/`AbsenceKind`/`DutyFamily` value this app's
@@ -160,6 +161,19 @@ const AFTER_NIGHT_STATUS = "נוכח, אחרי לילה";
  *   with a BLOCKING absence -- so a duty coexisting with vacation/abroad/
  *   medical/day_off is still a genuine unresolved conflict ("?", no duty
  *   text appended), not silently combined.
+ *
+ *   A SECOND exception (see `PRESENCE_IMPLYING_DUTY_FAMILIES` below): when
+ *   the primary itself is the bare unresolved "?" -- and ONLY the
+ *   genuinely-no-data flavor of "?" (no shift event at all today; the
+ *   blocking-absence-conflict and ambiguous-shift-wording flavors of "?"
+ *   are structurally excluded, see `resolveRegularOrReserveStatus`'s own
+ *   docs) -- a duty whose family INHERENTLY requires physically being on
+ *   site synthesizes `PRESENT_STATUS` ("נוכח") as the primary, since a
+ *   bare "?" next to e.g. "שמירה 1" was actively misleading: the duty
+ *   itself already proves the person is physically present. A duty that
+ *   does NOT inherently prove on-site presence (e.g. `evacuation_on_call`/
+ *   `reserve` -- both genuinely on-call/standby concepts, reachable but
+ *   not necessarily on site) leaves the bare "?" exactly as before.
  *
  * NEITHER (Report 1 never surfaces these -- not a person's own operational
  * presence fact):
@@ -199,6 +213,43 @@ const DUTY_FAMILY_ORDER: readonly DutyFamily[] = [
   "oxid",
   "callup",
 ];
+
+/**
+ * Audit of every `DutyFamily` for whether it INHERENTLY requires being
+ * physically on site -- deliberately NOT "every duty implies presence"
+ * (see `resolveRegularOrReserveStatus`'s own docs on why a bare "?" is
+ * synthesized into `PRESENT_STATUS` only for these):
+ *
+ * PRESENCE-IMPLYING (structurally cannot be performed off site):
+ * - `guard` (שמירה) -- a physical post.
+ * - `full_kitchen`/`daily_kitchen`/`weekend_kitchen` (מטבח) -- kitchen
+ *   duty is on-site food service work by definition.
+ * - `rasar` (רס"ר) -- an on-base equipment/quartermaster role.
+ *
+ * NOT presence-implying (on-call/standby concepts, or too ambiguous to
+ * assert on-site presence from the family alone -- left as bare "?" next
+ * to the duty text unless another authoritative primary already applies):
+ * - `evacuation_on_call` (כונן פינויים) -- "כונן" is Hebrew for on-call/
+ *   standby: reachable, not necessarily on site. This is also the exact
+ *   existing "נוכח, אחרי לילה" + "כונן פינויים" example this module's own
+ *   docs already use -- that combination works today because the primary
+ *   there comes from after-night carryover, never from this duty itself.
+ * - `reserve` (עתודה) -- a backup/standby pool duty, same on-call
+ *   reasoning as `evacuation_on_call`.
+ * - `oxid`/`callup` (אוקסיד/הקפצה) -- no clear, unambiguous on-site
+ *   signal from the family alone; never guessed.
+ */
+const PRESENCE_IMPLYING_DUTY_FAMILIES: ReadonlySet<DutyFamily> = new Set([
+  "guard",
+  "full_kitchen",
+  "daily_kitchen",
+  "weekend_kitchen",
+  "rasar",
+]);
+
+function isPresenceImplyingDuty(dutyFamily: DutyFamily): boolean {
+  return PRESENCE_IMPLYING_DUTY_FAMILIES.has(dutyFamily);
+}
 
 /** "שמירה 2" -- the duty family's Hebrew wording, with its slot appended only when the family actually has one. Deliberately duplicated from (never imported from) `lib/presentation/duty.ts`'s `dutyBlockTitle` -- this domain module never reaches into `lib/presentation` (see this repo's engineering rules on layer separation); the same duplication already exists between the parser's own duty phrase table and the presentation label table. */
 function dutyAddendumText(event: Event & { dutyFamily: DutyFamily }): string {
@@ -304,6 +355,21 @@ function resolvePrimaryStatus(
  * is the genuine blocking-absence-vs-assignment conflict above, so the
  * report keeps flagging that specific contradiction for manual review
  * rather than implying it was resolved.
+ *
+ * ONE further refinement to that "?" case: when the primary is the bare
+ * "?" for genuinely having no data at all today (no shift event today --
+ * `hasShiftEventToday` below -- since ANY shift event today means the "?"
+ * instead came from an unresolved SHIFT ambiguity, e.g. two conflicting
+ * shift wordings the same day, which must stay flagged exactly as before)
+ * and at least one of today's additive duties inherently requires being
+ * on site (`isPresenceImplyingDuty` -- guard/kitchen/rasar), the primary
+ * is synthesized to `PRESENT_STATUS` ("נוכח") instead of staying "?": the
+ * duty itself already proves the person is physically present, so "?,
+ * שמירה 1" was actively misleading. This can never fire for the blocking-
+ * absence-vs-assignment conflict above (that returns early, before this
+ * point) or the referral-vs-shift conflict (both have a shift event
+ * today, so `hasShiftEventToday` excludes them) -- every existing
+ * contradiction stays exactly as unresolved as it was.
  */
 export function resolveRegularOrReserveStatus(
   eventsToday: readonly Event[],
@@ -317,8 +383,18 @@ export function resolveRegularOrReserveStatus(
     return UNKNOWN_REPORT_ONE_STATUS;
   }
 
-  const primary = resolvePrimaryStatus(eventsToday, eventsPrevDay, blockingAbsencesToday, referralsToday);
+  let primary = resolvePrimaryStatus(eventsToday, eventsPrevDay, blockingAbsencesToday, referralsToday);
   const additiveDutyTexts = resolveAdditiveDutyTexts(eventsToday);
+
+  if (primary === UNKNOWN_REPORT_ONE_STATUS && additiveDutyTexts.length > 0) {
+    const hasShiftEventToday = eventsToday.some((event) => event.category === "shift");
+    const hasPresenceImplyingDutyToday = eventsToday.some(
+      (event) => isAdditiveDutyEvent(event) && isPresenceImplyingDuty(event.dutyFamily),
+    );
+    if (!hasShiftEventToday && hasPresenceImplyingDutyToday) {
+      primary = PRESENT_STATUS;
+    }
+  }
 
   if (additiveDutyTexts.length === 0) return primary;
   return [primary, ...additiveDutyTexts].join(", ");
