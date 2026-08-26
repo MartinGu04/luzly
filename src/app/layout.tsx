@@ -5,6 +5,7 @@ import { ThemeProvider } from "@/lib/theme/ThemeProvider";
 import { THEME_INIT_SCRIPT } from "@/lib/theme/themeScript";
 import { ServiceWorkerManager } from "@/components/pwa/ServiceWorkerManager";
 import { PwaInstallProvider } from "@/components/pwa/PwaInstallProvider";
+import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 
 const heebo = Heebo({
@@ -120,6 +121,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             <ServiceWorkerManager />
           </PwaInstallProvider>
         </ThemeProvider>
+        <Analytics />
       </body>
     </html>
   );

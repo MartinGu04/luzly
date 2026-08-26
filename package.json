@@ -15,6 +15,7 @@
     "@hebcal/core": "^6.9.2",
     "@supabase/ssr": "^0.12.4",
     "@supabase/supabase-js": "^2.112.3",
+    "@vercel/analytics": "^2.0.1",
     "client-only": "^0.0.1",
     "googleapis": "^174.0.1",
     "lucide-react": "^1.31.0",
