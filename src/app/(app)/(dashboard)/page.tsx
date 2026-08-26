@@ -2,10 +2,12 @@ import { Dashboard } from "@/components/dashboard/Dashboard";
 import { ConfigurationErrorState } from "@/components/dashboard/ConfigurationErrorState";
 import { EmergencyDashboard } from "@/components/dashboard/EmergencyDashboard";
 import { EmergencyUnavailableState } from "@/components/emergencyMode/EmergencyUnavailableState";
+import { PermanentManagerEmergencyHome } from "@/components/home/PermanentManagerEmergencyHome";
 import { PermanentManagerHome } from "@/components/home/PermanentManagerHome";
 import { getCalendarFeedForCurrentUser } from "@/lib/calendar/feedStore";
 import { isEligibleForOnboarding } from "@/lib/config/onboardingRollout";
 import { classifyPersonnelType } from "@/lib/domain/personnelType";
+import { loadManagerEmergencyOverview } from "@/lib/readModels/managerEmergencyOverview";
 import { getRequestPermanentManagerHome } from "@/lib/readModels/getRequestPermanentManagerHome";
 import { getRequestPersonalSchedule } from "@/lib/readModels/getRequestPersonalSchedule";
 import { getRequestDashboardVisitRecap } from "@/lib/readModels/getRequestRecentDashboardChanges";
@@ -95,6 +97,42 @@ export default async function DashboardPage() {
     return <EmergencyUnavailableState />;
   }
   if (result.status === "emergency") {
+    /**
+     * Spec section 13/14 -- a permanent (קבע) manager's Home is normally
+     * the department-wide operational snapshot (`PermanentManagerHome`),
+     * never their own personal shift card. The SAME distinction must hold
+     * during Emergency Mode: routing them to the generic per-person
+     * `EmergencyDashboard` (built for a regular/reserve person's own "מי
+     * איתי" view) would be the wrong surface for a manager, so this
+     * re-checks the exact same `classifyPersonnelType(...) === "permanent"
+     * && isManager` gate used below for the regular-mode branch and
+     * renders the desk-based department-wide staffing view instead
+     * (`loadManagerEmergencyOverview`, the SAME loader/perspective
+     * Manager Area's own Emergency Mode branch already uses). Any
+     * non-"ok" result from it falls back to the already-successfully-
+     * loaded personal `EmergencyDashboard` rather than a worse/error
+     * experience -- mirrors the identical "any non-ok falls back" pattern
+     * `getRequestPermanentManagerHome()` already uses below.
+     */
+    const isPermanentManagerDuringEmergency =
+      result.person.isManager && classifyPersonnelType(result.person.personnelType) === "permanent";
+    if (isPermanentManagerDuringEmergency) {
+      const managerEmergencyResult = await loadManagerEmergencyOverview(
+        { id: result.person.id, name: result.person.name },
+        null,
+      );
+      if (managerEmergencyResult.status === "ok") {
+        return (
+          <PermanentManagerEmergencyHome
+            personName={result.person.name}
+            localNow={managerEmergencyResult.model.localNow}
+            fetchedAt={managerEmergencyResult.model.fetchedAt}
+            everyoneShifts={managerEmergencyResult.model.everyoneShifts ?? []}
+            diagnosticsCount={managerEmergencyResult.model.diagnostics.length}
+          />
+        );
+      }
+    }
     return <EmergencyDashboard model={result.emergencyHome} />;
   }
   if (result.status !== "ok") {
