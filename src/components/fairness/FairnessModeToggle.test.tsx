@@ -39,6 +39,21 @@ describe("FairnessModeToggle", () => {
     render(<FairnessModeToggle active="shifts" />);
     expect(screen.queryByText("משולב")).toBeNull();
   });
+
+  it("never renders the emergency tab when emergencyAvailable is false/omitted", () => {
+    render(<FairnessModeToggle active="shifts" />);
+    expect(screen.queryByRole("tab", { name: "חירום" })).toBeNull();
+  });
+
+  it("renders the emergency tab with an explicit mode=emergency href when emergencyAvailable is true", () => {
+    render(<FairnessModeToggle active="shifts" emergencyAvailable />);
+    expect(screen.getByRole("tab", { name: "חירום" })).toHaveAttribute("href", "/fairness?mode=emergency");
+  });
+
+  it("marks the emergency tab selected when active", () => {
+    render(<FairnessModeToggle active="emergency" emergencyAvailable />);
+    expect(screen.getByRole("tab", { name: "חירום" })).toHaveAttribute("aria-selected", "true");
+  });
 });
 
 describe("FairnessModeToggle — pending navigation feedback", () => {

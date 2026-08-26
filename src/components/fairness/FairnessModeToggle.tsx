@@ -1,8 +1,10 @@
 import { TabLink } from "@/components/ui/TabLink";
-import { fairnessDutiesHref, fairnessShiftsHref, type FairnessMode } from "@/lib/presentation/fairnessUrl";
+import { fairnessDutiesHref, fairnessEmergencyHref, fairnessShiftsHref, type FairnessMode } from "@/lib/presentation/fairnessUrl";
 
 interface FairnessModeToggleProps {
   active: FairnessMode;
+  /** Renders the third "טבלת צדק חירום" tab only when the emergency workbook is actually configured/readable -- a deployment that has never touched Emergency Mode never sees a broken/empty tab. */
+  emergencyAvailable?: boolean;
 }
 
 const TAB_BASE =
@@ -32,7 +34,7 @@ const TAB_BASE =
  * `ManagerCategoryNav`'s identical tab idiom rather than reimplemented
  * here.
  */
-export function FairnessModeToggle({ active }: FairnessModeToggleProps) {
+export function FairnessModeToggle({ active, emergencyAvailable = false }: FairnessModeToggleProps) {
   return (
     <div role="tablist" aria-label="מצב תצוגה" className="flex items-stretch gap-1 rounded-full bg-overlay-soft p-1">
       <TabLink
@@ -49,6 +51,15 @@ export function FairnessModeToggle({ active }: FairnessModeToggleProps) {
       >
         תורנויות
       </TabLink>
+      {emergencyAvailable ? (
+        <TabLink
+          href={fairnessEmergencyHref()}
+          isActive={active === "emergency"}
+          className={`${TAB_BASE} ${active === "emergency" ? "bg-surface-1 text-primary" : "text-muted hover:text-foreground"}`}
+        >
+          חירום
+        </TabLink>
+      ) : null}
     </div>
   );
 }

@@ -1,11 +1,25 @@
 import { formatMonthParam, type CalendarMonthKey } from "@/lib/domain/calendarMonth";
 import type { FairnessPeriodKey } from "@/lib/domain/fairnessPeriod";
 
-export type FairnessMode = "shifts" | "duties";
+export type FairnessMode = "shifts" | "duties" | "emergency";
 
 /** Strict parse of `?mode=` -- anything else (including missing) falls back to `"shifts"`, the default mode, never a guess or a crash. */
 export function parseFairnessMode(raw: string | null | undefined): FairnessMode {
-  return raw === "duties" ? "duties" : "shifts";
+  if (raw === "duties") return "duties";
+  if (raw === "emergency") return "emergency";
+  return "shifts";
+}
+
+/**
+ * Builds a `/fairness` URL for the Emergency shift-fairness mode (spec
+ * section 16/17) -- `mode=emergency` is always explicit, same reasoning
+ * as Duty mode: it is never the resolved default, so a link into it
+ * must always say so. No month/period concept applies here (the model
+ * reflects the emergency workbook's full recorded history, not one
+ * calendar period), so this URL never carries either.
+ */
+export function fairnessEmergencyHref(): string {
+  return "/fairness?mode=emergency";
 }
 
 interface FairnessShiftsHrefParams {

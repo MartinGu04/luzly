@@ -29,6 +29,9 @@ import { groupShiftFairnessCardsByServiceType } from "@/lib/presentation/shiftFa
 import { isShiftFairnessRowVisible } from "@/lib/presentation/shiftFairnessVisibility";
 import { getRequestDutyFairness } from "@/lib/readModels/getRequestDutyFairness";
 import { getRequestShiftFairness } from "@/lib/readModels/getRequestShiftFairness";
+import { getRequestEmergencyFairness } from "@/lib/readModels/getRequestEmergencyFairness";
+import { EmergencyFairnessSection } from "@/components/fairness/EmergencyFairnessSection";
+import type { EmergencyFairnessReadModel } from "@/lib/readModels/emergencyFairnessTypes";
 import { getJerusalemLocalNow } from "@/lib/time/jerusalemClock";
 
 type SearchParamValue = string | string[] | undefined;
@@ -102,6 +105,13 @@ export default async function FairnessPage({ searchParams }: FairnessPageProps) 
     return renderDutyFairnessView(result.model, rawPersonId);
   }
 
+  if (mode === "emergency") {
+    const result = await getRequestEmergencyFairness();
+    if (result.status === "unavailable") return renderEmergencyFairnessUnavailable();
+    if (result.status !== "ok") return renderAuthFailure(result.status);
+    return renderEmergencyFairnessView(result.model);
+  }
+
   const result = await getRequestShiftFairness(firstParam(params.month) ?? null);
   if (result.status !== "ok") return renderAuthFailure(result.status);
   return renderShiftFairnessView(result.model, rawPersonId);
@@ -153,7 +163,7 @@ function renderShiftFairnessView(model: ShiftFairnessReadModel, rawPersonId: str
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <FairnessHeader />
-        <FairnessModeToggle active="shifts" />
+        <FairnessModeToggle active="shifts" emergencyAvailable />
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -214,7 +224,7 @@ function renderDutyFairnessView(model: DutyFairnessReadModel, rawPersonId: strin
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <FairnessHeader />
-        <FairnessModeToggle active="duties" />
+        <FairnessModeToggle active="duties" emergencyAvailable />
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -252,6 +262,43 @@ function renderDutyFairnessView(model: DutyFairnessReadModel, rawPersonId: strin
           />
         </FairnessDetailOverlay>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * Emergency shift fairness (spec section 16/17) -- deliberately its own
+ * simpler view, never sharing `ShiftFairnessRoleSection`/
+ * `ShiftFairnessCard`/`DutyFairnessCard`, since it has no expected-shift,
+ * weekend, or target concept at all -- only assignment counts grouped by
+ * `גזירת נתונים` membership.
+ */
+function renderEmergencyFairnessView(model: EmergencyFairnessReadModel): ReactNode {
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <FairnessHeader />
+        <FairnessModeToggle active="emergency" emergencyAvailable />
+      </div>
+
+      <DataFreshnessStatus fetchedAt={model.fetchedAt} />
+
+      <EmergencyFairnessSection model={model} />
+    </div>
+  );
+}
+
+/** The emergency workbook itself is not configured/readable -- a graceful, non-blocking state (never an auth-failure screen), since a deployment that has never touched Emergency Mode should still be able to view this tab without alarm. */
+function renderEmergencyFairnessUnavailable(): ReactNode {
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <FairnessHeader />
+        <FairnessModeToggle active="emergency" emergencyAvailable />
+      </div>
+      <Panel variant="compact" className="text-sm text-muted">
+        אין עדיין נתוני חירום זמינים.
+      </Panel>
     </div>
   );
 }
