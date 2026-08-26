@@ -11,12 +11,14 @@ function renderWithTheme(ui: ReactElement) {
 
 const getRequestPersonalSchedule = vi.fn();
 const getRequestSearchReadModel = vi.fn();
+const resolveOperationalMode = vi.fn();
 const redirect = vi.fn((path: string) => {
   throw new Error(`REDIRECT:${path}`);
 });
 
 vi.mock("@/lib/readModels/getRequestPersonalSchedule", () => ({ getRequestPersonalSchedule }));
 vi.mock("@/lib/readModels/getRequestSearchReadModel", () => ({ getRequestSearchReadModel }));
+vi.mock("@/lib/emergencyMode/state", () => ({ resolveOperationalMode }));
 vi.mock("next/navigation", () => ({
   redirect,
   usePathname: () => "/",
@@ -89,9 +91,13 @@ beforeEach(() => {
   redirect.mockClear();
   getRequestPersonalSchedule.mockReset();
   getRequestSearchReadModel.mockReset();
+  resolveOperationalMode.mockReset();
   // Most tests here don't exercise search at all -- default to "unavailable"
   // (no search trigger renders) so they don't each need a full SearchReadModel fixture.
   getRequestSearchReadModel.mockResolvedValue({ status: "configuration_error" });
+  // Most tests here aren't about Emergency Mode -- default to regular so
+  // they don't each need their own resolveOperationalMode fixture.
+  resolveOperationalMode.mockResolvedValue({ kind: "regular" });
 });
 
 afterEach(() => {
@@ -359,5 +365,88 @@ describe("(app) layout — avatarUrl (presentation-only Google account photo)", 
 
     expect(container.textContent).not.toContain("@");
     expect(container.innerHTML).not.toContain("user_metadata");
+  });
+});
+
+describe("(app) layout — global Emergency Mode banner (spec section 3)", () => {
+  it("is absent for every authenticated user while Emergency Mode is regular", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(okResult(profile()));
+    resolveOperationalMode.mockResolvedValue({ kind: "regular" });
+
+    const element = await ProtectedLayout({ children: <div>x</div> });
+    renderWithTheme(element);
+
+    expect(screen.queryByTestId("emergency-mode-banner")).toBeNull();
+  });
+
+  it("is present for every authenticated user while Emergency Mode is active", async () => {
+    getRequestPersonalSchedule.mockResolvedValue(okResult(profile()));
+    resolveOperationalMode.mockResolvedValue({
+      kind: "emergency",
+      period: {
+        id: "period1",
+        activatedAt: "2026-08-26T14:00:00.000Z",
+        activatedByUserId: "u1",
+        activatedByPersonId: "p1",
+        activatedByPersonName: "מנהל בדיקה",
+        startDate: "2026-08-26",
+        deactivatedAt: null,
+        deactivatedByUserId: null,
+        deactivatedByPersonId: null,
+        deactivatedByPersonName: null,
+        endDate: null,
+      },
+    });
+
+    const element = await ProtectedLayout({ children: <div>x</div> });
+    renderWithTheme(element);
+
+    expect(screen.getByTestId("emergency-mode-banner")).toBeInTheDocument();
+    expect(screen.getByText(/מצב חירום פעיל/)).toBeInTheDocument();
+  });
+
+  it("is present even for a configuration_error render (authorized user, broken schedule config)", async () => {
+    getRequestPersonalSchedule.mockResolvedValue({
+      status: "configuration_error",
+      message: "Missing shift start time configuration.",
+      person: profile(),
+    });
+    resolveOperationalMode.mockResolvedValue({
+      kind: "emergency",
+      period: {
+        id: "period1",
+        activatedAt: "2026-08-26T14:00:00.000Z",
+        activatedByUserId: "u1",
+        activatedByPersonId: "p1",
+        activatedByPersonName: "מנהל בדיקה",
+        startDate: "2026-08-26",
+        deactivatedAt: null,
+        deactivatedByUserId: null,
+        deactivatedByPersonId: null,
+        deactivatedByPersonName: null,
+        endDate: null,
+      },
+    });
+
+    const element = await ProtectedLayout({ children: <div>x</div> });
+    renderWithTheme(element);
+
+    expect(screen.getByTestId("emergency-mode-banner")).toBeInTheDocument();
+  });
+
+  it("starts resolveOperationalMode CONCURRENTLY with the other request loaders, not chained after them", async () => {
+    let resolvePersonal!: (value: unknown) => void;
+    getRequestPersonalSchedule.mockReturnValue(new Promise((resolve) => (resolvePersonal = resolve)));
+    getRequestSearchReadModel.mockResolvedValue({ status: "configuration_error" });
+
+    const pending = ProtectedLayout({ children: <div>x</div> });
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(resolveOperationalMode).toHaveBeenCalledTimes(1);
+
+    resolvePersonal(okResult(profile()));
+    await pending;
   });
 });

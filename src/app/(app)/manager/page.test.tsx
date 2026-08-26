@@ -27,6 +27,16 @@ vi.mock("@/components/ui/DataFreshnessStatus", () => ({
   DataFreshnessStatus: ({ fetchedAt }: { fetchedAt: string }) => <div data-testid="freshness">{fetchedAt}</div>,
 }));
 
+// The system-level Emergency Mode control is a self-contained async
+// Server Component (resolves its own OperationalMode via
+// `resolveOperationalMode()`) -- entirely orthogonal to what this file
+// tests (ManagerPage's regular read-model rendering), so it's stubbed
+// out rather than exercised here. See `EmergencyModeControlClient.test.tsx`
+// for its own behavior coverage.
+vi.mock("@/components/manager/EmergencyModeControl", () => ({
+  EmergencyModeControl: () => <div data-testid="emergency-mode-control-stub" />,
+}));
+
 const { default: ManagerPage } = await import("./page");
 
 afterEach(() => {

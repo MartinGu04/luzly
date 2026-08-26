@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { BottomNav } from "./BottomNav";
+import { EmergencyModeBanner } from "./EmergencyModeBanner";
 import { MobileIdentityBar } from "./MobileIdentityBar";
 import { ShellUtilityBar } from "./ShellUtilityBar";
 import { Sidebar } from "./Sidebar";
@@ -29,6 +30,14 @@ interface AppShellProps {
   initialClockTime?: string | null;
   /** Pre-formatted Hebrew weekday+date for `ShellUtilityBar`'s clock pill -- see there. `null`/omitted alongside `initialClockTime` for the same reason. */
   dateLabel?: string | null;
+  /**
+   * A safe, server-resolved projection of `OperationalMode` (never a
+   * client-only boolean the caller invents) -- `true` renders the global
+   * `EmergencyModeBanner` for every authenticated screen (spec section
+   * 3). See `src/app/(app)/layout.tsx`, which resolves this via
+   * `resolveOperationalMode()` alongside its other per-request reads.
+   */
+  emergencyModeActive?: boolean;
 }
 
 /**
@@ -65,7 +74,13 @@ interface AppShellProps {
  * pass: it also now carries the desktop notification bell (moved out of
  * `Sidebar`) and the two organizational logos, framing the clock/date.
  */
-export function AppShell({ children, person, initialClockTime = null, dateLabel = null }: AppShellProps) {
+export function AppShell({
+  children,
+  person,
+  initialClockTime = null,
+  dateLabel = null,
+  emergencyModeActive = false,
+}: AppShellProps) {
   return (
     <div className="flex min-h-dvh bg-background text-foreground">
       <Sidebar person={person} />
@@ -79,6 +94,7 @@ export function AppShell({ children, person, initialClockTime = null, dateLabel 
           />
         ) : null}
         <ShellUtilityBar initialClockTime={initialClockTime} dateLabel={dateLabel} userId={person?.userId} />
+        {emergencyModeActive ? <EmergencyModeBanner /> : null}
         <main className="flex-1 px-4 pt-6 pb-28 sm:px-6 lg:px-10 lg:pb-10">
           <div className="mx-auto w-full max-w-[1440px]">{children}</div>
         </main>

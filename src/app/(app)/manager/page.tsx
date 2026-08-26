@@ -8,6 +8,7 @@ import { ManagerCategoryNav } from "@/components/manager/ManagerCategoryNav";
 import { ManagerCommandBar } from "@/components/manager/ManagerCommandBar";
 import { ManagerCoverageSection } from "@/components/manager/ManagerCoverageSection";
 import { ManagerDutiesAbsencesSection } from "@/components/manager/ManagerDutiesAbsencesSection";
+import { EmergencyModeControl } from "@/components/manager/EmergencyModeControl";
 import { ManagerForbiddenState } from "@/components/manager/ManagerForbiddenState";
 import { ManagerHeader } from "@/components/manager/ManagerHeader";
 import { ManagerPotentialSection } from "@/components/manager/ManagerPotentialSection";
@@ -379,6 +380,7 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
     return (
       <div className="flex flex-col gap-6">
         <ManagerHeader />
+        <EmergencyModeControl />
         <ManagerCommandBar
           people={people}
           selectedPersonId={model.selectedPersonId}
@@ -447,6 +449,7 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
   return (
     <div className="flex flex-col gap-6">
       <ManagerHeader />
+      <EmergencyModeControl />
       <ManagerCategoryNav active={category} current={categoryNavCurrent} />
       <ManagerCommandBar
         people={people}
