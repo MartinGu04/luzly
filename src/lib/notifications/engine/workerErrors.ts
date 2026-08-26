@@ -23,6 +23,10 @@
 export type WorkerStage =
   | "fresh_workbook_read"
   | "recipient_resolution"
+  | "operational_mode"
+  | "operational_roster"
+  | "last_operational_mode"
+  | "last_operational_mode_write"
   | "change_detection"
   | "rule_config"
   | "reminders"

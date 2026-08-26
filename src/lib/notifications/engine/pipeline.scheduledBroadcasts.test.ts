@@ -27,6 +27,10 @@ const peekDueManagerScheduledBroadcastsCount = vi.fn();
 const loadNotificationRuleConfig = vi.fn();
 const findDueCustomWeeklyOccurrences = vi.fn();
 const runDueCustomWeeklyRuleDispatch = vi.fn();
+const resolveOperationalMode = vi.fn();
+const resolveOperationalRoster = vi.fn();
+const peekLastOperationalMode = vi.fn();
+const setLastOperationalMode = vi.fn();
 
 vi.mock("./freshRead", () => ({ fetchFreshWorkbookRead: (...args: unknown[]) => fetchFreshWorkbookRead(...args) }));
 vi.mock("./recipients", () => ({ resolveNotificationRecipients: (...args: unknown[]) => resolveNotificationRecipients(...args) }));
@@ -44,7 +48,11 @@ vi.mock("./recurringRuleDispatch", () => ({
 vi.mock("./store", () => ({
   peekDueJobsCount: (...args: unknown[]) => peekDueJobsCount(...args),
   peekDueManagerScheduledBroadcastsCount: (...args: unknown[]) => peekDueManagerScheduledBroadcastsCount(...args),
+  peekLastOperationalMode: (...args: unknown[]) => peekLastOperationalMode(...args),
+  setLastOperationalMode: (...args: unknown[]) => setLastOperationalMode(...args),
 }));
+vi.mock("@/lib/emergencyMode/state", () => ({ resolveOperationalMode: (...args: unknown[]) => resolveOperationalMode(...args) }));
+vi.mock("@/lib/readModels/operationalMode", () => ({ resolveOperationalRoster: (...args: unknown[]) => resolveOperationalRoster(...args) }));
 
 async function loadModule() {
   return import("./pipeline");
@@ -71,6 +79,10 @@ function setupHappyDefaults() {
     read: { people: PEOPLE, events: [], shiftSchedule: {} },
   });
   resolveNotificationRecipients.mockResolvedValue({ resolved: new Map(), unmappedCount: 0, ambiguousEmailCount: 0, noEmailCount: 0 });
+  resolveOperationalMode.mockResolvedValue({ kind: "regular" });
+  resolveOperationalRoster.mockResolvedValue({ mode: "regular" });
+  peekLastOperationalMode.mockResolvedValue("regular");
+  setLastOperationalMode.mockResolvedValue(undefined);
   runChangeDetection.mockResolvedValue({ baselineAction: "unchanged", semanticChangesDetected: 0, pendingChangesOpen: 0, jobsCreated: 0 });
   runReminders.mockResolvedValue(ZERO_REMINDERS_SUMMARY);
   loadNotificationRuleConfig.mockResolvedValue({ systemRules: new Map(), customWeeklyRules: [] });

@@ -1,5 +1,6 @@
 import "server-only";
-import type { DutyFamily, Event } from "@/lib/domain/event";
+import type { DutyFamily, Event, EventPeriod } from "@/lib/domain/event";
+import type { EmergencyAssignment } from "@/lib/domain/emergencyShift";
 import type { Person } from "@/lib/domain/types";
 import type { OperationalWeek } from "@/lib/domain/operationalWeek";
 import type { LocalNow } from "@/lib/domain/localNow";
@@ -71,6 +72,21 @@ export interface RemindersInput {
    * -- fail safe, never fall back to a hardcoded time.
    */
   ruleConfig: NotificationRuleConfig;
+  /**
+   * Which operational world is live right now (spec section 24/25).
+   * `"emergency"` switches `tomorrow_shift` to desk-based content
+   * (`emergencyAssignments`, never `events`) and suspends every regular-
+   * duty/logistics-coordination reminder entirely (`tomorrow_duty`,
+   * `almash_check_in`, every `*logistics_withdrawal*` reminder) -- their
+   * own `applyReminderJobs(..., [], ...)` call then naturally CANCELS
+   * any already-pending job for that category, since regular duties are
+   * suspended system-wide while Emergency Mode is active. Defaults to
+   * `"regular"` -- byte-for-byte unchanged behavior for any existing
+   * caller/test that predates this field.
+   */
+  operationalMode?: "regular" | "emergency";
+  /** Emergency Mode's own desk assignments -- consulted ONLY when `operationalMode === "emergency"`. Defaults to `[]`. */
+  emergencyAssignments?: readonly EmergencyAssignment[];
 }
 
 function formatMinuteAsClock(minute: number): string {
@@ -135,6 +151,21 @@ async function runTomorrowShiftReminders(input: RemindersInput): Promise<{ creat
   if (!rule?.enabled) return applyReminderJobs("tomorrow_shift", tomorrowDate, [], input.persist, rule);
 
   const scheduledFor = toIso(input.now.date, rule.localHour, rule.localMinute);
+
+  const validJobs =
+    input.operationalMode === "emergency"
+      ? buildTomorrowEmergencyShiftJobs(input, tomorrowDate, rule, scheduledFor)
+      : buildTomorrowRegularShiftJobs(input, tomorrowDate, rule, scheduledFor);
+
+  return applyReminderJobs("tomorrow_shift", tomorrowDate, validJobs, input.persist, rule);
+}
+
+function buildTomorrowRegularShiftJobs(
+  input: RemindersInput,
+  tomorrowDate: string,
+  rule: SystemRuleConfig,
+  scheduledFor: string,
+): NewNotificationJob[] {
   const tomorrowShiftEvents = input.events.filter(
     (event) => event.category === "shift" && event.date === tomorrowDate && !event.shadow,
   );
@@ -175,8 +206,61 @@ async function runTomorrowShiftReminders(input: RemindersInput): Promise<{ creat
       sourceRef: `shift:${event.personId}:${event.date}`,
     });
   }
+  return validJobs;
+}
 
-  return applyReminderJobs("tomorrow_shift", tomorrowDate, validJobs, input.persist, rule);
+/**
+ * Emergency Mode's own `tomorrow_shift` content (spec section 24) --
+ * SAME category/dedupe-key shape (`tomorrow_shift:${date}:${userId}:${period}`)
+ * as the regular reminder above, deliberately: `applyReminderJobs`'s own
+ * cancel-by-prefix sweep then transparently reconciles the switch in
+ * EITHER direction (entering emergency cancels any stale regular-shift
+ * reminder for someone no longer on a desk; returning to regular mode
+ * cancels any stale desk reminder), with no special-cased transition
+ * logic needed here. Desk assignments for the SAME person+date+period
+ * are combined into ONE job (mirrors `icsEmergencyItems.ts`'s own "one
+ * calendar item per person per shift" convention), never one job per
+ * desk cell.
+ */
+function buildTomorrowEmergencyShiftJobs(
+  input: RemindersInput,
+  tomorrowDate: string,
+  rule: SystemRuleConfig,
+  scheduledFor: string,
+): NewNotificationJob[] {
+  const desksByPersonPeriod = new Map<string, { personId: string; period: string; desks: string[] }>();
+  for (const assignment of input.emergencyAssignments ?? []) {
+    if (assignment.personId === null || assignment.date !== tomorrowDate) continue;
+    const key = `${assignment.personId} ${assignment.period}`;
+    const existing = desksByPersonPeriod.get(key);
+    if (existing) existing.desks.push(assignment.desk);
+    else desksByPersonPeriod.set(key, { personId: assignment.personId, period: assignment.period, desks: [assignment.desk] });
+  }
+
+  const validJobs: NewNotificationJob[] = [];
+  for (const { personId, period, desks } of desksByPersonPeriod.values()) {
+    if (!isSystemRulePersonAllowed(rule, personId)) continue;
+    const recipient = input.recipientResolution.resolved.get(personId);
+    if (!recipient) continue;
+
+    const label = periodLabel(period as EventPeriod);
+    const desksText = desks.join(", ");
+    const details = label ? `מחר משמרת ${label} שלך -- דסק ${desksText}` : `מחר המשמרת שלך -- דסק ${desksText}`;
+    const { title, body } = applySystemRuleCopy("tomorrow_shift", rule, { title: "🚨 המשמרת שלך מחר", body: details });
+
+    validJobs.push({
+      category: "tomorrow_shift",
+      recipientUserId: recipient.userId,
+      title,
+      body,
+      path: "/schedule",
+      tag: `tomorrow-shift-${tomorrowDate}-${recipient.userId}-${period}`,
+      dedupeKey: `tomorrow_shift:${tomorrowDate}:${recipient.userId}:${period}`,
+      scheduledFor,
+      sourceRef: `emergency_shift:${personId}:${tomorrowDate}`,
+    });
+  }
+  return validJobs;
 }
 
 // ---------------------------------------------------------------------------
@@ -189,6 +273,12 @@ async function runTomorrowDutyReminders(input: RemindersInput): Promise<{ create
 
   const rule = input.ruleConfig.systemRules.get("tomorrow_duty");
   if (!rule?.enabled) return applyReminderJobs("tomorrow_duty", tomorrowDate, [], input.persist, rule);
+  // Spec section 25 -- regular duties are suspended system-wide while
+  // Emergency Mode is active; an empty valid-jobs set here also CANCELS
+  // any already-pending tomorrow_duty job (`applyReminderJobs`'s own
+  // prefix sweep), so entering Emergency Mode silences these on the
+  // very next tick.
+  if (input.operationalMode === "emergency") return applyReminderJobs("tomorrow_duty", tomorrowDate, [], input.persist, rule);
 
   const scheduledFor = toIso(input.now.date, rule.localHour, rule.localMinute);
   const tomorrowDutyEvents = input.events.filter(
@@ -248,6 +338,13 @@ async function runTomorrowLogisticsWithdrawalReminders(
 
   const rule = input.ruleConfig.systemRules.get("tomorrow_logistics_withdrawal");
   if (!rule?.enabled) return applyReminderJobs("tomorrow_logistics_withdrawal", tomorrowDate, [], input.persist, rule);
+  // Spec section 25 -- logistics-withdrawal coordination reads regular
+  // shift/duty Events as "who's currently assigned"; during Emergency
+  // Mode that data must never be trusted as authoritative (fail closed),
+  // so this reminder is suspended entirely, same as `tomorrow_duty`.
+  if (input.operationalMode === "emergency") {
+    return applyReminderJobs("tomorrow_logistics_withdrawal", tomorrowDate, [], input.persist, rule);
+  }
 
   const scheduledFor = toIso(input.now.date, rule.localHour, rule.localMinute);
   const tomorrowLogisticsWithdrawalEvents = input.events.filter(
@@ -328,6 +425,13 @@ async function runTomorrowLogisticsWithdrawalSupervisorReminders(
   if (!rule?.enabled) {
     return applyReminderJobs("tomorrow_logistics_withdrawal_supervisor", tomorrowDate, [], input.persist, rule);
   }
+  // Spec section 25 -- `resolveRelevantSupervisors` reads regular shift
+  // Events as "who's currently on shift"; that must never be trusted
+  // during Emergency Mode (fail closed), so this reminder is suspended
+  // entirely.
+  if (input.operationalMode === "emergency") {
+    return applyReminderJobs("tomorrow_logistics_withdrawal_supervisor", tomorrowDate, [], input.persist, rule);
+  }
 
   const scheduledFor = toIso(input.now.date, rule.localHour, rule.localMinute);
   const assignees = findLogisticsWithdrawalAssignees(input.events, tomorrowDate);
@@ -400,6 +504,20 @@ async function runLogisticsWithdrawalNoonReminders(input: RemindersInput): Promi
   const assignedRule = input.ruleConfig.systemRules.get("logistics_withdrawal_noon_assigned");
   const supervisorRule = input.ruleConfig.systemRules.get("logistics_withdrawal_noon_supervisor");
   const teamRule = input.ruleConfig.systemRules.get("logistics_withdrawal_noon_team");
+
+  // Spec section 25 -- every branch below (assigned/supervisor/team)
+  // ultimately reads regular shift Events as "who's currently on shift"
+  // (`resolveRelevantSupervisors`/`resolveEligibleLogisticsTechnicians`),
+  // which must never be trusted during Emergency Mode (fail closed).
+  // Suspended entirely -- an empty valid-jobs set for each category also
+  // cancels any already-pending job via `applyReminderJobs`'s own prefix
+  // sweep.
+  if (input.operationalMode === "emergency") {
+    const assigned = await applyReminderJobs("logistics_withdrawal_noon_assigned", today, [], input.persist, assignedRule);
+    const supervisor = await applyReminderJobs("logistics_withdrawal_noon_supervisor", today, [], input.persist, supervisorRule);
+    const team = await applyReminderJobs("logistics_withdrawal_noon_team", today, [], input.persist, teamRule);
+    return { assigned, supervisor, team };
+  }
 
   const assignees = findLogisticsWithdrawalAssignees(input.events, today);
   const assignedPersonIds = new Set(assignees.map((assignee) => assignee.personId));
@@ -572,6 +690,9 @@ async function runAlmashCheckInReminders(input: RemindersInput): Promise<{ creat
 
   const rule = input.ruleConfig.systemRules.get("almash_check_in");
   if (!rule?.enabled) return applyReminderJobs("almash_check_in", today, [], input.persist, rule);
+  // Spec section 25 -- regular duties (guard/reserve/oxid check-ins
+  // included) are suspended system-wide while Emergency Mode is active.
+  if (input.operationalMode === "emergency") return applyReminderJobs("almash_check_in", today, [], input.persist, rule);
 
   const isSaturday = dayOfWeek(todayParsed) === 6;
   // Saturday always uses the real astronomical מוצ״ש instant -- protected

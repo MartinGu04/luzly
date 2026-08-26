@@ -1,16 +1,28 @@
 import "server-only";
+import type { EmergencyAssignment } from "@/lib/domain/emergencyShift";
 import { getOperationalWeek } from "@/lib/domain/operationalWeek";
+import { resolveOperationalMode } from "@/lib/emergencyMode/state";
+import { resolveOperationalRoster } from "@/lib/readModels/operationalMode";
 import { getJerusalemLocalNow } from "@/lib/time/jerusalemClock";
 import { fetchFreshWorkbookRead } from "./freshRead";
 import { resolveNotificationRecipients } from "./recipients";
-import { runChangeDetection } from "./changeDetection";
+import { runChangeDetection, type ChangeDetectionSummary } from "./changeDetection";
 import { findDueCustomWeeklyOccurrences, runDueCustomWeeklyRuleDispatch } from "./recurringRuleDispatch";
 import { runReminders, type RemindersSummary } from "./reminders";
 import { loadNotificationRuleConfig, type NotificationRuleConfig } from "./ruleConfig";
 import { runDueScheduledBroadcastDispatch } from "./scheduledBroadcast";
 import { runDelivery, type DeliverySummary } from "./delivery";
-import { peekDueJobsCount, peekDueManagerScheduledBroadcastsCount } from "./store";
+import { peekDueJobsCount, peekDueManagerScheduledBroadcastsCount, peekLastOperationalMode, setLastOperationalMode } from "./store";
 import { formatWorkerErrorLog, runStage, sanitizeWorkerError, WorkerStageError } from "./workerErrors";
+
+const SILENT_CHANGE_SUMMARY = (weekStart: string): ChangeDetectionSummary => ({
+  currentWeek: weekStart,
+  baselineAction: "unchanged",
+  semanticChangesDetected: 0,
+  pendingChangesOpen: 0,
+  settledChanges: 0,
+  jobsCreated: 0,
+});
 
 export type WorkerMode = "dry_run" | "send";
 
@@ -108,17 +120,72 @@ export async function runNotificationWorkerTick(mode: WorkerMode): Promise<Worke
   const recipientResolution = await runStage("recipient_resolution", () => resolveNotificationRecipients(people));
   const personNameById = new Map(people.map((person) => [person.id, person.name]));
 
-  const changeSummary = await runStage("change_detection", () =>
-    runChangeDetection({
-      events,
-      people,
-      shiftSchedule,
-      week,
-      persist,
-      recipientResolution,
-      personNameById,
-    }),
-  );
+  /**
+   * Emergency Mode (spec section 22/23) -- resolved via the SAME
+   * `resolveOperationalMode()`/`resolveOperationalRoster()` boundary
+   * every other emergency-aware surface uses, never a second concept of
+   * "which world is live". `emergencyAssignments` stays `[]` and
+   * `emergencyRosterAvailable` stays `false` whenever the emergency
+   * workbook itself can't be read (`roster.mode === "emergency_unavailable"`)
+   * -- change detection is then skipped ENTIRELY for this tick (see
+   * below) rather than treating an unreadable workbook as "every desk
+   * assignment vanished", which would fabricate a flood of false
+   * "cancelled" notifications for real data this tick simply couldn't
+   * see.
+   */
+  const operationalMode = await runStage("operational_mode", () => resolveOperationalMode());
+  let emergencyAssignments: readonly EmergencyAssignment[] = [];
+  let emergencyRosterAvailable = true;
+  if (operationalMode.kind === "emergency") {
+    const roster = await runStage("operational_roster", () => resolveOperationalRoster(people));
+    if (roster.mode === "emergency") {
+      emergencyAssignments = roster.assignments;
+    } else {
+      // `roster.mode === "emergency_unavailable"` -- the expected reason.
+      // `roster.mode === "regular"` would mean `resolveOperationalMode()`
+      // reported "emergency" moments earlier but `resolveOperationalRoster`
+      // now reports "regular" within the SAME tick -- structurally
+      // unreachable (both read the same request-scoped DB state), but
+      // handled the same fail-safe way rather than crashing the whole
+      // tick over an inconsistency this narrow.
+      emergencyRosterAvailable = false;
+    }
+  }
+
+  // Read-only either way (dry-run never writes it) -- this tick's own
+  // computed "did the operational mode flip since the last PERSISTED
+  // tick" signal, mirroring the week-rollover baseline's own
+  // read-vs-write split (`peekBaselineState` vs `advanceNotificationBaseline`).
+  const lastOperationalMode = await runStage("last_operational_mode", () => peekLastOperationalMode());
+  const operationalModeTransitioned = (lastOperationalMode ?? "regular") !== operationalMode.kind;
+
+  // While Emergency Mode is active but its own workbook can't be read,
+  // this tick has no reliable facts to diff either direction -- skip
+  // change detection entirely (never touch baseline/observed/pending
+  // state) rather than compute a false "everything changed" from an
+  // empty reading. The next tick tries again.
+  const changeDetectionRunnable = operationalMode.kind === "regular" || emergencyRosterAvailable;
+
+  const changeSummary = changeDetectionRunnable
+    ? await runStage("change_detection", () =>
+        runChangeDetection({
+          events,
+          people,
+          shiftSchedule,
+          week,
+          persist,
+          recipientResolution,
+          personNameById,
+          emergencyAssignments,
+          operationalMode: operationalMode.kind,
+          operationalModeTransitioned,
+        }),
+      )
+    : SILENT_CHANGE_SUMMARY(week.weekStart);
+
+  if (persist && changeDetectionRunnable) {
+    await runStage("last_operational_mode_write", () => setLastOperationalMode(operationalMode.kind));
+  }
 
   // Loaded ONCE per tick and passed into `runReminders` -- never queried
   // per reminder/person (see `ruleConfig.ts`'s own docstring). A failure
@@ -150,6 +217,8 @@ export async function runNotificationWorkerTick(mode: WorkerMode): Promise<Worke
         persist,
         recipientResolution,
         ruleConfig,
+        operationalMode: operationalMode.kind,
+        emergencyAssignments,
       }),
     );
   } catch (error) {

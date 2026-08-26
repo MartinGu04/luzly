@@ -1,9 +1,10 @@
 import "server-only";
 import type { Event } from "@/lib/domain/event";
+import type { EmergencyAssignment } from "@/lib/domain/emergencyShift";
 import type { Person } from "@/lib/domain/types";
 import type { ShiftSchedule } from "@/lib/domain/shiftSchedule";
 import type { OperationalWeek } from "@/lib/domain/operationalWeek";
-import { computeSemanticFacts } from "./semanticFacts";
+import { computeEmergencySemanticFacts, computeSemanticFacts } from "./semanticFacts";
 import { diffSemanticFacts, type FactChange } from "./diffFacts";
 import { buildSettledChangeCopy } from "./copy";
 import { filterManagerRecipients, type RecipientResolution, type ResolvedRecipient } from "./recipients";
@@ -40,6 +41,27 @@ export interface ChangeDetectionInput {
   persist: boolean;
   recipientResolution: RecipientResolution;
   personNameById: ReadonlyMap<string, string>;
+  /**
+   * Emergency Mode's own desk assignments (spec section 23) -- consulted
+   * ONLY when `operationalMode.kind === "emergency"`, in place of
+   * `events`, to compute "emergency_shift"/"emergency_team" facts
+   * instead of the regular "shift"/"team"/"duty"/"coverage" ones. Empty/
+   * ignored in regular mode. Defaults to `[]` -- a safe no-op for any
+   * existing caller/test that predates this field.
+   */
+  emergencyAssignments?: readonly EmergencyAssignment[];
+  /** Defaults to `"regular"` -- byte-for-byte unchanged behavior for any existing caller/test that predates this field. */
+  operationalMode?: "regular" | "emergency";
+  /**
+   * `true` exactly on the tick where Emergency Mode was just entered OR
+   * just exited (spec section 22) -- forces the SAME silent "clear +
+   * reseed, no diff, no notify" treatment week-rollover already gets, so
+   * neither transition direction floods change notifications for facts
+   * that were never meant to be diffed as regular operational truth
+   * (every regular fact "vanishing" on entry, or "reappearing" on exit,
+   * would otherwise look like a mass settled change). Defaults to `false`.
+   */
+  operationalModeTransitioned?: boolean;
 }
 
 const CATEGORY_TO_JOB_CATEGORY: Record<string, string> = {
@@ -47,6 +69,8 @@ const CATEGORY_TO_JOB_CATEGORY: Record<string, string> = {
   team: "team_change",
   duty: "duty_change",
   coverage: "coverage_gap",
+  emergency_shift: "emergency_shift_change",
+  emergency_team: "emergency_team_change",
 };
 
 const SILENT_SUMMARY_BASE = {
@@ -67,11 +91,41 @@ const SILENT_SUMMARY_BASE = {
  * baseline/observed/pending state and never creating a job.
  */
 export async function runChangeDetection(input: ChangeDetectionInput): Promise<ChangeDetectionSummary> {
-  const { week, persist } = input;
-  const weekEvents = input.events.filter((event) => week.dates.includes(event.date));
-  const freshFacts = computeSemanticFacts(weekEvents, input.shiftSchedule, week);
+  const {
+    week,
+    persist,
+    operationalMode = "regular",
+    operationalModeTransitioned = false,
+    emergencyAssignments = [],
+  } = input;
 
-  const { action: baselineAction, previousWeekStart } = await resolveBaselineTransition(week.weekStart, persist);
+  // Spec section 23 -- while Emergency Mode is active, regular shift/
+  // team/duty/coverage facts are never computed at all (regular
+  // operations are suspended); "emergency_shift"/"emergency_team" facts
+  // are computed from desk assignments instead. Both share the exact
+  // SAME diff/debounce/settle machinery below, which operates on the
+  // generic `Map<string, SemanticFact>` shape regardless of source.
+  const freshFacts =
+    operationalMode === "emergency"
+      ? computeEmergencySemanticFacts(emergencyAssignments.filter((assignment) => week.dates.includes(assignment.date)))
+      : computeSemanticFacts(
+          input.events.filter((event) => week.dates.includes(event.date)),
+          input.shiftSchedule,
+          week,
+        );
+
+  const { action: rawBaselineAction, previousWeekStart: rawPreviousWeekStart } = await resolveBaselineTransition(
+    week.weekStart,
+    persist,
+  );
+
+  // A mode transition forces the SAME silent treatment as a week
+  // rollover (see `ChangeDetectionInput.operationalModeTransitioned`'s
+  // own docs) -- but the state to clear is THIS week's own (still
+  // current) observed/pending rows, never a different week's.
+  const baselineAction =
+    operationalModeTransitioned && rawBaselineAction === "unchanged" ? "rolled_over" : rawBaselineAction;
+  const previousWeekStart = rawBaselineAction === "rolled_over" ? rawPreviousWeekStart : week.weekStart;
 
   if (baselineAction === "initialized") {
     if (persist) await seedObservedFacts(week.weekStart, freshFacts);
@@ -80,9 +134,11 @@ export async function runChangeDetection(input: ChangeDetectionInput): Promise<C
 
   if (baselineAction === "rolled_over") {
     if (persist) {
-      // The previous week's stale state must never leak into the new
-      // week's diff base, and must never itself generate change
-      // notifications just because the week rolled over (spec section 9).
+      // The previous week's (or, on a mode transition, THIS week's own
+      // pre-transition) stale state must never leak into the new diff
+      // base, and must never itself generate change notifications just
+      // because the week rolled over or the operational mode flipped
+      // (spec section 9/22).
       if (previousWeekStart) await clearWeekState(previousWeekStart);
       await seedObservedFacts(week.weekStart, freshFacts);
     }

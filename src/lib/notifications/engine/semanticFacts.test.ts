@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { Event } from "@/lib/domain/event";
+import type { EmergencyAssignment } from "@/lib/domain/emergencyShift";
 import { buildShiftSchedule } from "@/lib/domain/shiftSchedule";
 import { getOperationalWeek } from "@/lib/domain/operationalWeek";
 import type { LocalNow } from "@/lib/domain/localNow";
-import { computeSemanticFacts } from "./semanticFacts";
+import { computeEmergencySemanticFacts, computeSemanticFacts } from "./semanticFacts";
 
 const schedule = buildShiftSchedule("07:00");
 const week = getOperationalWeek({ date: "2026-08-19", minuteOfDay: 0 } as LocalNow);
@@ -149,5 +150,72 @@ describe("computeSemanticFacts -- current week restriction", () => {
     const events = [event({ personId: "p1", date: "2026-09-01", category: "shift", period: "day" })];
     const facts = computeSemanticFacts(events, schedule, week);
     expect(facts.has("shift:p1:2026-09-01")).toBe(true);
+  });
+});
+
+function emergencyAssignment(overrides: Partial<EmergencyAssignment> & Pick<EmergencyAssignment, "personId" | "date" | "period" | "desk">): EmergencyAssignment {
+  return {
+    personName: overrides.personId ?? "unknown",
+    sourceCell: "C2",
+    ...overrides,
+  };
+}
+
+describe("computeEmergencySemanticFacts -- emergency_shift facts", () => {
+  it("produces one emergency_shift fact per (person, date) with the assigned desk(s)", () => {
+    const facts = computeEmergencySemanticFacts([
+      emergencyAssignment({ personId: "p1", date: "2026-08-18", period: "day", desk: "הוגוורט" }),
+    ]);
+    expect(facts.get("emergency_shift:p1:2026-08-18")?.value).toEqual({
+      entries: [{ period: "day", desk: "הוגוורט" }],
+    });
+  });
+
+  it("combines multiple desk cells for the SAME person+date+period into one fact's entries", () => {
+    const facts = computeEmergencySemanticFacts([
+      emergencyAssignment({ personId: "p1", date: "2026-08-18", period: "day", desk: "הוגוורט" }),
+      emergencyAssignment({ personId: "p1", date: "2026-08-18", period: "day", desk: "תיעוד" }),
+    ]);
+    expect(facts.get("emergency_shift:p1:2026-08-18")?.value).toEqual({
+      entries: [
+        { period: "day", desk: "הוגוורט" },
+        { period: "day", desk: "תיעוד" },
+      ],
+    });
+  });
+
+  it("never creates a fact for an unresolved assignment (personId null)", () => {
+    const facts = computeEmergencySemanticFacts([
+      emergencyAssignment({ personId: null, date: "2026-08-18", period: "day", desk: "הוגוורט", personName: "לא ידוע" }),
+    ]);
+    expect(facts.size).toBe(0);
+  });
+});
+
+describe("computeEmergencySemanticFacts -- emergency_team facts", () => {
+  it("lists every OTHER resolved person on the same date+period, excluding the viewer themselves", () => {
+    const facts = computeEmergencySemanticFacts([
+      emergencyAssignment({ personId: "p1", date: "2026-08-18", period: "day", desk: "הוגוורט" }),
+      emergencyAssignment({ personId: "p2", date: "2026-08-18", period: "day", desk: "תיעוד" }),
+    ]);
+    expect(facts.get("emergency_team:p1:2026-08-18:day")?.value).toEqual({ colleagues: ["p2"] });
+    expect(facts.get("emergency_team:p2:2026-08-18:day")?.value).toEqual({ colleagues: ["p1"] });
+  });
+
+  it("an unresolved colleague (personId null) never appears in another person's colleague list", () => {
+    const facts = computeEmergencySemanticFacts([
+      emergencyAssignment({ personId: "p1", date: "2026-08-18", period: "day", desk: "הוגוורט" }),
+      emergencyAssignment({ personId: null, date: "2026-08-18", period: "day", desk: "תיעוד", personName: "לא ידוע" }),
+    ]);
+    expect(facts.get("emergency_team:p1:2026-08-18:day")?.value).toEqual({ colleagues: [] });
+  });
+
+  it("multiple desks for the same person never duplicate them in a colleague's list", () => {
+    const facts = computeEmergencySemanticFacts([
+      emergencyAssignment({ personId: "p1", date: "2026-08-18", period: "day", desk: "הוגוורט" }),
+      emergencyAssignment({ personId: "p2", date: "2026-08-18", period: "day", desk: "תיעוד" }),
+      emergencyAssignment({ personId: "p2", date: "2026-08-18", period: "day", desk: 'ס"מ' }),
+    ]);
+    expect(facts.get("emergency_team:p1:2026-08-18:day")?.value).toEqual({ colleagues: ["p2"] });
   });
 });

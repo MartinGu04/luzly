@@ -63,6 +63,41 @@ export async function peekBaselineState(): Promise<BaselineStateSnapshot> {
   return { initialized: data?.initialized ?? false, currentWeekStart: data?.current_week_start ?? null };
 }
 
+/**
+ * The last operational world (`"regular"` | `"emergency"`) a persisted
+ * tick observed -- the mode-transition counterpart to
+ * `current_week_start`'s week-rollover tracking (spec section 22). `null`
+ * only when the baseline row itself doesn't exist yet (pre-first-tick) --
+ * treated by the caller exactly like the un-initialized-baseline case,
+ * never guessed.
+ */
+export async function peekLastOperationalMode(): Promise<"regular" | "emergency" | null> {
+  const supabase = getNotificationServiceClient();
+  const { data, error } = await supabase
+    .from("notification_baseline_state")
+    .select("last_operational_mode")
+    .eq("id", 1)
+    .maybeSingle<{ last_operational_mode: "regular" | "emergency" }>();
+  if (error) throw error;
+  return data?.last_operational_mode ?? null;
+}
+
+/**
+ * Records this tick's operational mode as the new "last observed" value.
+ * A PLAIN update, deliberately NOT routed through `advance_notification_baseline`
+ * -- see the migration's own doc comment for why this flag doesn't need
+ * that RPC's row-lock/concurrency guarantee. Never called in dry-run mode
+ * (mirrors every other WRITE in this file).
+ */
+export async function setLastOperationalMode(mode: "regular" | "emergency"): Promise<void> {
+  const supabase = getNotificationServiceClient();
+  const { error } = await supabase
+    .from("notification_baseline_state")
+    .update({ last_operational_mode: mode })
+    .eq("id", 1);
+  if (error) throw error;
+}
+
 // ---------------------------------------------------------------------------
 // Observed facts (last settled truth for the current week)
 // ---------------------------------------------------------------------------

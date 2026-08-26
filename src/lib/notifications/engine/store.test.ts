@@ -1391,3 +1391,52 @@ describe("getManagerBroadcastDeliveryTiming", () => {
     expect(calls.deliveriesQueries).toBe(1);
   });
 });
+
+describe("peekLastOperationalMode / setLastOperationalMode -- Emergency Mode baseline tracking (spec section 22)", () => {
+  function makeBaselineStateFakeSupabase(initial: { last_operational_mode: string } | null) {
+    let row = initial;
+    const updateCalls: Record<string, unknown>[] = [];
+    const client = {
+      from: (table: string) => {
+        if (table !== "notification_baseline_state") throw new Error(`unexpected table ${table}`);
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: () => Promise.resolve({ data: row, error: null }),
+            }),
+          }),
+          update: (patch: Record<string, unknown>) => ({
+            eq: () => {
+              updateCalls.push(patch);
+              row = { last_operational_mode: patch.last_operational_mode as string };
+              return Promise.resolve({ error: null });
+            },
+          }),
+        };
+      },
+    };
+    return { client, updateCalls, getRow: () => row };
+  }
+
+  it("peekLastOperationalMode reads the stored value", async () => {
+    const { client } = makeBaselineStateFakeSupabase({ last_operational_mode: "emergency" });
+    const { peekLastOperationalMode } = await loadModule(client);
+    expect(await peekLastOperationalMode()).toBe("emergency");
+  });
+
+  it("peekLastOperationalMode returns null when the row doesn't exist yet (pre-first-tick), never a guessed default", async () => {
+    const { client } = makeBaselineStateFakeSupabase(null);
+    const { peekLastOperationalMode } = await loadModule(client);
+    expect(await peekLastOperationalMode()).toBeNull();
+  });
+
+  it("setLastOperationalMode writes the new value via a plain update, not the atomic baseline RPC", async () => {
+    const { client, updateCalls, getRow } = makeBaselineStateFakeSupabase({ last_operational_mode: "regular" });
+    const { setLastOperationalMode } = await loadModule(client);
+
+    await setLastOperationalMode("emergency");
+
+    expect(updateCalls).toEqual([{ last_operational_mode: "emergency" }]);
+    expect(getRow()).toEqual({ last_operational_mode: "emergency" });
+  });
+});
