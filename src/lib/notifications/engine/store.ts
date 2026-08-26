@@ -64,36 +64,43 @@ export async function peekBaselineState(): Promise<BaselineStateSnapshot> {
 }
 
 /**
- * The last operational world (`"regular"` | `"emergency"`) a persisted
- * tick observed -- the mode-transition counterpart to
- * `current_week_start`'s week-rollover tracking (spec section 22). `null`
- * only when the baseline row itself doesn't exist yet (pre-first-tick) --
- * treated by the caller exactly like the un-initialized-baseline case,
- * never guessed.
+ * The last operational GENERATION (`"regular"` or
+ * `` `emergency:${periodId}` ``, never the bare word `"emergency"`) a
+ * persisted tick observed -- the transition-tracking counterpart to
+ * `current_week_start`'s week-rollover tracking (spec section 22). A full
+ * generation identity, not merely a regular/emergency KIND, so that two
+ * DIFFERENT Emergency Mode activations (period A, then later, unrelated
+ * period B) are distinguishable even though both share `kind: "emergency"`
+ * -- see `resolveOperationalGeneration` (`operationalGeneration.ts`) for
+ * where this string is derived, and the migration's own doc comment for
+ * why comparing bare kind alone is unsafe. `null` only when the baseline
+ * row itself doesn't exist yet (pre-first-tick) -- treated by the caller
+ * exactly like the un-initialized-baseline case, never guessed.
  */
-export async function peekLastOperationalMode(): Promise<"regular" | "emergency" | null> {
+export async function peekLastOperationalGeneration(): Promise<string | null> {
   const supabase = getNotificationServiceClient();
   const { data, error } = await supabase
     .from("notification_baseline_state")
-    .select("last_operational_mode")
+    .select("last_operational_generation")
     .eq("id", 1)
-    .maybeSingle<{ last_operational_mode: "regular" | "emergency" }>();
+    .maybeSingle<{ last_operational_generation: string }>();
   if (error) throw error;
-  return data?.last_operational_mode ?? null;
+  return data?.last_operational_generation ?? null;
 }
 
 /**
- * Records this tick's operational mode as the new "last observed" value.
- * A PLAIN update, deliberately NOT routed through `advance_notification_baseline`
- * -- see the migration's own doc comment for why this flag doesn't need
- * that RPC's row-lock/concurrency guarantee. Never called in dry-run mode
- * (mirrors every other WRITE in this file).
+ * Records this tick's operational generation as the new "last observed"
+ * value. A PLAIN update, deliberately NOT routed through
+ * `advance_notification_baseline` -- see the migration's own doc comment
+ * for why this column doesn't need that RPC's row-lock/concurrency
+ * guarantee. Never called in dry-run mode (mirrors every other WRITE in
+ * this file).
  */
-export async function setLastOperationalMode(mode: "regular" | "emergency"): Promise<void> {
+export async function setLastOperationalGeneration(generation: string): Promise<void> {
   const supabase = getNotificationServiceClient();
   const { error } = await supabase
     .from("notification_baseline_state")
-    .update({ last_operational_mode: mode })
+    .update({ last_operational_generation: generation })
     .eq("id", 1);
   if (error) throw error;
 }

@@ -415,7 +415,7 @@ describe("runChangeDetection -- Emergency Mode (spec section 22/23)", () => {
     expect(changes.some((change) => change.category.startsWith("emergency"))).toBe(false);
   });
 
-  it("operationalModeTransitioned forces the SAME silent clear+reseed treatment as a week rollover -- no diff, no notification, even though the baseline RPC itself reports 'unchanged'", async () => {
+  it("operationalGenerationTransitioned forces the SAME silent clear+reseed treatment as a week rollover -- no diff, no notification, even though the baseline RPC itself reports 'unchanged'", async () => {
     store.advanceNotificationBaseline.mockResolvedValue({ action: "unchanged", previousWeekStart: week.weekStart });
     const { runChangeDetection } = await loadModule();
 
@@ -427,21 +427,21 @@ describe("runChangeDetection -- Emergency Mode (spec section 22/23)", () => {
       persist: true,
       recipientResolution: emptyResolution(),
       personNameById: new Map(),
-      operationalModeTransitioned: true,
+      operationalGenerationTransitioned: true,
     });
 
     expect(summary.baselineAction).toBe("rolled_over");
     expect(summary.semanticChangesDetected).toBe(0);
     expect(summary.jobsCreated).toBe(0);
     // Clears THIS week's own state (never a different week's -- there was
-    // no real week rollover here, only a mode flip).
+    // no real week rollover here, only a generation change).
     expect(store.clearWeekState).toHaveBeenCalledWith(week.weekStart);
     expect(store.seedObservedFacts).toHaveBeenCalledTimes(1);
     expect(store.getObservedFacts).not.toHaveBeenCalled();
     expect(store.insertNotificationJobIfAbsent).not.toHaveBeenCalled();
   });
 
-  it("a mode transition happening on the SAME tick as a genuine week rollover still only clears/reseeds once, using the real previous week", async () => {
+  it("a generation transition happening on the SAME tick as a genuine week rollover still only clears/reseeds once, using the real previous week", async () => {
     store.advanceNotificationBaseline.mockResolvedValue({ action: "rolled_over", previousWeekStart: "2026-08-09" });
     const { runChangeDetection } = await loadModule();
 
@@ -453,14 +453,14 @@ describe("runChangeDetection -- Emergency Mode (spec section 22/23)", () => {
       persist: true,
       recipientResolution: emptyResolution(),
       personNameById: new Map(),
-      operationalModeTransitioned: true,
+      operationalGenerationTransitioned: true,
     });
 
     expect(store.clearWeekState).toHaveBeenCalledWith("2026-08-09");
     expect(store.clearWeekState).toHaveBeenCalledTimes(1);
   });
 
-  it("operationalModeTransitioned=false (the default) never forces a silent reset on an ordinary unchanged tick", async () => {
+  it("operationalGenerationTransitioned=false (the default) never forces a silent reset on an ordinary unchanged tick", async () => {
     store.advanceNotificationBaseline.mockResolvedValue({ action: "unchanged", previousWeekStart: week.weekStart });
     store.getObservedFacts.mockResolvedValue(new Map());
     const { runChangeDetection } = await loadModule();

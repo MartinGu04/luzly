@@ -4,10 +4,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
  * Regression guard for the main worker tick's Emergency Mode wiring
  * (spec section 22) -- resolving the operational mode, deciding whether
  * change detection can run this tick (skipped entirely when the
- * emergency workbook itself is unreadable), computing the mode-
- * transition flag, and persisting the new "last observed mode" only in
- * `persist` mode. Mirrors `pipeline.scheduledBroadcasts.test.ts`'s own
- * mocking shape.
+ * emergency workbook itself is unreadable), computing the operational-
+ * GENERATION transition flag (not merely a regular/emergency kind flip --
+ * see `operationalGeneration.ts`'s own docs for why two DIFFERENT
+ * Emergency Mode sessions must also be distinguished), and persisting the
+ * new "last observed generation" only in `persist` mode. Mirrors
+ * `pipeline.scheduledBroadcasts.test.ts`'s own mocking shape.
  */
 
 const fetchFreshWorkbookRead = vi.fn();
@@ -23,8 +25,8 @@ const findDueCustomWeeklyOccurrences = vi.fn();
 const runDueCustomWeeklyRuleDispatch = vi.fn();
 const resolveOperationalMode = vi.fn();
 const resolveOperationalRoster = vi.fn();
-const peekLastOperationalMode = vi.fn();
-const setLastOperationalMode = vi.fn();
+const peekLastOperationalGeneration = vi.fn();
+const setLastOperationalGeneration = vi.fn();
 
 vi.mock("./freshRead", () => ({ fetchFreshWorkbookRead: (...args: unknown[]) => fetchFreshWorkbookRead(...args) }));
 vi.mock("./recipients", () => ({ resolveNotificationRecipients: (...args: unknown[]) => resolveNotificationRecipients(...args) }));
@@ -42,8 +44,8 @@ vi.mock("./recurringRuleDispatch", () => ({
 vi.mock("./store", () => ({
   peekDueJobsCount: (...args: unknown[]) => peekDueJobsCount(...args),
   peekDueManagerScheduledBroadcastsCount: (...args: unknown[]) => peekDueManagerScheduledBroadcastsCount(...args),
-  peekLastOperationalMode: (...args: unknown[]) => peekLastOperationalMode(...args),
-  setLastOperationalMode: (...args: unknown[]) => setLastOperationalMode(...args),
+  peekLastOperationalGeneration: (...args: unknown[]) => peekLastOperationalGeneration(...args),
+  setLastOperationalGeneration: (...args: unknown[]) => setLastOperationalGeneration(...args),
 }));
 vi.mock("@/lib/emergencyMode/state", () => ({ resolveOperationalMode: (...args: unknown[]) => resolveOperationalMode(...args) }));
 vi.mock("@/lib/readModels/operationalMode", () => ({ resolveOperationalRoster: (...args: unknown[]) => resolveOperationalRoster(...args) }));
@@ -82,8 +84,8 @@ function setupHappyDefaults() {
   resolveNotificationRecipients.mockResolvedValue({ resolved: new Map(), unmappedCount: 0, ambiguousEmailCount: 0, noEmailCount: 0 });
   resolveOperationalMode.mockResolvedValue({ kind: "regular" });
   resolveOperationalRoster.mockResolvedValue({ mode: "regular" });
-  peekLastOperationalMode.mockResolvedValue("regular");
-  setLastOperationalMode.mockResolvedValue(undefined);
+  peekLastOperationalGeneration.mockResolvedValue("regular");
+  setLastOperationalGeneration.mockResolvedValue(undefined);
   runChangeDetection.mockResolvedValue(ZERO_CHANGE_SUMMARY);
   runReminders.mockResolvedValue(ZERO_REMINDERS_SUMMARY);
   loadNotificationRuleConfig.mockResolvedValue({ systemRules: new Map(), customWeeklyRules: [] });
@@ -144,7 +146,7 @@ describe("runNotificationWorkerTick -- Emergency Mode wiring (spec section 22)",
     const result = await runNotificationWorkerTick("send");
 
     expect(runChangeDetection).not.toHaveBeenCalled();
-    expect(setLastOperationalMode).not.toHaveBeenCalled();
+    expect(setLastOperationalGeneration).not.toHaveBeenCalled();
     expect(result.status).toBe("ok");
     if (result.status === "ok") {
       expect(result.summary.semanticChangesDetected).toBe(0);
@@ -152,60 +154,102 @@ describe("runNotificationWorkerTick -- Emergency Mode wiring (spec section 22)",
     }
   });
 
-  it("computes operationalModeTransitioned=true and passes it through when the last observed mode differs from this tick's", async () => {
+  it("computes operationalGenerationTransitioned=true and passes it through when the last observed generation differs from this tick's", async () => {
     setupHappyDefaults();
-    peekLastOperationalMode.mockResolvedValue("regular");
+    peekLastOperationalGeneration.mockResolvedValue("regular");
     resolveOperationalMode.mockResolvedValue({ kind: "emergency", period: { id: "p1" } });
     resolveOperationalRoster.mockResolvedValue({ mode: "emergency", assignments: [], diagnostics: [], fetchedAt: "2026-08-19T09:00:00.000Z" });
     const { runNotificationWorkerTick } = await loadModule();
 
     await runNotificationWorkerTick("send");
 
-    expect(runChangeDetection).toHaveBeenCalledWith(expect.objectContaining({ operationalModeTransitioned: true }));
+    expect(runChangeDetection).toHaveBeenCalledWith(expect.objectContaining({ operationalGenerationTransitioned: true }));
   });
 
-  it("computes operationalModeTransitioned=false when the mode is unchanged from the last observed tick", async () => {
+  it("computes operationalGenerationTransitioned=false when the generation is unchanged from the last observed tick", async () => {
     setupHappyDefaults();
-    peekLastOperationalMode.mockResolvedValue("regular");
+    peekLastOperationalGeneration.mockResolvedValue("regular");
     resolveOperationalMode.mockResolvedValue({ kind: "regular" });
     const { runNotificationWorkerTick } = await loadModule();
 
     await runNotificationWorkerTick("send");
 
-    expect(runChangeDetection).toHaveBeenCalledWith(expect.objectContaining({ operationalModeTransitioned: false }));
+    expect(runChangeDetection).toHaveBeenCalledWith(expect.objectContaining({ operationalGenerationTransitioned: false }));
   });
 
-  it("persists the new last-operational-mode after a runnable change-detection tick, only in 'send' mode", async () => {
+  it("computes operationalGenerationTransitioned=false when the SAME emergency period is still active as last observed (kind AND generation both unchanged)", async () => {
+    setupHappyDefaults();
+    peekLastOperationalGeneration.mockResolvedValue("emergency:p1");
+    resolveOperationalMode.mockResolvedValue({ kind: "emergency", period: { id: "p1" } });
+    resolveOperationalRoster.mockResolvedValue({ mode: "emergency", assignments: [], diagnostics: [], fetchedAt: "2026-08-19T09:00:00.000Z" });
+    const { runNotificationWorkerTick } = await loadModule();
+
+    await runNotificationWorkerTick("send");
+
+    expect(runChangeDetection).toHaveBeenCalledWith(expect.objectContaining({ operationalGenerationTransitioned: false }));
+    expect(setLastOperationalGeneration).toHaveBeenCalledWith("emergency:p1");
+  });
+
+  it("Emergency A -> Emergency B WITHOUT an intervening regular-mode tick: still a real transition, even though kind stayed 'emergency' both times (the exact false-notification scenario this generation identity exists to prevent)", async () => {
+    setupHappyDefaults();
+    // The last PERSISTED tick observed period A -- deployment-realistic
+    // scenario: A was deactivated and an unrelated period B was activated
+    // before the worker's next tick ever ran (no intervening regular-mode
+    // observation in between), so a bare regular/emergency KIND comparison
+    // would see "emergency" both times and wrongly conclude nothing
+    // transitioned, leaving period B's real desk assignments to be diffed
+    // against period A's stale observed facts.
+    peekLastOperationalGeneration.mockResolvedValue("emergency:period-a");
+    resolveOperationalMode.mockResolvedValue({ kind: "emergency", period: { id: "period-b" } });
+    const assignments = [{ date: "2026-08-19", period: "day", desk: "הוגוורט", personId: "p_1", personName: "אחד", sourceCell: "C2" }];
+    resolveOperationalRoster.mockResolvedValue({ mode: "emergency", assignments, diagnostics: [], fetchedAt: "2026-08-19T09:00:00.000Z" });
+    const { runNotificationWorkerTick } = await loadModule();
+
+    await runNotificationWorkerTick("send");
+
+    // The generation-level flag catches the swap even though `kind` alone
+    // never changed -- this is what forces changeDetection's silent
+    // clear+reseed (verified independently in changeDetection.test.ts),
+    // rather than a diff against period A's stale facts.
+    expect(runChangeDetection).toHaveBeenCalledWith(
+      expect.objectContaining({ operationalMode: "emergency", operationalGenerationTransitioned: true }),
+    );
+    // The new generation persisted for the NEXT tick is period B's own,
+    // never period A's stale one and never the bare word "emergency".
+    expect(setLastOperationalGeneration).toHaveBeenCalledWith("emergency:period-b");
+  });
+
+  it("persists the new last-operational-generation after a runnable change-detection tick, only in 'send' mode", async () => {
     setupHappyDefaults();
     resolveOperationalMode.mockResolvedValue({ kind: "emergency", period: { id: "p1" } });
     resolveOperationalRoster.mockResolvedValue({ mode: "emergency", assignments: [], diagnostics: [], fetchedAt: "2026-08-19T09:00:00.000Z" });
     const { runNotificationWorkerTick } = await loadModule();
 
     await runNotificationWorkerTick("send");
-    expect(setLastOperationalMode).toHaveBeenCalledWith("emergency");
+    expect(setLastOperationalGeneration).toHaveBeenCalledWith("emergency:p1");
   });
 
-  it("dry_run mode never writes the last-operational-mode flag, even on a runnable tick", async () => {
+  it("dry_run mode never writes the last-operational-generation flag, even on a runnable tick", async () => {
     setupHappyDefaults();
     const { runNotificationWorkerTick } = await loadModule();
 
     await runNotificationWorkerTick("dry_run");
 
-    expect(setLastOperationalMode).not.toHaveBeenCalled();
+    expect(setLastOperationalGeneration).not.toHaveBeenCalled();
   });
 
-  it("a null peekLastOperationalMode (pre-first-tick) defaults to 'regular', never a guessed transition", async () => {
+  it("a null peekLastOperationalGeneration (pre-first-tick) defaults to 'regular', never a guessed transition", async () => {
     setupHappyDefaults();
-    peekLastOperationalMode.mockResolvedValue(null);
+    peekLastOperationalGeneration.mockResolvedValue(null);
     resolveOperationalMode.mockResolvedValue({ kind: "regular" });
     const { runNotificationWorkerTick } = await loadModule();
 
     await runNotificationWorkerTick("send");
 
-    expect(runChangeDetection).toHaveBeenCalledWith(expect.objectContaining({ operationalModeTransitioned: false }));
+    expect(runChangeDetection).toHaveBeenCalledWith(expect.objectContaining({ operationalGenerationTransitioned: false }));
   });
 
-  it("threads operationalMode and emergencyAssignments into runReminders too", async () => {
+  it("threads operationalMode and emergencyAssignments into runReminders too -- reminder selection stays kind-based, unaffected by the generation identity", async () => {
     setupHappyDefaults();
     resolveOperationalMode.mockResolvedValue({ kind: "emergency", period: { id: "p1" } });
     const assignments = [{ date: "2026-08-19", period: "day", desk: "הוגוורט", personId: "p_1", personName: "אחד", sourceCell: "C2" }];

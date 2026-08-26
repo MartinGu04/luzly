@@ -50,18 +50,26 @@ export interface ChangeDetectionInput {
    * existing caller/test that predates this field.
    */
   emergencyAssignments?: readonly EmergencyAssignment[];
-  /** Defaults to `"regular"` -- byte-for-byte unchanged behavior for any existing caller/test that predates this field. */
+  /** Defaults to `"regular"` -- byte-for-byte unchanged behavior for any existing caller/test that predates this field. Used ONLY to pick which facts to compute below (regular vs. emergency source) -- never the transition safety check, which needs the finer-grained generation identity below. */
   operationalMode?: "regular" | "emergency";
   /**
-   * `true` exactly on the tick where Emergency Mode was just entered OR
-   * just exited (spec section 22) -- forces the SAME silent "clear +
-   * reseed, no diff, no notify" treatment week-rollover already gets, so
-   * neither transition direction floods change notifications for facts
-   * that were never meant to be diffed as regular operational truth
-   * (every regular fact "vanishing" on entry, or "reappearing" on exit,
-   * would otherwise look like a mass settled change). Defaults to `false`.
+   * `true` exactly on the tick where the operational GENERATION just
+   * changed (spec section 22) -- Emergency Mode was entered, was exited,
+   * OR one Emergency Mode session was swapped for a different one
+   * (period A deactivated, a later unrelated period B activated, with no
+   * intervening regular-mode tick observed in between). Forces the SAME
+   * silent "clear + reseed, no diff, no notify" treatment week-rollover
+   * already gets, so no generation transition ever floods change
+   * notifications for facts that were never meant to be diffed against
+   * each other (every regular fact "vanishing" on entry, "reappearing" on
+   * exit, or one emergency session's desk assignments diffed against a
+   * DIFFERENT session's stale observed facts, would otherwise look like a
+   * mass settled change). Computed by `pipeline.ts` from
+   * `resolveOperationalGeneration` (`operationalGeneration.ts`), never
+   * from bare `operationalMode`/`kind` comparison alone -- see that
+   * module's own docs for why kind alone is unsafe. Defaults to `false`.
    */
-  operationalModeTransitioned?: boolean;
+  operationalGenerationTransitioned?: boolean;
 }
 
 const CATEGORY_TO_JOB_CATEGORY: Record<string, string> = {
@@ -95,7 +103,7 @@ export async function runChangeDetection(input: ChangeDetectionInput): Promise<C
     week,
     persist,
     operationalMode = "regular",
-    operationalModeTransitioned = false,
+    operationalGenerationTransitioned = false,
     emergencyAssignments = [],
   } = input;
 
@@ -119,12 +127,12 @@ export async function runChangeDetection(input: ChangeDetectionInput): Promise<C
     persist,
   );
 
-  // A mode transition forces the SAME silent treatment as a week
-  // rollover (see `ChangeDetectionInput.operationalModeTransitioned`'s
+  // A generation transition forces the SAME silent treatment as a week
+  // rollover (see `ChangeDetectionInput.operationalGenerationTransitioned`'s
   // own docs) -- but the state to clear is THIS week's own (still
   // current) observed/pending rows, never a different week's.
   const baselineAction =
-    operationalModeTransitioned && rawBaselineAction === "unchanged" ? "rolled_over" : rawBaselineAction;
+    operationalGenerationTransitioned && rawBaselineAction === "unchanged" ? "rolled_over" : rawBaselineAction;
   const previousWeekStart = rawBaselineAction === "rolled_over" ? rawPreviousWeekStart : week.weekStart;
 
   if (baselineAction === "initialized") {
@@ -137,7 +145,7 @@ export async function runChangeDetection(input: ChangeDetectionInput): Promise<C
       // The previous week's (or, on a mode transition, THIS week's own
       // pre-transition) stale state must never leak into the new diff
       // base, and must never itself generate change notifications just
-      // because the week rolled over or the operational mode flipped
+      // because the week rolled over or the operational generation changed
       // (spec section 9/22).
       if (previousWeekStart) await clearWeekState(previousWeekStart);
       await seedObservedFacts(week.weekStart, freshFacts);

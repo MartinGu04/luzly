@@ -12,7 +12,8 @@ import { runReminders, type RemindersSummary } from "./reminders";
 import { loadNotificationRuleConfig, type NotificationRuleConfig } from "./ruleConfig";
 import { runDueScheduledBroadcastDispatch } from "./scheduledBroadcast";
 import { runDelivery, type DeliverySummary } from "./delivery";
-import { peekDueJobsCount, peekDueManagerScheduledBroadcastsCount, peekLastOperationalMode, setLastOperationalMode } from "./store";
+import { resolveOperationalGeneration } from "./operationalGeneration";
+import { peekDueJobsCount, peekDueManagerScheduledBroadcastsCount, peekLastOperationalGeneration, setLastOperationalGeneration } from "./store";
 import { formatWorkerErrorLog, runStage, sanitizeWorkerError, WorkerStageError } from "./workerErrors";
 
 const SILENT_CHANGE_SUMMARY = (weekStart: string): ChangeDetectionSummary => ({
@@ -153,11 +154,19 @@ export async function runNotificationWorkerTick(mode: WorkerMode): Promise<Worke
   }
 
   // Read-only either way (dry-run never writes it) -- this tick's own
-  // computed "did the operational mode flip since the last PERSISTED
-  // tick" signal, mirroring the week-rollover baseline's own
+  // computed "did the operational GENERATION change since the last
+  // PERSISTED tick" signal, mirroring the week-rollover baseline's own
   // read-vs-write split (`peekBaselineState` vs `advanceNotificationBaseline`).
-  const lastOperationalMode = await runStage("last_operational_mode", () => peekLastOperationalMode());
-  const operationalModeTransitioned = (lastOperationalMode ?? "regular") !== operationalMode.kind;
+  // Deliberately the full generation identity (`resolveOperationalGeneration`),
+  // never a bare `kind` comparison -- two different Emergency Mode
+  // sessions (period A deactivated, unrelated period B activated before
+  // this tick's own previous run observed a regular tick in between) both
+  // report `kind: "emergency"`, but are DIFFERENT generations that must
+  // still get the silent clear+reseed treatment below -- see
+  // `operationalGeneration.ts`'s own docs.
+  const operationalGeneration = resolveOperationalGeneration(operationalMode);
+  const lastOperationalGeneration = await runStage("last_operational_generation", () => peekLastOperationalGeneration());
+  const operationalGenerationTransitioned = (lastOperationalGeneration ?? "regular") !== operationalGeneration;
 
   // While Emergency Mode is active but its own workbook can't be read,
   // this tick has no reliable facts to diff either direction -- skip
@@ -178,13 +187,22 @@ export async function runNotificationWorkerTick(mode: WorkerMode): Promise<Worke
           personNameById,
           emergencyAssignments,
           operationalMode: operationalMode.kind,
-          operationalModeTransitioned,
+          operationalGenerationTransitioned,
         }),
       )
     : SILENT_CHANGE_SUMMARY(week.weekStart);
 
+  // Same concurrency reasoning as the migration's own doc comment: a
+  // plain, un-locked update, never routed through the atomic
+  // `advance_notification_baseline` RPC. A stray double-write here (two
+  // concurrent ticks both observing the same generation change) is still
+  // harmless -- both would persist the identical `operationalGeneration`
+  // string and both would have already performed the same idempotent
+  // clear+reseed above, so there is nothing for this write to race
+  // against. Never gates/serializes on this write; it purely records this
+  // tick's own already-decided outcome for the NEXT tick to read.
   if (persist && changeDetectionRunnable) {
-    await runStage("last_operational_mode_write", () => setLastOperationalMode(operationalMode.kind));
+    await runStage("last_operational_generation_write", () => setLastOperationalGeneration(operationalGeneration));
   }
 
   // Loaded ONCE per tick and passed into `runReminders` -- never queried
