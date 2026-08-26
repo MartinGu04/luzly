@@ -25,10 +25,13 @@ import path from "node:path";
  *     domain boundary from the notification engine's), `src/lib/reportOne/serviceClient.ts`
  *     (the Report 1 reserve-inclusion toggle's own independent call site
  *     for the zero-RLS-policy `report_one_reserve_inclusion` table -- same
- *     reasoning, its own separate domain boundary), and
- *     `src/lib/shootingRanges/serviceClient.ts` (the מטווחים qualification
- *     feature's own independent call site for the zero-RLS-policy
- *     `shooting_range_completions`/`shooting_range_planned_occurrences`
+ *     reasoning, its own separate domain boundary), `src/lib/shootingRanges/serviceClient.ts`
+ *     (the מטווחים qualification feature's own independent call site for
+ *     the zero-RLS-policy `shooting_range_completions`/`shooting_range_planned_occurrences`
+ *     tables -- same reasoning again, its own separate domain boundary),
+ *     and `src/lib/emergencyMode/serviceClient.ts` (the system-level
+ *     Emergency Mode switch's own independent call site for the
+ *     zero-RLS-policy `emergency_mode_periods`/`emergency_mode_state`
  *     tables -- same reasoning again, its own separate domain boundary).
  *     No other file -- not a route, not a Server Component/Action, not a
  *     client component -- may import or call it directly.
@@ -61,6 +64,7 @@ const CALENDAR_SERVICE_ROLE_CALL_SITE_FILE = path.join(srcRoot, "lib", "calendar
 const DASHBOARD_VISIT_SERVICE_ROLE_CALL_SITE_FILE = path.join(srcRoot, "lib", "dashboardVisit", "serviceClient.ts");
 const REPORT_ONE_SERVICE_ROLE_CALL_SITE_FILE = path.join(srcRoot, "lib", "reportOne", "serviceClient.ts");
 const SHOOTING_RANGES_SERVICE_ROLE_CALL_SITE_FILE = path.join(srcRoot, "lib", "shootingRanges", "serviceClient.ts");
+const EMERGENCY_MODE_SERVICE_ROLE_CALL_SITE_FILE = path.join(srcRoot, "lib", "emergencyMode", "serviceClient.ts");
 const ALLOWED_SERVICE_ROLE_REFERENCE_FILES = new Set([
   SERVICE_ROLE_DEFINITION_FILE,
   NOTIFICATION_SERVICE_ROLE_CALL_SITE_FILE,
@@ -68,9 +72,10 @@ const ALLOWED_SERVICE_ROLE_REFERENCE_FILES = new Set([
   DASHBOARD_VISIT_SERVICE_ROLE_CALL_SITE_FILE,
   REPORT_ONE_SERVICE_ROLE_CALL_SITE_FILE,
   SHOOTING_RANGES_SERVICE_ROLE_CALL_SITE_FILE,
+  EMERGENCY_MODE_SERVICE_ROLE_CALL_SITE_FILE,
 ]);
 
-describe("notification worker + calendar feed + dashboard visit + report one + shooting ranges service-role boundary guard", () => {
+describe("notification worker + calendar feed + dashboard visit + report one + shooting ranges + emergency mode service-role boundary guard", () => {
   it("finds source files (sanity check the scan itself works)", () => {
     expect(sourceFiles.length).toBeGreaterThan(0);
   });
