@@ -22,6 +22,7 @@ const CATEGORY_SCHEDULED = "shooting_range_scheduled";
 const CATEGORY_REMINDER = "shooting_range_reminder";
 const CATEGORY_CONFIRMATION_REQUIRED = "shooting_range_confirmation_required";
 const CATEGORY_REPORT_DECIDED = "shooting_range_report_decided";
+const CATEGORY_SELF_REPORT_SUBMITTED = "shooting_range_self_report_submitted";
 
 const PERSONAL_PATH = "/shooting-ranges";
 const MANAGER_PATH = "/shooting-ranges/manager";
@@ -134,6 +135,48 @@ export async function cancelManagerConfirmationRequiredJob(people: readonly Pers
 
 function confirmationRequiredDedupeKey(rangeDate: string, managerUserId: string): string {
   return `${CATEGORY_CONFIRMATION_REQUIRED}:${rangeDate}:${managerUserId}`;
+}
+
+/**
+ * Immediately notifies every current manager (`Person.isManager`, resolved
+ * via the SAME `resolveNotificationRecipients`/`filterManagerRecipients`
+ * pair `scheduleManagerConfirmationRequiredJob`/`cancelManagerConfirmationRequiredJob`
+ * already use -- never a second/hardcoded manager list) that a new
+ * self-report ("ביצעתי מטווח") is waiting for their approval, addressed to
+ * `/shooting-ranges/manager`.
+ *
+ * The dedupe key is per-manager AND keyed off the persisted
+ * `shooting_range_completions` row id (`reportId`, as returned by
+ * `insertSelfReport`) -- never a shared key across recipients (the same
+ * `upsertPendingReminderJob`-class incident `scheduleManagerConfirmationRequiredJob`'s
+ * own docstring warns about would apply equally here to a plain
+ * `insertNotificationJobIfAbsent` call), and never keyed off something
+ * re-derivable/re-triggerable like a date, since a single reporter can
+ * submit more than one self-report on the same date.
+ */
+export async function notifyManagersOfSelfReportSubmitted(
+  people: readonly Person[],
+  reporterName: string,
+  performedOn: string,
+  reportId: string,
+): Promise<void> {
+  const resolution = await resolveNotificationRecipients(people);
+  const managers = filterManagerRecipients(people, resolution);
+  const now = new Date().toISOString();
+
+  await Promise.all(
+    managers.map((manager) =>
+      insertNotificationJobIfAbsent({
+        category: CATEGORY_SELF_REPORT_SUBMITTED,
+        recipientUserId: manager.userId,
+        title: "🎯 דיווח מטווח חדש ממתין לאישור",
+        body: `${reporterName} דיווח שביצע מטווח בתאריך ${formatDdMmYyyy(performedOn)}.`,
+        path: MANAGER_PATH,
+        dedupeKey: `${CATEGORY_SELF_REPORT_SUBMITTED}:${reportId}:${manager.userId}`,
+        scheduledFor: now,
+      }),
+    ),
+  );
 }
 
 /** Immediately notifies a self-reporter of their manager's decision. */

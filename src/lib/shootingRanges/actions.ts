@@ -6,6 +6,7 @@ import { parseCalendarDate } from "@/lib/domain/dutyBlocks";
 import { isEligibleForShootingRanges } from "@/lib/domain/shootingRangeQualification";
 import {
   cancelManagerConfirmationRequiredJob,
+  notifyManagersOfSelfReportSubmitted,
   notifyPeopleScheduledForRange,
   notifySelfReportDecision,
   scheduleManagerConfirmationRequiredJob,
@@ -61,6 +62,18 @@ function validateNotes(notes: string | null | undefined): string | null | "inval
  * self-report either, even by calling this action directly -- מטווחים is
  * not currently a qualification concern for them, so there is nothing for
  * a self-report to renew.
+ *
+ * Once the report is actually persisted, notifies every current manager
+ * (`notifyManagersOfSelfReportSubmitted`) that it's waiting for their
+ * approval -- called with the row `insertSelfReport` itself returned
+ * (never a second read), so a notification is only ever created for a
+ * report that genuinely exists. If `insertSelfReport` throws, this
+ * function returns before the notification call is ever reached -- same
+ * "no notification for a failed write" semantics every other action in
+ * this file already has (e.g. `createPlannedShootingRangeAction` only
+ * notifies people once `createPlannedOccurrences` has actually
+ * succeeded), and the same "let it propagate, no bespoke try/catch"
+ * failure posture too -- a notification-layer error is not swallowed here.
  */
 export async function submitSelfReportShootingRangeAction(
   performedOn: string,
@@ -96,13 +109,15 @@ export async function submitSelfReportShootingRangeAction(
   const cleanNotes = validateNotes(notes);
   if (cleanNotes === "invalid") return { ok: false, error: "invalid_notes" };
 
-  await insertSelfReport({
+  const completion = await insertSelfReport({
     personId: identityResult.person.id,
     performedOn,
     notes: cleanNotes,
     submittedByPersonId: identityResult.person.id,
     submittedByPersonName: identityResult.person.name,
   });
+
+  await notifyManagersOfSelfReportSubmitted(people, identityResult.person.name, performedOn, completion.id);
 
   return { ok: true };
 }
