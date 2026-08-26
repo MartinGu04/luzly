@@ -112,6 +112,8 @@ export function formatDutyStatusLabel(status: DutyStatusState | null): string | 
       return "בהתאם לצפי";
     case "ahead_of_pace":
       return "מעל לצפי";
+    case "suspended":
+      return "מושהה בזמן מצב חירום";
     case "target_reached":
       return "היעד הושלם";
     case "target_exceeded":

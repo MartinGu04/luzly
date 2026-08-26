@@ -243,6 +243,18 @@ describe("DutyFairnessCard — Justice Table refinement: natural pace/status lan
     expect(screen.getByTestId("metric-duty-pace")).toHaveTextContent("מעבר ליעד");
   });
 
+  it("'suspended' (Emergency Mode currently active) reads as its own calm phrase, with the SAME neutral tint as not_started, never the below-pace warning tint", () => {
+    render(
+      <ul>
+        <DutyFairnessCard view={view({ dutyStatusLabel: "מושהה בזמן מצב חירום", dutyStatusState: "suspended" })} />
+      </ul>,
+    );
+    const badge = screen.getByTestId("metric-duty-pace");
+    expect(badge).toHaveTextContent("מושהה בזמן מצב חירום");
+    expect(badge.className).toContain("text-muted");
+    expect(badge.className).not.toContain("text-status-below");
+  });
+
   it("never shows the old pace-only wording this refinement replaces", () => {
     render(
       <ul>

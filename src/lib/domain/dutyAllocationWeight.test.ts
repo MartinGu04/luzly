@@ -558,3 +558,40 @@ describe("resolveActiveDutyBlock — Justice Table LIVE duty detection", () => {
     expect(resolveActiveDutyBlock(events, "p1", "2026-01-02")).toBeNull();
   });
 });
+
+describe("computeCompletedDutyAllocation — Emergency Mode date exclusion (spec section 19)", () => {
+  it("an empty excludedDates set (the default) behaves byte-for-byte as calling with no 5th argument at all", () => {
+    const events = block("rasar", ["2026-01-05", "2026-01-06"], { slot: null });
+    const withoutArg = computeCompletedDutyAllocation(events, "p1", H1_START, H1_END);
+    const withEmptySet = computeCompletedDutyAllocation(events, "p1", H1_START, H1_END, new Set());
+    expect(withEmptySet.total).toBe(withoutArg.total);
+  });
+
+  it("a day-based family (rasar) excludes ONLY the individual excluded date, not the whole run", () => {
+    const events = block("rasar", ["2026-01-05", "2026-01-06", "2026-01-07"], { slot: null });
+    const result = computeCompletedDutyAllocation(events, "p1", H1_START, H1_END, new Set(["2026-01-06"]));
+    // 01-05 and 01-07 still count (0.2 each); only 01-06 is dropped.
+    expect(result.total).toBeCloseTo(0.4);
+  });
+
+  it("a flat-allocation block (single_day guard) touching the excluded date is dropped in full", () => {
+    const events = block("guard", ["2026-01-05"]);
+    const result = computeCompletedDutyAllocation(events, "p1", H1_START, H1_END, new Set(["2026-01-05"]));
+    expect(result.total).toBe(0);
+  });
+
+  it("a multi-day guard/reserve block touching ANY excluded date anywhere in its span is excluded in full -- never partially credited", () => {
+    const events = block("guard", HALF_WEEK_BLOCK_DATES); // Mon 5 - Wed 7
+    // Only the MIDDLE day of the block is an emergency date.
+    const result = computeCompletedDutyAllocation(events, "p1", H1_START, H1_END, new Set(["2026-01-06"]));
+    expect(result.total).toBe(0);
+  });
+
+  it("a block with no date touching the excluded set is unaffected", () => {
+    const events = block("guard", HALF_WEEK_BLOCK_DATES); // Mon 5 - Wed 7
+    const result = computeCompletedDutyAllocation(events, "p1", H1_START, H1_END, new Set(["2026-02-01"]));
+    expect(result.total).toBeGreaterThan(0);
+    const withoutExclusion = computeCompletedDutyAllocation(events, "p1", H1_START, H1_END);
+    expect(result.total).toBe(withoutExclusion.total);
+  });
+});

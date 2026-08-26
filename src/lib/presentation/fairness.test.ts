@@ -140,13 +140,17 @@ describe("formatDutyStatusLabel", () => {
     expect(formatDutyStatusLabel("target_exceeded")).toBe("מעבר ליעד");
   });
 
+  it("'suspended' (Emergency Mode currently active, spec section 19) gets its own calm factual phrase, distinct from below_pace", () => {
+    expect(formatDutyStatusLabel("suspended")).toBe("מושהה בזמן מצב חירום");
+  });
+
   it("null -> null, never a fabricated badge", () => {
     expect(formatDutyStatusLabel(null)).toBeNull();
   });
 
   it("never produces the old pace-only wording it replaces", () => {
     const allLabels = (
-      ["not_started", "below_pace", "on_pace", "ahead_of_pace", "target_reached", "target_exceeded"] as const
+      ["not_started", "below_pace", "on_pace", "ahead_of_pace", "suspended", "target_reached", "target_exceeded"] as const
     ).map((status) => formatDutyStatusLabel(status));
     expect(allLabels).not.toContain("בקצב הצפוי");
     expect(allLabels).not.toContain("מתחת לקצב");
@@ -194,5 +198,15 @@ describe("resolveDutyStatusState — precedence, per the Justice Table pace/stat
 
   it("completed > 0, under target, but paceStatus itself unavailable -> null", () => {
     expect(resolveDutyStatusState(2, 6, null)).toBeNull();
+  });
+
+  it("completed > 0, under target, paceStatus 'suspended' (Emergency Mode active) -> passes through as 'suspended', never 'below_pace'", () => {
+    expect(resolveDutyStatusState(2, 6, "suspended")).toBe("suspended");
+  });
+
+  it("target_exceeded/target_reached/not_started still take precedence over 'suspended', same as over any other paceStatus", () => {
+    expect(resolveDutyStatusState(7, 6, "suspended")).toBe("target_exceeded");
+    expect(resolveDutyStatusState(6, 6, "suspended")).toBe("target_reached");
+    expect(resolveDutyStatusState(0, 6, "suspended")).toBe("not_started");
   });
 });

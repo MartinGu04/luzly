@@ -19,6 +19,10 @@ const DUTY_STATUS_TINT_CLASSES: Record<DutyStatusState, string> = {
   below_pace: "bg-status-below-soft text-status-below ring-status-below-border",
   on_pace: "bg-status-balanced-soft text-status-balanced ring-status-balanced-border",
   ahead_of_pace: "bg-status-above-soft text-status-above ring-status-above-border",
+  // Same calm neutral treatment as "not_started" -- suspended is a factual
+  // state (Emergency Mode is active, pace judgment does not apply right
+  // now), never a warning tint.
+  suspended: "bg-overlay-soft text-muted ring-border-strong",
   target_reached: "bg-status-above-soft text-status-above ring-status-above-border",
   target_exceeded: "bg-status-above-soft text-status-above ring-status-above-border",
 };

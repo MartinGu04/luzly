@@ -1,3 +1,4 @@
+import { addCalendarDays, formatCalendarDate } from "./dateRange";
 import { buildDutyBlocks, dayOfWeek, parseCalendarDate, type DutyBlock } from "./dutyBlocks";
 import type { DutyFamily, Event } from "./event";
 
@@ -259,11 +260,39 @@ function isFullyWithinRange(block: Pick<DutyBlock, "startDate" | "endDate">, per
  * family's flat weight EXACTLY ONCE, regardless of `dayCount` -- never
  * `numberOfDays × rate`.
  */
+const EMPTY_EXCLUDED_DATES: ReadonlySet<string> = new Set();
+
+/** True when any calendar date in `[startDate, endDate]` (inclusive) is in `excludedDates` -- bounded by the block's own real length, never the whole period. */
+function blockTouchesExcludedDate(startDate: string, endDate: string, excludedDates: ReadonlySet<string>): boolean {
+  if (excludedDates.size === 0) return false;
+  const start = parseCalendarDate(startDate);
+  if (!start) return false;
+
+  let cursor = start;
+  let cursorStr = formatCalendarDate(cursor);
+  for (let i = 0; cursorStr <= endDate && i < 400; i++) {
+    if (excludedDates.has(cursorStr)) return true;
+    cursor = addCalendarDays(cursor, 1);
+    cursorStr = formatCalendarDate(cursor);
+  }
+  return false;
+}
+
 export function computeCompletedDutyAllocation(
   events: readonly Event[],
   personId: string,
   periodStartDate: string,
   effectiveEndDate: string,
+  /**
+   * Emergency Mode date exclusion (spec section 19) -- duties scheduled/
+   * performed on an emergency date must not contribute to the regular
+   * completed-duty score. Day-based families are excluded date-by-date;
+   * a flat-allocation or guard/reserve block that touches ANY excluded
+   * date anywhere in its own span is excluded in full (never split/
+   * partially credited -- splitting a block would require inventing a
+   * partial-block weighting rule this codebase has never had).
+   */
+  excludedDates: ReadonlySet<string> = EMPTY_EXCLUDED_DATES,
 ): CompletedDutyAllocationResult {
   const personEvents = events.filter((event) => event.personId === personId);
 
@@ -274,6 +303,7 @@ export function computeCompletedDutyAllocation(
     if (!isSettledDutyEvent(event)) continue;
     if (!isDayBasedFamily(event.dutyFamily)) continue;
     if (event.date < periodStartDate || event.date > effectiveEndDate) continue;
+    if (excludedDates.has(event.date)) continue;
     total += DUTY_ALLOCATION_WEIGHT_BY_FAMILY[event.dutyFamily];
   }
 
@@ -287,6 +317,7 @@ export function computeCompletedDutyAllocation(
     if (!datesOverlap(block.startDate, block.endDate, periodStartDate, effectiveEndDate)) continue;
     if (block.dutyFamily === "weekend_kitchen" && block.weekendCompleteness !== "complete") continue;
     if (!isFullyWithinRange(block, periodStartDate, effectiveEndDate)) continue;
+    if (blockTouchesExcludedDate(block.startDate, block.endDate, excludedDates)) continue;
 
     total += DUTY_ALLOCATION_WEIGHT_BY_FAMILY[block.dutyFamily];
   }
@@ -310,6 +341,7 @@ export function computeCompletedDutyAllocation(
     }
 
     if (!isFullyWithinRange(block, periodStartDate, effectiveEndDate)) continue;
+    if (blockTouchesExcludedDate(block.startDate, block.endDate, excludedDates)) continue;
 
     total += GUARD_RESERVE_BLOCK_WEIGHT[shape];
   }

@@ -1,4 +1,5 @@
 import "server-only";
+import { getEmergencyDateSet, resolveOperationalMode } from "@/lib/emergencyMode/state";
 import { resolveFairnessPeriodIdentity } from "@/lib/domain/fairnessPeriod";
 import { buildPotentialDutyEventsForRoster } from "@/lib/domain/potentialDutyEvents";
 import type { Event } from "@/lib/domain/event";
@@ -101,12 +102,24 @@ export async function loadDutyFairnessReadModel(rawPeriod: string | null): Promi
   const confirmedPotentialDutyEvents = resolveConfirmedPotentialDutyEvents(potentialAllocations, extendedPeople, events);
   const eventsForCompletedAllocation = [...events, ...confirmedPotentialDutyEvents];
 
+  // Emergency Mode date exclusion + suspended pace (spec section 19) --
+  // the SAME emergency-dates exclusion set Shift Fairness uses
+  // (`getEmergencyDateSet`, byte-for-byte identical for an unactivated
+  // deployment: an empty set), plus whether Emergency Mode is CURRENTLY
+  // active (never just whether any historical exclusion dates exist) so
+  // `buildDutyFairnessReadModel` can force every row's pace verdict to
+  // `"suspended"` rather than judging elapsed time while duties are not
+  // operational.
+  const [excludedDates, operationalMode] = await Promise.all([getEmergencyDateSet(now.date), resolveOperationalMode()]);
+
   const model = buildDutyFairnessReadModel({
     parseResult,
     periodIdentity,
     fetchedAt: snapshot.fetchedAt,
     now,
     events: eventsForCompletedAllocation,
+    excludedDates,
+    isEmergencyModeActive: operationalMode.kind === "emergency",
   });
 
   return { status: "ok", model: withAvatars(model, avatarByPersonId), person };

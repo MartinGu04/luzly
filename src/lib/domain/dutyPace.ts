@@ -1,4 +1,5 @@
-import { daysBetweenCalendarDates } from "./dutyBlocks";
+import { addCalendarDays, formatCalendarDate } from "./dateRange";
+import { daysBetweenCalendarDates, parseCalendarDate } from "./dutyBlocks";
 
 /**
  * Justice Table redesign -- Duty pace. Progress ("how much of the target is
@@ -22,7 +23,14 @@ import { daysBetweenCalendarDates } from "./dutyBlocks";
  * personalized participation window.
  */
 
-export type DutyPaceStatus = "below_pace" | "on_pace" | "ahead_of_pace";
+/**
+ * `"suspended"` (spec section 19) -- while Emergency Mode is CURRENTLY
+ * active, operational duties are suspended, so elapsed period time must
+ * never be read as "behind schedule". Deliberately its own explicit
+ * state rather than a null pace or a forced "on_pace" -- both would
+ * misrepresent WHY no below/on/ahead judgment applies right now.
+ */
+export type DutyPaceStatus = "below_pace" | "on_pace" | "ahead_of_pace" | "suspended";
 
 /** ±5 percentage points -- the spec's own stated tolerance band around "on pace". */
 export const DUTY_PACE_TOLERANCE_PERCENTAGE_POINTS = 5;
@@ -46,6 +54,57 @@ export function computePeriodElapsedPercent(
   const elapsedDays = daysBetweenCalendarDates(periodStartDate, effectiveEndDate);
   if (totalDays === null || elapsedDays === null || totalDays <= 0) return null;
 
+  const clampedElapsed = Math.min(Math.max(elapsedDays, 0), totalDays);
+  return (clampedElapsed / totalDays) * 100;
+}
+
+/**
+ * Emergency Mode's post-deactivation pace resumption (spec section 19):
+ * "numerator = elapsed non-emergency dates, denominator = total non-
+ * emergency dates in the fairness period" -- so a past emergency pause
+ * never permanently makes everybody look behind, and by the end of the
+ * period, elapsed progress still reaches 100% of the NON-EMERGENCY
+ * period timeline (excluded dates count toward neither side). The
+ * source TARGET itself is never altered -- this only recomputes the
+ * ELAPSED-TIME denominator/numerator pace is judged against.
+ *
+ * Enumerates every calendar date in `[periodStartDate, periodEndDate]`
+ * day-by-day (a Duty Fairness H1/H2 period is at most ~183 days, so this
+ * is cheap) -- deliberately not a closed-form day-count subtraction,
+ * since `excludedDates` can be scattered anywhere in the range, not a
+ * single contiguous block. Returns `null` under the exact same
+ * conditions as `computePeriodElapsedPercent` (unparseable dates, or a
+ * period with zero non-emergency days at all -- never a division by
+ * zero, never a fabricated percentage).
+ */
+export function computePeriodElapsedPercentExcludingDates(
+  periodStartDate: string,
+  periodEndDate: string,
+  effectiveEndDate: string,
+  excludedDates: ReadonlySet<string>,
+): number | null {
+  if (excludedDates.size === 0) {
+    return computePeriodElapsedPercent(periodStartDate, periodEndDate, effectiveEndDate);
+  }
+
+  const start = parseCalendarDate(periodStartDate);
+  const end = parseCalendarDate(periodEndDate);
+  if (!start || !end) return null;
+
+  let totalDays = 0;
+  let elapsedDays = 0;
+  let cursor = start;
+  let cursorStr = formatCalendarDate(cursor);
+  for (let i = 0; cursorStr <= periodEndDate && i < 3660; i++) {
+    if (!excludedDates.has(cursorStr)) {
+      totalDays += 1;
+      if (cursorStr <= effectiveEndDate) elapsedDays += 1;
+    }
+    cursor = addCalendarDays(cursor, 1);
+    cursorStr = formatCalendarDate(cursor);
+  }
+
+  if (totalDays <= 0) return null;
   const clampedElapsed = Math.min(Math.max(elapsedDays, 0), totalDays);
   return (clampedElapsed / totalDays) * 100;
 }

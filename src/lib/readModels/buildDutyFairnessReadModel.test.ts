@@ -841,6 +841,129 @@ describe("buildDutyFairnessReadModel — Justice Table redesign, corrected: prog
   });
 });
 
+describe("buildDutyFairnessReadModel — Emergency Mode: excludedDates and isEmergencyModeActive default to zero-behavior-change (spec section 19)", () => {
+  it("omitting excludedDates/isEmergencyModeActive entirely behaves byte-for-byte identically to passing an empty set / false", () => {
+    const events: Event[] = [dutyEvent({ personId: "p1", date: "2026-01-05" })];
+    const input = {
+      parseResult: parseResult({
+        personRows: [personRow({ resolvedPersonId: "p1", allocationLabel: "טכנאי", currentScore: 0.25 })],
+        targets: { supervisorTarget: 4, technicianTarget: 8 },
+      }),
+      periodIdentity: { key: "h1", year: 2026 } as const,
+      fetchedAt: "2026-08-15T10:00:00.000Z",
+      now: NOW,
+      events,
+    };
+    const withoutFields = buildDutyFairnessReadModel(input);
+    const withExplicitDefaults = buildDutyFairnessReadModel({ ...input, excludedDates: new Set(), isEmergencyModeActive: false });
+    expect(withoutFields).toEqual(withExplicitDefaults);
+  });
+
+  it("excludedDates removes a completed duty on that date from completedAllocationTotal", () => {
+    const events: Event[] = [
+      dutyEvent({ personId: "p1", date: "2026-01-05" }),
+      dutyEvent({ personId: "p1", date: "2026-02-05" }),
+    ]; // 2 rasar days -> 0.4 completed, unless excluded
+    const model = buildDutyFairnessReadModel({
+      parseResult: parseResult({
+        personRows: [personRow({ resolvedPersonId: "p1", allocationLabel: "טכנאי", currentScore: 0.25 })],
+        targets: { supervisorTarget: 4, technicianTarget: 8 },
+      }),
+      periodIdentity: { key: "h1", year: 2026 },
+      fetchedAt: "2026-08-15T10:00:00.000Z",
+      now: NOW,
+      events,
+      excludedDates: new Set(["2026-01-05"]),
+    });
+    const row = model.groups.find((g) => g.key === "technician")?.rows[0];
+    expect(row?.completedAllocationTotal).toBeCloseTo(0.2); // only 02-05 counts
+  });
+
+  it("excludedDates shrinks the elapsed-time denominator used for paceStatus (numerator and denominator both exclude the same dates)", () => {
+    // H1 2026: Jan 1 - Jun 30 (181 days incl. both ends). NOW closes the
+    // period, so effectiveEndDate = periodEndDate either way -- this test
+    // isolates the excludedDates effect on completedAllocationTotal/target
+    // progress rather than elapsed%, which is already 100% for a closed
+    // period regardless of exclusion (see dutyPace.test.ts for elapsed%
+    // exclusion coverage in isolation).
+    const events: Event[] = [dutyEvent({ personId: "p1", date: "2026-01-05" })]; // excluded below
+    const excludedModel = buildDutyFairnessReadModel({
+      parseResult: parseResult({
+        personRows: [personRow({ resolvedPersonId: "p1", allocationLabel: "טכנאי", currentScore: 0.25 })],
+        targets: { supervisorTarget: 4, technicianTarget: 8 },
+      }),
+      periodIdentity: { key: "h1", year: 2026 },
+      fetchedAt: "2026-08-15T10:00:00.000Z",
+      now: NOW,
+      events,
+      excludedDates: new Set(["2026-01-05"]),
+    });
+    const excludedRow = excludedModel.groups.find((g) => g.key === "technician")?.rows[0];
+    expect(excludedRow?.completedAllocationTotal).toBe(0);
+    expect(excludedRow?.targetProgressRatio).toBe(0);
+  });
+
+  it("isEmergencyModeActive: true forces paceStatus to 'suspended' EVEN WHEN progress/elapsed% would otherwise resolve to a real below/on/ahead verdict", () => {
+    // Same fixture as the "ahead_of_pace" test above -- without
+    // isEmergencyModeActive this would resolve to "ahead_of_pace".
+    const events: Event[] = [
+      dutyEvent({ personId: "p1", date: "2026-01-05" }),
+      dutyEvent({ personId: "p1", date: "2026-02-05" }),
+    ];
+    const model = buildDutyFairnessReadModel({
+      parseResult: parseResult({
+        personRows: [personRow({ resolvedPersonId: "p1", allocationLabel: "טכנאי", currentScore: 0.25 })],
+        targets: { supervisorTarget: 4, technicianTarget: 8 },
+      }),
+      periodIdentity: { key: "h1", year: 2026 },
+      fetchedAt: "2026-08-15T10:00:00.000Z",
+      now: NOW,
+      events,
+      isEmergencyModeActive: true,
+    });
+    const row = model.groups.find((g) => g.key === "technician")?.rows[0];
+    expect(row?.targetProgressRatio).toBeCloseTo(1.6); // progress itself is unaffected
+    expect(row?.paceStatus).toBe("suspended");
+  });
+
+  it("isEmergencyModeActive: true still forces 'suspended' even for a row with no progress ratio at all (paceStatus would otherwise be null)", () => {
+    const model = buildDutyFairnessReadModel({
+      parseResult: parseResult({
+        personRows: [personRow({ resolvedPersonId: "p1", allocationLabel: "טכנאי", currentScore: null })],
+        targets: { supervisorTarget: 4, technicianTarget: 8 },
+      }),
+      periodIdentity: { key: "h1", year: 2026 },
+      fetchedAt: "2026-08-15T10:00:00.000Z",
+      now: NOW,
+      events: [],
+      isEmergencyModeActive: true,
+    });
+    const row = model.groups.find((g) => g.key === "technician")?.rows[0];
+    expect(row?.targetProgressRatio).toBeNull();
+    expect(row?.paceStatus).toBe("suspended");
+  });
+
+  it("isEmergencyModeActive: false (the default) never forces 'suspended' -- normal pace judgment applies", () => {
+    const events: Event[] = [
+      dutyEvent({ personId: "p1", date: "2026-01-05" }),
+      dutyEvent({ personId: "p1", date: "2026-02-05" }),
+    ];
+    const model = buildDutyFairnessReadModel({
+      parseResult: parseResult({
+        personRows: [personRow({ resolvedPersonId: "p1", allocationLabel: "טכנאי", currentScore: 0.25 })],
+        targets: { supervisorTarget: 4, technicianTarget: 8 },
+      }),
+      periodIdentity: { key: "h1", year: 2026 },
+      fetchedAt: "2026-08-15T10:00:00.000Z",
+      now: NOW,
+      events,
+      isEmergencyModeActive: false,
+    });
+    const row = model.groups.find((g) => g.key === "technician")?.rows[0];
+    expect(row?.paceStatus).toBe("ahead_of_pace");
+  });
+});
+
 describe("buildDutyFairnessReadModel — real-workbook regression: personalTargetTotal reuses the workbook's own currentScore, never the removed Potential-event reconstruction", () => {
   const targets: FairnessTargets = { supervisorTarget: 4, technicianTarget: 8 };
 
