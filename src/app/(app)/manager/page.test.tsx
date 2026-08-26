@@ -14,6 +14,11 @@ import type { PersonalScheduleReadModel } from "@/lib/readModels/types";
 const getRequestManagerOverview = vi.fn();
 vi.mock("@/lib/readModels/getRequestManagerOverview", () => ({ getRequestManagerOverview }));
 
+const resolveOperationalMode = vi.fn();
+const loadManagerEmergencyOverview = vi.fn();
+vi.mock("@/lib/emergencyMode/state", () => ({ resolveOperationalMode }));
+vi.mock("@/lib/readModels/managerEmergencyOverview", () => ({ loadManagerEmergencyOverview }));
+
 const usePathname = vi.fn(() => "/manager");
 const useSearchParams = vi.fn(() => new URLSearchParams());
 const useRouter = vi.fn(() => ({ push: vi.fn(), refresh: vi.fn() }));
@@ -45,6 +50,9 @@ afterEach(() => {
 
 beforeEach(() => {
   getRequestManagerOverview.mockReset();
+  resolveOperationalMode.mockReset();
+  resolveOperationalMode.mockResolvedValue({ kind: "regular" });
+  loadManagerEmergencyOverview.mockReset();
 });
 
 function issue(overrides: Partial<ManagerIssue> = {}): ManagerIssue {
@@ -1336,5 +1344,121 @@ describe("ManagerPage — privacy", () => {
     expect(container.textContent).not.toContain("no_push_subscription");
     expect(container.textContent).not.toContain("not_enabled");
     expect(container.textContent).not.toContain("logged_in");
+  });
+});
+
+const EMERGENCY_PERIOD = {
+  id: "period_1",
+  activatedAt: "2026-08-13T06:00:00.000Z",
+  activatedByUserId: "u_manager",
+  activatedByPersonId: "p_manager",
+  activatedByPersonName: "דני מנהל",
+  startDate: "2026-08-13",
+  deactivatedAt: null,
+  deactivatedByUserId: null,
+  deactivatedByPersonId: null,
+  deactivatedByPersonName: null,
+  endDate: null,
+};
+
+describe("ManagerPage — Emergency Mode: desk staffing replaces regular coverage/duties/potential/roster-drill-down (spec section 13)", () => {
+  it("takes precedence over the category switch -- the everyone perspective renders desk staffing, never the regular coverage/potential sections, even with ?category=shifts", async () => {
+    resolveOperationalMode.mockResolvedValue({ kind: "emergency" });
+    getRequestManagerOverview.mockResolvedValue(
+      okResult(model({ coverageOverview: [shiftGroup()], potentialRequirements: [potentialRow()] })),
+    );
+    loadManagerEmergencyOverview.mockResolvedValue({
+      status: "ok",
+      model: {
+        fetchedAt: "2026-08-13T09:00:00.000Z",
+        localNow: { date: "2026-08-13", minuteOfDay: 600 },
+        period: EMERGENCY_PERIOD,
+        diagnostics: [],
+        manager: { id: "p_manager", name: "דני מנהל" },
+        roster: [],
+        perspective: "all",
+        selectedPersonId: null,
+        selectedPersonName: null,
+        personalShifts: null,
+        everyoneShifts: [
+          {
+            date: "2026-08-13",
+            period: "day",
+            desks: [{ desk: 'רת"ק', personId: "p_martin", personName: "מרטין בדיקה" }],
+          },
+        ],
+      },
+    });
+
+    await renderPage({ category: "shifts" });
+
+    expect(screen.getByTestId("emergency-everyone-schedule-list")).toBeInTheDocument();
+    expect(screen.getByText('רת"ק')).toBeInTheDocument();
+    expect(screen.queryByText("כיסוי משמרות")).toBeNull();
+    expect(loadManagerEmergencyOverview).toHaveBeenCalledWith({ id: "p_manager", name: "דני מנהל" }, null);
+  });
+
+  it("a selected person renders their own desk assignments (person perspective), never the regular selected-person drill-down", async () => {
+    resolveOperationalMode.mockResolvedValue({ kind: "emergency" });
+    getRequestManagerOverview.mockResolvedValue(
+      okResult(
+        model({
+          selectedPersonId: "p_martin",
+          selectedPerson: personalModel(),
+        }),
+      ),
+    );
+    loadManagerEmergencyOverview.mockResolvedValue({
+      status: "ok",
+      model: {
+        fetchedAt: "2026-08-13T09:00:00.000Z",
+        localNow: { date: "2026-08-13", minuteOfDay: 600 },
+        period: EMERGENCY_PERIOD,
+        diagnostics: [],
+        manager: { id: "p_manager", name: "דני מנהל" },
+        roster: [],
+        perspective: "person",
+        selectedPersonId: "p_martin",
+        selectedPersonName: "מרטין בדיקה",
+        personalShifts: [
+          { date: "2026-08-13", period: "day", ownDesks: ['רת"ק'], roster: [] },
+        ],
+        everyoneShifts: null,
+      },
+    });
+
+    await renderPage({ person: "p_martin" });
+
+    expect(screen.getByTestId("emergency-personal-schedule-list")).toBeInTheDocument();
+    expect(screen.getByText(/רת"ק/)).toBeInTheDocument();
+    expect(screen.queryByTestId("emergency-everyone-schedule-list")).toBeNull();
+    expect(loadManagerEmergencyOverview).toHaveBeenCalledWith({ id: "p_manager", name: "דני מנהל" }, "p_martin");
+  });
+
+  it("renders the shared unavailable state when the emergency workbook itself is broken -- never falls back to regular coverage data", async () => {
+    resolveOperationalMode.mockResolvedValue({ kind: "emergency" });
+    getRequestManagerOverview.mockResolvedValue(
+      okResult(model({ coverageOverview: [shiftGroup()] })),
+    );
+    loadManagerEmergencyOverview.mockResolvedValue({
+      status: "emergency_unavailable",
+      message: "Missing GOOGLE_EMERGENCY_SPREADSHEET_ID.",
+    });
+
+    await renderPage({ category: "shifts" });
+
+    expect(screen.getByText(/נתוני החירום אינם זמינים/)).toBeInTheDocument();
+    expect(screen.queryByTestId("emergency-everyone-schedule-list")).toBeNull();
+    expect(screen.queryByText("כיסוי משמרות")).toBeNull();
+  });
+
+  it("regular mode (the default) is unaffected -- loadManagerEmergencyOverview is never called", async () => {
+    resolveOperationalMode.mockResolvedValue({ kind: "regular" });
+    getRequestManagerOverview.mockResolvedValue(okResult(model({ coverageOverview: [shiftGroup()] })));
+
+    await renderPage({ category: "shifts" });
+
+    expect(screen.getByText("כיסוי משמרות")).toBeInTheDocument();
+    expect(loadManagerEmergencyOverview).not.toHaveBeenCalled();
   });
 });

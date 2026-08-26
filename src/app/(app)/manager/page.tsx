@@ -11,6 +11,7 @@ import { ManagerDutiesAbsencesSection } from "@/components/manager/ManagerDuties
 import { EmergencyModeControl } from "@/components/manager/EmergencyModeControl";
 import { ManagerForbiddenState } from "@/components/manager/ManagerForbiddenState";
 import { ManagerHeader } from "@/components/manager/ManagerHeader";
+import { ManagerPersonSelector } from "@/components/manager/ManagerPersonSelector";
 import { ManagerPotentialSection } from "@/components/manager/ManagerPotentialSection";
 import { ManagerRosterSection } from "@/components/manager/ManagerRosterSection";
 import {
@@ -20,6 +21,10 @@ import {
 import { ManagerShiftSnapshotSection } from "@/components/manager/ManagerShiftSnapshotSection";
 import { ManagerSourceOfTruthNote } from "@/components/manager/ManagerSourceOfTruthNote";
 import { ManagerSummaryStrip } from "@/components/manager/ManagerSummaryStrip";
+import { EmergencyUnavailableState } from "@/components/emergencyMode/EmergencyUnavailableState";
+import { EmergencyEveryoneScheduleList } from "@/components/schedule/EmergencyEveryoneScheduleList";
+import { EmergencyPersonalScheduleList } from "@/components/schedule/EmergencyPersonalScheduleList";
+import { DataFreshnessStatus } from "@/components/ui/DataFreshnessStatus";
 import type {
   ManagerAbsenceRowView,
   ManagerAttentionItem,
@@ -59,7 +64,9 @@ import { managerSummaryLabel } from "@/lib/presentation/managerSummary";
 import { roleCoverageMessage } from "@/lib/presentation/roleCoverage";
 import { scheduleEveryoneHref } from "@/lib/presentation/scheduleUrl";
 import { formatMissingIntervals } from "@/lib/presentation/scheduleTime";
+import { resolveOperationalMode } from "@/lib/emergencyMode/state";
 import { getRequestManagerOverview } from "@/lib/readModels/getRequestManagerOverview";
+import { loadManagerEmergencyOverview } from "@/lib/readModels/managerEmergencyOverview";
 import { parseManagerOverviewSearchParams } from "@/lib/readModels/managerOverviewParams";
 import type {
   ManagerAbsenceEntry,
@@ -367,6 +374,53 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
   // it can group people the same way `ManagerRosterSection` does, instead
   // of stripping those fields to a bare `{id, name}` projection first.
   const people = model.roster;
+
+  /**
+   * Manager Area's Emergency Mode branch (spec section 13) -- takes
+   * precedence over BOTH the selected-person drill-down and the
+   * category switch below: while Emergency Mode is active, regular
+   * coverage/duties/potential/roster-drill-down data must never be
+   * shown as current operational truth (spec section 4/29). Desk
+   * staffing (`loadManagerEmergencyOverview`) reuses the SAME
+   * perspective resolution `/schedule`'s own Emergency Mode branch
+   * already established -- `model.selectedPersonId` (already validated
+   * by `getRequestManagerOverview`'s own fail-closed rules) narrows to
+   * one person's own desk assignments; otherwise the whole-roster "all"
+   * perspective is shown by default.
+   */
+  const operationalMode = await resolveOperationalMode();
+  if (operationalMode.kind === "emergency") {
+    const emergencyResult = await loadManagerEmergencyOverview(
+      { id: model.manager.id, name: model.manager.name },
+      model.selectedPersonId,
+    );
+
+    return (
+      <div className="flex flex-col gap-6">
+        <ManagerHeader />
+        <EmergencyModeControl />
+        {emergencyResult.status === "emergency_unavailable" ? (
+          <EmergencyUnavailableState />
+        ) : (
+          <>
+            <div className="flex flex-col gap-2.5">
+              <DataFreshnessStatus fetchedAt={emergencyResult.model.fetchedAt} />
+              <ManagerPersonSelector people={people} selectedId={model.selectedPersonId} />
+            </div>
+            {emergencyResult.model.perspective === "all" ? (
+              <EmergencyEveryoneScheduleList shifts={emergencyResult.model.everyoneShifts ?? []} />
+            ) : (
+              <EmergencyPersonalScheduleList
+                shifts={emergencyResult.model.personalShifts ?? []}
+                emptyStateName={emergencyResult.model.selectedPersonName}
+              />
+            )}
+          </>
+        )}
+        <ManagerSourceOfTruthNote />
+      </div>
+    );
+  }
 
   if (model.selectedPersonId && model.selectedPerson) {
     const selected = model.selectedPerson;
