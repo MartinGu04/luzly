@@ -215,6 +215,8 @@ describe("updateSystemRuleAction -- authorization + validation + audience/copy r
       bodyOverride: null,
       audienceMode: "all_eligible",
       targetPersonIds: [],
+      audienceGroupKeys: [],
+      excludedPersonIds: [],
       expectedRevision: 1,
       updatedByPersonId: "p_manager",
       updatedByPersonName: "דני מנהל",

@@ -1,5 +1,6 @@
 import "server-only";
 import { SEMANTIC_CHANGE_DEBOUNCE_MINUTES } from "@/lib/config/notificationTiming";
+import type { AudienceGroupKey } from "@/lib/domain/audienceGroups";
 import { getNotificationServiceClient } from "./serviceClient";
 import type { FactChange } from "./diffFacts";
 import type { SemanticFact, SemanticFactCategory, SemanticFactValue } from "./semanticFacts";
@@ -999,7 +1000,8 @@ export async function deletePushSubscriptionById(subscriptionId: string): Promis
 // `lib/notifications/engine/manualBroadcast.ts`, the one caller).
 // ---------------------------------------------------------------------------
 
-export type BroadcastAudienceKind = "person" | "people" | "everyone";
+/** `"groups"` (dynamic audience groups/exclusions follow-up) resolves `audienceGroupKeys` against the roster at the SAME point every other kind already resolves its own audience -- immediately, for a manual send; at save/edit time, frozen into `targetPersonIds`, for a scheduled broadcast or custom weekly rule (see `manualBroadcast.ts`'s `resolveAudience`). Never re-expanded later, exactly like `"everyone"` already isn't. */
+export type BroadcastAudienceKind = "person" | "people" | "everyone" | "groups";
 
 export interface NewManagerNotificationBatch {
   idempotencyKey: string;
@@ -1007,6 +1009,10 @@ export interface NewManagerNotificationBatch {
   createdByPersonName: string;
   audienceKind: BroadcastAudienceKind;
   targetPersonIds: readonly string[];
+  /** The raw group-key selection intent -- meaningful only when `audienceKind === "groups"`. Stored for audit/display only; `targetPersonIds` (the already-resolved snapshot) is what job creation actually uses. */
+  audienceGroupKeys?: readonly AudienceGroupKey[];
+  /** "לא לשלוח ל" -- the raw excluded-person-id selection, independent of `audienceKind`. Already baked into `targetPersonIds`/`resolvedRecipientUserIds` by the time this batch is created; stored here only so the batch's own audit record reflects what the manager actually configured. */
+  excludedPersonIds?: readonly string[];
   /** The EXACT set of resolved Supabase auth user ids this batch's jobs were (or are about to be) created for -- the batch's own immutability anchor. See the migration's own doc comment. */
   resolvedRecipientUserIds: readonly string[];
   title: string;
@@ -1024,6 +1030,8 @@ export interface ManagerNotificationBatchRow {
   createdByPersonName: string;
   audienceKind: BroadcastAudienceKind;
   targetPersonIds: string[];
+  audienceGroupKeys: AudienceGroupKey[];
+  excludedPersonIds: string[];
   resolvedRecipientUserIds: string[];
   title: string;
   body: string;
@@ -1035,7 +1043,7 @@ export interface ManagerNotificationBatchRow {
 }
 
 const MANAGER_NOTIFICATION_BATCH_COLUMNS =
-  "id, idempotency_key, created_by_person_id, created_by_person_name, audience_kind, target_person_ids, resolved_recipient_user_ids, title, body, resolved_recipient_count, push_capable_count, inbox_only_count, unresolved_count, created_at";
+  "id, idempotency_key, created_by_person_id, created_by_person_name, audience_kind, target_person_ids, audience_group_keys, excluded_person_ids, resolved_recipient_user_ids, title, body, resolved_recipient_count, push_capable_count, inbox_only_count, unresolved_count, created_at";
 
 function toBatchRow(row: Record<string, unknown>): ManagerNotificationBatchRow {
   return {
@@ -1045,6 +1053,8 @@ function toBatchRow(row: Record<string, unknown>): ManagerNotificationBatchRow {
     createdByPersonName: row.created_by_person_name as string,
     audienceKind: row.audience_kind as BroadcastAudienceKind,
     targetPersonIds: (row.target_person_ids as string[] | null) ?? [],
+    audienceGroupKeys: (row.audience_group_keys as AudienceGroupKey[] | null) ?? [],
+    excludedPersonIds: (row.excluded_person_ids as string[] | null) ?? [],
     resolvedRecipientUserIds: (row.resolved_recipient_user_ids as string[] | null) ?? [],
     title: row.title as string,
     body: row.body as string,
@@ -1107,6 +1117,8 @@ export async function insertManagerNotificationBatchIfAbsent(
       created_by_person_name: batch.createdByPersonName,
       audience_kind: batch.audienceKind,
       target_person_ids: batch.targetPersonIds,
+      audience_group_keys: batch.audienceGroupKeys ?? [],
+      excluded_person_ids: batch.excludedPersonIds ?? [],
       resolved_recipient_user_ids: batch.resolvedRecipientUserIds,
       title: batch.title,
       body: batch.body,
@@ -1157,27 +1169,36 @@ export interface NotificationRuleOccurrenceClaim {
   ruleBody: string;
   ruleAudienceKind: BroadcastAudienceKind;
   ruleTargetPersonIds: string[];
+  /** Dynamic audience group keys, frozen at claim time -- meaningful only when `ruleAudienceKind === "groups"`. The KEYS are frozen; MEMBERSHIP is still resolved fresh against the current roster on every occurrence dispatch, exactly like `"everyone"` already is -- see `recurringRuleDispatch.ts`'s own `resolveRecurringDispatchTargets`. */
+  ruleAudienceGroupKeys: AudienceGroupKey[];
+  /** "לא לשלוח ל", frozen at claim time -- applied fresh against the resolved candidate set on every occurrence dispatch, independent of `ruleAudienceKind`. */
+  ruleExcludedPersonIds: string[];
   createdByPersonId: string | null;
   createdByPersonName: string | null;
 }
 
 /**
  * Atomically claims (or safely resumes) one custom weekly rule's one
- * local occurrence -- the ONE call site of `claim_notification_rule_occurrence`.
- * `null` means: already `'completed'`, actively leased by another
- * worker right now, or (FRESH claim only) the rule is disabled/archived/
- * gone, or its CURRENT weekday/local time no longer matches
- * `occurrenceDate`/the caller's assumption of due-ness -- in every case,
- * the caller does nothing further for this occurrence this tick. See the
- * RPC's own migration doc comment for the full at-most-once +
- * disable/edit/archive-before-claim + frozen-content race analysis.
+ * local occurrence -- the ONE call site of
+ * `claim_notification_rule_occurrence_v2` (the dynamic audience groups/
+ * exclusions follow-up migration's replacement for
+ * `claim_notification_rule_occurrence`, which remains defined, untouched,
+ * in the database for rollout compatibility with an already-deployed old
+ * app instance -- same convention as `update_system_rule_configuration_
+ * and_invalidate_pending_jobs_v2`). `null` means: already `'completed'`,
+ * actively leased by another worker right now, or (FRESH claim only) the
+ * rule is disabled/archived/gone, or its CURRENT weekday/local time no
+ * longer matches `occurrenceDate`/the caller's assumption of due-ness --
+ * in every case, the caller does nothing further for this occurrence this
+ * tick. See the RPC's own migration doc comment for the full at-most-once
+ * + disable/edit/archive-before-claim + frozen-content race analysis.
  */
 export async function claimNotificationRuleOccurrence(
   ruleId: string,
   occurrenceDate: string,
 ): Promise<NotificationRuleOccurrenceClaim | null> {
   const supabase = getNotificationServiceClient();
-  const { data, error } = await supabase.rpc("claim_notification_rule_occurrence", {
+  const { data, error } = await supabase.rpc("claim_notification_rule_occurrence_v2", {
     p_rule_id: ruleId,
     p_occurrence_date: occurrenceDate,
   });
@@ -1193,6 +1214,8 @@ export async function claimNotificationRuleOccurrence(
     ruleBody: row.rule_body as string,
     ruleAudienceKind: row.rule_audience_kind as BroadcastAudienceKind,
     ruleTargetPersonIds: (row.rule_target_person_ids as string[] | null) ?? [],
+    ruleAudienceGroupKeys: (row.rule_audience_group_keys as AudienceGroupKey[] | null) ?? [],
+    ruleExcludedPersonIds: (row.rule_excluded_person_ids as string[] | null) ?? [],
     createdByPersonId: (row.created_by_person_id as string | null) ?? null,
     createdByPersonName: (row.created_by_person_name as string | null) ?? null,
   };
@@ -1523,8 +1546,12 @@ export interface NewManagerScheduledBroadcast {
   /** The compose-session key behind exactly-once CREATION -- see the migration's own doc comment. Never reused for dispatch (that's `batch_id`/`scheduled:<id>`). */
   createIdempotencyKey: string;
   audienceKind: BroadcastAudienceKind;
-  /** The frozen audience snapshot -- for `"everyone"` this is already the roster expanded to ids at save time, never re-expanded later. */
+  /** The frozen audience snapshot -- for `"everyone"`/`"groups"` this is already the roster (or matching group members) expanded to ids at save time, minus any exclusion, never re-expanded later. */
   targetPersonIds: readonly string[];
+  /** The raw group-key selection intent -- meaningful only when `audienceKind === "groups"`. Stored for display/re-edit only; `targetPersonIds` is the resolved snapshot dispatch actually uses. */
+  audienceGroupKeys?: readonly AudienceGroupKey[];
+  /** "לא לשלוח ל" intent -- already baked into `targetPersonIds` at save time; stored separately so the editor can show/re-edit it. */
+  excludedPersonIds?: readonly string[];
   title: string;
   body: string;
   scheduledFor: string;
@@ -1538,6 +1565,8 @@ export interface ManagerScheduledBroadcastRow {
   status: ManagerScheduledBroadcastStatus;
   audienceKind: BroadcastAudienceKind;
   targetPersonIds: string[];
+  audienceGroupKeys: AudienceGroupKey[];
+  excludedPersonIds: string[];
   title: string;
   body: string;
   scheduledFor: string;
@@ -1560,7 +1589,7 @@ export interface ManagerScheduledBroadcastRow {
 }
 
 const MANAGER_SCHEDULED_BROADCAST_COLUMNS =
-  "id, create_idempotency_key, status, audience_kind, target_person_ids, title, body, scheduled_for, created_by_person_id, created_by_person_name, last_changed_by_person_id, last_changed_by_person_name, cancelled_by_person_id, cancelled_by_person_name, sent_now_by_person_id, sent_now_by_person_name, sent_now_at, claimed_at, batch_id, dispatched_at, cancelled_at, created_at, updated_at";
+  "id, create_idempotency_key, status, audience_kind, target_person_ids, audience_group_keys, excluded_person_ids, title, body, scheduled_for, created_by_person_id, created_by_person_name, last_changed_by_person_id, last_changed_by_person_name, cancelled_by_person_id, cancelled_by_person_name, sent_now_by_person_id, sent_now_by_person_name, sent_now_at, claimed_at, batch_id, dispatched_at, cancelled_at, created_at, updated_at";
 
 function toScheduledBroadcastRow(row: Record<string, unknown>): ManagerScheduledBroadcastRow {
   return {
@@ -1569,6 +1598,8 @@ function toScheduledBroadcastRow(row: Record<string, unknown>): ManagerScheduled
     status: row.status as ManagerScheduledBroadcastStatus,
     audienceKind: row.audience_kind as BroadcastAudienceKind,
     targetPersonIds: (row.target_person_ids as string[] | null) ?? [],
+    audienceGroupKeys: (row.audience_group_keys as AudienceGroupKey[] | null) ?? [],
+    excludedPersonIds: (row.excluded_person_ids as string[] | null) ?? [],
     title: row.title as string,
     body: row.body as string,
     // Canonicalized here, ONCE, at this row's one mapping boundary --
@@ -1624,6 +1655,8 @@ export async function insertManagerScheduledBroadcastIfAbsent(
       create_idempotency_key: input.createIdempotencyKey,
       audience_kind: input.audienceKind,
       target_person_ids: input.targetPersonIds,
+      audience_group_keys: input.audienceGroupKeys ?? [],
+      excluded_person_ids: input.excludedPersonIds ?? [],
       title: input.title,
       body: input.body,
       scheduled_for: input.scheduledFor,
@@ -1670,6 +1703,8 @@ export async function getManagerScheduledBroadcastById(id: string): Promise<Mana
 export interface ManagerScheduledBroadcastEdit {
   audienceKind: BroadcastAudienceKind;
   targetPersonIds: readonly string[];
+  audienceGroupKeys?: readonly AudienceGroupKey[];
+  excludedPersonIds?: readonly string[];
   title: string;
   body: string;
   scheduledFor: string;
@@ -1688,6 +1723,8 @@ export async function updateManagerScheduledBroadcastIfEditable(
     .update({
       audience_kind: edit.audienceKind,
       target_person_ids: edit.targetPersonIds,
+      audience_group_keys: edit.audienceGroupKeys ?? [],
+      excluded_person_ids: edit.excludedPersonIds ?? [],
       title: edit.title,
       body: edit.body,
       scheduled_for: edit.scheduledFor,
@@ -1827,14 +1864,22 @@ export interface NotificationRuleRow {
   body: string | null;
   audienceKind: BroadcastAudienceKind | null;
   targetPersonIds: string[];
+  /** `custom_weekly` only -- the raw group-key selection intent, meaningful only when `audienceKind === "groups"`. `targetPersonIds` (above) is the already-resolved snapshot dispatch actually uses; this is stored purely for display/re-edit. Always empty for a `system` row. */
+  audienceGroupKeys: AudienceGroupKey[];
+  /** `custom_weekly` only -- "לא לשלוח ל" intent, already baked into `targetPersonIds` at save time. Always empty for a `system` row (system exclusions live in `systemExcludedPersonIds` instead). */
+  excludedPersonIds: string[];
   /** System rule only (null override = the built-in title unchanged). Always null for a `custom_weekly` row -- see the migration's own shape check. */
   systemTitleOverride: string | null;
   /** System rule only -- for a static-body category, a full replacement; for a dynamic-body category, a `{details}` template. Always null for a `custom_weekly` row. */
   systemBodyOverride: string | null;
-  /** System rule only -- `'all_eligible'` or `'selected'`, a FILTER over the rule's own domain-eligible recipients. Always `'all_eligible'` for a `custom_weekly` row. */
-  systemAudienceMode: "all_eligible" | "selected";
+  /** System rule only -- `'all_eligible'`, `'groups'`, or `'selected'`, a FILTER over the rule's own domain-eligible recipients. Always `'all_eligible'` for a `custom_weekly` row. */
+  systemAudienceMode: "all_eligible" | "selected" | "groups";
   /** System rule only -- stable roster person ids, meaningful only when `systemAudienceMode === 'selected'`. Always empty for a `custom_weekly` row. */
   systemTargetPersonIds: string[];
+  /** System rule only -- dynamic group keys, meaningful only when `systemAudienceMode === 'groups'`. Resolved fresh every reminder tick, never frozen. Always empty for a `custom_weekly` row. */
+  systemAudienceGroupKeys: AudienceGroupKey[];
+  /** System rule only -- "לא לשלוח ל", ALWAYS applied regardless of `systemAudienceMode`. Always empty for a `custom_weekly` row. */
+  systemExcludedPersonIds: string[];
   archivedAt: string | null;
   createdByPersonId: string | null;
   createdByPersonName: string | null;
@@ -1845,7 +1890,7 @@ export interface NotificationRuleRow {
 }
 
 const NOTIFICATION_RULE_COLUMNS =
-  "id, kind, system_key, enabled, weekday, local_hour, local_minute, revision, title, body, audience_kind, target_person_ids, system_title_override, system_body_override, system_audience_mode, system_target_person_ids, archived_at, created_by_person_id, created_by_person_name, updated_by_person_id, updated_by_person_name, created_at, updated_at";
+  "id, kind, system_key, enabled, weekday, local_hour, local_minute, revision, title, body, audience_kind, target_person_ids, audience_group_keys, excluded_person_ids, system_title_override, system_body_override, system_audience_mode, system_target_person_ids, system_audience_group_keys, system_excluded_person_ids, archived_at, created_by_person_id, created_by_person_name, updated_by_person_id, updated_by_person_name, created_at, updated_at";
 
 function toNotificationRuleRow(row: Record<string, unknown>): NotificationRuleRow {
   return {
@@ -1865,10 +1910,14 @@ function toNotificationRuleRow(row: Record<string, unknown>): NotificationRuleRo
     body: (row.body as string | null) ?? null,
     audienceKind: (row.audience_kind as BroadcastAudienceKind | null) ?? null,
     targetPersonIds: (row.target_person_ids as string[] | null) ?? [],
+    audienceGroupKeys: (row.audience_group_keys as AudienceGroupKey[] | null) ?? [],
+    excludedPersonIds: (row.excluded_person_ids as string[] | null) ?? [],
     systemTitleOverride: (row.system_title_override as string | null) ?? null,
     systemBodyOverride: (row.system_body_override as string | null) ?? null,
-    systemAudienceMode: (row.system_audience_mode as "all_eligible" | "selected" | null) ?? "all_eligible",
+    systemAudienceMode: (row.system_audience_mode as "all_eligible" | "selected" | "groups" | null) ?? "all_eligible",
     systemTargetPersonIds: (row.system_target_person_ids as string[] | null) ?? [],
+    systemAudienceGroupKeys: (row.system_audience_group_keys as AudienceGroupKey[] | null) ?? [],
+    systemExcludedPersonIds: (row.system_excluded_person_ids as string[] | null) ?? [],
     archivedAt: (row.archived_at as string | null) ?? null,
     createdByPersonId: (row.created_by_person_id as string | null) ?? null,
     createdByPersonName: (row.created_by_person_name as string | null) ?? null,
@@ -1910,9 +1959,13 @@ export interface SystemRuleEdit {
   titleOverride: string | null;
   /** `null` = clear the override, use the built-in body unchanged. Server-side callers must already have validated the `{details}` placeholder requirement for a dynamic-body category before reaching here -- this function does not re-derive that classification. */
   bodyOverride: string | null;
-  audienceMode: "all_eligible" | "selected";
+  audienceMode: "all_eligible" | "selected" | "groups";
   /** Stable roster person ids -- meaningful only when `audienceMode === 'selected'`; callers must already have revalidated these against a fresh roster (`ruleActions.ts`) before reaching here. */
   targetPersonIds: readonly string[];
+  /** Dynamic audience group keys -- meaningful only when `audienceMode === 'groups'`; callers must already have validated these against the canonical `AudienceGroupKey` enum (`ruleActions.ts`). */
+  audienceGroupKeys?: readonly AudienceGroupKey[];
+  /** "לא לשלוח ל" -- ALWAYS applied, independent of `audienceMode`; callers must already have revalidated these against a fresh roster, same as `targetPersonIds`. */
+  excludedPersonIds?: readonly string[];
   /**
    * The `revision` this edit's caller loaded the rule at (`SystemRuleView.revision`)
    * -- the OPTIMISTIC CONCURRENCY TOKEN for the Manager's OWN write path
@@ -1983,10 +2036,17 @@ export type UpdateSystemRuleOutcome =
  * enabled/time only, no revision check on the Manager's own write path)
  * remains defined in the database, untouched, for rollout compatibility
  * with an already-deployed old app instance -- this function never calls it.
+ *
+ * Calls `update_system_rule_configuration_and_invalidate_pending_jobs_v2`
+ * (the dynamic audience groups/exclusions follow-up migration) rather than
+ * its `_v2`-less predecessor -- same rollout-safety reasoning: the
+ * predecessor remains defined, untouched, in the database for an
+ * already-deployed old app instance mid-rollout; this function never calls
+ * it once the new columns exist.
  */
 export async function updateSystemRule(id: string, edit: SystemRuleEdit): Promise<UpdateSystemRuleOutcome> {
   const supabase = getNotificationServiceClient();
-  const { data, error } = await supabase.rpc("update_system_rule_configuration_and_invalidate_pending_jobs", {
+  const { data, error } = await supabase.rpc("update_system_rule_configuration_and_invalidate_pending_jobs_v2", {
     p_rule_id: id,
     p_expected_revision: edit.expectedRevision,
     p_enabled: edit.enabled,
@@ -1996,6 +2056,8 @@ export async function updateSystemRule(id: string, edit: SystemRuleEdit): Promis
     p_body_override: edit.bodyOverride,
     p_audience_mode: edit.audienceMode,
     p_target_person_ids: edit.targetPersonIds,
+    p_audience_group_keys: edit.audienceGroupKeys ?? [],
+    p_excluded_person_ids: edit.excludedPersonIds ?? [],
     p_updated_by_person_id: edit.updatedByPersonId,
     p_updated_by_person_name: edit.updatedByPersonName,
   });
@@ -2016,6 +2078,8 @@ export interface NewCustomWeeklyRule {
   body: string;
   audienceKind: BroadcastAudienceKind;
   targetPersonIds: readonly string[];
+  audienceGroupKeys?: readonly AudienceGroupKey[];
+  excludedPersonIds?: readonly string[];
   createdByPersonId: string;
   createdByPersonName: string;
 }
@@ -2034,6 +2098,8 @@ export async function insertCustomWeeklyRule(rule: NewCustomWeeklyRule): Promise
       body: rule.body,
       audience_kind: rule.audienceKind,
       target_person_ids: rule.targetPersonIds,
+      audience_group_keys: rule.audienceGroupKeys ?? [],
+      excluded_person_ids: rule.excludedPersonIds ?? [],
       created_by_person_id: rule.createdByPersonId,
       created_by_person_name: rule.createdByPersonName,
     })
@@ -2051,6 +2117,8 @@ export interface CustomWeeklyRuleEdit {
   body: string;
   audienceKind: BroadcastAudienceKind;
   targetPersonIds: readonly string[];
+  audienceGroupKeys?: readonly AudienceGroupKey[];
+  excludedPersonIds?: readonly string[];
   updatedByPersonId: string;
   updatedByPersonName: string;
 }
@@ -2068,6 +2136,8 @@ export async function updateCustomWeeklyRule(id: string, edit: CustomWeeklyRuleE
       body: edit.body,
       audience_kind: edit.audienceKind,
       target_person_ids: edit.targetPersonIds,
+      audience_group_keys: edit.audienceGroupKeys ?? [],
+      excluded_person_ids: edit.excludedPersonIds ?? [],
       updated_by_person_id: edit.updatedByPersonId,
       updated_by_person_name: edit.updatedByPersonName,
       updated_at: new Date().toISOString(),

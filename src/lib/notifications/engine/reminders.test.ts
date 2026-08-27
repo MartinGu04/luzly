@@ -82,6 +82,8 @@ function defaultRuleConfig(
       bodyOverride: null,
       audienceMode: "all_eligible" as const,
       targetPersonIds: [],
+      audienceGroupKeys: [],
+      excludedPersonIds: [],
     },
     tomorrow_duty: {
       id: "rule-tomorrow_duty",
@@ -94,6 +96,8 @@ function defaultRuleConfig(
       bodyOverride: null,
       audienceMode: "all_eligible" as const,
       targetPersonIds: [],
+      audienceGroupKeys: [],
+      excludedPersonIds: [],
     },
     tomorrow_logistics_withdrawal: {
       id: "rule-tomorrow_logistics_withdrawal",
@@ -106,6 +110,8 @@ function defaultRuleConfig(
       bodyOverride: null,
       audienceMode: "all_eligible" as const,
       targetPersonIds: [],
+      audienceGroupKeys: [],
+      excludedPersonIds: [],
     },
     tomorrow_logistics_withdrawal_supervisor: {
       id: "rule-tomorrow_logistics_withdrawal_supervisor",
@@ -118,6 +124,8 @@ function defaultRuleConfig(
       bodyOverride: null,
       audienceMode: "all_eligible" as const,
       targetPersonIds: [],
+      audienceGroupKeys: [],
+      excludedPersonIds: [],
     },
     logistics_withdrawal_noon_assigned: {
       id: "rule-logistics_withdrawal_noon_assigned",
@@ -130,6 +138,8 @@ function defaultRuleConfig(
       bodyOverride: null,
       audienceMode: "all_eligible" as const,
       targetPersonIds: [],
+      audienceGroupKeys: [],
+      excludedPersonIds: [],
     },
     logistics_withdrawal_noon_supervisor: {
       id: "rule-logistics_withdrawal_noon_supervisor",
@@ -142,6 +152,8 @@ function defaultRuleConfig(
       bodyOverride: null,
       audienceMode: "all_eligible" as const,
       targetPersonIds: [],
+      audienceGroupKeys: [],
+      excludedPersonIds: [],
     },
     logistics_withdrawal_noon_team: {
       id: "rule-logistics_withdrawal_noon_team",
@@ -154,6 +166,8 @@ function defaultRuleConfig(
       bodyOverride: null,
       audienceMode: "all_eligible" as const,
       targetPersonIds: [],
+      audienceGroupKeys: [],
+      excludedPersonIds: [],
     },
     almash_check_in: {
       id: "rule-almash_check_in",
@@ -166,6 +180,8 @@ function defaultRuleConfig(
       bodyOverride: null,
       audienceMode: "all_eligible" as const,
       targetPersonIds: [],
+      audienceGroupKeys: [],
+      excludedPersonIds: [],
     },
     constraints_sunday: {
       id: "rule-constraints_sunday",
@@ -178,6 +194,8 @@ function defaultRuleConfig(
       bodyOverride: null,
       audienceMode: "all_eligible" as const,
       targetPersonIds: [],
+      audienceGroupKeys: [],
+      excludedPersonIds: [],
     },
     constraints_monday: {
       id: "rule-constraints_monday",
@@ -190,6 +208,8 @@ function defaultRuleConfig(
       bodyOverride: null,
       audienceMode: "all_eligible" as const,
       targetPersonIds: [],
+      audienceGroupKeys: [],
+      excludedPersonIds: [],
     },
   };
 
@@ -2268,6 +2288,40 @@ describe("audience filtering -- system_target_person_ids FILTERS domain eligibil
       ruleConfig: defaultRuleConfig({ constraints_sunday: { audienceMode: "selected", targetPersonIds: ["p_permanent"] } }),
     });
 
+    expect(summary.constraintsJobs).toBe(0);
+    expect(upsertedFor("constraints_sunday")).toHaveLength(0);
+  });
+
+  it("constraints: selecting the 'groups' audience mode with the permanent group can never deliver to permanent staff -- same structural safety as 'selected'", async () => {
+    // Even if a manager configures the constraints reminder to target the
+    // dynamic "permanent" (קבע) group, `resolveNonPermanentConstraintsRecipients`
+    // (mocked here exactly as it behaves in reality -- see that function's
+    // own docstring) never returns a permanent person as a candidate in
+    // the first place, so `isSystemRulePersonAllowed`'s own group-matching
+    // logic never even gets a chance to evaluate them. This is the "system
+    // audience filters cannot broaden domain eligibility" guarantee,
+    // proven specifically for the hard-rule case: קבע must never receive
+    // constraint reminders, no matter what audience configuration is saved.
+    resolveNonPermanentConstraintsRecipients.mockResolvedValue([{ personId: "p_a", userId: "user-a" }]);
+    const now: LocalNow = { date: "2026-08-16", minuteOfDay: 1080 }; // Sunday
+    const week = getOperationalWeek(now);
+
+    const { runReminders } = await loadModule();
+    const summary = await runReminders({
+      events: [],
+      people: [{ id: "p_a", name: "a", email: "a@x.com", isManager: false, isTechnician: false, isSupervisor: false, personnelType: "חובה" }],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: emptyRecipientResolution,
+      ruleConfig: defaultRuleConfig({ constraints_sunday: { audienceMode: "groups", audienceGroupKeys: ["permanent"] } }),
+    });
+
+    // The candidate (p_a) is non-permanent (חובה), so selecting the
+    // "permanent" group correctly excludes them too -- zero jobs, never a
+    // permanent person slipping through, and never an accidental match on
+    // an unrelated non-permanent candidate either.
     expect(summary.constraintsJobs).toBe(0);
     expect(upsertedFor("constraints_sunday")).toHaveLength(0);
   });

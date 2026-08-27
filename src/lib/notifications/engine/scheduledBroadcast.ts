@@ -1,5 +1,6 @@
 import "server-only";
 import type { Person } from "@/lib/domain/types";
+import type { AudienceGroupKey } from "@/lib/domain/audienceGroups";
 import { parseCalendarDate } from "@/lib/domain/dutyBlocks";
 import { getJerusalemLocalNow, jerusalemLocalTimeToInstant } from "@/lib/time/jerusalemClock";
 import { BROADCAST_BODY_MAX_LENGTH, BROADCAST_TITLE_MAX_LENGTH } from "../manualBroadcastLimits";
@@ -123,6 +124,8 @@ function validateScheduledBroadcastFields(input: {
   people: readonly Person[];
   audienceKind: BroadcastAudienceKind;
   targetPersonIds: readonly string[];
+  groupKeys: readonly AudienceGroupKey[];
+  excludedPersonIds: readonly string[];
   title: string;
   body: string;
   scheduledDate: string;
@@ -135,11 +138,11 @@ function validateScheduledBroadcastFields(input: {
   const body = validateText(input.body, BROADCAST_BODY_MAX_LENGTH);
   if (body === null) return { ok: false, error: "invalid_body" };
 
-  if (!validateAudienceCardinality(input.audienceKind, input.targetPersonIds)) {
+  if (!validateAudienceCardinality(input.audienceKind, input.targetPersonIds, input.groupKeys)) {
     return { ok: false, error: "invalid_audience" };
   }
 
-  const targets = resolveAudience(input.audienceKind, input.people, input.targetPersonIds);
+  const targets = resolveAudience(input.audienceKind, input.people, input.targetPersonIds, input.groupKeys, input.excludedPersonIds);
   if (targets === null) return { ok: false, error: "invalid_targets" };
   if (targets.length === 0) return { ok: false, error: "no_targets" };
 
@@ -153,10 +156,14 @@ function validateScheduledBroadcastFields(input: {
 
 export interface ScheduledBroadcastInput {
   manager: Person;
-  /** The full, freshly-parsed personnel roster -- the ONLY source `"everyone"`/`targetPersonIds` are resolved against, exactly like an immediate send (see `resolveAudience`). */
+  /** The full, freshly-parsed personnel roster -- the ONLY source `"everyone"`/`"groups"`/`targetPersonIds` are resolved against, exactly like an immediate send (see `resolveAudience`). */
   people: readonly Person[];
   audienceKind: BroadcastAudienceKind;
   targetPersonIds: readonly string[];
+  /** Dynamic audience group keys for `"groups"` -- resolved against `people` right now, at save/edit time, and FROZEN into `targetPersonIds`, exactly like `"everyone"` already is (see this module's own file docstring for why a scheduled broadcast's audience is a frozen snapshot, re-resolved only on an explicit edit -- never re-expanded again at dispatch). Optional/defaults to `[]`. */
+  groupKeys?: readonly AudienceGroupKey[];
+  /** "לא לשלוח ל" -- ALWAYS applied on top of whichever mode selected the base audience, baked into the frozen `targetPersonIds` snapshot at the SAME save/edit instant. Optional/defaults to `[]`. */
+  excludedPersonIds?: readonly string[];
   title: string;
   body: string;
   /** Israel-local civil date, "YYYY-MM-DD". */
@@ -207,11 +214,16 @@ export type CreateScheduledBroadcastOutcome =
  * anywhere they might not already be canonical.
  */
 function isSameLogicalScheduledCreateRequest(
-  stored: Pick<ManagerScheduledBroadcastRow, "createdByPersonId" | "audienceKind" | "targetPersonIds" | "title" | "body" | "scheduledFor">,
+  stored: Pick<
+    ManagerScheduledBroadcastRow,
+    "createdByPersonId" | "audienceKind" | "targetPersonIds" | "audienceGroupKeys" | "excludedPersonIds" | "title" | "body" | "scheduledFor"
+  >,
   candidate: {
     createdByPersonId: string;
     audienceKind: BroadcastAudienceKind;
     targetPersonIds: readonly string[];
+    audienceGroupKeys: readonly AudienceGroupKey[];
+    excludedPersonIds: readonly string[];
     title: string;
     body: string;
     scheduledFor: string;
@@ -222,7 +234,9 @@ function isSameLogicalScheduledCreateRequest(
   if (stored.title !== candidate.title) return false;
   if (stored.body !== candidate.body) return false;
   if (stored.scheduledFor !== candidate.scheduledFor) return false;
+  if (!sameIdSet(stored.excludedPersonIds, candidate.excludedPersonIds)) return false;
   if (stored.audienceKind === "everyone") return true;
+  if (stored.audienceKind === "groups") return sameIdSet(stored.audienceGroupKeys, candidate.audienceGroupKeys);
   return sameIdSet(stored.targetPersonIds, candidate.targetPersonIds);
 }
 
@@ -232,6 +246,8 @@ interface ScheduledCreateCandidate {
   audienceKind: BroadcastAudienceKind;
   /** The client's own requested ids, NOT yet validated against any roster -- see `createScheduledBroadcast`'s own docstring for why a replay must never require this. */
   targetPersonIds: readonly string[];
+  audienceGroupKeys: readonly AudienceGroupKey[];
+  excludedPersonIds: readonly string[];
   title: string;
   body: string;
   scheduledForInstant: Date;
@@ -246,6 +262,8 @@ function resolveExistingScheduledCreate(
     createdByPersonId: candidate.createdByPersonId,
     audienceKind: candidate.audienceKind,
     targetPersonIds: candidate.targetPersonIds,
+    audienceGroupKeys: candidate.audienceGroupKeys,
+    excludedPersonIds: candidate.excludedPersonIds,
     title: candidate.title,
     body: candidate.body,
     scheduledFor: candidate.scheduledForInstant.toISOString(),
@@ -303,7 +321,10 @@ export async function createScheduledBroadcast(input: CreateScheduledBroadcastIn
   const body = validateText(input.body, BROADCAST_BODY_MAX_LENGTH);
   if (body === null) return { ok: false, error: "invalid_body" };
 
-  if (!validateAudienceCardinality(input.audienceKind, input.targetPersonIds)) {
+  const groupKeys = input.groupKeys ?? [];
+  const excludedPersonIds = input.excludedPersonIds ?? [];
+
+  if (!validateAudienceCardinality(input.audienceKind, input.targetPersonIds, groupKeys)) {
     return { ok: false, error: "invalid_audience" };
   }
 
@@ -314,6 +335,8 @@ export async function createScheduledBroadcast(input: CreateScheduledBroadcastIn
     createdByPersonId: input.manager.id,
     audienceKind: input.audienceKind,
     targetPersonIds: input.targetPersonIds,
+    audienceGroupKeys: groupKeys,
+    excludedPersonIds,
     title,
     body,
     scheduledForInstant,
@@ -323,8 +346,9 @@ export async function createScheduledBroadcast(input: CreateScheduledBroadcastIn
   if (existing) return resolveExistingScheduledCreate(existing, candidate);
 
   // Genuinely new -- only NOW do the NEW-CREATE-only rules apply: the
-  // roster and "still in the future" as they stand RIGHT NOW.
-  const targets = resolveAudience(input.audienceKind, input.people, input.targetPersonIds);
+  // roster (and, for "groups", current group membership) and "still in
+  // the future" as they stand RIGHT NOW.
+  const targets = resolveAudience(input.audienceKind, input.people, input.targetPersonIds, groupKeys, excludedPersonIds);
   if (targets === null) return { ok: false, error: "invalid_targets" };
   if (targets.length === 0) return { ok: false, error: "no_targets" };
   if (scheduledForInstant.getTime() <= Date.now()) return { ok: false, error: "invalid_schedule" };
@@ -335,6 +359,8 @@ export async function createScheduledBroadcast(input: CreateScheduledBroadcastIn
     createIdempotencyKey: input.createIdempotencyKey,
     audienceKind: input.audienceKind,
     targetPersonIds: canonicalTargetPersonIds,
+    audienceGroupKeys: groupKeys,
+    excludedPersonIds,
     title,
     body,
     scheduledFor: scheduledForInstant.toISOString(),
@@ -371,12 +397,16 @@ export async function editScheduledBroadcast(
   id: string,
   input: ScheduledBroadcastInput,
 ): Promise<EditScheduledBroadcastOutcome> {
-  const validated = validateScheduledBroadcastFields(input);
+  const groupKeys = input.groupKeys ?? [];
+  const excludedPersonIds = input.excludedPersonIds ?? [];
+  const validated = validateScheduledBroadcastFields({ ...input, groupKeys, excludedPersonIds });
   if (!validated.ok) return validated;
 
   const edited = await updateManagerScheduledBroadcastIfEditable(id, {
     audienceKind: input.audienceKind,
     targetPersonIds: validated.fields.canonicalTargetPersonIds,
+    audienceGroupKeys: groupKeys,
+    excludedPersonIds,
     title: validated.fields.title,
     body: validated.fields.body,
     scheduledFor: validated.fields.scheduledForInstant.toISOString(),
@@ -549,6 +579,8 @@ export async function dispatchScheduledBroadcast(
       createdByPersonName: creator.name,
       audienceKind: row.audienceKind,
       targetPersonIds: row.targetPersonIds,
+      audienceGroupKeys: row.audienceGroupKeys,
+      excludedPersonIds: row.excludedPersonIds,
       resolvedRecipientUserIds: freshRecipientUserIds,
       title: row.title,
       body: row.body,
@@ -563,6 +595,8 @@ export async function dispatchScheduledBroadcast(
         createdByPersonId: creator.id,
         audienceKind: row.audienceKind,
         targetPersonIds: row.targetPersonIds,
+        audienceGroupKeys: row.audienceGroupKeys,
+        excludedPersonIds: row.excludedPersonIds,
         title: row.title,
         body: row.body,
       });

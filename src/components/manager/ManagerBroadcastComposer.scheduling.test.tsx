@@ -122,6 +122,8 @@ describe("ManagerBroadcastComposer -- editing an existing scheduled broadcast (a
     status: "scheduled",
     audienceKind: "person",
     targetPersonIds: ["p_dana"],
+    audienceGroupKeys: [],
+    excludedPersonIds: [],
     title: "כותרת קיימת",
     body: "תוכן קיים",
     scheduledFor: "2026-08-23T17:00:00.000Z",

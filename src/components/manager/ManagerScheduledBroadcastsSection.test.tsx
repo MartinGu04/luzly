@@ -27,6 +27,8 @@ function item(overrides: Partial<ScheduledBroadcastView> = {}): ScheduledBroadca
     status: "scheduled",
     audienceKind: "everyone",
     targetPersonIds: ["p_a", "p_b"],
+    audienceGroupKeys: [],
+    excludedPersonIds: [],
     title: "עדכון חשוב",
     body: "תוכן",
     scheduledFor: "2026-08-23T17:00:00.000Z",

@@ -1,4 +1,7 @@
 import "server-only";
+import type { Person } from "@/lib/domain/types";
+import type { AudienceGroupable, AudienceGroupKey } from "@/lib/domain/audienceGroups";
+import { personMatchesAudienceSelection, type NotificationAudienceSelection } from "@/lib/domain/audienceSelection";
 import { listActiveNotificationRules, type BroadcastAudienceKind, type NotificationRuleRow } from "./store";
 
 /**
@@ -58,10 +61,27 @@ export interface SystemRuleConfig {
   titleOverride: string | null;
   /** `null` = use the built-in body unchanged. For a `dynamic_details_required` category (see the presentation-layer catalog), a non-null value is a `{details}` template -- already validated server-side at save time, never re-validated here. */
   bodyOverride: string | null;
-  /** A FILTER over this rule's own domain-eligible recipients -- see `isSystemRulePersonAllowed` below. Can never expand who is eligible. */
-  audienceMode: "all_eligible" | "selected";
+  /**
+   * A FILTER over this rule's own domain-eligible recipients -- see
+   * `isSystemRulePersonAllowed` below. Can never expand who is eligible.
+   * `"groups"` (dynamic audience groups/exclusions follow-up) resolves
+   * `audienceGroupKeys` fresh against the CURRENT roster every tick --
+   * never a frozen list of person ids -- via the shared
+   * `lib/domain/audienceSelection.ts` resolver.
+   */
+  audienceMode: "all_eligible" | "selected" | "groups";
   /** Stable roster person ids -- meaningful only when `audienceMode === 'selected'`. Re-validated against the CURRENT roster at send time by each reminder function's own recipient resolution (a stale/removed id simply never matches a currently-eligible person, so it's silently skipped, never guessed at). */
   targetPersonIds: readonly string[];
+  /** Dynamic audience group keys -- meaningful only when `audienceMode === 'groups'`. Resolved fresh against the current roster every tick, never persisted as a frozen id list (spec: "Groups must be resolved dynamically... not persisted as a frozen list"). */
+  audienceGroupKeys: readonly AudienceGroupKey[];
+  /**
+   * "לא לשלוח ל" -- stable roster person ids explicitly EXCLUDED from this
+   * rule, independent of `audienceMode`. Always applied, always wins --
+   * see `isSystemRulePersonAllowed` below and
+   * `lib/domain/audienceSelection.ts`'s own docstring. Never has any power
+   * to ADD a recipient; only to remove one who would otherwise qualify.
+   */
+  excludedPersonIds: readonly string[];
 }
 
 export interface CustomWeeklyRuleConfig {
@@ -110,6 +130,18 @@ function toSystemRuleConfig(row: NotificationRuleRow): SystemRuleConfig | null {
     bodyOverride: row.systemBodyOverride,
     audienceMode: row.systemAudienceMode,
     targetPersonIds: row.systemTargetPersonIds,
+    audienceGroupKeys: row.systemAudienceGroupKeys,
+    excludedPersonIds: row.systemExcludedPersonIds,
+  };
+}
+
+/** `SystemRuleConfig`'s own audience configuration, translated into the shared resolver's `NotificationAudienceSelection` shape -- `'selected'` maps to the resolver's `'people'` mode (same meaning, different historical name kept for API/DB backwards compatibility -- see this table's own migration). */
+function systemRuleAudienceSelection(rule: SystemRuleConfig): NotificationAudienceSelection {
+  return {
+    mode: rule.audienceMode === "selected" ? "people" : rule.audienceMode,
+    groupKeys: rule.audienceGroupKeys,
+    personIds: rule.targetPersonIds,
+    excludedPersonIds: rule.excludedPersonIds,
   };
 }
 
@@ -119,14 +151,29 @@ function toSystemRuleConfig(row: NotificationRuleRow): SystemRuleConfig | null {
  * caller's own domain eligibility logic already decided; this function
  * has no domain knowledge itself and must always be applied ON TOP of
  * (never instead of) a category's real eligible-recipient computation
- * (see each `reminders.ts` function's own recipient loop). `'selected'`
- * with an empty `targetPersonIds` (should be unreachable -- `ruleActions.ts`
- * requires at least one selection to save that mode) allows no one,
- * fail-safe rather than silently falling back to `'all_eligible'`.
+ * (see each `reminders.ts` function's own recipient loop). Delegates to
+ * the ONE shared `lib/domain/audienceSelection.ts` resolver -- never a
+ * second copy of the mode/group/exclusion logic -- so the same rules
+ * (exclusions always win, groups resolved fresh from the person's own
+ * current fields, `'selected'`/`'groups'` with nothing selected allows no
+ * one rather than silently falling back to `'all_eligible'`) apply
+ * identically here and in every other audience-selecting surface.
+ *
+ * `people` is consulted ONLY to resolve `personId`'s
+ * `personnelType`/`isSupervisor`/`isTechnician` for a `'groups'`-mode
+ * rule -- `'all_eligible'` never needs it, and `'selected'`/exclusions
+ * only ever compare bare ids. A `personId` genuinely absent from `people`
+ * (should be unreachable for a genuine roster-derived id, but every
+ * caller here passes the SAME roster snapshot it resolved `personId` from
+ * in the first place) falls back to an "unclassified, no capability
+ * flags" shell -- which can never satisfy any `'groups'` membership check
+ * (fail closed), while leaving `'all_eligible'`/`'selected'`/exclusion
+ * decisions, which only ever need the bare id, completely unaffected.
  */
-export function isSystemRulePersonAllowed(rule: SystemRuleConfig, personId: string): boolean {
-  if (rule.audienceMode === "all_eligible") return true;
-  return rule.targetPersonIds.includes(personId);
+export function isSystemRulePersonAllowed(rule: SystemRuleConfig, personId: string, people: readonly Person[]): boolean {
+  const person = people.find((candidate) => candidate.id === personId);
+  const groupable: AudienceGroupable = person ?? { id: personId, personnelType: null, isSupervisor: false, isTechnician: false };
+  return personMatchesAudienceSelection(groupable, systemRuleAudienceSelection(rule));
 }
 
 function toCustomWeeklyRuleConfig(row: NotificationRuleRow): CustomWeeklyRuleConfig | null {

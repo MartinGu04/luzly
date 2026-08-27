@@ -38,6 +38,8 @@ function dynamicRule(overrides: Partial<SystemRuleView> = {}): SystemRuleView {
     bodyOverride: null,
     audienceMode: "all_eligible",
     targetPersonIds: [],
+    audienceGroupKeys: [],
+    excludedPersonIds: [],
     bodyKind: "dynamic_details_required",
     defaultTitle: "⏰ המשמרת שלך מחר",
     defaultBody: null,
@@ -75,6 +77,8 @@ describe("ManagerSystemRuleEditor -- fields + submission", () => {
         bodyOverride: null,
         audienceMode: "all_eligible",
         targetPersonIds: [],
+        audienceGroupKeys: [],
+        excludedPersonIds: [],
         expectedRevision: 1,
       }),
     );
@@ -167,11 +171,11 @@ describe("ManagerSystemRuleEditor -- fields + submission", () => {
     );
   });
 
-  it("switching to 'אנשים מסוימים' with nothing selected disables submit; selecting a roster person enables it and reuses RosterPersonPicker", async () => {
+  it("switching to 'אנשים ספציפיים' with nothing selected disables submit; selecting a roster person enables it and reuses RosterPersonPicker", async () => {
     updateSystemRuleAction.mockResolvedValue({ ok: true, rule: dynamicRule() });
 
     render(<ManagerSystemRuleEditor rule={dynamicRule()} roster={ROSTER} adoptionPeople={ADOPTION} onSaved={vi.fn()} onCancel={vi.fn()} />);
-    fireEvent.click(screen.getByText("אנשים מסוימים"));
+    fireEvent.click(screen.getByText("אנשים ספציפיים"));
     expect(screen.getByText("שמירת שינויים")).toBeDisabled();
 
     fireEvent.click(screen.getByText("דנה"));

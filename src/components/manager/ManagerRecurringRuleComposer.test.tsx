@@ -36,6 +36,8 @@ function existingRule(overrides: Partial<CustomWeeklyRuleView> = {}): CustomWeek
     body: "גוף קיים",
     audienceKind: "everyone",
     targetPersonIds: [],
+    audienceGroupKeys: [],
+    excludedPersonIds: [],
     scheduleSummary: "כל שבת בשעה 21:00",
     nextSendSummary: null,
     createdByPersonName: "דני מנהל",
@@ -71,6 +73,8 @@ describe("ManagerRecurringRuleComposer -- create mode", () => {
         localMinute: 0,
         audienceKind: "everyone",
         targetPersonIds: [],
+        groupKeys: [],
+        excludedPersonIds: [],
       }),
     );
     await waitFor(() => expect(onSaved).toHaveBeenCalled());

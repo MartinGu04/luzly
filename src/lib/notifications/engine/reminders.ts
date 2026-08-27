@@ -172,7 +172,7 @@ function buildTomorrowRegularShiftJobs(
 
   const validJobs: NewNotificationJob[] = [];
   for (const event of tomorrowShiftEvents) {
-    if (!isSystemRulePersonAllowed(rule, event.personId)) continue;
+    if (!isSystemRulePersonAllowed(rule, event.personId, input.people)) continue;
     const recipient = input.recipientResolution.resolved.get(event.personId);
     if (!recipient) continue;
 
@@ -239,7 +239,7 @@ function buildTomorrowEmergencyShiftJobs(
 
   const validJobs: NewNotificationJob[] = [];
   for (const { personId, period, desks } of desksByPersonPeriod.values()) {
-    if (!isSystemRulePersonAllowed(rule, personId)) continue;
+    if (!isSystemRulePersonAllowed(rule, personId, input.people)) continue;
     const recipient = input.recipientResolution.resolved.get(personId);
     if (!recipient) continue;
 
@@ -288,7 +288,7 @@ async function runTomorrowDutyReminders(input: RemindersInput): Promise<{ create
   const validJobs: NewNotificationJob[] = [];
   for (const event of tomorrowDutyEvents) {
     if (event.dutyFamily === null) continue;
-    if (!isSystemRulePersonAllowed(rule, event.personId)) continue;
+    if (!isSystemRulePersonAllowed(rule, event.personId, input.people)) continue;
     const recipient = input.recipientResolution.resolved.get(event.personId);
     if (!recipient) continue;
 
@@ -353,7 +353,7 @@ async function runTomorrowLogisticsWithdrawalReminders(
 
   const validJobs: NewNotificationJob[] = [];
   for (const event of tomorrowLogisticsWithdrawalEvents) {
-    if (!isSystemRulePersonAllowed(rule, event.personId)) continue;
+    if (!isSystemRulePersonAllowed(rule, event.personId, input.people)) continue;
     const recipient = input.recipientResolution.resolved.get(event.personId);
     if (!recipient) continue;
 
@@ -455,7 +455,7 @@ async function runTomorrowLogisticsWithdrawalSupervisorReminders(
 
   const validJobs: NewNotificationJob[] = [];
   for (const supervisor of supervisors) {
-    if (!isSystemRulePersonAllowed(rule, supervisor.personId)) continue;
+    if (!isSystemRulePersonAllowed(rule, supervisor.personId, input.people)) continue;
     const recipient = input.recipientResolution.resolved.get(supervisor.personId);
     if (!recipient) continue;
 
@@ -536,7 +536,7 @@ async function runLogisticsWithdrawalNoonReminders(input: RemindersInput): Promi
       body: "היום אתה עושה משיכות בין 13:00–14:00.",
     });
     for (const assignee of assignees) {
-      if (!isSystemRulePersonAllowed(assignedRule, assignee.personId)) continue;
+      if (!isSystemRulePersonAllowed(assignedRule, assignee.personId, input.people)) continue;
       const recipient = input.recipientResolution.resolved.get(assignee.personId);
       if (!recipient) continue;
       assignedJobs.push({
@@ -580,7 +580,7 @@ async function runLogisticsWithdrawalNoonReminders(input: RemindersInput): Promi
       body: "לא הוגדר טכנאי למשיכות היום בין 13:00–14:00. נדרש לוודא שכל הטכנאים הזמינים יוצאים למשיכות.",
     });
     for (const supervisor of supervisorCandidates) {
-      if (!isSystemRulePersonAllowed(supervisorRule, supervisor.personId)) continue;
+      if (!isSystemRulePersonAllowed(supervisorRule, supervisor.personId, input.people)) continue;
       const recipient = input.recipientResolution.resolved.get(supervisor.personId);
       if (!recipient) continue;
       supervisorJobs.push({
@@ -627,7 +627,7 @@ async function runLogisticsWithdrawalNoonReminders(input: RemindersInput): Promi
     const scheduledFor = toIso(today, teamRule.localHour, teamRule.localMinute);
     const { title: teamTitle, body: teamBody } = applySystemRuleCopy("logistics_withdrawal_noon_team", teamRule, teamBuiltIn);
     for (const person of eligibleTechnicians) {
-      if (!isSystemRulePersonAllowed(teamRule, person.id)) continue;
+      if (!isSystemRulePersonAllowed(teamRule, person.id, input.people)) continue;
       const recipient = input.recipientResolution.resolved.get(person.id);
       if (!recipient) continue;
       teamJobs.push({
@@ -711,7 +711,7 @@ async function runAlmashCheckInReminders(input: RemindersInput): Promise<{ creat
 
   const validJobs: NewNotificationJob[] = [];
   for (const action of todayActions) {
-    if (!isSystemRulePersonAllowed(rule, action.personId)) continue;
+    if (!isSystemRulePersonAllowed(rule, action.personId, input.people)) continue;
     const recipient = input.recipientResolution.resolved.get(action.personId);
     if (!recipient) continue;
 
@@ -920,7 +920,15 @@ async function buildAndApplyConstraintsJobs(
   const { title, body } = applySystemRuleCopy(category, rule, copy);
 
   const validJobs: NewNotificationJob[] = recipients
-    .filter((recipient) => isSystemRulePersonAllowed(rule, recipient.personId))
+    // `resolveNonPermanentConstraintsRecipients` already guarantees every
+    // returned `personId` matches a genuine member of `input.people` (it
+    // iterates `people` itself) -- a permanent person is never even a
+    // candidate here to begin with, so no `audienceMode`/group/exclusion
+    // configuration below can ever cause them to receive this reminder
+    // (see `isSystemRulePersonAllowed`'s own docstring: a pure FILTER,
+    // never a broadening, over whatever domain eligibility already
+    // decided).
+    .filter((recipient) => isSystemRulePersonAllowed(rule, recipient.personId, input.people))
     .map(({ userId }) => ({
       category,
       recipientUserId: userId,

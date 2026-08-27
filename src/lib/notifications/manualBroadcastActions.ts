@@ -1,6 +1,7 @@
 "use server";
 
 import { after } from "next/server";
+import { isAudienceGroupKey, type AudienceGroupKey } from "@/lib/domain/audienceGroups";
 import { loadManagerPersonnelContext, loadManagerWorkbookContext } from "@/lib/readModels/managerWorkbookContext";
 import { computeDeliveryLatencySeconds } from "./broadcastTiming";
 import { runDelivery } from "./engine/delivery";
@@ -22,8 +23,12 @@ const MAX_IDEMPOTENCY_KEY_LENGTH = 200;
 
 export interface SendManagerBroadcastActionInput {
   audienceKind: BroadcastAudienceKind;
-  /** Untrusted candidate roster ids -- re-validated against the freshly-fetched roster before anything is sent (see `sendManagerBroadcastNotification`). */
+  /** Untrusted candidate roster ids -- re-validated against the freshly-fetched roster before anything is sent (see `sendManagerBroadcastNotification`). Ignored unless `audienceKind` is `"person"`/`"people"`. */
   targetPersonIds: string[];
+  /** Untrusted candidate group keys -- re-validated against the canonical `AudienceGroupKey` enum before anything is sent. Ignored unless `audienceKind === "groups"`. */
+  groupKeys?: string[];
+  /** "לא לשלוח ל" -- untrusted candidate roster ids, ALWAYS re-validated against the freshly-fetched roster, independent of `audienceKind`. */
+  excludedPersonIds?: string[];
   title: string;
   body: string;
   /** Generated once per compose session on the client (e.g. `crypto.randomUUID()`), unchanged across a retry -- the batch-level idempotency key. */
@@ -43,11 +48,22 @@ export type SendManagerBroadcastActionResult =
   | { ok: false; error: string };
 
 function isValidRequestShape(input: SendManagerBroadcastActionInput): boolean {
-  if (input.audienceKind !== "person" && input.audienceKind !== "people" && input.audienceKind !== "everyone") {
+  if (
+    input.audienceKind !== "person" &&
+    input.audienceKind !== "people" &&
+    input.audienceKind !== "everyone" &&
+    input.audienceKind !== "groups"
+  ) {
     return false;
   }
   if (!Array.isArray(input.targetPersonIds) || input.targetPersonIds.length > MAX_TARGET_IDS) return false;
   if (!input.targetPersonIds.every((id) => typeof id === "string")) return false;
+  const groupKeys = input.groupKeys ?? [];
+  if (!Array.isArray(groupKeys) || groupKeys.length > MAX_TARGET_IDS) return false;
+  if (!groupKeys.every(isAudienceGroupKey)) return false;
+  const excludedPersonIds = input.excludedPersonIds ?? [];
+  if (!Array.isArray(excludedPersonIds) || excludedPersonIds.length > MAX_TARGET_IDS) return false;
+  if (!excludedPersonIds.every((id) => typeof id === "string")) return false;
   if (typeof input.title !== "string" || typeof input.body !== "string") return false;
   if (typeof input.idempotencyKey !== "string" || input.idempotencyKey.length < 8) return false;
   if (input.idempotencyKey.length > MAX_IDEMPOTENCY_KEY_LENGTH) return false;
@@ -102,6 +118,8 @@ export async function sendManagerBroadcastAction(
     people,
     audienceKind: input.audienceKind,
     targetPersonIds: input.targetPersonIds,
+    groupKeys: (input.groupKeys ?? []) as AudienceGroupKey[],
+    excludedPersonIds: input.excludedPersonIds ?? [],
     title: input.title,
     body: input.body,
     idempotencyKey: input.idempotencyKey,
