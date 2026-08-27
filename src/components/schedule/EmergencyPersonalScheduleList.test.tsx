@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
+import type { LocalNow } from "@/lib/domain/localNow";
 import type { EmergencyPersonalShiftEntry } from "@/lib/readModels/emergencyScheduleTypes";
 import { EmergencyPersonalScheduleList } from "./EmergencyPersonalScheduleList";
 
-const TODAY = "2026-08-26";
+const TODAY_DATE = "2026-08-26";
+const TODAY: LocalNow = { date: TODAY_DATE, minuteOfDay: 600 };
 
 afterEach(() => {
   cleanup();
@@ -21,31 +23,42 @@ function shift(overrides: Partial<EmergencyPersonalShiftEntry> = {}): EmergencyP
 
 describe("EmergencyPersonalScheduleList -- empty states", () => {
   it("shows an empty state with the colleague's name when person perspective has no shifts at all", () => {
-    render(<EmergencyPersonalScheduleList shifts={[]} emptyStateName="עמית בדיקה" todayDate={TODAY} />);
+    render(<EmergencyPersonalScheduleList shifts={[]} emptyStateName="עמית בדיקה" range="7d" localNow={TODAY} />);
     expect(screen.getByText(/עמית בדיקה/)).toBeInTheDocument();
   });
 
   it("shows a generic empty state for self with no name", () => {
-    render(<EmergencyPersonalScheduleList shifts={[]} emptyStateName={null} todayDate={TODAY} />);
+    render(<EmergencyPersonalScheduleList shifts={[]} emptyStateName={null} range="7d" localNow={TODAY} />);
     expect(screen.getByText("אין משמרות חירום ידועות.")).toBeInTheDocument();
   });
 
-  it("shows a calm 'no upcoming shifts' note (not a blank agenda) when every known shift is in the past, while still surfacing the history disclosure", () => {
+  it("a multi-day range (7d/30d) with zero matches shows a calm empty note, never a wall of empty cards", () => {
     render(
-      <EmergencyPersonalScheduleList shifts={[shift({ date: "2026-02-10" })]} emptyStateName={null} todayDate={TODAY} />,
+      <EmergencyPersonalScheduleList shifts={[shift({ date: "2026-02-10" })]} emptyStateName={null} range="7d" localNow={TODAY} />,
     );
-    expect(screen.getByText("אין משמרות חירום קרובות.")).toBeInTheDocument();
+    expect(screen.getByText("אין משמרות חירום בטווח שנבחר.")).toBeInTheDocument();
+    expect(screen.queryByTestId("emergency-agenda-current")).not.toBeInTheDocument();
     expect(screen.getByTestId("emergency-agenda-history")).toBeInTheDocument();
+  });
+
+  it("a single-day range (today/tomorrow) with nothing recorded still renders ONE card anchored on that date, with a calm 'no shift' state -- never a blank page", () => {
+    render(<EmergencyPersonalScheduleList shifts={[shift({ date: "2026-09-01" })]} emptyStateName={null} range="today" localNow={TODAY} />);
+
+    const cards = screen.getAllByTestId("emergency-day-card");
+    expect(cards).toHaveLength(1);
+    expect(within(cards[0]).getByText(/26 באוגוסט/)).toBeInTheDocument();
+    expect(within(cards[0]).getAllByText("אין משמרת")).toHaveLength(2); // both day and night columns
   });
 });
 
-describe("EmergencyPersonalScheduleList -- own desks and roster", () => {
-  it("renders own desk(s) and the roster of others", () => {
+describe("EmergencyPersonalScheduleList -- own desks and roster ('מי איתי')", () => {
+  it("renders own desk(s) and the roster of others sharing that date+period", () => {
     render(
       <EmergencyPersonalScheduleList
         shifts={[shift({ ownDesks: ["הוגוורט", "תיעוד"], roster: [{ personId: "p2", personName: "ליה", desk: "ק'" }] })]}
         emptyStateName={null}
-        todayDate={TODAY}
+        range="today"
+        localNow={TODAY}
       />,
     );
 
@@ -54,148 +67,238 @@ describe("EmergencyPersonalScheduleList -- own desks and roster", () => {
     expect(screen.getByText(/ק'/)).toBeInTheDocument();
   });
 
-  it("never renders a row for a date+period the viewed person has no desk in, even if it's a known recorded shift for others", () => {
+  it("never renders a shift for a date+period the viewed person has no desk in, even if it's a known recorded shift for others", () => {
     render(
       <EmergencyPersonalScheduleList
-        shifts={[
-          shift({ date: "2026-08-27", ownDesks: [], roster: [{ personId: "p2", personName: "אחר לגמרי", desk: "ק'" }] }),
-        ]}
+        shifts={[shift({ date: TODAY_DATE, ownDesks: [], roster: [{ personId: "p2", personName: "אחר לגמרי", desk: "ק'" }] })]}
         emptyStateName={null}
-        todayDate={TODAY}
+        range="today"
+        localNow={TODAY}
       />,
     );
 
     expect(screen.queryByText(/אחר לגמרי/)).not.toBeInTheDocument();
-    expect(screen.getByText("אין משמרות חירום קרובות.")).toBeInTheDocument();
+    expect(screen.getAllByText("אין משמרת")).toHaveLength(2);
   });
 });
 
-describe("EmergencyPersonalScheduleList -- chronological upcoming agenda ordering", () => {
-  it("renders date headings in chronological ascending order, regardless of input order", () => {
+describe("EmergencyPersonalScheduleList -- default selection is 7 ימים (verified through the range prop)", () => {
+  it("a shift 6 days out is included, one 8 days out is excluded, when range='7d'", () => {
+    render(
+      <EmergencyPersonalScheduleList
+        shifts={[shift({ date: "2026-09-01" }), shift({ date: "2026-09-03" })]}
+        emptyStateName={null}
+        range="7d"
+        localNow={TODAY}
+      />,
+    );
+
+    expect(screen.getByText(/1 בספטמבר/)).toBeInTheDocument();
+    expect(screen.queryByText(/3 בספטמבר/)).not.toBeInTheDocument();
+  });
+});
+
+describe("EmergencyPersonalScheduleList -- today filtering", () => {
+  it("range='today' shows only today's card, excluding any other date", () => {
+    render(
+      <EmergencyPersonalScheduleList
+        shifts={[shift({ date: TODAY_DATE }), shift({ date: "2026-08-27" })]}
+        emptyStateName={null}
+        range="today"
+        localNow={TODAY}
+      />,
+    );
+
+    const cards = screen.getAllByTestId("emergency-day-card");
+    expect(cards).toHaveLength(1);
+    expect(within(cards[0]).getByText(/26 באוגוסט/)).toBeInTheDocument();
+  });
+});
+
+describe("EmergencyPersonalScheduleList -- tomorrow filtering", () => {
+  it("range='tomorrow' shows only tomorrow's card, excluding today and later dates", () => {
+    render(
+      <EmergencyPersonalScheduleList
+        shifts={[shift({ date: TODAY_DATE }), shift({ date: "2026-08-27" }), shift({ date: "2026-08-28" })]}
+        emptyStateName={null}
+        range="tomorrow"
+        localNow={TODAY}
+      />,
+    );
+
+    const cards = screen.getAllByTestId("emergency-day-card");
+    expect(cards).toHaveLength(1);
+    expect(within(cards[0]).getByText(/27 באוגוסט/)).toBeInTheDocument();
+  });
+});
+
+describe("EmergencyPersonalScheduleList -- 7-day filtering", () => {
+  it("range='7d' includes today through day+6 and excludes day+7", () => {
+    render(
+      <EmergencyPersonalScheduleList
+        shifts={[shift({ date: "2026-08-26" }), shift({ date: "2026-09-01" }), shift({ date: "2026-09-02" })]}
+        emptyStateName={null}
+        range="7d"
+        localNow={TODAY}
+      />,
+    );
+
+    expect(screen.getAllByTestId("emergency-day-card")).toHaveLength(2);
+    expect(screen.queryByText(/2 בספטמבר/)).not.toBeInTheDocument();
+  });
+});
+
+describe("EmergencyPersonalScheduleList -- 30-day filtering", () => {
+  it("range='30d' includes today through day+29 and excludes day+30", () => {
+    render(
+      <EmergencyPersonalScheduleList
+        shifts={[shift({ date: "2026-08-26" }), shift({ date: "2026-09-24" }), shift({ date: "2026-09-25" })]}
+        emptyStateName={null}
+        range="30d"
+        localNow={TODAY}
+      />,
+    );
+
+    expect(screen.getAllByTestId("emergency-day-card")).toHaveLength(2);
+    expect(screen.queryByText(/25 בספטמבר/)).not.toBeInTheDocument();
+  });
+});
+
+describe("EmergencyPersonalScheduleList -- chronological/calendar placement", () => {
+  it("day-cards appear in the DOM in chronological ascending order, regardless of input order", () => {
     render(
       <EmergencyPersonalScheduleList
         shifts={[shift({ date: "2026-09-01" }), shift({ date: "2026-08-27" }), shift({ date: "2026-08-30" })]}
         emptyStateName={null}
-        todayDate={TODAY}
+        range="30d"
+        localNow={TODAY}
       />,
     );
 
-    const upcoming = screen.getByTestId("emergency-agenda-upcoming");
-    const rows = within(upcoming).getAllByTestId("emergency-shift-row");
-    expect(rows).toHaveLength(3);
-    // Date headings must appear in the DOM in chronological (ascending)
-    // document order, regardless of the input array's own order.
-    const text = upcoming.textContent ?? "";
-    expect(text.indexOf("27 באוגוסט")).toBeLessThan(text.indexOf("30 באוגוסט"));
-    expect(text.indexOf("30 באוגוסט")).toBeLessThan(text.indexOf("1 בספטמבר"));
-  });
-});
-
-describe("EmergencyPersonalScheduleList -- old history never becomes the default/upcoming focus", () => {
-  it("a date far in the past (e.g. February) is NOT rendered in the always-visible upcoming agenda", () => {
-    render(
-      <EmergencyPersonalScheduleList
-        shifts={[shift({ date: "2026-02-10" }), shift({ date: "2026-08-27" })]}
-        emptyStateName={null}
-        todayDate={TODAY}
-      />,
-    );
-
-    const upcoming = screen.getByTestId("emergency-agenda-upcoming");
-    expect(within(upcoming).queryByText(/פברואר/)).not.toBeInTheDocument();
-  });
-
-  it("the past date is still reachable via the collapsed history disclosure -- never dropped entirely", () => {
-    render(
-      <EmergencyPersonalScheduleList
-        shifts={[shift({ date: "2026-02-10" }), shift({ date: "2026-08-27" })]}
-        emptyStateName={null}
-        todayDate={TODAY}
-      />,
-    );
-
-    const history = screen.getByTestId("emergency-agenda-history");
-    expect(within(history).getByText(/פברואר/)).toBeInTheDocument();
-    // Collapsed by default -- <details> with no `open` attribute.
-    expect(history).not.toHaveAttribute("open");
-  });
-
-  it("no history disclosure renders at all when every shift is upcoming/current", () => {
-    render(<EmergencyPersonalScheduleList shifts={[shift({ date: "2026-08-27" })]} emptyStateName={null} todayDate={TODAY} />);
-    expect(screen.queryByTestId("emergency-agenda-history")).not.toBeInTheDocument();
+    const cards = screen.getAllByTestId("emergency-day-card");
+    const dateTexts = cards.map((card) => card.textContent ?? "");
+    expect(dateTexts[0]).toMatch(/27 באוגוסט/);
+    expect(dateTexts[1]).toMatch(/30 באוגוסט/);
+    expect(dateTexts[2]).toMatch(/1 בספטמבר/);
   });
 });
 
 describe("EmergencyPersonalScheduleList -- grouping multiple desks in the same date+period", () => {
-  it("multiple desks for the same person/date/period render together in ONE compact row, not split across several", () => {
+  it("multiple desks for the same person/date/period render together in ONE period column, not split across several", () => {
     render(
       <EmergencyPersonalScheduleList
-        shifts={[shift({ date: "2026-08-27", period: "day", ownDesks: ["הוגוורט", "תיעוד", "ק'"] })]}
+        shifts={[shift({ date: TODAY_DATE, period: "day", ownDesks: ["הוגוורט", "תיעוד", "ק'"] })]}
         emptyStateName={null}
-        todayDate={TODAY}
+        range="today"
+        localNow={TODAY}
       />,
     );
 
-    const rows = screen.getAllByTestId("emergency-shift-row");
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toHaveTextContent("הוגוורט, תיעוד, ק'");
+    const dayColumn = screen.getByTestId("emergency-period-column-day");
+    expect(within(dayColumn).getByText(/הוגוורט, תיעוד, ק'/)).toBeInTheDocument();
+    expect(screen.getAllByTestId(/emergency-period-column-/)).toHaveLength(2); // day + night, never a 3rd for the extra desk
   });
 
-  it("day and night on the same date render as two separate rows under the SAME date heading", () => {
+  it("day and night on the same date render as two separate columns within the SAME date card", () => {
     render(
       <EmergencyPersonalScheduleList
         shifts={[
-          shift({ date: "2026-08-27", period: "day", ownDesks: ["הוגוורט"] }),
-          shift({ date: "2026-08-27", period: "night", ownDesks: ["ק'"] }),
+          shift({ date: TODAY_DATE, period: "day", ownDesks: ["הוגוורט"] }),
+          shift({ date: TODAY_DATE, period: "night", ownDesks: ["ק'"] }),
         ]}
         emptyStateName={null}
-        todayDate={TODAY}
+        range="today"
+        localNow={TODAY}
       />,
     );
 
-    const upcoming = screen.getByTestId("emergency-agenda-upcoming");
-    // Exactly one date heading for 2026-08-27, even though there are two rows.
-    expect(within(upcoming).getAllByText(/27 באוגוסט/)).toHaveLength(1);
-    expect(within(upcoming).getAllByTestId("emergency-shift-row")).toHaveLength(2);
+    expect(screen.getAllByTestId("emergency-day-card")).toHaveLength(1);
+    expect(within(screen.getByTestId("emergency-period-column-day")).getByText(/הוגוורט/)).toBeInTheDocument();
+    expect(within(screen.getByTestId("emergency-period-column-night")).getByText(/ק'/)).toBeInTheDocument();
   });
 });
 
 describe("EmergencyPersonalScheduleList -- day/night presentation", () => {
   it("shows a clear יום indication for a day shift", () => {
-    render(<EmergencyPersonalScheduleList shifts={[shift({ period: "day" })]} emptyStateName={null} todayDate={TODAY} />);
-    expect(screen.getByTestId("emergency-shift-period")).toHaveTextContent("יום");
+    render(<EmergencyPersonalScheduleList shifts={[shift({ period: "day" })]} emptyStateName={null} range="today" localNow={TODAY} />);
+    expect(within(screen.getByTestId("emergency-period-column-day")).getByText(/יום/)).toBeInTheDocument();
   });
 
   it("shows a clear לילה indication for a night shift", () => {
-    render(<EmergencyPersonalScheduleList shifts={[shift({ period: "night" })]} emptyStateName={null} todayDate={TODAY} />);
-    expect(screen.getByTestId("emergency-shift-period")).toHaveTextContent("לילה");
+    render(<EmergencyPersonalScheduleList shifts={[shift({ period: "night" })]} emptyStateName={null} range="today" localNow={TODAY} />);
+    expect(within(screen.getByTestId("emergency-period-column-night")).getByText(/לילה/)).toBeInTheDocument();
   });
 
-  it("day and night rows are visually distinguishable via different soft background classes", () => {
+  it("day and night columns carry different soft background classes when populated", () => {
     render(
       <EmergencyPersonalScheduleList
-        shifts={[
-          shift({ date: "2026-08-27", period: "day" }),
-          shift({ date: "2026-08-28", period: "night" }),
-        ]}
+        shifts={[shift({ date: TODAY_DATE, period: "day" }), shift({ date: TODAY_DATE, period: "night" })]}
         emptyStateName={null}
-        todayDate={TODAY}
+        range="today"
+        localNow={TODAY}
       />,
     );
 
-    const [dayRow, nightRow] = screen.getAllByTestId("emergency-shift-row");
-    expect(dayRow.className).not.toBe(nightRow.className);
+    const dayColumn = screen.getByTestId("emergency-period-column-day");
+    const nightColumn = screen.getByTestId("emergency-period-column-night");
+    expect(dayColumn.className).not.toBe(nightColumn.className);
   });
 });
 
 describe("EmergencyPersonalScheduleList -- today is visually obvious", () => {
-  it("marks today's date heading with a distinct 'היום' badge", () => {
-    render(<EmergencyPersonalScheduleList shifts={[shift({ date: TODAY })]} emptyStateName={null} todayDate={TODAY} />);
+  it("marks today's card with a distinct 'היום' badge", () => {
+    render(<EmergencyPersonalScheduleList shifts={[shift({ date: TODAY_DATE })]} emptyStateName={null} range="today" localNow={TODAY} />);
     expect(screen.getByText("היום")).toBeInTheDocument();
   });
 
   it("does not show a 'היום' badge on a non-today date", () => {
-    render(<EmergencyPersonalScheduleList shifts={[shift({ date: "2026-08-30" })]} emptyStateName={null} todayDate={TODAY} />);
+    render(<EmergencyPersonalScheduleList shifts={[shift({ date: "2026-08-30" })]} emptyStateName={null} range="30d" localNow={TODAY} />);
     expect(screen.queryByText("היום")).not.toBeInTheDocument();
+  });
+});
+
+describe("EmergencyPersonalScheduleList -- old history never becomes the default focus", () => {
+  it("a date far in the past (e.g. February) is NOT rendered in the always-visible current grid", () => {
+    render(
+      <EmergencyPersonalScheduleList
+        shifts={[shift({ date: "2026-02-10" }), shift({ date: "2026-08-27" })]}
+        emptyStateName={null}
+        range="30d"
+        localNow={TODAY}
+      />,
+    );
+
+    const current = screen.getByTestId("emergency-agenda-current");
+    expect(within(current).queryByText(/פברואר/)).not.toBeInTheDocument();
+  });
+
+  it("the past date is still reachable via the collapsed history disclosure -- never dropped entirely, regardless of the selected range", () => {
+    render(
+      <EmergencyPersonalScheduleList
+        shifts={[shift({ date: "2026-02-10" }), shift({ date: "2026-08-27" })]}
+        emptyStateName={null}
+        range="today"
+        localNow={TODAY}
+      />,
+    );
+
+    const history = screen.getByTestId("emergency-agenda-history");
+    expect(within(history).getByText(/פברואר/)).toBeInTheDocument();
+    expect(history).not.toHaveAttribute("open");
+  });
+
+  it("no history disclosure renders at all when every shift is upcoming/current", () => {
+    render(<EmergencyPersonalScheduleList shifts={[shift({ date: "2026-08-27" })]} emptyStateName={null} range="7d" localNow={TODAY} />);
+    expect(screen.queryByTestId("emergency-agenda-history")).not.toBeInTheDocument();
+  });
+});
+
+describe("EmergencyPersonalScheduleList -- responsive card grid (mirrors ManagerCoverageSection's own mobile/desktop behavior)", () => {
+  it("the current-range grid never forces a fixed multi-column layout -- single column by default, widening only from sm: up", () => {
+    render(<EmergencyPersonalScheduleList shifts={[shift({ date: TODAY_DATE })]} emptyStateName={null} range="7d" localNow={TODAY} />);
+
+    const grid = screen.getByTestId("emergency-agenda-current");
+    expect(grid.className).toContain("grid-cols-1");
+    expect(grid.className).toContain("sm:grid-cols-2");
   });
 });

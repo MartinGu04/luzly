@@ -3,6 +3,7 @@ import { EmergencyUnavailableState } from "@/components/emergencyMode/EmergencyU
 import { MonthNav } from "@/components/schedule/MonthNav";
 import { EmergencyEveryoneScheduleList } from "@/components/schedule/EmergencyEveryoneScheduleList";
 import { EmergencyPersonalScheduleList } from "@/components/schedule/EmergencyPersonalScheduleList";
+import { EmergencyScheduleRangeSelector } from "@/components/schedule/EmergencyScheduleRangeSelector";
 import { ScheduleCalendar } from "@/components/schedule/ScheduleCalendar";
 import { ScheduleEveryoneCalendar } from "@/components/schedule/ScheduleEveryoneCalendar";
 import { ScheduleHeader } from "@/components/schedule/ScheduleHeader";
@@ -22,6 +23,7 @@ import {
 import { parseCalendarDate } from "@/lib/domain/dutyBlocks";
 import { formatHebrewCalendarDate, formatHebrewMonthRange, getHolidayContext } from "@/lib/presentation/hebrewCalendar";
 import { formatHebrewMonthYear, formatHebrewWeekdayAndDate } from "@/lib/presentation/hebrewDate";
+import { parseEmergencyScheduleRangeParam, type EmergencyScheduleRangeKey } from "@/lib/presentation/emergencyAgenda";
 import { buildScheduleEveryoneDayViews } from "@/lib/presentation/scheduleEveryone";
 import { getRequestSchedule } from "@/lib/readModels/getRequestSchedule";
 import type { EmergencyScheduleReadModel } from "@/lib/readModels/emergencyScheduleTypes";
@@ -47,7 +49,7 @@ function buildDayMeta(date: string, todayDate: string): DayMeta {
 type SearchParamValue = string | string[] | undefined;
 
 interface SchedulePageProps {
-  searchParams: Promise<{ month?: SearchParamValue; person?: SearchParamValue; date?: SearchParamValue }>;
+  searchParams: Promise<{ month?: SearchParamValue; person?: SearchParamValue; date?: SearchParamValue; range?: SearchParamValue }>;
 }
 
 function firstParam(value: SearchParamValue): string | undefined {
@@ -123,7 +125,8 @@ export default async function SchedulePage({ searchParams }: SchedulePageProps) 
     return <EmergencyUnavailableState />;
   }
   if (result.status === "emergency") {
-    return <EmergencySchedulePage model={result.model} />;
+    const range = parseEmergencyScheduleRangeParam(firstParam(params.range));
+    return <EmergencySchedulePage model={result.model} range={range} />;
   }
   if (result.status !== "ok") {
     return <ConfigurationErrorState />;
@@ -271,14 +274,19 @@ function PersonalPerspective({
 
 /**
  * Emergency Mode's `/schedule` presentation (spec section 10) -- desk-
- * based staffing, never regular Event/role coverage. Deliberately a
- * simpler flat list (not the regular month-grid calendar, which is
- * built around `CalendarGridCell`/`PersonalEventView` semantics) since
- * an Emergency Mode period is typically a short, bounded window rather
- * than a full recurring monthly schedule -- every known emergency shift
- * renders, sorted chronologically, with no month pagination needed.
+ * based staffing, never regular Event/role coverage. The "self"/"person"
+ * perspective renders a real calendar/schedule presentation modeled on
+ * the regular schedule's own equivalent for a fixed date range (see
+ * `EmergencyPersonalScheduleList`'s own docs) rather than the month-grid
+ * calendar (`CalendarGridCell`/`PersonalEventView` semantics), plus its
+ * own "היום | מחר | 7 ימים | 30 יום" range selector
+ * (`EmergencyScheduleRangeSelector`) -- an Emergency Mode period is
+ * typically a short, bounded window rather than a full recurring monthly
+ * schedule, so a rolling range fits better than month pagination. The
+ * "all" perspective (`EmergencyEveryoneScheduleList`) is unaffected --
+ * it stays the full unscoped team roster, no range selector.
  */
-function EmergencySchedulePage({ model }: { model: EmergencyScheduleReadModel }) {
+function EmergencySchedulePage({ model, range }: { model: EmergencyScheduleReadModel; range: EmergencyScheduleRangeKey }) {
   return (
     <div className="flex flex-col gap-4 sm:gap-6">
       <ScheduleHeader monthLabel="סידור חירום" monthRangeSubtitle="משמרות חירום לפי דסקים" />
@@ -300,11 +308,15 @@ function EmergencySchedulePage({ model }: { model: EmergencyScheduleReadModel })
       {model.perspective === "all" && model.everyoneShifts ? (
         <EmergencyEveryoneScheduleList shifts={model.everyoneShifts} />
       ) : (
-        <EmergencyPersonalScheduleList
-          shifts={model.personalShifts ?? []}
-          emptyStateName={model.perspective === "person" ? model.selectedPersonName : null}
-          todayDate={model.localNow.date}
-        />
+        <>
+          <EmergencyScheduleRangeSelector basePath="/schedule" personId={model.selectedPersonId} currentRange={range} />
+          <EmergencyPersonalScheduleList
+            shifts={model.personalShifts ?? []}
+            emptyStateName={model.perspective === "person" ? model.selectedPersonName : null}
+            range={range}
+            localNow={model.localNow}
+          />
+        </>
       )}
     </div>
   );

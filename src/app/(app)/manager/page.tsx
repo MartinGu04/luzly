@@ -24,6 +24,7 @@ import { ManagerSummaryStrip } from "@/components/manager/ManagerSummaryStrip";
 import { EmergencyUnavailableState } from "@/components/emergencyMode/EmergencyUnavailableState";
 import { EmergencyEveryoneScheduleList } from "@/components/schedule/EmergencyEveryoneScheduleList";
 import { EmergencyPersonalScheduleList } from "@/components/schedule/EmergencyPersonalScheduleList";
+import { EmergencyScheduleRangeSelector } from "@/components/schedule/EmergencyScheduleRangeSelector";
 import { DataFreshnessStatus } from "@/components/ui/DataFreshnessStatus";
 import type {
   ManagerAbsenceRowView,
@@ -59,6 +60,7 @@ import {
   type ManagerHrefParams,
 } from "@/lib/presentation/managerUrl";
 import { buildManagerAdoptionSectionView } from "@/lib/presentation/managerAdoption";
+import { parseEmergencyScheduleRangeParam } from "@/lib/presentation/emergencyAgenda";
 import { managerIssueCoverageReasonLabel } from "@/lib/presentation/managerIssueCoverage";
 import { managerSummaryLabel } from "@/lib/presentation/managerSummary";
 import { roleCoverageMessage } from "@/lib/presentation/roleCoverage";
@@ -394,6 +396,9 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
       { id: model.manager.id, name: model.manager.name },
       model.selectedPersonId,
     );
+    const emergencyRange = parseEmergencyScheduleRangeParam(
+      Array.isArray(rawParams.range) ? rawParams.range[0] : rawParams.range,
+    );
 
     return (
       <div className="flex flex-col gap-6">
@@ -410,11 +415,19 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
             {emergencyResult.model.perspective === "all" ? (
               <EmergencyEveryoneScheduleList shifts={emergencyResult.model.everyoneShifts ?? []} />
             ) : (
-              <EmergencyPersonalScheduleList
-                shifts={emergencyResult.model.personalShifts ?? []}
-                emptyStateName={emergencyResult.model.selectedPersonName}
-                todayDate={emergencyResult.model.localNow.date}
-              />
+              <>
+                <EmergencyScheduleRangeSelector
+                  basePath="/manager"
+                  personId={model.selectedPersonId}
+                  currentRange={emergencyRange}
+                />
+                <EmergencyPersonalScheduleList
+                  shifts={emergencyResult.model.personalShifts ?? []}
+                  emptyStateName={emergencyResult.model.selectedPersonName}
+                  range={emergencyRange}
+                  localNow={emergencyResult.model.localNow}
+                />
+              </>
             )}
           </>
         )}

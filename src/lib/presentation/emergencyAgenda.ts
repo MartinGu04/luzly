@@ -1,3 +1,6 @@
+import { addCalendarDays, formatCalendarDate } from "@/lib/domain/dateRange";
+import { parseCalendarDate } from "@/lib/domain/dutyBlocks";
+import type { LocalNow } from "@/lib/domain/localNow";
 import type { EmergencyPersonalShiftEntry } from "@/lib/readModels/emergencyScheduleTypes";
 
 /** One date's worth of emergency shift entries -- almost always exactly one (a person is rarely on both day AND night the same date), but never assumed to be. */
@@ -70,4 +73,102 @@ export function buildEmergencyPersonalAgenda(
   }
 
   return { upcoming, past };
+}
+
+// ---------------------------------------------------------------------------
+// Date-range selector -- "היום | מחר | 7 ימים | 30 יום" (mirrors the visual
+// language and strict-allowlist-with-default parsing convention of
+// `ManagerRangeSelector`/`ManagerRangeKey`/`parseManagerRangeParam`,
+// lib/domain/dateRange.ts -- but kept entirely LOCAL to Emergency Mode
+// rather than extending that shared file, which fairness/notifications
+// code also imports and this task must never touch). Applies ONLY to the
+// current/upcoming agenda -- `past`/history is a completely separate
+// concern (see `buildEmergencyPersonalAgenda` above) and is never
+// filtered by this range.
+// ---------------------------------------------------------------------------
+
+export type EmergencyScheduleRangeKey = "today" | "tomorrow" | "7d" | "30d";
+
+const VALID_RANGE_KEYS: ReadonlySet<string> = new Set(["today", "tomorrow", "7d", "30d"]);
+
+/** Product default -- a person opening their emergency schedule should land on a full upcoming week, never just today alone nor the noisier 30-day view. */
+export const DEFAULT_EMERGENCY_SCHEDULE_RANGE: EmergencyScheduleRangeKey = "7d";
+
+/** Strict allowlist parse of the `?range=` query param -- anything else (including missing/invalid) falls back to the 7-day default, same fail-safe convention as `parseManagerRangeParam`. */
+export function parseEmergencyScheduleRangeParam(raw: string | null | undefined): EmergencyScheduleRangeKey {
+  if (raw !== null && raw !== undefined && VALID_RANGE_KEYS.has(raw)) {
+    return raw as EmergencyScheduleRangeKey;
+  }
+  return DEFAULT_EMERGENCY_SCHEDULE_RANGE;
+}
+
+const FIXED_RANGE_DAY_COUNTS: Record<EmergencyScheduleRangeKey, number> = {
+  today: 1,
+  tomorrow: 1,
+  "7d": 7,
+  "30d": 30,
+};
+
+/**
+ * Resolves a `EmergencyScheduleRangeKey` against `localNow` into the
+ * concrete list of civil dates it covers -- "today"/"tomorrow" are each a
+ * single date, "7d"/"30d" are `localNow.date` plus the next 6/29 civil
+ * dates (today itself always included, per spec: "7 ימים -> today + the
+ * next 7 calendar days"). Pure day-math, no `Date`/UTC -- reuses the SAME
+ * `addCalendarDays`/`formatCalendarDate` primitives `resolveManagerDateRange`
+ * (`lib/domain/dateRange.ts`) already uses for its own "today"/"7d"/"30d"
+ * options, imported read-only rather than duplicating that arithmetic, but
+ * computed independently since that file's `ManagerRangeKey` has no
+ * "tomorrow" option and this task must not extend a file
+ * fairness/notifications code also depends on.
+ */
+export function resolveEmergencyScheduleRangeDates(key: EmergencyScheduleRangeKey, localNow: LocalNow): string[] {
+  const today = parseCalendarDate(localNow.date);
+  if (!today) return [localNow.date];
+
+  if (key === "tomorrow") return [formatCalendarDate(addCalendarDays(today, 1))];
+
+  const count = FIXED_RANGE_DAY_COUNTS[key];
+  const dates: string[] = [];
+  for (let i = 0; i < count; i++) dates.push(formatCalendarDate(addCalendarDays(today, i)));
+  return dates;
+}
+
+/** Narrows already-grouped date-groups down to the ones whose date falls inside `dates` -- preserves the input's own chronological order, never re-sorts. */
+function filterAgendaGroupsByDates(
+  groups: readonly EmergencyAgendaDayGroup[],
+  dates: readonly string[],
+): EmergencyAgendaDayGroup[] {
+  const dateSet = new Set(dates);
+  return groups.filter((group) => dateSet.has(group.date));
+}
+
+/** The fully-resolved view `EmergencyPersonalScheduleList` renders: `current` is the selected range's own date-groups (chronological), `past` is the FULL history regardless of range (collapsed/secondary, per spec -- the range selector never touches it). */
+export interface EmergencyScheduleAgendaView {
+  range: EmergencyScheduleRangeKey;
+  rangeDates: string[];
+  current: EmergencyAgendaDayGroup[];
+  past: EmergencyAgendaDayGroup[];
+}
+
+/**
+ * The one function `EmergencyPersonalScheduleList` calls to go from raw
+ * `EmergencyPersonalShiftEntry[]` + a selected range straight to what it
+ * renders -- composes `buildEmergencyPersonalAgenda` (own-shifts-only,
+ * today-vs-past split) with `resolveEmergencyScheduleRangeDates` +
+ * `filterAgendaGroupsByDates` (narrowing `upcoming` to the selected
+ * window). `past` is deliberately the UNFILTERED full history from
+ * `buildEmergencyPersonalAgenda` -- the range selector's own semantics
+ * ("today + upcoming N days") only ever describe a forward-looking
+ * window, so applying it to history would be meaningless; history has
+ * its own, separate "collapsed by default" treatment instead.
+ */
+export function buildEmergencyScheduleAgendaView(
+  shifts: readonly EmergencyPersonalShiftEntry[],
+  range: EmergencyScheduleRangeKey,
+  localNow: LocalNow,
+): EmergencyScheduleAgendaView {
+  const agenda = buildEmergencyPersonalAgenda(shifts, localNow.date);
+  const rangeDates = resolveEmergencyScheduleRangeDates(range, localNow);
+  return { range, rangeDates, current: filterAgendaGroupsByDates(agenda.upcoming, rangeDates), past: agenda.past };
 }
