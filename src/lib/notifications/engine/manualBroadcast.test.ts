@@ -455,6 +455,176 @@ describe("sendManagerBroadcastNotification -- recipient resolution", () => {
   });
 });
 
+describe("sendManagerBroadcastNotification -- dynamic audience groups + exclusions", () => {
+  it("'groups' resolves a service-type group against the current roster", async () => {
+    const dana = person({ id: "p_dana", name: "דנה", email: "dana@example.invalid", personnelType: "קבע" });
+    const noa = person({ id: "p_noa", name: "נועה", email: "noa@example.invalid", personnelType: "חובה" });
+    const { client, jobsByDedupeKey } = makeFakeSupabase(
+      [
+        { id: "user-dana", email: "dana@example.invalid" },
+        { id: "user-noa", email: "noa@example.invalid" },
+      ],
+      ["user-dana", "user-noa"],
+    );
+    const { sendManagerBroadcastNotification } = await loadModule(client);
+
+    const outcome = await sendManagerBroadcastNotification({
+      manager: MANAGER,
+      people: [MANAGER, dana, noa],
+      audienceKind: "groups",
+      targetPersonIds: [],
+      groupKeys: ["permanent"],
+      title: "כותרת",
+      body: "תוכן",
+      idempotencyKey: "idem-groups-service-type",
+    });
+
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result.resolvedRecipientCount).toBe(1);
+    expect(jobsByDedupeKey.size).toBe(1);
+    expect([...jobsByDedupeKey.values()][0].recipient_user_id).toBe("user-dana");
+  });
+
+  it("'groups' resolves a role group against the current roster", async () => {
+    const dana = person({ id: "p_dana", name: "דנה", email: "dana@example.invalid", isSupervisor: true });
+    const noa = person({ id: "p_noa", name: "נועה", email: "noa@example.invalid" });
+    const { client, jobsByDedupeKey } = makeFakeSupabase(
+      [
+        { id: "user-dana", email: "dana@example.invalid" },
+        { id: "user-noa", email: "noa@example.invalid" },
+      ],
+      ["user-dana", "user-noa"],
+    );
+    const { sendManagerBroadcastNotification } = await loadModule(client);
+
+    const outcome = await sendManagerBroadcastNotification({
+      manager: MANAGER,
+      people: [MANAGER, dana, noa],
+      audienceKind: "groups",
+      targetPersonIds: [],
+      groupKeys: ["supervisor"],
+      title: "כותרת",
+      body: "תוכן",
+      idempotencyKey: "idem-groups-role",
+    });
+
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(jobsByDedupeKey.size).toBe(1);
+    expect([...jobsByDedupeKey.values()][0].recipient_user_id).toBe("user-dana");
+  });
+
+  it("'groups' unions multiple selected groups correctly", async () => {
+    const dana = person({ id: "p_dana", name: "דנה", email: "dana@example.invalid", personnelType: "קבע" });
+    const noa = person({ id: "p_noa", name: "נועה", email: "noa@example.invalid", isTechnician: true });
+    const gil = person({ id: "p_gil", name: "גיל", email: "gil@example.invalid" });
+    const { client, jobsByDedupeKey } = makeFakeSupabase(
+      [
+        { id: "user-dana", email: "dana@example.invalid" },
+        { id: "user-noa", email: "noa@example.invalid" },
+        { id: "user-gil", email: "gil@example.invalid" },
+      ],
+      ["user-dana", "user-noa", "user-gil"],
+    );
+    const { sendManagerBroadcastNotification } = await loadModule(client);
+
+    const outcome = await sendManagerBroadcastNotification({
+      manager: MANAGER,
+      people: [MANAGER, dana, noa, gil],
+      audienceKind: "groups",
+      targetPersonIds: [],
+      groupKeys: ["permanent", "technician"],
+      title: "כותרת",
+      body: "תוכן",
+      idempotencyKey: "idem-groups-union",
+    });
+
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result.resolvedRecipientCount).toBe(2);
+    expect(new Set([...jobsByDedupeKey.values()].map((job) => job.recipient_user_id))).toEqual(new Set(["user-dana", "user-noa"]));
+  });
+
+  it("excludedPersonIds always wins -- removes a person even under 'everyone'", async () => {
+    const dana = person({ id: "p_dana", name: "דנה", email: "dana@example.invalid" });
+    const noa = person({ id: "p_noa", name: "נועה", email: "noa@example.invalid" });
+    const { client, jobsByDedupeKey } = makeFakeSupabase(
+      [
+        { id: "user-dana", email: "dana@example.invalid" },
+        { id: "user-noa", email: "noa@example.invalid" },
+      ],
+      ["user-dana", "user-noa"],
+    );
+    const { sendManagerBroadcastNotification } = await loadModule(client);
+
+    const outcome = await sendManagerBroadcastNotification({
+      manager: MANAGER,
+      people: [MANAGER, dana, noa],
+      audienceKind: "everyone",
+      targetPersonIds: [],
+      excludedPersonIds: ["p_dana"],
+      title: "כותרת",
+      body: "תוכן",
+      idempotencyKey: "idem-exclude-everyone",
+    });
+
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result.resolvedRecipientCount).toBe(1);
+    expect([...jobsByDedupeKey.values()][0].recipient_user_id).toBe("user-noa");
+  });
+
+  it("excludedPersonIds wins even for a person who belongs to multiple selected groups", async () => {
+    const dana = person({ id: "p_dana", name: "דנה", email: "dana@example.invalid", personnelType: "מילואים", isSupervisor: true, isTechnician: true });
+    const noa = person({ id: "p_noa", name: "נועה", email: "noa@example.invalid", personnelType: "מילואים" });
+    const { client, jobsByDedupeKey } = makeFakeSupabase(
+      [
+        { id: "user-dana", email: "dana@example.invalid" },
+        { id: "user-noa", email: "noa@example.invalid" },
+      ],
+      ["user-dana", "user-noa"],
+    );
+    const { sendManagerBroadcastNotification } = await loadModule(client);
+
+    const outcome = await sendManagerBroadcastNotification({
+      manager: MANAGER,
+      people: [MANAGER, dana, noa],
+      audienceKind: "groups",
+      targetPersonIds: [],
+      groupKeys: ["reserve", "supervisor", "technician"],
+      excludedPersonIds: ["p_dana"],
+      title: "כותרת",
+      body: "תוכן",
+      idempotencyKey: "idem-exclude-multi-group",
+    });
+
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result.resolvedRecipientCount).toBe(1);
+    expect([...jobsByDedupeKey.values()][0].recipient_user_id).toBe("user-noa");
+  });
+
+  it("an excluded id that isn't a genuine roster member fails the whole request closed, exactly like an invalid targetPersonId", async () => {
+    const dana = person({ id: "p_dana", name: "דנה", email: "dana@example.invalid" });
+    const { client } = makeFakeSupabase([{ id: "user-dana", email: "dana@example.invalid" }], ["user-dana"]);
+    const { sendManagerBroadcastNotification } = await loadModule(client);
+
+    const outcome = await sendManagerBroadcastNotification({
+      manager: MANAGER,
+      people: [MANAGER, dana],
+      audienceKind: "everyone",
+      targetPersonIds: [],
+      excludedPersonIds: ["p_not_in_roster"],
+      title: "כותרת",
+      body: "תוכן",
+      idempotencyKey: "idem-exclude-invalid",
+    });
+
+    expect(outcome).toEqual({ ok: false, error: "invalid_targets" });
+  });
+});
+
 describe("sendManagerBroadcastNotification -- idempotency", () => {
   it("a duplicate submission with the SAME idempotency key never creates a second batch or a second job per recipient", async () => {
     const dana = person({ id: "p_dana", name: "דנה", email: "dana@example.invalid" });

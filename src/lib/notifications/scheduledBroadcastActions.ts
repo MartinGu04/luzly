@@ -1,5 +1,6 @@
 "use server";
 
+import { isAudienceGroupKey, type AudienceGroupKey } from "@/lib/domain/audienceGroups";
 import { loadManagerPersonnelContext, loadManagerWorkbookContext } from "@/lib/readModels/managerWorkbookContext";
 import { getJerusalemLocalNow } from "@/lib/time/jerusalemClock";
 import {
@@ -18,8 +19,12 @@ const MAX_IDEMPOTENCY_KEY_LENGTH = 200; // same bound as the immediate-send acti
 
 export interface ScheduledBroadcastActionInput {
   audienceKind: BroadcastAudienceKind;
-  /** Untrusted candidate roster ids -- re-validated against the freshly-fetched roster before anything is saved (see `createScheduledBroadcast`/`editScheduledBroadcast`). */
+  /** Untrusted candidate roster ids -- re-validated against the freshly-fetched roster before anything is saved (see `createScheduledBroadcast`/`editScheduledBroadcast`). Ignored unless `audienceKind` is `"person"`/`"people"`. */
   targetPersonIds: string[];
+  /** Untrusted candidate group keys -- re-validated against the canonical `AudienceGroupKey` enum before anything is saved. Ignored unless `audienceKind === "groups"`. */
+  groupKeys?: string[];
+  /** "לא לשלוח ל" -- untrusted candidate roster ids, ALWAYS re-validated against the freshly-fetched roster, independent of `audienceKind`. */
+  excludedPersonIds?: string[];
   title: string;
   body: string;
   /** Israel-local civil date, "YYYY-MM-DD". */
@@ -37,11 +42,22 @@ export interface CreateScheduledBroadcastActionInput extends ScheduledBroadcastA
 }
 
 function isValidRequestShape(input: ScheduledBroadcastActionInput): boolean {
-  if (input.audienceKind !== "person" && input.audienceKind !== "people" && input.audienceKind !== "everyone") {
+  if (
+    input.audienceKind !== "person" &&
+    input.audienceKind !== "people" &&
+    input.audienceKind !== "everyone" &&
+    input.audienceKind !== "groups"
+  ) {
     return false;
   }
   if (!Array.isArray(input.targetPersonIds) || input.targetPersonIds.length > MAX_TARGET_IDS) return false;
   if (!input.targetPersonIds.every((id) => typeof id === "string")) return false;
+  const groupKeys = input.groupKeys ?? [];
+  if (!Array.isArray(groupKeys) || groupKeys.length > MAX_TARGET_IDS) return false;
+  if (!groupKeys.every(isAudienceGroupKey)) return false;
+  const excludedPersonIds = input.excludedPersonIds ?? [];
+  if (!Array.isArray(excludedPersonIds) || excludedPersonIds.length > MAX_TARGET_IDS) return false;
+  if (!excludedPersonIds.every((id) => typeof id === "string")) return false;
   if (typeof input.title !== "string" || typeof input.body !== "string") return false;
   if (typeof input.scheduledDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(input.scheduledDate)) return false;
   if (!Number.isInteger(input.scheduledHour) || !Number.isInteger(input.scheduledMinute)) return false;
@@ -57,6 +73,10 @@ export interface ScheduledBroadcastView {
   status: ManagerScheduledBroadcastStatus;
   audienceKind: BroadcastAudienceKind;
   targetPersonIds: string[];
+  /** Dynamic audience group keys -- meaningful only when `audienceKind === "groups"`. Display/re-edit intent only -- `targetPersonIds` is the already-resolved snapshot dispatch actually uses (frozen at save/edit time). */
+  audienceGroupKeys: AudienceGroupKey[];
+  /** "לא לשלוח ל" intent -- already baked into `targetPersonIds` at save time. */
+  excludedPersonIds: string[];
   title: string;
   body: string;
   /** The stored UTC instant, ISO -- kept only for stable sort/identity; the UI reads the two fields below for display. */
@@ -76,6 +96,8 @@ function toView(row: ManagerScheduledBroadcastRow): ScheduledBroadcastView {
     status: row.status,
     audienceKind: row.audienceKind,
     targetPersonIds: row.targetPersonIds,
+    audienceGroupKeys: row.audienceGroupKeys,
+    excludedPersonIds: row.excludedPersonIds,
     title: row.title,
     body: row.body,
     scheduledFor: row.scheduledFor,
@@ -123,6 +145,8 @@ export async function createScheduledBroadcastAction(
     people,
     audienceKind: input.audienceKind,
     targetPersonIds: input.targetPersonIds,
+    groupKeys: (input.groupKeys ?? []) as AudienceGroupKey[],
+    excludedPersonIds: input.excludedPersonIds ?? [],
     title: input.title,
     body: input.body,
     scheduledDate: input.scheduledDate,
@@ -160,6 +184,8 @@ export async function editScheduledBroadcastAction(
     people,
     audienceKind: input.audienceKind,
     targetPersonIds: input.targetPersonIds,
+    groupKeys: (input.groupKeys ?? []) as AudienceGroupKey[],
+    excludedPersonIds: input.excludedPersonIds ?? [],
     title: input.title,
     body: input.body,
     scheduledDate: input.scheduledDate,

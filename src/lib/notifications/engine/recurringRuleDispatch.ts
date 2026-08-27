@@ -1,5 +1,6 @@
 import "server-only";
 import type { Person } from "@/lib/domain/types";
+import { resolveAudienceGroupMembers, type AudienceGroupKey } from "@/lib/domain/audienceGroups";
 import { dayOfWeek, parseCalendarDate } from "@/lib/domain/dutyBlocks";
 import type { LocalNow } from "@/lib/domain/localNow";
 import { fetchAllSubscribedUserIds, fetchAllUserIdsByEmail, resolvePersonIdentity, type AuthAccountLookup } from "./recipients";
@@ -139,6 +140,12 @@ interface RecurringDispatchResolution {
  *    occurrence, never frozen at rule-creation time (unlike a one-time
  *    scheduled broadcast's snapshot -- spec: "do not copy one-time
  *    snapshot semantics blindly").
+ *  - `"groups"` is resolved the SAME way -- `groupKeys` is the manager's
+ *    own selection, frozen at claim time, but which roster MEMBERS
+ *    currently match those keys is resolved fresh via the shared
+ *    `resolveAudienceGroupMembers` on every occurrence too (spec: "groups
+ *    dynamically reflect roster changes at send time"). Never a frozen
+ *    list of person ids.
  *  - `"person"`/`"people"` re-validates the rule's OWN stored
  *    `targetPersonIds` against the current roster + current auth mapping
  *    on every occurrence. A person no longer in the roster, or not
@@ -147,24 +154,49 @@ interface RecurringDispatchResolution {
  *    door for a client-supplied id to sneak in (this only ever reads the
  *    rule's own server-validated stored ids, never anything request-
  *    scoped).
+ *
+ * `excludedPersonIds` ("לא לשלוח ל", also frozen at claim time) is applied
+ * on top of whichever branch above selected the base candidates, on every
+ * occurrence -- independent of `audienceKind`, and always wins.
  */
 function resolveRecurringDispatchTargets(
   audienceKind: BroadcastAudienceKind,
   targetPersonIds: readonly string[],
+  groupKeys: readonly AudienceGroupKey[],
+  excludedPersonIds: readonly string[],
   people: readonly Person[],
   emailToAccount: ReadonlyMap<string, AuthAccountLookup>,
   subscribed: ReadonlySet<string>,
 ): RecurringDispatchResolution {
-  const candidatePersonIds = audienceKind === "everyone" ? people.map((person) => person.id) : targetPersonIds;
-  const byId = new Map(people.map((person) => [person.id, person]));
+  const excludedSet = new Set(excludedPersonIds);
+
+  let candidatePersons: readonly Person[];
+  let candidateCount: number;
+
+  if (audienceKind === "everyone") {
+    candidatePersons = people.filter((person) => !excludedSet.has(person.id));
+    candidateCount = candidatePersons.length;
+  } else if (audienceKind === "groups") {
+    candidatePersons = resolveAudienceGroupMembers(people, groupKeys).filter((person) => !excludedSet.has(person.id));
+    candidateCount = candidatePersons.length;
+  } else {
+    // Preserves the ORIGINAL "person"/"people" unresolvedCount semantics:
+    // a no-longer-in-roster targeted person still counts toward
+    // `candidateCount` (a real, truthful "unresolved" case worth
+    // surfacing), while an EXCLUDED id is removed from the count entirely
+    // -- exclusion is a deliberate choice, never a resolution failure.
+    const nonExcludedTargetIds = targetPersonIds.filter((personId) => !excludedSet.has(personId));
+    candidateCount = nonExcludedTargetIds.length;
+    const byId = new Map(people.map((person) => [person.id, person]));
+    candidatePersons = nonExcludedTargetIds
+      .map((personId) => byId.get(personId))
+      .filter((person): person is Person => person !== undefined); // no longer in the roster -- skipped truthfully, never fails the occurrence
+  }
 
   const pushCapable: { personId: string; userId: string }[] = [];
   const inboxOnly: { personId: string; userId: string }[] = [];
 
-  for (const personId of candidatePersonIds) {
-    const person = byId.get(personId);
-    if (!person) continue; // no longer in the roster -- skipped truthfully, never fails the occurrence
-
+  for (const person of candidatePersons) {
     const identity = resolvePersonIdentity(person, people, emailToAccount);
     if (identity.status !== "mapped") continue;
 
@@ -172,7 +204,7 @@ function resolveRecurringDispatchTargets(
     else inboxOnly.push({ personId: person.id, userId: identity.userId });
   }
 
-  return { pushCapable, inboxOnly, candidateCount: candidatePersonIds.length };
+  return { pushCapable, inboxOnly, candidateCount };
 }
 
 /**
@@ -229,6 +261,8 @@ async function dispatchOneOccurrence(
     const resolution = resolveRecurringDispatchTargets(
       claim.ruleAudienceKind,
       claim.ruleTargetPersonIds,
+      claim.ruleAudienceGroupKeys,
+      claim.ruleExcludedPersonIds,
       people,
       emailToAccount,
       subscribed,
@@ -243,6 +277,8 @@ async function dispatchOneOccurrence(
       createdByPersonName: claim.createdByPersonName ?? "התראה מחזורית",
       audienceKind: claim.ruleAudienceKind,
       targetPersonIds: claim.ruleTargetPersonIds,
+      audienceGroupKeys: claim.ruleAudienceGroupKeys,
+      excludedPersonIds: claim.ruleExcludedPersonIds,
       resolvedRecipientUserIds: freshRecipientUserIds,
       title: claim.ruleTitle,
       body: claim.ruleBody,

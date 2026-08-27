@@ -13,10 +13,14 @@ interface FakeRow {
   body: string | null;
   audience_kind: string | null;
   target_person_ids: string[];
+  audience_group_keys: string[];
+  excluded_person_ids: string[];
   system_title_override: string | null;
   system_body_override: string | null;
-  system_audience_mode: "all_eligible" | "selected";
+  system_audience_mode: "all_eligible" | "selected" | "groups";
   system_target_person_ids: string[];
+  system_audience_group_keys: string[];
+  system_excluded_person_ids: string[];
   archived_at: string | null;
   created_by_person_id: string | null;
   created_by_person_name: string | null;
@@ -40,10 +44,14 @@ function systemRow(overrides: Partial<FakeRow> = {}): FakeRow {
     body: null,
     audience_kind: null,
     target_person_ids: [],
+    audience_group_keys: [],
+    excluded_person_ids: [],
     system_title_override: null,
     system_body_override: null,
     system_audience_mode: "all_eligible",
     system_target_person_ids: [],
+    system_audience_group_keys: [],
+    system_excluded_person_ids: [],
     archived_at: null,
     created_by_person_id: null,
     created_by_person_name: null,
@@ -69,10 +77,14 @@ function customRow(overrides: Partial<FakeRow> = {}): FakeRow {
     body: "גוף",
     audience_kind: "everyone",
     target_person_ids: [],
+    audience_group_keys: [],
+    excluded_person_ids: [],
     system_title_override: null,
     system_body_override: null,
     system_audience_mode: "all_eligible",
     system_target_person_ids: [],
+    system_audience_group_keys: [],
+    system_excluded_person_ids: [],
     archived_at: null,
     created_by_person_id: "p_manager",
     created_by_person_name: "מנהל",
@@ -218,7 +230,7 @@ describe("updateSystemRule -- atomic rule update + pending-job invalidation via 
   function makeFakeSystemRuleUpdateClient(rows: FakeRow[], pendingJobCategories: string[] = []) {
     const pendingJobs = [...pendingJobCategories];
     const rpc = vi.fn(async (fnName: string, params: Record<string, unknown>) => {
-      if (fnName !== "update_system_rule_configuration_and_invalidate_pending_jobs") throw new Error(`unexpected rpc ${fnName}`);
+      if (fnName !== "update_system_rule_configuration_and_invalidate_pending_jobs_v2") throw new Error(`unexpected rpc ${fnName}`);
       const row = rows.find((candidate) => candidate.id === params.p_rule_id && candidate.kind === "system");
       if (!row) return { data: [], error: null }; // not found / not a system row -- nothing touched
       if (row.revision !== params.p_expected_revision) return { data: [], error: null }; // stale Manager edit -- nothing touched
@@ -230,6 +242,8 @@ describe("updateSystemRule -- atomic rule update + pending-job invalidation via 
       row.system_body_override = (params.p_body_override as string | null) ?? null;
       row.system_audience_mode = (params.p_audience_mode as "all_eligible" | "selected") ?? "all_eligible";
       row.system_target_person_ids = (params.p_target_person_ids as string[] | null) ?? [];
+      row.system_audience_group_keys = (params.p_audience_group_keys as string[] | null) ?? [];
+      row.system_excluded_person_ids = (params.p_excluded_person_ids as string[] | null) ?? [];
       row.revision += 1;
       row.updated_by_person_id = params.p_updated_by_person_id as string;
       row.updated_by_person_name = params.p_updated_by_person_name as string;
@@ -400,7 +414,7 @@ describe("updateSystemRule -- atomic rule update + pending-job invalidation via 
       updatedByPersonName: "מנהל",
     });
 
-    expect(rpc).toHaveBeenCalledWith("update_system_rule_configuration_and_invalidate_pending_jobs", {
+    expect(rpc).toHaveBeenCalledWith("update_system_rule_configuration_and_invalidate_pending_jobs_v2", {
       p_rule_id: "rule-1",
       p_expected_revision: 1,
       p_enabled: false,
@@ -410,6 +424,8 @@ describe("updateSystemRule -- atomic rule update + pending-job invalidation via 
       p_body_override: null,
       p_audience_mode: "all_eligible",
       p_target_person_ids: [],
+      p_audience_group_keys: [],
+      p_excluded_person_ids: [],
       p_updated_by_person_id: "p_manager",
       p_updated_by_person_name: "מנהל",
     });
@@ -432,7 +448,7 @@ describe("updateSystemRule -- atomic rule update + pending-job invalidation via 
       updatedByPersonName: "מנהל",
     });
 
-    expect(rpc).toHaveBeenCalledWith("update_system_rule_configuration_and_invalidate_pending_jobs", {
+    expect(rpc).toHaveBeenCalledWith("update_system_rule_configuration_and_invalidate_pending_jobs_v2", {
       p_rule_id: "rule-1",
       p_expected_revision: 1,
       p_enabled: true,
@@ -442,6 +458,8 @@ describe("updateSystemRule -- atomic rule update + pending-job invalidation via 
       p_body_override: "תוכן מותאם {details}",
       p_audience_mode: "selected",
       p_target_person_ids: ["p_a", "p_b"],
+      p_audience_group_keys: [],
+      p_excluded_person_ids: [],
       p_updated_by_person_id: "p_manager",
       p_updated_by_person_name: "מנהל",
     });
@@ -608,7 +626,7 @@ interface RaceRuleState {
 function makeFakeRaceClient(rule: RaceRuleState) {
   const pendingJobs = new Map<string, { category: string; scheduledFor: string }>();
   const rpc = vi.fn(async (fnName: string, params: Record<string, unknown>) => {
-    if (fnName === "update_system_rule_configuration_and_invalidate_pending_jobs") {
+    if (fnName === "update_system_rule_configuration_and_invalidate_pending_jobs_v2") {
       if (rule.id !== params.p_rule_id || rule.kind !== "system") return { data: [], error: null };
       if (rule.revision !== params.p_expected_revision) return { data: [], error: null }; // stale Manager edit -- nothing touched
       rule.enabled = params.p_enabled as boolean;
@@ -1135,6 +1153,8 @@ describe("claimNotificationRuleOccurrence / setNotificationRuleOccurrenceBatchId
           rule_body: "גוף",
           rule_audience_kind: "everyone",
           rule_target_person_ids: [],
+          rule_audience_group_keys: [],
+          rule_excluded_person_ids: [],
           created_by_person_id: "p_manager",
           created_by_person_name: "מנהל",
         },
@@ -1153,10 +1173,12 @@ describe("claimNotificationRuleOccurrence / setNotificationRuleOccurrenceBatchId
       ruleBody: "גוף",
       ruleAudienceKind: "everyone",
       ruleTargetPersonIds: [],
+      ruleAudienceGroupKeys: [],
+      ruleExcludedPersonIds: [],
       createdByPersonId: "p_manager",
       createdByPersonName: "מנהל",
     });
-    expect(rpc).toHaveBeenCalledWith("claim_notification_rule_occurrence", { p_rule_id: "rule-1", p_occurrence_date: "2026-08-22" });
+    expect(rpc).toHaveBeenCalledWith("claim_notification_rule_occurrence_v2", { p_rule_id: "rule-1", p_occurrence_date: "2026-08-22" });
   });
 
   it("claimNotificationRuleOccurrence returns null when the RPC returns zero rows -- already completed, actively leased, or disabled/archived", async () => {

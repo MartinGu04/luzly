@@ -1,5 +1,6 @@
 import "server-only";
 import type { Person } from "@/lib/domain/types";
+import { resolveAudienceGroupMembers, type AudienceGroupKey } from "@/lib/domain/audienceGroups";
 import { BROADCAST_BODY_MAX_LENGTH, BROADCAST_TITLE_MAX_LENGTH } from "../manualBroadcastLimits";
 import { fetchAllSubscribedUserIds, fetchAllUserIdsByEmail, resolvePersonIdentity } from "./recipients";
 import {
@@ -67,8 +68,12 @@ export interface SendManagerBroadcastInput {
   /** The full, freshly-parsed personnel roster -- the ONLY source `targetPersonIds`/`"everyone"` are resolved against. Never trusts a client-supplied roster. */
   people: readonly Person[];
   audienceKind: BroadcastAudienceKind;
-  /** Candidate roster person ids for `"person"`/`"people"` -- untrusted client input. Every id MUST be a genuine member of `people`, or the whole request fails closed (see `resolveAudience`). Ignored for `"everyone"`. */
+  /** Candidate roster person ids for `"person"`/`"people"` -- untrusted client input. Every id MUST be a genuine member of `people`, or the whole request fails closed (see `resolveAudience`). Ignored for `"everyone"`/`"groups"`. */
   targetPersonIds: readonly string[];
+  /** Dynamic audience group keys for `"groups"` -- resolved fresh against `people` right now, never a frozen snapshot. Ignored for every other `audienceKind`. Optional/defaults to `[]` -- omitted entirely by a caller that never uses `"groups"`. */
+  groupKeys?: readonly AudienceGroupKey[];
+  /** "לא לשלוח ל" -- ALWAYS applied, independent of `audienceKind`. Every id MUST be a genuine member of `people`, exactly like `targetPersonIds` -- an unknown excluded id fails the WHOLE request closed too, never silently ignored (see `resolveAudience`). Optional/defaults to `[]`. */
+  excludedPersonIds?: readonly string[];
   title: string;
   body: string;
   /** Client-generated per-compose-session key; the ONE thing that makes a retried/double-submitted send idempotent at the batch level (see `insertManagerNotificationBatchIfAbsent` and `isSameLogicalBroadcastRequest`). */
@@ -85,34 +90,61 @@ export function validateText(value: string, maxLength: number): string | null {
 
 /**
  * `"everyone"` means every person currently in the (freshly re-fetched)
- * personnel roster -- never every Supabase auth account, and never
- * dependent on client-supplied ids at all. `"person"`/`"people"` resolve
- * ONLY through genuine `people` membership: every requested id (after
- * deduping harmless repeats) must match a real roster person, or the
- * WHOLE request fails closed (`null`) -- a single stale/tampered/unknown
- * id must never silently shrink the audience to "whatever did resolve";
- * it must nuke the whole request before anything is created (see caller).
- * Deliberately never reveals WHICH id was invalid or why -- the caller
- * only fails with one generic `invalid_targets`, never "does id X map to
- * a real account" (that would let a client probe roster membership).
+ * personnel roster; `"groups"` means every person matching at least one of
+ * `groupKeys` (`resolveAudienceGroupMembers` -- the SAME shared, dynamic
+ * group-membership resolver every other audience-selecting surface uses,
+ * never a frozen list of person ids). Neither depends on client-supplied
+ * ids at all. `"person"`/`"people"` resolve ONLY through genuine `people`
+ * membership: every requested id (after deduping harmless repeats) must
+ * match a real roster person, or the WHOLE request fails closed (`null`)
+ * -- a single stale/tampered/unknown id must never silently shrink the
+ * audience to "whatever did resolve"; it must nuke the whole request
+ * before anything is created (see caller). Deliberately never reveals
+ * WHICH id was invalid or why -- the caller only fails with one generic
+ * `invalid_targets`, never "does id X map to a real account" (that would
+ * let a client probe roster membership).
+ *
+ * `excludedPersonIds` ("לא לשלוח ל") is a SEPARATE, always-applied
+ * dimension on top of whichever mode above selected the base audience --
+ * every excluded id must ALSO be a genuine `people` member (same
+ * fail-closed rule), and any person it names is removed from the result
+ * regardless of how they qualified (spec: "explicit exclusions always
+ * win").
  */
 /** Exported for `scheduledBroadcast.ts`'s create/edit path -- same fail-closed audience-resolution rule an immediate send uses (an intentional audience change is a fresh, fully re-validated request). Never reused for DISPATCH-time resolution of an already-stored snapshot, which has different semantics (see that module's own `resolveScheduledDispatchTargets`). */
 export function resolveAudience(
   audienceKind: BroadcastAudienceKind,
   people: readonly Person[],
   targetPersonIds: readonly string[],
+  groupKeys: readonly AudienceGroupKey[] = [],
+  excludedPersonIds: readonly string[] = [],
 ): Person[] | null {
-  if (audienceKind === "everyone") return [...people];
-
   const byId = new Map(people.map((person) => [person.id, person]));
-  const uniqueIds = [...new Set(targetPersonIds)];
-  const resolved: Person[] = [];
-  for (const id of uniqueIds) {
-    const person = byId.get(id);
-    if (!person) return null;
-    resolved.push(person);
+
+  const uniqueExcludedIds = [...new Set(excludedPersonIds)];
+  for (const id of uniqueExcludedIds) {
+    if (!byId.has(id)) return null;
   }
-  return resolved;
+
+  let base: Person[];
+  if (audienceKind === "everyone") {
+    base = [...people];
+  } else if (audienceKind === "groups") {
+    base = resolveAudienceGroupMembers(people, groupKeys);
+  } else {
+    const uniqueIds = [...new Set(targetPersonIds)];
+    const resolved: Person[] = [];
+    for (const id of uniqueIds) {
+      const person = byId.get(id);
+      if (!person) return null;
+      resolved.push(person);
+    }
+    base = resolved;
+  }
+
+  if (uniqueExcludedIds.length === 0) return base;
+  const excludedSet = new Set(uniqueExcludedIds);
+  return base.filter((person) => !excludedSet.has(person.id));
 }
 
 /**
@@ -120,15 +152,21 @@ export function resolveAudience(
  * happens to enforce -- a tampered client must never be able to submit
  * `audienceKind: "person"` with more than one id (or zero) while the
  * audit row claims a single-person send. `"people"` requires at least
- * one id; `"everyone"` has no id-based cardinality at all (see
- * `resolveAudience`). Runs AFTER deduping, so harmless repeated ids in
- * the request never trigger a false `"invalid_audience"`.
+ * one id; `"groups"` requires at least one selected group key;
+ * `"everyone"` has no id-based cardinality at all (see `resolveAudience`).
+ * Runs AFTER deduping, so harmless repeated ids/keys in the request never
+ * trigger a false `"invalid_audience"`.
  */
 /** Exported for `scheduledBroadcast.ts`'s create/edit path -- same cardinality rule an immediate send enforces. */
-export function validateAudienceCardinality(audienceKind: BroadcastAudienceKind, targetPersonIds: readonly string[]): boolean {
+export function validateAudienceCardinality(
+  audienceKind: BroadcastAudienceKind,
+  targetPersonIds: readonly string[],
+  groupKeys: readonly AudienceGroupKey[] = [],
+): boolean {
   const uniqueCount = new Set(targetPersonIds).size;
   if (audienceKind === "person") return uniqueCount === 1;
   if (audienceKind === "people") return uniqueCount >= 1;
+  if (audienceKind === "groups") return new Set(groupKeys).size >= 1;
   return true; // "everyone"
 }
 
@@ -144,21 +182,29 @@ export function sameIdSet(a: readonly string[], b: readonly string[]): boolean {
 /**
  * Whether `candidate` is a REPLAY of the exact same logical request the
  * stored batch (found via a reused `idempotency_key`) already represents
- * -- sending manager, audience kind, title, body, and (for `"person"`/
- * `"people"`) the canonical target-id SET. `"everyone"` deliberately never
- * compares target ids: that audience is server-derived from the roster at
- * send time, not client-supplied, so a roster that changed by one person
- * between two nearly-simultaneous requests must never itself manufacture
- * a false `idempotency_conflict` for an "everyone" send. A mismatch on
+ * -- sending manager, audience kind, title, body, the canonical excluded-
+ * id SET (ALWAYS compared, independent of `audienceKind` -- exclusions are
+ * their own selection dimension), and, mode-dependent, either the target-
+ * id SET (`"person"`/`"people"`) or the group-key SET (`"groups"`).
+ * `"everyone"`/`"groups"` deliberately never compare target ids: that
+ * audience is server-derived from the roster (and, for `"groups"`, the
+ * selected group keys) at send time, not client-supplied ids, so a roster
+ * that changed by one person between two nearly-simultaneous requests must
+ * never itself manufacture a false `idempotency_conflict`. A mismatch on
  * ANY compared field means this is a genuinely different request that
  * happens to reuse an old key -- never a safe replay.
  */
 export function isSameLogicalBroadcastRequest(
-  stored: Pick<ManagerNotificationBatchRow, "createdByPersonId" | "audienceKind" | "targetPersonIds" | "title" | "body">,
+  stored: Pick<
+    ManagerNotificationBatchRow,
+    "createdByPersonId" | "audienceKind" | "targetPersonIds" | "audienceGroupKeys" | "excludedPersonIds" | "title" | "body"
+  >,
   candidate: {
     createdByPersonId: string;
     audienceKind: BroadcastAudienceKind;
     targetPersonIds: readonly string[];
+    audienceGroupKeys: readonly AudienceGroupKey[];
+    excludedPersonIds: readonly string[];
     title: string;
     body: string;
   },
@@ -167,7 +213,9 @@ export function isSameLogicalBroadcastRequest(
   if (stored.audienceKind !== candidate.audienceKind) return false;
   if (stored.title !== candidate.title) return false;
   if (stored.body !== candidate.body) return false;
+  if (!sameIdSet(stored.excludedPersonIds, candidate.excludedPersonIds)) return false;
   if (stored.audienceKind === "everyone") return true;
+  if (stored.audienceKind === "groups") return sameIdSet(stored.audienceGroupKeys, candidate.audienceGroupKeys);
   return sameIdSet(stored.targetPersonIds, candidate.targetPersonIds);
 }
 
@@ -210,11 +258,14 @@ export async function sendManagerBroadcastNotification(
   const body = validateText(input.body, BROADCAST_BODY_MAX_LENGTH);
   if (body === null) return { ok: false, error: "invalid_body" };
 
-  if (!validateAudienceCardinality(input.audienceKind, input.targetPersonIds)) {
+  const groupKeys = input.groupKeys ?? [];
+  const excludedPersonIds = input.excludedPersonIds ?? [];
+
+  if (!validateAudienceCardinality(input.audienceKind, input.targetPersonIds, groupKeys)) {
     return { ok: false, error: "invalid_audience" };
   }
 
-  const targets = resolveAudience(input.audienceKind, input.people, input.targetPersonIds);
+  const targets = resolveAudience(input.audienceKind, input.people, input.targetPersonIds, groupKeys, excludedPersonIds);
   if (targets === null) return { ok: false, error: "invalid_targets" };
   if (targets.length === 0) return { ok: false, error: "no_targets" };
 
@@ -261,6 +312,8 @@ export async function sendManagerBroadcastNotification(
     createdByPersonName: input.manager.name,
     audienceKind: input.audienceKind,
     targetPersonIds: canonicalTargetPersonIds,
+    audienceGroupKeys: groupKeys,
+    excludedPersonIds,
     resolvedRecipientUserIds: freshRecipientUserIds,
     title,
     body,
@@ -281,6 +334,8 @@ export async function sendManagerBroadcastNotification(
       createdByPersonId: input.manager.id,
       audienceKind: input.audienceKind,
       targetPersonIds: canonicalTargetPersonIds,
+      audienceGroupKeys: groupKeys,
+      excludedPersonIds,
       title,
       body,
     });

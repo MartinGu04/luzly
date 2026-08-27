@@ -3,13 +3,16 @@
 import { useMemo, useState, useTransition } from "react";
 import { Panel } from "@/components/ui/Panel";
 import { RosterPersonPicker } from "./RosterPersonPicker";
+import { AudienceGroupPicker } from "./AudienceGroupPicker";
 import { updateSystemRuleAction, type SystemRuleView, type UpdateSystemRuleActionResult } from "@/lib/notifications/ruleActions";
 import { BROADCAST_BODY_MAX_LENGTH, BROADCAST_TITLE_MAX_LENGTH } from "@/lib/notifications/manualBroadcastLimits";
 import { SYSTEM_RULE_DETAILS_PLACEHOLDER } from "@/lib/presentation/notificationRules";
 import { computeAudienceSummary } from "@/lib/presentation/managerBroadcast";
 import type { ManagerAdoptionPersonView, ManagerPersonSummary } from "@/lib/readModels/managerTypes";
+import type { AudienceGroupKey } from "@/lib/domain/audienceGroups";
+import { resolveAudienceGroupMembers } from "@/lib/domain/audienceGroups";
 
-type SystemAudienceMode = "all_eligible" | "selected";
+type SystemAudienceMode = "all_eligible" | "selected" | "groups";
 
 interface ManagerSystemRuleEditorProps {
   rule: SystemRuleView;
@@ -21,7 +24,8 @@ interface ManagerSystemRuleEditorProps {
 
 const AUDIENCE_OPTIONS: { value: SystemAudienceMode; label: string }[] = [
   { value: "all_eligible", label: "כל הרלוונטיים" },
-  { value: "selected", label: "אנשים מסוימים" },
+  { value: "groups", label: "לפי קבוצות" },
+  { value: "selected", label: "אנשים ספציפיים" },
 ];
 
 const ERROR_LABELS: Record<string, string> = {
@@ -75,12 +79,30 @@ export function ManagerSystemRuleEditor({ rule, roster, adoptionPeople, onSaved,
   const [body, setBody] = useState(() => rule.bodyOverride ?? "");
   const [audienceMode, setAudienceMode] = useState<SystemAudienceMode>(rule.audienceMode);
   const [selectedIds, setSelectedIds] = useState<string[]>(() => rule.targetPersonIds);
+  const [groupKeys, setGroupKeys] = useState<AudienceGroupKey[]>(() => rule.audienceGroupKeys);
+  const [excludedIds, setExcludedIds] = useState<string[]>(() => rule.excludedPersonIds);
+  const [excludeExpanded, setExcludeExpanded] = useState(() => rule.excludedPersonIds.length > 0);
   const [query, setQuery] = useState("");
+  const [excludeQuery, setExcludeQuery] = useState("");
   const [isPending, startTransition] = useTransition();
   const [result, setResult] = useState<UpdateSystemRuleActionResult | null>(null);
 
   const adoptionByPersonId = useMemo(() => new Map(adoptionPeople.map((person) => [person.personId, person])), [adoptionPeople]);
-  const summary = useMemo(() => computeAudienceSummary(selectedIds, adoptionByPersonId), [selectedIds, adoptionByPersonId]);
+
+  // A client-side ESTIMATE only -- the real domain-eligible set (who
+  // actually has a shift/duty/logistics assignment tomorrow, etc.) is
+  // never known client-side, so this can only ever show an UPPER BOUND
+  // ("at most this many, before today's real eligibility narrows it
+  // further"), same spirit `rule.audienceFilterNote` already explains in
+  // words. Uses the SAME shared group resolver (`resolveAudienceGroupMembers`)
+  // the server applies, so a "groups" estimate can never structurally
+  // drift from how membership is actually computed -- only from domain
+  // eligibility, which is inherent to it being an upper bound.
+  const groupMatchIds = useMemo(() => resolveAudienceGroupMembers(roster, groupKeys).map((person) => person.id), [roster, groupKeys]);
+  const baseSelectedIds = audienceMode === "groups" ? groupMatchIds : audienceMode === "selected" ? selectedIds : roster.map((person) => person.id);
+  const excludedSet = useMemo(() => new Set(excludedIds), [excludedIds]);
+  const effectiveIds = useMemo(() => baseSelectedIds.filter((id) => !excludedSet.has(id)), [baseSelectedIds, excludedSet]);
+  const summary = useMemo(() => computeAudienceSummary(effectiveIds, adoptionByPersonId), [effectiveIds, adoptionByPersonId]);
 
   const isDynamicBody = rule.bodyKind === "dynamic_details_required";
   const trimmedTitle = title.trim();
@@ -95,10 +117,18 @@ export function ManagerSystemRuleEditor({ rule, roster, adoptionPeople, onSaved,
     trimmedBody.length <= BROADCAST_BODY_MAX_LENGTH &&
     !bodyPlaceholderInvalid &&
     parsedTime !== null &&
-    (audienceMode === "all_eligible" || selectedIds.length > 0);
+    (audienceMode === "all_eligible" || (audienceMode === "selected" && selectedIds.length > 0) || (audienceMode === "groups" && groupKeys.length > 0));
 
   function togglePerson(personId: string) {
     setSelectedIds((current) => (current.includes(personId) ? current.filter((id) => id !== personId) : [...current, personId]));
+  }
+
+  function toggleExcludedPerson(personId: string) {
+    setExcludedIds((current) => (current.includes(personId) ? current.filter((id) => id !== personId) : [...current, personId]));
+  }
+
+  function toggleGroup(key: AudienceGroupKey) {
+    setGroupKeys((current) => (current.includes(key) ? current.filter((existing) => existing !== key) : [...current, key]));
   }
 
   function handleResetCopy() {
@@ -119,6 +149,8 @@ export function ManagerSystemRuleEditor({ rule, roster, adoptionPeople, onSaved,
         bodyOverride: trimmedBody.length > 0 ? trimmedBody : null,
         audienceMode,
         targetPersonIds: audienceMode === "selected" ? selectedIds : [],
+        audienceGroupKeys: audienceMode === "groups" ? groupKeys : [],
+        excludedPersonIds: excludedIds,
         expectedRevision: rule.revision,
       });
       setResult(outcome);
@@ -223,22 +255,47 @@ export function ManagerSystemRuleEditor({ rule, roster, adoptionPeople, onSaved,
           <span className="text-[11px] text-muted-2">{rule.audienceFilterNote}</span>
         </div>
 
+        {audienceMode === "groups" ? <AudienceGroupPicker selectedKeys={groupKeys} onToggle={toggleGroup} /> : null}
+
         {audienceMode === "selected" ? (
-          <>
-            <RosterPersonPicker
-              roster={roster}
-              adoptionPeople={adoptionPeople}
-              query={query}
-              onQueryChange={setQuery}
-              selectedIds={selectedIds}
-              onTogglePerson={togglePerson}
-            />
-            <p className="text-xs text-muted">
-              נבחרו <span className="font-semibold text-foreground">{summary.selectedCount}</span> אנשי צוות -- {summary.pushCapableCount} יקבלו גם
-              Push, {summary.inboxOnlyCount} במרכז ההתראות בלבד.
-            </p>
-          </>
+          <RosterPersonPicker
+            roster={roster}
+            adoptionPeople={adoptionPeople}
+            query={query}
+            onQueryChange={setQuery}
+            selectedIds={selectedIds}
+            onTogglePerson={togglePerson}
+          />
         ) : null}
+
+        <div className="flex flex-col gap-1.5">
+          <button
+            type="button"
+            onClick={() => setExcludeExpanded((current) => !current)}
+            aria-expanded={excludeExpanded}
+            className="self-start text-xs font-medium text-muted underline"
+          >
+            {excludeExpanded ? "− הסתר לא לשלוח ל" : "+ לא לשלוח ל"}
+          </button>
+          {excludeExpanded ? (
+            <>
+              <span className="text-[11px] text-muted-2">מי שנבחר כאן לעולם לא יקבל את ההתראה -- גם אם הוא/היא נכלל/ת בקהל היעד שנבחר למעלה.</span>
+              <RosterPersonPicker
+                roster={roster}
+                adoptionPeople={adoptionPeople}
+                query={excludeQuery}
+                onQueryChange={setExcludeQuery}
+                selectedIds={excludedIds}
+                onTogglePerson={toggleExcludedPerson}
+              />
+            </>
+          ) : null}
+        </div>
+
+        <p className="text-xs text-muted">
+          יישלח לכל היותר ל־<span className="font-semibold text-foreground">{summary.selectedCount}</span> אנשי צוות -- {summary.pushCapableCount} יקבלו
+          גם Push, {summary.inboxOnlyCount} במרכז ההתראות בלבד.
+        </p>
 
         <div>
           <button

@@ -3,6 +3,7 @@
 import { useMemo, useState, useTransition } from "react";
 import { Panel } from "@/components/ui/Panel";
 import { RosterPersonPicker } from "./RosterPersonPicker";
+import { AudienceGroupPicker } from "./AudienceGroupPicker";
 import {
   sendManagerBroadcastAction,
   type SendManagerBroadcastActionResult,
@@ -17,8 +18,10 @@ import {
 import { formatScheduledBroadcastMoment } from "@/lib/presentation/scheduledBroadcast";
 import { computeAudienceSummary } from "@/lib/presentation/managerBroadcast";
 import type { ManagerAdoptionPersonView, ManagerPersonSummary } from "@/lib/readModels/managerTypes";
+import type { AudienceGroupKey } from "@/lib/domain/audienceGroups";
+import { resolveAudienceGroupMembers } from "@/lib/domain/audienceGroups";
 
-type AudienceKind = "person" | "people" | "everyone";
+type AudienceKind = "person" | "people" | "everyone" | "groups";
 export type SendMode = "now" | "schedule";
 
 interface ManagerBroadcastComposerProps {
@@ -44,6 +47,7 @@ interface ManagerBroadcastComposerProps {
 const AUDIENCE_OPTIONS: { value: AudienceKind; label: string }[] = [
   { value: "person", label: "אדם מסוים" },
   { value: "people", label: "כמה אנשים" },
+  { value: "groups", label: "לפי קבוצות" },
   { value: "everyone", label: "כולם" },
 ];
 
@@ -130,9 +134,13 @@ export function ManagerBroadcastComposer({
     editingItem && editingItem.audienceKind !== "everyone" ? editingItem.audienceKind : editingItem ? "everyone" : "person",
   );
   const [selectedIds, setSelectedIds] = useState<string[]>(() =>
-    editingItem && editingItem.audienceKind !== "everyone" ? editingItem.targetPersonIds : [],
+    editingItem && editingItem.audienceKind !== "everyone" && editingItem.audienceKind !== "groups" ? editingItem.targetPersonIds : [],
   );
+  const [groupKeys, setGroupKeys] = useState<AudienceGroupKey[]>(() => editingItem?.audienceGroupKeys ?? []);
+  const [excludedIds, setExcludedIds] = useState<string[]>(() => editingItem?.excludedPersonIds ?? []);
+  const [excludeExpanded, setExcludeExpanded] = useState(() => (editingItem?.excludedPersonIds.length ?? 0) > 0);
   const [query, setQuery] = useState("");
+  const [excludeQuery, setExcludeQuery] = useState("");
   const [title, setTitle] = useState(() => editingItem?.title ?? "");
   const [body, setBody] = useState(() => editingItem?.body ?? "");
   const [scheduledDate, setScheduledDate] = useState(() => editingItem?.scheduledLocalDate ?? "");
@@ -149,7 +157,14 @@ export function ManagerBroadcastComposer({
     [adoptionPeople],
   );
 
-  const effectiveSelectedIds = audienceKind === "everyone" ? roster.map((person) => person.id) : selectedIds;
+  // The SAME shared resolver (`resolveAudienceGroupMembers`) the server
+  // uses -- so this client-side preview can never structurally drift from
+  // the actual send/save resolution (spec: "the preview must use the same
+  // audience resolver as the actual send path").
+  const groupMatchIds = useMemo(() => resolveAudienceGroupMembers(roster, groupKeys).map((person) => person.id), [roster, groupKeys]);
+  const baseSelectedIds = audienceKind === "everyone" ? roster.map((person) => person.id) : audienceKind === "groups" ? groupMatchIds : selectedIds;
+  const excludedSet = useMemo(() => new Set(excludedIds), [excludedIds]);
+  const effectiveSelectedIds = useMemo(() => baseSelectedIds.filter((id) => !excludedSet.has(id)), [baseSelectedIds, excludedSet]);
   const summary = useMemo(
     () => computeAudienceSummary(effectiveSelectedIds, adoptionByPersonId),
     [effectiveSelectedIds, adoptionByPersonId],
@@ -176,7 +191,11 @@ export function ManagerBroadcastComposer({
     setTitle("");
     setBody("");
     setSelectedIds([]);
+    setGroupKeys([]);
+    setExcludedIds([]);
+    setExcludeExpanded(false);
     setQuery("");
+    setExcludeQuery("");
     setScheduledDate("");
     setScheduledTime("");
     setIdempotencyKey(newIdempotencyKey());
@@ -195,6 +214,14 @@ export function ManagerBroadcastComposer({
     });
   }
 
+  function toggleGroup(key: AudienceGroupKey) {
+    setGroupKeys((current) => (current.includes(key) ? current.filter((existing) => existing !== key) : [...current, key]));
+  }
+
+  function toggleExcludedPerson(personId: string) {
+    setExcludedIds((current) => (current.includes(personId) ? current.filter((id) => id !== personId) : [...current, personId]));
+  }
+
   function handleSubmit() {
     if (!canSubmit) return;
     setResult(null);
@@ -204,7 +231,9 @@ export function ManagerBroadcastComposer({
       if (mode === "now") {
         const outcome = await sendManagerBroadcastAction({
           audienceKind,
-          targetPersonIds: audienceKind === "everyone" ? [] : selectedIds,
+          targetPersonIds: audienceKind === "everyone" || audienceKind === "groups" ? [] : selectedIds,
+          groupKeys: audienceKind === "groups" ? groupKeys : [],
+          excludedPersonIds: excludedIds,
           title: trimmedTitle,
           body: trimmedBody,
           idempotencyKey,
@@ -221,7 +250,9 @@ export function ManagerBroadcastComposer({
 
       const scheduleInput = {
         audienceKind,
-        targetPersonIds: audienceKind === "everyone" ? [] : selectedIds,
+        targetPersonIds: audienceKind === "everyone" || audienceKind === "groups" ? [] : selectedIds,
+        groupKeys: audienceKind === "groups" ? groupKeys : [],
+        excludedPersonIds: excludedIds,
         title: trimmedTitle,
         body: trimmedBody,
         scheduledDate,
@@ -279,7 +310,9 @@ export function ManagerBroadcastComposer({
           ))}
         </div>
 
-        {audienceKind !== "everyone" ? (
+        {audienceKind === "groups" ? <AudienceGroupPicker selectedKeys={groupKeys} onToggle={toggleGroup} /> : null}
+
+        {audienceKind !== "everyone" && audienceKind !== "groups" ? (
           <RosterPersonPicker
             roster={roster}
             adoptionPeople={adoptionPeople}
@@ -289,6 +322,30 @@ export function ManagerBroadcastComposer({
             onTogglePerson={togglePerson}
           />
         ) : null}
+
+        <div className="flex flex-col gap-1.5">
+          <button
+            type="button"
+            onClick={() => setExcludeExpanded((current) => !current)}
+            aria-expanded={excludeExpanded}
+            className="self-start text-xs font-medium text-muted underline"
+          >
+            {excludeExpanded ? "− הסתר לא לשלוח ל" : "+ לא לשלוח ל"}
+          </button>
+          {excludeExpanded ? (
+            <>
+              <span className="text-[11px] text-muted-2">מי שנבחר כאן לעולם לא יקבל את ההתראה -- גם אם הוא/היא נכלל/ת בקהל היעד שנבחר למעלה.</span>
+              <RosterPersonPicker
+                roster={roster}
+                adoptionPeople={adoptionPeople}
+                query={excludeQuery}
+                onQueryChange={setExcludeQuery}
+                selectedIds={excludedIds}
+                onTogglePerson={toggleExcludedPerson}
+              />
+            </>
+          ) : null}
+        </div>
 
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="flex flex-col gap-1">

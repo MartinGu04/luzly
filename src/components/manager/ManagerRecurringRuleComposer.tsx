@@ -3,6 +3,7 @@
 import { useMemo, useState, useTransition } from "react";
 import { Panel } from "@/components/ui/Panel";
 import { RosterPersonPicker } from "./RosterPersonPicker";
+import { AudienceGroupPicker } from "./AudienceGroupPicker";
 import {
   createCustomWeeklyRuleAction,
   updateCustomWeeklyRuleAction,
@@ -12,8 +13,10 @@ import {
 import { BROADCAST_BODY_MAX_LENGTH, BROADCAST_TITLE_MAX_LENGTH } from "@/lib/notifications/manualBroadcastLimits";
 import { computeAudienceSummary } from "@/lib/presentation/managerBroadcast";
 import type { ManagerAdoptionPersonView, ManagerPersonSummary } from "@/lib/readModels/managerTypes";
+import type { AudienceGroupKey } from "@/lib/domain/audienceGroups";
+import { resolveAudienceGroupMembers } from "@/lib/domain/audienceGroups";
 
-type AudienceKind = "person" | "people" | "everyone";
+type AudienceKind = "person" | "people" | "everyone" | "groups";
 
 interface ManagerRecurringRuleComposerProps {
   roster: ManagerPersonSummary[];
@@ -26,6 +29,7 @@ interface ManagerRecurringRuleComposerProps {
 const AUDIENCE_OPTIONS: { value: AudienceKind; label: string }[] = [
   { value: "person", label: "אדם מסוים" },
   { value: "people", label: "כמה אנשים" },
+  { value: "groups", label: "לפי קבוצות" },
   { value: "everyone", label: "כולם" },
 ];
 
@@ -88,14 +92,21 @@ export function ManagerRecurringRuleComposer({ roster, adoptionPeople, editingRu
     editingRule && editingRule.audienceKind !== "everyone" ? editingRule.audienceKind : "everyone",
   );
   const [selectedIds, setSelectedIds] = useState<string[]>(() =>
-    editingRule && editingRule.audienceKind !== "everyone" ? editingRule.targetPersonIds : [],
+    editingRule && editingRule.audienceKind !== "everyone" && editingRule.audienceKind !== "groups" ? editingRule.targetPersonIds : [],
   );
+  const [groupKeys, setGroupKeys] = useState<AudienceGroupKey[]>(() => editingRule?.audienceGroupKeys ?? []);
+  const [excludedIds, setExcludedIds] = useState<string[]>(() => editingRule?.excludedPersonIds ?? []);
+  const [excludeExpanded, setExcludeExpanded] = useState(() => (editingRule?.excludedPersonIds.length ?? 0) > 0);
   const [query, setQuery] = useState("");
+  const [excludeQuery, setExcludeQuery] = useState("");
   const [isPending, startTransition] = useTransition();
   const [result, setResult] = useState<CustomWeeklyRuleActionResult | null>(null);
 
   const adoptionByPersonId = useMemo(() => new Map(adoptionPeople.map((person) => [person.personId, person])), [adoptionPeople]);
-  const effectiveSelectedIds = audienceKind === "everyone" ? roster.map((person) => person.id) : selectedIds;
+  const groupMatchIds = useMemo(() => resolveAudienceGroupMembers(roster, groupKeys).map((person) => person.id), [roster, groupKeys]);
+  const baseSelectedIds = audienceKind === "everyone" ? roster.map((person) => person.id) : audienceKind === "groups" ? groupMatchIds : selectedIds;
+  const excludedSet = useMemo(() => new Set(excludedIds), [excludedIds]);
+  const effectiveSelectedIds = useMemo(() => baseSelectedIds.filter((id) => !excludedSet.has(id)), [baseSelectedIds, excludedSet]);
   const summary = useMemo(() => computeAudienceSummary(effectiveSelectedIds, adoptionByPersonId), [effectiveSelectedIds, adoptionByPersonId]);
 
   const trimmedTitle = title.trim();
@@ -124,6 +135,14 @@ export function ManagerRecurringRuleComposer({ roster, adoptionPeople, editingRu
     });
   }
 
+  function toggleGroup(key: AudienceGroupKey) {
+    setGroupKeys((current) => (current.includes(key) ? current.filter((existing) => existing !== key) : [...current, key]));
+  }
+
+  function toggleExcludedPerson(personId: string) {
+    setExcludedIds((current) => (current.includes(personId) ? current.filter((id) => id !== personId) : [...current, personId]));
+  }
+
   function handleSubmit() {
     if (!canSubmit || !parsedTime) return;
     setResult(null);
@@ -136,7 +155,9 @@ export function ManagerRecurringRuleComposer({ roster, adoptionPeople, editingRu
         localHour: parsedTime.hour,
         localMinute: parsedTime.minute,
         audienceKind,
-        targetPersonIds: audienceKind === "everyone" ? [] : selectedIds,
+        targetPersonIds: audienceKind === "everyone" || audienceKind === "groups" ? [] : selectedIds,
+        groupKeys: audienceKind === "groups" ? groupKeys : [],
+        excludedPersonIds: excludedIds,
       };
 
       const outcome = editingRule ? await updateCustomWeeklyRuleAction(editingRule.id, input) : await createCustomWeeklyRuleAction(input);
@@ -226,7 +247,9 @@ export function ManagerRecurringRuleComposer({ roster, adoptionPeople, editingRu
           ))}
         </div>
 
-        {audienceKind !== "everyone" ? (
+        {audienceKind === "groups" ? <AudienceGroupPicker selectedKeys={groupKeys} onToggle={toggleGroup} /> : null}
+
+        {audienceKind !== "everyone" && audienceKind !== "groups" ? (
           <RosterPersonPicker
             roster={roster}
             adoptionPeople={adoptionPeople}
@@ -236,6 +259,30 @@ export function ManagerRecurringRuleComposer({ roster, adoptionPeople, editingRu
             onTogglePerson={togglePerson}
           />
         ) : null}
+
+        <div className="flex flex-col gap-1.5">
+          <button
+            type="button"
+            onClick={() => setExcludeExpanded((current) => !current)}
+            aria-expanded={excludeExpanded}
+            className="self-start text-xs font-medium text-muted underline"
+          >
+            {excludeExpanded ? "− הסתר לא לשלוח ל" : "+ לא לשלוח ל"}
+          </button>
+          {excludeExpanded ? (
+            <>
+              <span className="text-[11px] text-muted-2">מי שנבחר כאן לעולם לא יקבל את ההתראה -- גם אם הוא/היא נכלל/ת בקהל היעד שנבחר למעלה.</span>
+              <RosterPersonPicker
+                roster={roster}
+                adoptionPeople={adoptionPeople}
+                query={excludeQuery}
+                onQueryChange={setExcludeQuery}
+                selectedIds={excludedIds}
+                onTogglePerson={toggleExcludedPerson}
+              />
+            </>
+          ) : null}
+        </div>
 
         <p className="text-xs text-muted">
           נבחרו <span className="font-semibold text-foreground">{summary.selectedCount}</span> אנשי צוות -- {summary.pushCapableCount} יקבלו גם

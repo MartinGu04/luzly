@@ -1,6 +1,7 @@
 "use server";
 
 import { getJerusalemLocalNow } from "@/lib/time/jerusalemClock";
+import { isAudienceGroupKey, type AudienceGroupKey } from "@/lib/domain/audienceGroups";
 import {
   describeSystemRule,
   formatNextWeeklyOccurrence,
@@ -45,8 +46,12 @@ export interface SystemRuleView {
   titleOverride: string | null;
   /** `null` = the built-in body is currently in effect. For a `dynamic_details_required` category, a non-null value is the manager's own `{details}` template. */
   bodyOverride: string | null;
-  audienceMode: "all_eligible" | "selected";
+  audienceMode: "all_eligible" | "selected" | "groups";
   targetPersonIds: string[];
+  /** Dynamic audience group keys -- meaningful only when `audienceMode === "groups"`. Resolved fresh against the current roster every reminder tick, never a frozen id list. */
+  audienceGroupKeys: AudienceGroupKey[];
+  /** "לא לשלוח ל" -- ALWAYS applied, independent of `audienceMode`. */
+  excludedPersonIds: string[];
   /** Whether `bodyOverride` (when set) must contain `{details}` -- from the one authoritative catalog (`describeSystemRule`), never re-derived. */
   bodyKind: SystemRuleBodyKind;
   defaultTitle: string;
@@ -66,6 +71,10 @@ export interface CustomWeeklyRuleView {
   body: string;
   audienceKind: BroadcastAudienceKind;
   targetPersonIds: string[];
+  /** Dynamic audience group keys -- meaningful only when `audienceKind === "groups"`. Display/re-edit intent only -- `targetPersonIds` is the already-resolved snapshot dispatch actually uses (frozen at save/edit time, exactly like `"everyone"`). */
+  audienceGroupKeys: AudienceGroupKey[];
+  /** "לא לשלוח ל" intent -- already baked into `targetPersonIds` at save time. */
+  excludedPersonIds: string[];
   /** "כל יום שבת בשעה 21:00" -- pure presentation, never re-derived client-side. */
   scheduleSummary: string | null;
   /** The next real Asia/Jerusalem occurrence moment, computed server-side against `now` -- null only if the stored weekday is somehow invalid. */
@@ -92,6 +101,8 @@ function toSystemRuleView(row: NotificationRuleRow): SystemRuleView | null {
     bodyOverride: row.systemBodyOverride,
     audienceMode: row.systemAudienceMode,
     targetPersonIds: row.systemTargetPersonIds,
+    audienceGroupKeys: row.systemAudienceGroupKeys,
+    excludedPersonIds: row.systemExcludedPersonIds,
     bodyKind: description.bodyKind,
     defaultTitle: description.defaultTitle,
     defaultBody: description.defaultBody,
@@ -112,6 +123,8 @@ function toCustomWeeklyRuleView(row: NotificationRuleRow, now: ReturnType<typeof
     body: row.body,
     audienceKind: row.audienceKind,
     targetPersonIds: row.targetPersonIds,
+    audienceGroupKeys: row.audienceGroupKeys,
+    excludedPersonIds: row.excludedPersonIds,
     scheduleSummary: formatWeeklyRecurringSchedule(row.weekday, row.localHour * 60 + row.localMinute),
     nextSendSummary: row.enabled ? formatNextWeeklyOccurrence(row.weekday, row.localHour * 60 + row.localMinute, now) : null,
     createdByPersonName: row.createdByPersonName,
@@ -184,9 +197,13 @@ export interface UpdateSystemRuleActionInput {
   titleOverride: string | null;
   /** `null`, or a blank string, resets to the built-in body. For a `dynamic_details_required` category (`describeSystemRule`), a non-null value MUST contain exactly one `{details}` -- validated here server-side against the rule's OWN current classification, never trusted from the client. */
   bodyOverride: string | null;
-  audienceMode: "all_eligible" | "selected";
-  /** Untrusted candidate roster ids -- re-validated against the freshly-fetched roster before anything is saved (never Supabase auth ids). Ignored (forced to `[]`) when `audienceMode` is `"all_eligible"`. */
+  audienceMode: "all_eligible" | "selected" | "groups";
+  /** Untrusted candidate roster ids -- re-validated against the freshly-fetched roster before anything is saved (never Supabase auth ids). Ignored (forced to `[]`) when `audienceMode` is not `"selected"`. */
   targetPersonIds: string[];
+  /** Untrusted candidate group keys -- re-validated against the canonical `AudienceGroupKey` enum before anything is saved. Ignored (forced to `[]`) when `audienceMode` is not `"groups"`. Optional/defaults to `[]`. */
+  audienceGroupKeys?: string[];
+  /** "לא לשלוח ל" -- untrusted candidate roster ids, ALWAYS re-validated against the freshly-fetched roster, independent of `audienceMode`. Optional/defaults to `[]`. */
+  excludedPersonIds?: string[];
   /**
    * The `revision` this edit's own caller loaded the rule at
    * (`SystemRuleView.revision`) -- the Manager-edit optimistic
@@ -245,7 +262,7 @@ export async function updateSystemRuleAction(id: string, input: UpdateSystemRule
   const bodyResult = normalizeSystemCopyOverride(input.bodyOverride, BROADCAST_BODY_MAX_LENGTH);
   if (!bodyResult.ok) return { ok: false, error: "invalid_body" };
 
-  if (input.audienceMode !== "all_eligible" && input.audienceMode !== "selected") {
+  if (input.audienceMode !== "all_eligible" && input.audienceMode !== "selected" && input.audienceMode !== "groups") {
     return { ok: false, error: "invalid_audience" };
   }
   if (!Array.isArray(input.targetPersonIds) || !input.targetPersonIds.every((personId) => typeof personId === "string")) {
@@ -253,6 +270,17 @@ export async function updateSystemRuleAction(id: string, input: UpdateSystemRule
   }
   if (input.audienceMode === "selected" && input.targetPersonIds.length === 0) {
     return { ok: false, error: "no_targets" };
+  }
+  const audienceGroupKeysInput = input.audienceGroupKeys ?? [];
+  if (!Array.isArray(audienceGroupKeysInput) || !audienceGroupKeysInput.every(isAudienceGroupKey)) {
+    return { ok: false, error: "invalid_audience" };
+  }
+  if (input.audienceMode === "groups" && audienceGroupKeysInput.length === 0) {
+    return { ok: false, error: "no_targets" };
+  }
+  const excludedPersonIdsInput = input.excludedPersonIds ?? [];
+  if (!Array.isArray(excludedPersonIdsInput) || !excludedPersonIdsInput.every((personId) => typeof personId === "string")) {
+    return { ok: false, error: "invalid_targets" };
   }
 
   const contextResult = await loadManagerWorkbookContext(["personnel"]);
@@ -273,13 +301,23 @@ export async function updateSystemRuleAction(id: string, input: UpdateSystemRule
     }
   }
 
+  const rosterPersonIds = new Set(people.map((person) => person.id));
+
   let canonicalTargetPersonIds: string[] = [];
   if (input.audienceMode === "selected") {
-    const rosterPersonIds = new Set(people.map((person) => person.id));
     canonicalTargetPersonIds = [...new Set(input.targetPersonIds)];
     if (!canonicalTargetPersonIds.every((personId) => rosterPersonIds.has(personId))) {
       return { ok: false, error: "invalid_targets" };
     }
+  }
+
+  const canonicalAudienceGroupKeys: AudienceGroupKey[] = input.audienceMode === "groups" ? [...new Set(audienceGroupKeysInput)] : [];
+
+  // "לא לשלוח ל" -- ALWAYS re-validated against the fresh roster,
+  // independent of `audienceMode`, same fail-closed rule as `targetPersonIds`.
+  const canonicalExcludedPersonIds = [...new Set(excludedPersonIdsInput)];
+  if (!canonicalExcludedPersonIds.every((personId) => rosterPersonIds.has(personId))) {
+    return { ok: false, error: "invalid_targets" };
   }
 
   const outcome = await updateSystemRule(id, {
@@ -290,6 +328,8 @@ export async function updateSystemRuleAction(id: string, input: UpdateSystemRule
     bodyOverride: bodyResult.value,
     audienceMode: input.audienceMode,
     targetPersonIds: canonicalTargetPersonIds,
+    audienceGroupKeys: canonicalAudienceGroupKeys,
+    excludedPersonIds: canonicalExcludedPersonIds,
     expectedRevision: input.expectedRevision,
     updatedByPersonId: manager.id,
     updatedByPersonName: manager.name,
@@ -310,8 +350,12 @@ export interface CustomWeeklyRuleActionInput {
   localHour: number;
   localMinute: number;
   audienceKind: BroadcastAudienceKind;
-  /** Untrusted candidate roster ids -- re-validated against the freshly-fetched roster before anything is saved (see `resolveAudience`). */
+  /** Untrusted candidate roster ids -- re-validated against the freshly-fetched roster before anything is saved (see `resolveAudience`). Ignored unless `audienceKind` is `"person"`/`"people"`. */
   targetPersonIds: string[];
+  /** Untrusted candidate group keys -- re-validated against the canonical `AudienceGroupKey` enum before anything is saved. Ignored unless `audienceKind === "groups"`. Resolved against the CURRENT roster and FROZEN into the saved `targetPersonIds` snapshot at this save/edit instant, exactly like `"everyone"` already is -- see `CustomWeeklyRuleView.audienceGroupKeys`'s own docstring. Optional/defaults to `[]`. */
+  groupKeys?: string[];
+  /** "לא לשלוח ל" -- untrusted candidate roster ids, ALWAYS re-validated against the freshly-fetched roster and baked into the frozen `targetPersonIds` snapshot, independent of `audienceKind`. Optional/defaults to `[]`. */
+  excludedPersonIds?: string[];
 }
 
 export type CustomWeeklyRuleActionResult = { ok: true; rule: CustomWeeklyRuleView } | { ok: false; error: string };
@@ -323,7 +367,10 @@ function isValidWeekday(value: unknown): value is number {
 function validateCustomWeeklyRuleFields(
   input: CustomWeeklyRuleActionInput,
   people: readonly import("@/lib/domain/types").Person[],
-): { ok: true; title: string; body: string; canonicalTargetPersonIds: string[] } | { ok: false; error: string } {
+): (
+  | { ok: true; title: string; body: string; canonicalTargetPersonIds: string[]; canonicalGroupKeys: AudienceGroupKey[]; canonicalExcludedPersonIds: string[] }
+  | { ok: false; error: string }
+) {
   const title = validateText(input.title, BROADCAST_TITLE_MAX_LENGTH);
   if (title === null) return { ok: false, error: "invalid_title" };
 
@@ -336,16 +383,31 @@ function validateCustomWeeklyRuleFields(
   if (!Array.isArray(input.targetPersonIds) || !input.targetPersonIds.every((id) => typeof id === "string")) {
     return { ok: false, error: "invalid_targets" };
   }
-  if (!validateAudienceCardinality(input.audienceKind, input.targetPersonIds)) {
+  const groupKeysInput = input.groupKeys ?? [];
+  if (!Array.isArray(groupKeysInput) || !groupKeysInput.every(isAudienceGroupKey)) {
+    return { ok: false, error: "invalid_audience" };
+  }
+  const excludedPersonIdsInput = input.excludedPersonIds ?? [];
+  if (!Array.isArray(excludedPersonIdsInput) || !excludedPersonIdsInput.every((id) => typeof id === "string")) {
+    return { ok: false, error: "invalid_targets" };
+  }
+  const canonicalGroupKeys = [...new Set(groupKeysInput)] as AudienceGroupKey[];
+  if (!validateAudienceCardinality(input.audienceKind, input.targetPersonIds, canonicalGroupKeys)) {
     return { ok: false, error: "invalid_audience" };
   }
 
-  const targets = resolveAudience(input.audienceKind, people, input.targetPersonIds);
+  const rosterPersonIds = new Set(people.map((person) => person.id));
+  const canonicalExcludedPersonIds = [...new Set(excludedPersonIdsInput)];
+  if (!canonicalExcludedPersonIds.every((id) => rosterPersonIds.has(id))) {
+    return { ok: false, error: "invalid_targets" };
+  }
+
+  const targets = resolveAudience(input.audienceKind, people, input.targetPersonIds, canonicalGroupKeys, canonicalExcludedPersonIds);
   if (targets === null) return { ok: false, error: "invalid_targets" };
   if (targets.length === 0) return { ok: false, error: "no_targets" };
 
   const canonicalTargetPersonIds = [...new Set(targets.map((person) => person.id))];
-  return { ok: true, title, body, canonicalTargetPersonIds };
+  return { ok: true, title, body, canonicalTargetPersonIds, canonicalGroupKeys, canonicalExcludedPersonIds };
 }
 
 /**
@@ -373,6 +435,8 @@ export async function createCustomWeeklyRuleAction(input: CustomWeeklyRuleAction
     body: validated.body,
     audienceKind: input.audienceKind,
     targetPersonIds: validated.canonicalTargetPersonIds,
+    audienceGroupKeys: validated.canonicalGroupKeys,
+    excludedPersonIds: validated.canonicalExcludedPersonIds,
     createdByPersonId: manager.id,
     createdByPersonName: manager.name,
   });
@@ -401,6 +465,8 @@ export async function updateCustomWeeklyRuleAction(id: string, input: CustomWeek
     body: validated.body,
     audienceKind: input.audienceKind,
     targetPersonIds: validated.canonicalTargetPersonIds,
+    audienceGroupKeys: validated.canonicalGroupKeys,
+    excludedPersonIds: validated.canonicalExcludedPersonIds,
     updatedByPersonId: manager.id,
     updatedByPersonName: manager.name,
   });

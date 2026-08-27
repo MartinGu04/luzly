@@ -38,16 +38,20 @@ function createFakeClaimStore() {
     localMinute: number;
     title: string;
     body: string;
-    audienceKind: "everyone" | "person" | "people";
+    audienceKind: "everyone" | "person" | "people" | "groups";
     targetPersonIds: string[];
+    audienceGroupKeys: string[];
+    excludedPersonIds: string[];
     createdByPersonId: string | null;
     createdByPersonName: string | null;
   }
   interface FrozenSnapshot {
     title: string;
     body: string;
-    audienceKind: "everyone" | "person" | "people";
+    audienceKind: "everyone" | "person" | "people" | "groups";
     targetPersonIds: string[];
+    audienceGroupKeys: string[];
+    excludedPersonIds: string[];
     createdByPersonId: string | null;
     createdByPersonName: string | null;
   }
@@ -98,6 +102,8 @@ function createFakeClaimStore() {
         ruleBody: existing.frozen.body,
         ruleAudienceKind: existing.frozen.audienceKind,
         ruleTargetPersonIds: existing.frozen.targetPersonIds,
+        ruleAudienceGroupKeys: existing.frozen.audienceGroupKeys,
+        ruleExcludedPersonIds: existing.frozen.excludedPersonIds,
         createdByPersonId: existing.frozen.createdByPersonId,
         createdByPersonName: existing.frozen.createdByPersonName,
       };
@@ -117,6 +123,8 @@ function createFakeClaimStore() {
       body: rule.body,
       audienceKind: rule.audienceKind,
       targetPersonIds: [...rule.targetPersonIds],
+      audienceGroupKeys: [...rule.audienceGroupKeys],
+      excludedPersonIds: [...rule.excludedPersonIds],
       createdByPersonId: rule.createdByPersonId,
       createdByPersonName: rule.createdByPersonName,
     };
@@ -130,6 +138,8 @@ function createFakeClaimStore() {
       ruleBody: frozen.body,
       ruleAudienceKind: frozen.audienceKind,
       ruleTargetPersonIds: frozen.targetPersonIds,
+      ruleAudienceGroupKeys: frozen.audienceGroupKeys,
+      ruleExcludedPersonIds: frozen.excludedPersonIds,
       createdByPersonId: frozen.createdByPersonId,
       createdByPersonName: frozen.createdByPersonName,
     };
@@ -183,6 +193,8 @@ function registerRule(claimStore: ReturnType<typeof createFakeClaimStore>, confi
     body: config.body,
     audienceKind: config.audienceKind,
     targetPersonIds: [...config.targetPersonIds],
+    audienceGroupKeys: [],
+    excludedPersonIds: [],
     createdByPersonId: config.createdByPersonId,
     createdByPersonName: config.createdByPersonName,
   });
@@ -393,6 +405,74 @@ describe("runDueCustomWeeklyRuleDispatch -- fresh dispatch + audience resolution
 
     expect(summary).toEqual({ dispatched: 1, failed: 0 });
     expect(jobStore.created).toEqual(new Set(["recurring:batch-1:user-a"]));
+  });
+
+  it("'groups' audience resolves membership fresh against the CURRENT roster passed to dispatch, never a frozen id list -- the frozen keys are just the manager's own selection", async () => {
+    claimStore.setRule("rule-1", {
+      enabled: true,
+      archived: false,
+      weekday: 6,
+      localHour: 21,
+      localMinute: 0,
+      title: "כותרת",
+      body: "גוף",
+      audienceKind: "groups",
+      targetPersonIds: [],
+      audienceGroupKeys: ["permanent"],
+      excludedPersonIds: [],
+      createdByPersonId: "mgr-1",
+      createdByPersonName: "מנהל",
+    });
+    fetchAllUserIdsByEmail.mockResolvedValue(
+      new Map([
+        ["a@example.com", { userId: "user-a", avatarUrl: null }],
+        ["b@example.com", { userId: "user-b", avatarUrl: null }],
+      ]),
+    );
+    const { runDueCustomWeeklyRuleDispatch } = await loadModule();
+
+    const occurrence = { ruleId: "rule-1", occurrenceDate: "2026-08-22" };
+    const people = [
+      person("p_a", { email: "a@example.com", personnelType: "קבע" }),
+      person("p_b", { email: "b@example.com", personnelType: "חובה" }),
+    ];
+    const summary = await runDueCustomWeeklyRuleDispatch([occurrence], people);
+
+    expect(summary).toEqual({ dispatched: 1, failed: 0 });
+    // Only the permanent (קבע) person -- p_b (חובה) never matches the group.
+    expect(jobStore.created).toEqual(new Set(["recurring:batch-1:user-a"]));
+  });
+
+  it("excludedPersonIds (frozen at claim time) always wins over the resolved audience on every occurrence dispatch", async () => {
+    claimStore.setRule("rule-1", {
+      enabled: true,
+      archived: false,
+      weekday: 6,
+      localHour: 21,
+      localMinute: 0,
+      title: "כותרת",
+      body: "גוף",
+      audienceKind: "everyone",
+      targetPersonIds: [],
+      audienceGroupKeys: [],
+      excludedPersonIds: ["p_a"],
+      createdByPersonId: "mgr-1",
+      createdByPersonName: "מנהל",
+    });
+    fetchAllUserIdsByEmail.mockResolvedValue(
+      new Map([
+        ["a@example.com", { userId: "user-a", avatarUrl: null }],
+        ["b@example.com", { userId: "user-b", avatarUrl: null }],
+      ]),
+    );
+    const { runDueCustomWeeklyRuleDispatch } = await loadModule();
+
+    const occurrence = { ruleId: "rule-1", occurrenceDate: "2026-08-22" };
+    const people = [person("p_a", { email: "a@example.com" }), person("p_b", { email: "b@example.com" })];
+    const summary = await runDueCustomWeeklyRuleDispatch([occurrence], people);
+
+    expect(summary).toEqual({ dispatched: 1, failed: 0 });
+    expect(jobStore.created).toEqual(new Set(["recurring:batch-1:user-b"]));
   });
 
   it("zero due occurrences performs zero I/O", async () => {

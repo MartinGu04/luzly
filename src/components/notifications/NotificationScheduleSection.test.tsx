@@ -42,6 +42,8 @@ const FAKE_ITEM: ScheduledBroadcastView = {
   status: "scheduled",
   audienceKind: "person",
   targetPersonIds: ["p_a"],
+  audienceGroupKeys: [],
+  excludedPersonIds: [],
   title: "כותרת",
   body: "תוכן",
   scheduledFor: "2026-08-23T17:00:00.000Z",
