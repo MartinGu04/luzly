@@ -413,6 +413,7 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
               <EmergencyPersonalScheduleList
                 shifts={emergencyResult.model.personalShifts ?? []}
                 emptyStateName={emergencyResult.model.selectedPersonName}
+                todayDate={emergencyResult.model.localNow.date}
               />
             )}
           </>

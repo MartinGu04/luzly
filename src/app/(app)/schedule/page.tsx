@@ -303,6 +303,7 @@ function EmergencySchedulePage({ model }: { model: EmergencyScheduleReadModel })
         <EmergencyPersonalScheduleList
           shifts={model.personalShifts ?? []}
           emptyStateName={model.perspective === "person" ? model.selectedPersonName : null}
+          todayDate={model.localNow.date}
         />
       )}
     </div>
