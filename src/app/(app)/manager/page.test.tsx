@@ -1388,14 +1388,54 @@ describe("ManagerPage — Emergency Mode: desk staffing replaces regular coverag
           },
         ],
       },
+      operationalOverview: {
+        previous: null,
+        current: {
+          date: "2026-08-13",
+          period: "day",
+          desks: [{ desk: 'רת"ק', personId: "p_martin", personName: "מרטין בדיקה" }],
+        },
+        next: null,
+      },
     });
 
     await renderPage({ category: "shifts" });
 
-    expect(screen.getByTestId("emergency-everyone-schedule-list")).toBeInTheDocument();
-    expect(screen.getByText('רת"ק')).toBeInTheDocument();
+    // The operational triad (previous/current/next) is the FIRST thing shown -- never the regular coverage sections.
+    expect(screen.getByTestId("emergency-manager-operational-overview")).toBeInTheDocument();
+    expect(screen.getByText("משמרת נוכחית")).toBeInTheDocument();
+    expect(within(screen.getByTestId("emergency-manager-shift-current")).getByText('רת"ק')).toBeInTheDocument();
     expect(screen.queryByText("כיסוי משמרות")).toBeNull();
     expect(loadManagerEmergencyOverview).toHaveBeenCalledWith({ id: "p_manager", name: "דני מנהל" }, null);
+  });
+
+  it("the full historical schedule stays reachable behind a collapsed secondary section, not shown as the default view", async () => {
+    resolveOperationalMode.mockResolvedValue({ kind: "emergency" });
+    getRequestManagerOverview.mockResolvedValue(okResult(model()));
+    loadManagerEmergencyOverview.mockResolvedValue({
+      status: "ok",
+      model: {
+        fetchedAt: "2026-08-13T09:00:00.000Z",
+        localNow: { date: "2026-08-13", minuteOfDay: 600 },
+        period: EMERGENCY_PERIOD,
+        diagnostics: [],
+        manager: { id: "p_manager", name: "דני מנהל" },
+        roster: [],
+        perspective: "all",
+        selectedPersonId: null,
+        selectedPersonName: null,
+        personalShifts: null,
+        everyoneShifts: [
+          { date: "2026-02-10", period: "day", desks: [{ desk: 'רת"ק', personId: null, personName: null }] },
+        ],
+      },
+      operationalOverview: { previous: null, current: null, next: null },
+    });
+
+    await renderPage({ category: "shifts" });
+
+    const history = screen.getByTestId("emergency-manager-full-schedule");
+    expect(history).not.toHaveAttribute("open");
   });
 
   it("a selected person renders their own desk assignments (person perspective), never the regular selected-person drill-down", async () => {

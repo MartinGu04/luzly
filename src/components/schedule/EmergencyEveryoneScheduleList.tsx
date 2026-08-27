@@ -1,6 +1,7 @@
 import { Panel } from "@/components/ui/Panel";
 import { formatHebrewWeekdayAndDate } from "@/lib/presentation/hebrewDate";
 import type { EmergencyEveryoneShiftEntry } from "@/lib/readModels/emergencyScheduleTypes";
+import { EmergencyDeskGrid } from "./EmergencyDeskGrid";
 
 interface EmergencyEveryoneScheduleListProps {
   shifts: EmergencyEveryoneShiftEntry[];
@@ -32,19 +33,7 @@ export function EmergencyEveryoneScheduleList({ shifts }: EmergencyEveryoneSched
           <p className="text-sm font-semibold text-foreground">
             {formatHebrewWeekdayAndDate(shift.date)} · משמרת {PERIOD_LABEL[shift.period]}
           </p>
-          <ul className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
-            {shift.desks.map((slot) => (
-              <li
-                key={slot.desk}
-                className="flex items-center justify-between gap-3 rounded-lg bg-overlay-faint px-3 py-1.5 text-xs ring-1 ring-border"
-              >
-                <span className="min-w-0 truncate font-medium text-foreground">{slot.desk}</span>
-                <span className={`shrink-0 ${slot.personName ? "text-muted" : "text-warning"}`}>
-                  {slot.personName ?? "לא מאויש"}
-                </span>
-              </li>
-            ))}
-          </ul>
+          <EmergencyDeskGrid desks={shift.desks} className="mt-2" />
         </Panel>
       ))}
     </div>

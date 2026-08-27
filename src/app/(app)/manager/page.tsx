@@ -22,7 +22,7 @@ import { ManagerShiftSnapshotSection } from "@/components/manager/ManagerShiftSn
 import { ManagerSourceOfTruthNote } from "@/components/manager/ManagerSourceOfTruthNote";
 import { ManagerSummaryStrip } from "@/components/manager/ManagerSummaryStrip";
 import { EmergencyUnavailableState } from "@/components/emergencyMode/EmergencyUnavailableState";
-import { EmergencyEveryoneScheduleList } from "@/components/schedule/EmergencyEveryoneScheduleList";
+import { EmergencyManagerOperationalOverview } from "@/components/manager/EmergencyManagerOperationalOverview";
 import { EmergencyPersonalScheduleList } from "@/components/schedule/EmergencyPersonalScheduleList";
 import { EmergencyScheduleRangeSelector } from "@/components/schedule/EmergencyScheduleRangeSelector";
 import { DataFreshnessStatus } from "@/components/ui/DataFreshnessStatus";
@@ -413,7 +413,10 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
               <ManagerPersonSelector people={people} selectedId={model.selectedPersonId} />
             </div>
             {emergencyResult.model.perspective === "all" ? (
-              <EmergencyEveryoneScheduleList shifts={emergencyResult.model.everyoneShifts ?? []} />
+              <EmergencyManagerOperationalOverview
+                overview={emergencyResult.operationalOverview ?? { previous: null, current: null, next: null }}
+                fullSchedule={emergencyResult.model.everyoneShifts ?? []}
+              />
             ) : (
               <>
                 <EmergencyScheduleRangeSelector

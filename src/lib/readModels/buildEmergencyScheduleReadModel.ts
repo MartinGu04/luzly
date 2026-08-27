@@ -80,7 +80,8 @@ function toPersonalShiftEntry(shift: EmergencyShift, viewedPersonId: string): Em
   return { date: shift.date, period: shift.period, ownDesks, roster };
 }
 
-function toEveryoneShiftEntry(shift: EmergencyShift): EmergencyEveryoneShiftEntry {
+/** Exported for reuse by `buildEmergencyManagerOverview.ts` -- the Manager Area's previous/current/next operational overview needs the exact same full desk-grid shape for one shift, never a second definition of "which of the ten canonical desks is who". */
+export function toEveryoneShiftEntry(shift: EmergencyShift): EmergencyEveryoneShiftEntry {
   const byDesk = new Map(shift.assignments.map((a) => [a.desk, a]));
   const desks: EmergencyDeskSlot[] = EMERGENCY_DESK_NAMES.map((desk) => {
     const assignment = byDesk.get(desk);

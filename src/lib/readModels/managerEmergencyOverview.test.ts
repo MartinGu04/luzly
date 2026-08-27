@@ -4,14 +4,22 @@ import { stableIdFromName } from "@/lib/parsers/personnel";
 
 const getWorkbookSnapshot = vi.fn();
 const resolveOperationalRoster = vi.fn();
+const getJerusalemLocalNow = vi.fn();
 
 vi.mock("@/lib/sync", () => ({ getWorkbookSnapshot }));
 vi.mock("./operationalMode", () => ({ resolveOperationalRoster }));
+vi.mock("@/lib/time/jerusalemClock", () => ({ getJerusalemLocalNow }));
 
 const { loadManagerEmergencyOverview } = await import("./managerEmergencyOverview");
 
 function personnelSheet(rows: (string | boolean)[][]): RawSheet {
   return { name: 'כ"א', values: rows };
+}
+
+function settingsSheet(shiftStartTimeDay: string | null): RawSheet {
+  const rows: string[][] = [["הגדרה", "ערך"]];
+  if (shiftStartTimeDay !== null) rows.push(["תחילת משמרת יום", shiftStartTimeDay]);
+  return { name: "הגדרות", values: rows };
 }
 
 const PERSONNEL_ROWS: (string | boolean)[][] = [
@@ -20,8 +28,11 @@ const PERSONNEL_ROWS: (string | boolean)[][] = [
   ["מרטין בדיקה", "martin@example.invalid", false],
 ];
 
-function snapshot() {
-  return { fetchedAt: "2026-08-13T08:00:00.000Z", sheets: [personnelSheet(PERSONNEL_ROWS)] };
+function snapshot(shiftStartTimeDay: string | null = "07:00") {
+  return {
+    fetchedAt: "2026-08-13T08:00:00.000Z",
+    sheets: [personnelSheet(PERSONNEL_ROWS), settingsSheet(shiftStartTimeDay)],
+  };
 }
 
 const PERIOD = {
@@ -44,7 +55,10 @@ const MARTIN_ID = stableIdFromName("מרטין בדיקה");
 beforeEach(() => {
   getWorkbookSnapshot.mockReset();
   resolveOperationalRoster.mockReset();
+  getJerusalemLocalNow.mockReset();
   getWorkbookSnapshot.mockResolvedValue(snapshot());
+  // 2026-08-13 10:00 -- inside the day window for a 07:00 shift start.
+  getJerusalemLocalNow.mockReturnValue({ date: "2026-08-13", minuteOfDay: 600 });
 });
 
 describe("loadManagerEmergencyOverview", () => {
@@ -75,7 +89,26 @@ describe("loadManagerEmergencyOverview", () => {
     expect(result.model.everyoneShifts?.[0].desks.some((d) => d.personName === "מרטין בדיקה")).toBe(true);
   });
 
-  it("a requested personId narrows to that person's own desk assignments", async () => {
+  it("'all' perspective resolves operationalOverview's current shift from the SAME assignments, using now=10:00/07:00-day-start -- the day shift", async () => {
+    resolveOperationalRoster.mockResolvedValue({
+      mode: "emergency",
+      period: PERIOD,
+      assignments: [
+        { date: "2026-08-13", period: "day", desk: "הוגוורט", personId: MARTIN_ID, personName: "מרטין בדיקה", sourceCell: "C2" },
+      ],
+      diagnostics: [],
+      fetchedAt: "2026-08-13T09:00:00.000Z",
+    });
+
+    const result = await loadManagerEmergencyOverview(MANAGER, null);
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") throw new Error("unreachable");
+    expect(result.operationalOverview?.current).toMatchObject({ date: "2026-08-13", period: "day" });
+    expect(result.operationalOverview?.current?.desks.some((d) => d.personName === "מרטין בדיקה")).toBe(true);
+  });
+
+  it("a requested personId narrows to that person's own desk assignments -- and operationalOverview is null (personal view instead)", async () => {
     resolveOperationalRoster.mockResolvedValue({
       mode: "emergency",
       period: PERIOD,
@@ -93,6 +126,7 @@ describe("loadManagerEmergencyOverview", () => {
     expect(result.model.perspective).toBe("person");
     expect(result.model.selectedPersonId).toBe(MARTIN_ID);
     expect(result.model.personalShifts?.[0].ownDesks).toEqual(["הוגוורט"]);
+    expect(result.operationalOverview).toBeNull();
   });
 
   it("an unknown personId falls back to the manager's own 'self' perspective, same fail-closed rule buildEmergencyScheduleReadModel already establishes", async () => {
@@ -109,6 +143,7 @@ describe("loadManagerEmergencyOverview", () => {
     expect(result.status).toBe("ok");
     if (result.status !== "ok") throw new Error("unreachable");
     expect(result.model.perspective).toBe("self");
+    expect(result.operationalOverview).toBeNull();
   });
 
   it("throws if resolveOperationalRoster somehow reports 'regular' -- structurally unreachable within one request per its own docs", async () => {
@@ -117,7 +152,7 @@ describe("loadManagerEmergencyOverview", () => {
     await expect(loadManagerEmergencyOverview(MANAGER, null)).rejects.toThrow(/inconsistently/);
   });
 
-  it("never fetches the regular schedule/coverage sources -- only a personnel-only snapshot", async () => {
+  it("fetches personnel AND settings -- never the regular schedule/coverage sources", async () => {
     resolveOperationalRoster.mockResolvedValue({
       mode: "emergency",
       period: PERIOD,
@@ -128,6 +163,26 @@ describe("loadManagerEmergencyOverview", () => {
 
     await loadManagerEmergencyOverview(MANAGER, null);
 
-    expect(getWorkbookSnapshot).toHaveBeenCalledWith(["personnel"]);
+    expect(getWorkbookSnapshot).toHaveBeenCalledWith(["personnel", "settings"]);
+  });
+
+  it("a broken shift-time configuration degrades operationalOverview gracefully (current/previous null) rather than throwing", async () => {
+    getWorkbookSnapshot.mockResolvedValue(snapshot(null)); // no "תחילת משמרת יום" row at all
+    resolveOperationalRoster.mockResolvedValue({
+      mode: "emergency",
+      period: PERIOD,
+      assignments: [
+        { date: "2026-08-13", period: "day", desk: "הוגוורט", personId: MARTIN_ID, personName: "מרטין בדיקה", sourceCell: "C2" },
+      ],
+      diagnostics: [],
+      fetchedAt: "2026-08-13T09:00:00.000Z",
+    });
+
+    const result = await loadManagerEmergencyOverview(MANAGER, null);
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") throw new Error("unreachable");
+    expect(result.operationalOverview?.current).toBeNull();
+    expect(result.operationalOverview?.previous).toBeNull();
   });
 });
