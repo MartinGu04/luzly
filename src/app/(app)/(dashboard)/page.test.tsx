@@ -12,6 +12,9 @@ vi.mock("@/lib/readModels/getRequestRecentDashboardChanges", () => ({ getRequest
 const getRequestPermanentManagerHome = vi.fn();
 vi.mock("@/lib/readModels/getRequestPermanentManagerHome", () => ({ getRequestPermanentManagerHome }));
 
+const loadManagerEmergencyOverview = vi.fn();
+vi.mock("@/lib/readModels/managerEmergencyOverview", () => ({ loadManagerEmergencyOverview }));
+
 const getRequestReportOneTomorrow = vi.fn();
 vi.mock("@/lib/readModels/getRequestReportOneTomorrow", () => ({ getRequestReportOneTomorrow }));
 
@@ -52,6 +55,7 @@ beforeEach(() => {
   getRequestDashboardVisitRecap.mockReset();
   getRequestDashboardVisitRecap.mockResolvedValue({ visitStartedAt: "2026-08-25T10:00:00.000Z", items: [], totalCount: 0 });
   getRequestPermanentManagerHome.mockReset();
+  loadManagerEmergencyOverview.mockReset();
   getRequestReportOneTomorrow.mockReset();
   getRequestReportOneTomorrow.mockResolvedValue({ status: "forbidden" });
   recordDashboardVisitAction.mockClear();
@@ -527,5 +531,200 @@ describe("DashboardPage — onboarding eligibility wiring (pre-merge correction)
     render(element);
 
     expect(screen.queryByText("השלמת הגדרה")).toBeNull();
+  });
+});
+
+describe("DashboardPage — Emergency Mode", () => {
+  it("renders EmergencyDashboard for status 'emergency', never the regular Dashboard/PermanentManagerHome", async () => {
+    getRequestPersonalSchedule.mockResolvedValue({
+      status: "emergency",
+      person: { id: "p_1", name: "דני בדיקה", isManager: false },
+      emergencyHome: {
+        period: {
+          id: "period1",
+          activatedAt: "2026-08-26T14:00:00.000Z",
+          activatedByUserId: "u_mgr",
+          activatedByPersonId: "p_mgr",
+          activatedByPersonName: "מנהל בדיקה",
+          startDate: "2026-08-26",
+          deactivatedAt: null,
+          deactivatedByUserId: null,
+          deactivatedByPersonId: null,
+          deactivatedByPersonName: null,
+          endDate: null,
+        },
+        localNow: { date: "2026-08-26", minuteOfDay: 600 },
+        fetchedAt: "2026-08-26T14:05:00.000Z",
+        current: {
+          date: "2026-08-26",
+          period: "day",
+          ownDesks: ["הוגוורט"],
+          startMinute: 480,
+          endMinute: 1200,
+          roster: [{ personId: "p_2", personName: "ליה", desk: "תיעוד" }],
+        },
+        next: null,
+        diagnostics: [],
+      },
+      userId: "u1",
+      avatarUrl: null,
+      accountCreatedAt: "2020-01-01T00:00:00.000Z",
+    });
+
+    const element = await DashboardPage();
+    render(element);
+
+    expect(screen.getByTestId("emergency-dashboard")).toBeInTheDocument();
+    expect(screen.getByText(/משמרת יום · דסק הוגוורט/)).toBeInTheDocument();
+    expect(screen.getByText("ליה")).toBeInTheDocument();
+    expect(getRequestPermanentManagerHome).not.toHaveBeenCalled();
+    expect(getRequestDashboardVisitRecap).not.toHaveBeenCalled();
+  });
+
+  it("a permanent manager gets the department-wide desk staffing view during Emergency Mode, never the generic per-person EmergencyDashboard", async () => {
+    getRequestPersonalSchedule.mockResolvedValue({
+      status: "emergency",
+      person: { id: "p_mgr", name: "דני מנהל", isManager: true, isTechnician: false, isSupervisor: false, personnelType: "קבע" },
+      emergencyHome: {
+        period: {
+          id: "period1",
+          activatedAt: "2026-08-26T14:00:00.000Z",
+          activatedByUserId: "u_mgr",
+          activatedByPersonId: "p_mgr",
+          activatedByPersonName: "דני מנהל",
+          startDate: "2026-08-26",
+          deactivatedAt: null,
+          deactivatedByUserId: null,
+          deactivatedByPersonId: null,
+          deactivatedByPersonName: null,
+          endDate: null,
+        },
+        localNow: { date: "2026-08-26", minuteOfDay: 600 },
+        fetchedAt: "2026-08-26T14:05:00.000Z",
+        current: null,
+        next: null,
+        diagnostics: [],
+      },
+      userId: "u_mgr",
+      avatarUrl: null,
+      accountCreatedAt: "2020-01-01T00:00:00.000Z",
+    });
+    loadManagerEmergencyOverview.mockResolvedValue({
+      status: "ok",
+      model: {
+        fetchedAt: "2026-08-26T14:10:00.000Z",
+        localNow: { date: "2026-08-26", minuteOfDay: 600 },
+        period: { key: "irrelevant" },
+        diagnostics: [],
+        manager: { id: "p_mgr", name: "דני מנהל" },
+        roster: [],
+        perspective: "all",
+        selectedPersonId: null,
+        selectedPersonName: null,
+        personalShifts: null,
+        everyoneShifts: [
+          { date: "2026-08-26", period: "day", desks: [{ desk: "הוגוורט", personId: "p_2", personName: "ליה" }] },
+        ],
+      },
+    });
+
+    const element = await DashboardPage();
+    render(element);
+
+    expect(screen.getByTestId("permanent-manager-emergency-home")).toBeInTheDocument();
+    expect(screen.getByTestId("emergency-everyone-schedule-list")).toBeInTheDocument();
+    expect(screen.getByText("ליה")).toBeInTheDocument();
+    expect(screen.queryByTestId("emergency-dashboard")).toBeNull();
+    expect(loadManagerEmergencyOverview).toHaveBeenCalledWith({ id: "p_mgr", name: "דני מנהל" }, null);
+  });
+
+  it("a permanent manager falls back to the generic EmergencyDashboard if loadManagerEmergencyOverview itself fails", async () => {
+    getRequestPersonalSchedule.mockResolvedValue({
+      status: "emergency",
+      person: { id: "p_mgr", name: "דני מנהל", isManager: true, isTechnician: false, isSupervisor: false, personnelType: "קבע" },
+      emergencyHome: {
+        period: {
+          id: "period1",
+          activatedAt: "2026-08-26T14:00:00.000Z",
+          activatedByUserId: "u_mgr",
+          activatedByPersonId: "p_mgr",
+          activatedByPersonName: "דני מנהל",
+          startDate: "2026-08-26",
+          deactivatedAt: null,
+          deactivatedByUserId: null,
+          deactivatedByPersonId: null,
+          deactivatedByPersonName: null,
+          endDate: null,
+        },
+        localNow: { date: "2026-08-26", minuteOfDay: 600 },
+        fetchedAt: "2026-08-26T14:05:00.000Z",
+        current: null,
+        next: null,
+        diagnostics: [],
+      },
+      userId: "u_mgr",
+      avatarUrl: null,
+      accountCreatedAt: "2020-01-01T00:00:00.000Z",
+    });
+    loadManagerEmergencyOverview.mockResolvedValue({ status: "emergency_unavailable", message: "boom" });
+
+    const element = await DashboardPage();
+    render(element);
+
+    expect(screen.getByTestId("emergency-dashboard")).toBeInTheDocument();
+    expect(screen.queryByTestId("permanent-manager-emergency-home")).toBeNull();
+  });
+
+  it("a non-permanent manager (regular/reserve, or permanent non-manager) during Emergency Mode still gets the generic EmergencyDashboard, never loadManagerEmergencyOverview", async () => {
+    getRequestPersonalSchedule.mockResolvedValue({
+      status: "emergency",
+      person: { id: "p_1", name: "דני בדיקה", isManager: true, isTechnician: true, isSupervisor: false, personnelType: "חובה" },
+      emergencyHome: {
+        period: {
+          id: "period1",
+          activatedAt: "2026-08-26T14:00:00.000Z",
+          activatedByUserId: "u_mgr",
+          activatedByPersonId: "p_mgr",
+          activatedByPersonName: "מנהל בדיקה",
+          startDate: "2026-08-26",
+          deactivatedAt: null,
+          deactivatedByUserId: null,
+          deactivatedByPersonId: null,
+          deactivatedByPersonName: null,
+          endDate: null,
+        },
+        localNow: { date: "2026-08-26", minuteOfDay: 600 },
+        fetchedAt: "2026-08-26T14:05:00.000Z",
+        current: null,
+        next: null,
+        diagnostics: [],
+      },
+      userId: "u1",
+      avatarUrl: null,
+      accountCreatedAt: "2020-01-01T00:00:00.000Z",
+    });
+
+    const element = await DashboardPage();
+    render(element);
+
+    expect(screen.getByTestId("emergency-dashboard")).toBeInTheDocument();
+    expect(loadManagerEmergencyOverview).not.toHaveBeenCalled();
+  });
+
+  it("renders EmergencyUnavailableState for status 'emergency_unavailable', never the generic ConfigurationErrorState copy", async () => {
+    getRequestPersonalSchedule.mockResolvedValue({
+      status: "emergency_unavailable",
+      message: "boom",
+      person: { id: "p_1", name: "דני בדיקה", isManager: false },
+      userId: "u1",
+      avatarUrl: null,
+      accountCreatedAt: "2020-01-01T00:00:00.000Z",
+    });
+
+    const element = await DashboardPage();
+    render(element);
+
+    expect(screen.getByText(/נתוני החירום אינם זמינים/)).toBeInTheDocument();
+    expect(screen.queryByText("לא ניתן לחשב כרגע את שעות המשמרות")).toBeNull();
   });
 });

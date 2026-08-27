@@ -23,6 +23,7 @@ function view(overrides: Partial<DutyFairnessCardView> = {}): DutyFairnessCardVi
     gapLabel: "-2.00",
     status: "below",
     weekendLabel: "2",
+    weekendSuspendedNote: null,
     exemptionBadges: [],
     hasTarget: true,
     progressRatio: 0.3625,
@@ -243,6 +244,18 @@ describe("DutyFairnessCard — Justice Table refinement: natural pace/status lan
     expect(screen.getByTestId("metric-duty-pace")).toHaveTextContent("מעבר ליעד");
   });
 
+  it("'suspended' (Emergency Mode currently active) reads as its own calm phrase, with the SAME neutral tint as not_started, never the below-pace warning tint", () => {
+    render(
+      <ul>
+        <DutyFairnessCard view={view({ dutyStatusLabel: "מושהה בזמן מצב חירום", dutyStatusState: "suspended" })} />
+      </ul>,
+    );
+    const badge = screen.getByTestId("metric-duty-pace");
+    expect(badge).toHaveTextContent("מושהה בזמן מצב חירום");
+    expect(badge.className).toContain("text-muted");
+    expect(badge.className).not.toContain("text-status-below");
+  });
+
   it("never shows the old pace-only wording this refinement replaces", () => {
     render(
       <ul>
@@ -325,6 +338,24 @@ describe("DutyFairnessCard — weekend and exemptions still show, secondary row"
       </ul>,
     );
     expect(screen.getByText("🚫 מטבח")).toBeInTheDocument();
+  });
+
+  it("attaches the emergency-period suspension explanation to the weekend metric when set", () => {
+    render(
+      <ul>
+        <DutyFairnessCard view={view({ weekendLabel: "—", weekendSuspendedNote: "ספירת סופ\"שים מושהית בתקופה זו." })} />
+      </ul>,
+    );
+    expect(screen.getByTestId("metric-duty-weekend")).toHaveAttribute("title", 'ספירת סופ"שים מושהית בתקופה זו.');
+  });
+
+  it("carries no title explanation for an ordinary weekend count (no suspension)", () => {
+    render(
+      <ul>
+        <DutyFairnessCard view={view({ weekendLabel: "3", weekendSuspendedNote: null })} />
+      </ul>,
+    );
+    expect(screen.getByTestId("metric-duty-weekend")).not.toHaveAttribute("title");
   });
 });
 

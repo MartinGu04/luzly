@@ -5,8 +5,10 @@ import type { PersonalDutyAction, PersonalDutyBlock, PersonalScheduleReadModel }
 
 const getRequestPersonalSchedule = vi.fn();
 const getRequestDutyFairness = vi.fn();
+const resolveOperationalMode = vi.fn();
 vi.mock("@/lib/readModels/getRequestPersonalSchedule", () => ({ getRequestPersonalSchedule }));
 vi.mock("@/lib/readModels/getRequestDutyFairness", () => ({ getRequestDutyFairness }));
+vi.mock("@/lib/emergencyMode/state", () => ({ resolveOperationalMode }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 vi.mock("@/components/ui/DataFreshnessStatus", () => ({
   DataFreshnessStatus: ({ fetchedAt }: { fetchedAt: string }) => <div data-testid="freshness">{fetchedAt}</div>,
@@ -26,6 +28,8 @@ beforeEach(() => {
   // unchanged and only the new exemption-specific tests below override it.
   getRequestDutyFairness.mockReset();
   getRequestDutyFairness.mockResolvedValue({ status: "unmapped" });
+  resolveOperationalMode.mockReset();
+  resolveOperationalMode.mockResolvedValue({ kind: "regular" });
 });
 
 function dutyFairnessRow(overrides: Partial<DutyFairnessPersonRowView> = {}): DutyFairnessPersonRowView {
@@ -516,5 +520,75 @@ describe("DutiesPage — data freshness uses PersonalScheduleReadModel.fetchedAt
     const element = await DutiesPage({ searchParams: searchParams() });
     render(element);
     expect(screen.getByTestId("freshness")).toHaveTextContent("2026-08-13T10:45:00.000Z");
+  });
+});
+
+describe("DutiesPage — Emergency Mode: regular duties suspended (spec section 19/21)", () => {
+  it("while Emergency Mode is active, the focus section is replaced by the suspended state, even with an active-today duty block", async () => {
+    resolveOperationalMode.mockResolvedValue({ kind: "emergency" });
+    getRequestPersonalSchedule.mockResolvedValue(
+      okResult(model({ dutyBlocks: [dutyBlock({ dates: ["2026-08-11", "2026-08-12", "2026-08-13"] })] })),
+    );
+    const element = await DutiesPage({ searchParams: searchParams() });
+    render(element);
+    expect(screen.getByTestId("duties-suspended-state")).toBeInTheDocument();
+    expect(screen.getByText("תורנויות רגילות מושהות")).toBeInTheDocument();
+    expect(screen.queryByText("בתורנות עכשיו")).toBeNull();
+  });
+
+  it("while Emergency Mode is active, the upcoming tab shows a suspended message instead of the upcoming duty list", async () => {
+    resolveOperationalMode.mockResolvedValue({ kind: "emergency" });
+    getRequestPersonalSchedule.mockResolvedValue(
+      okResult(
+        model({
+          dutyBlocks: [
+            dutyBlock({ startDate: "2026-08-20", endDate: "2026-08-20", dates: ["2026-08-20"] }),
+          ],
+        }),
+      ),
+    );
+    const element = await DutiesPage({ searchParams: searchParams() });
+    render(element);
+    expect(screen.getByText(/תורנויות קרובות אינן מוצגות בזמן מצב חירום/)).toBeInTheDocument();
+    expect(screen.queryByText("עתודה 3")).toBeNull();
+    expect(screen.queryByText("התורנות הבאה")).toBeNull();
+  });
+
+  it("while Emergency Mode is active, the history tab is UNCHANGED -- past duty blocks remain visible, clearly labeled history", async () => {
+    resolveOperationalMode.mockResolvedValue({ kind: "emergency" });
+    getRequestPersonalSchedule.mockResolvedValue(
+      okResult(
+        model({
+          dutyBlocks: [
+            dutyBlock({ startDate: "2026-08-01", endDate: "2026-08-02", dates: ["2026-08-01", "2026-08-02"] }),
+          ],
+        }),
+      ),
+    );
+    const element = await DutiesPage({ searchParams: searchParams("history") });
+    render(element);
+    expect(screen.getByText("שמירה 2")).toBeInTheDocument();
+    expect(screen.getByText("היסטוריה אחרונה")).toBeInTheDocument();
+    expect(screen.queryByTestId("duties-suspended-state")).toBeInTheDocument();
+  });
+
+  it("while Emergency Mode is active, the redundant-empty-state / recent-history-preview logic never triggers on the upcoming tab -- the suspended message always wins", async () => {
+    resolveOperationalMode.mockResolvedValue({ kind: "emergency" });
+    getRequestPersonalSchedule.mockResolvedValue(okResult(model({ dutyBlocks: [] })));
+    const element = await DutiesPage({ searchParams: searchParams() });
+    render(element);
+    expect(screen.getByText(/תורנויות קרובות אינן מוצגות בזמן מצב חירום/)).toBeInTheDocument();
+    expect(screen.queryByText("היסטוריה אחרונה")).toBeNull();
+  });
+
+  it("regular mode (the default) is completely unaffected -- the focus section and upcoming list render exactly as before", async () => {
+    resolveOperationalMode.mockResolvedValue({ kind: "regular" });
+    getRequestPersonalSchedule.mockResolvedValue(
+      okResult(model({ dutyBlocks: [dutyBlock({ dates: ["2026-08-11", "2026-08-12", "2026-08-13"] })] })),
+    );
+    const element = await DutiesPage({ searchParams: searchParams() });
+    render(element);
+    expect(screen.getByText("בתורנות עכשיו")).toBeInTheDocument();
+    expect(screen.queryByTestId("duties-suspended-state")).toBeNull();
   });
 });

@@ -19,6 +19,10 @@ const DUTY_STATUS_TINT_CLASSES: Record<DutyStatusState, string> = {
   below_pace: "bg-status-below-soft text-status-below ring-status-below-border",
   on_pace: "bg-status-balanced-soft text-status-balanced ring-status-balanced-border",
   ahead_of_pace: "bg-status-above-soft text-status-above ring-status-above-border",
+  // Same calm neutral treatment as "not_started" -- suspended is a factual
+  // state (Emergency Mode is active, pace judgment does not apply right
+  // now), never a warning tint.
+  suspended: "bg-overlay-soft text-muted ring-border-strong",
   target_reached: "bg-status-above-soft text-status-above ring-status-above-border",
   target_exceeded: "bg-status-above-soft text-status-above ring-status-above-border",
 };
@@ -127,7 +131,7 @@ export function DutyFairnessCard({ view }: { view: DutyFairnessCardView }) {
 
       <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-1.5">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-2">
-          <span data-testid="metric-duty-weekend">
+          <span data-testid="metric-duty-weekend" title={view.weekendSuspendedNote ?? undefined}>
             סופ&quot;שים <span className="font-medium text-muted">{view.weekendLabel}</span>
           </span>
         </div>

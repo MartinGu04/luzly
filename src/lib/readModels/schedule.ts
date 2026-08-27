@@ -2,14 +2,20 @@ import "server-only";
 import { calendarMonthOfLocalNow, formatMonthParam, parseMonthParam } from "@/lib/domain/calendarMonth";
 import { resolveManagerDateRange } from "@/lib/domain/dateRange";
 import { ShiftConfigurationError, buildShiftSchedule, type ShiftSchedule } from "@/lib/domain/shiftSchedule";
-import type { SheetSourceKey } from "@/lib/google";
+import { SHEET_SOURCES, type RawWorkbookSnapshot, type SheetSourceKey } from "@/lib/google";
 import { parseEvent } from "@/lib/parsers/event";
+import { parsePersonnelSheet } from "@/lib/parsers/personnel";
 import { parsePotentialSheet } from "@/lib/parsers/potential";
 import { parseScheduleSheet } from "@/lib/parsers/schedule";
 import { parseSettingsSheet } from "@/lib/parsers/settings";
+import { getWorkbookSnapshot } from "@/lib/sync";
+import { getJerusalemLocalNow } from "@/lib/time/jerusalemClock";
 import { buildManagerScheduleReadModel, buildSelfOnlyScheduleReadModel } from "./buildScheduleReadModel";
+import { buildEmergencyScheduleReadModel } from "./buildEmergencyScheduleReadModel";
+import { resolveOperationalRoster } from "./operationalMode";
 import { getManagerWorkbookSheet, loadManagerWorkbookContext } from "./managerWorkbookContext";
 import { getRequestPersonalSchedule } from "./getRequestPersonalSchedule";
+import type { EmergencyScheduleReadModel } from "./emergencyScheduleTypes";
 import type { ScheduleReadModel } from "./scheduleTypes";
 
 export type ScheduleLoadResult =
@@ -18,7 +24,11 @@ export type ScheduleLoadResult =
   | { status: "unmapped" }
   | { status: "ambiguous_identity" }
   | { status: "configuration_error"; message: string }
-  | { status: "ok"; model: ScheduleReadModel };
+  | { status: "ok"; model: ScheduleReadModel }
+  /** Emergency Mode is active and its workbook is readable -- desk-based staffing, never regular role coverage (spec section 10). */
+  | { status: "emergency"; model: EmergencyScheduleReadModel }
+  /** Emergency Mode is active but its own workbook is unreadable -- must render a visible unavailable state, never fall back to regular schedule data. */
+  | { status: "emergency_unavailable"; message: string };
 
 /**
  * Everything the Schedule feature ever needs, for a normal user OR a
@@ -82,6 +92,12 @@ export async function loadScheduleReadModel(params: ScheduleParams): Promise<Sch
   if (personalResult.status === "configuration_error") {
     return { status: "configuration_error", message: personalResult.message };
   }
+  if (personalResult.status === "emergency_unavailable") {
+    return { status: "emergency_unavailable", message: personalResult.message };
+  }
+  if (personalResult.status === "emergency") {
+    return loadEmergencyScheduleReadModel(personalResult.person, params);
+  }
 
   const { model: selfModel } = personalResult;
 
@@ -140,4 +156,57 @@ export async function loadScheduleReadModel(params: ScheduleParams): Promise<Sch
   });
 
   return { status: "ok", model };
+}
+
+/** Looks the personnel sheet up by its logical source name -- the personnel-only fetch this helper needs. */
+function getPersonnelSheet(snapshot: RawWorkbookSnapshot) {
+  const sheet = snapshot.sheets.find((candidate) => candidate.name === SHEET_SOURCES.personnel);
+  if (!sheet) throw new Error(`Workbook snapshot is missing the "${SHEET_SOURCES.personnel}" sheet.`);
+  return sheet;
+}
+
+/**
+ * Emergency Mode branch of `/schedule` -- mirrors the regular flow's own
+ * structure (a personnel-only re-fetch, then `resolveOperationalRoster`
+ * for the emergency assignments, then pure construction) rather than
+ * threading raw arrays through `PersonalScheduleLoadResult`, which stays
+ * a narrow, safe read model. The underlying Google/emergency-mode reads
+ * are each cheaply de-duplicated by their own request-scoped caches, so
+ * this never performs a second real network fetch within the same
+ * request.
+ */
+async function loadEmergencyScheduleReadModel(
+  person: { id: string; name: string; isManager: boolean },
+  params: ScheduleParams,
+): Promise<ScheduleLoadResult> {
+  const snapshot = await getWorkbookSnapshot(["personnel"]);
+  const people = parsePersonnelSheet(getPersonnelSheet(snapshot));
+
+  const roster = await resolveOperationalRoster(people);
+  if (roster.mode === "regular") {
+    // Structurally unreachable within one request: `resolveOperationalMode`
+    // is request-scoped `cache()`-memoized (see `operationalMode.ts`), so
+    // it cannot report "regular" here immediately after the caller already
+    // observed "emergency" moments earlier in the SAME request. Guarded
+    // explicitly rather than silently narrowing the type away.
+    throw new Error("resolveOperationalMode reported 'regular' inconsistently within the same request.");
+  }
+  if (roster.mode === "emergency_unavailable") {
+    return { status: "emergency_unavailable", message: roster.message };
+  }
+
+  const model = buildEmergencyScheduleReadModel({
+    manager: person.isManager ? { id: person.id, name: person.name } : null,
+    people,
+    assignments: roster.assignments,
+    period: roster.period,
+    fetchedAt: roster.fetchedAt,
+    now: getJerusalemLocalNow(),
+    diagnostics: roster.diagnostics,
+    selfPersonId: person.id,
+    selfPersonName: person.name,
+    requestedPersonId: params.personId,
+  });
+
+  return { status: "emergency", model };
 }

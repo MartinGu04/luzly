@@ -1,12 +1,26 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RawSheet, RawWorkbookSnapshot } from "@/lib/google";
 import { SHEET_SOURCES } from "@/lib/google";
+import { stableIdFromName } from "@/lib/parsers/personnel";
 
 const resolveCalendarFeedOwnerByToken = vi.fn();
 vi.mock("./feedOwnerLookup", () => ({ resolveCalendarFeedOwnerByToken: (token: string) => resolveCalendarFeedOwnerByToken(token) }));
 
 const getWorkbookSnapshot = vi.fn();
 vi.mock("@/lib/sync", () => ({ getWorkbookSnapshot: (sources: unknown) => getWorkbookSnapshot(sources) }));
+
+const resolveOperationalMode = vi.fn();
+vi.mock("@/lib/emergencyMode/state", () => ({ resolveOperationalMode: () => resolveOperationalMode() }));
+
+const resolveOperationalRoster = vi.fn();
+vi.mock("@/lib/readModels/operationalMode", () => ({ resolveOperationalRoster: (people: unknown) => resolveOperationalRoster(people) }));
+
+/** Every EXISTING test in this file exercises regular mode -- defaulting here means none of them need to know Emergency Mode exists. Only the dedicated "Emergency Mode" describe block below overrides this. */
+beforeEach(() => {
+  resolveOperationalMode.mockReset();
+  resolveOperationalMode.mockResolvedValue({ kind: "regular" });
+  resolveOperationalRoster.mockReset();
+});
 
 /** Fixed "now" for every test -- never the real system clock, so the 30-day window's boundary tests stay exact regardless of when this suite actually runs. Partial mock: `jerusalemLocalTimeToInstant` (used by icsItems.ts for real shift timing) stays the real implementation -- only `getJerusalemLocalNow` (the window's "now") is overridden. */
 const NOW = { date: "2026-08-19", minuteOfDay: 600 };
@@ -377,5 +391,104 @@ describe("loadCalendarFeedForToken -- shift roster in DESCRIPTION (end-to-end, d
     // Exactly one VEVENT throughout -- the roster/description change never produced a second, duplicate entry.
     expect(before.icsText.match(/BEGIN:VEVENT/g)).toHaveLength(1);
     expect(after.icsText.match(/BEGIN:VEVENT/g)).toHaveLength(1);
+  });
+});
+
+const EMERGENCY_PERIOD = {
+  id: "period1",
+  activatedAt: "2026-08-19T06:00:00.000Z",
+  activatedByUserId: "u_mgr",
+  activatedByPersonId: "p_mgr",
+  activatedByPersonName: "מנהל בדיקה",
+  startDate: "2026-08-19",
+  deactivatedAt: null,
+  deactivatedByUserId: null,
+  deactivatedByPersonId: null,
+  deactivatedByPersonName: null,
+  endDate: null,
+};
+
+describe("loadCalendarFeedForToken -- Emergency Mode (spec section 16)", () => {
+  it("while Emergency Mode is active, the feed comes from desk assignments -- never the regular schedule/Potential sheets", async () => {
+    resolveCalendarFeedOwnerByToken.mockReset().mockResolvedValue({ status: "ok", email: "dani@example.com" });
+    getWorkbookSnapshot.mockReset().mockResolvedValue(makeSnapshot());
+    resolveOperationalMode.mockResolvedValue({ kind: "emergency", period: EMERGENCY_PERIOD });
+    resolveOperationalRoster.mockResolvedValue({
+      mode: "emergency",
+      period: EMERGENCY_PERIOD,
+      assignments: [
+        { date: "2026-08-19", period: "day", desk: "הוגוורט", personId: stableIdFromName("דני בדיקה"), personName: "דני בדיקה", sourceCell: "C2" },
+        { date: "2026-08-19", period: "day", desk: "תיעוד", personId: stableIdFromName("נועה דוגמה"), personName: "נועה דוגמה", sourceCell: "J2" },
+      ],
+      diagnostics: [],
+      fetchedAt: "2026-08-19T09:00:00.000Z",
+    });
+
+    const result = await loadCalendarFeedForToken("tok");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+
+    expect(result.icsText).toContain("דסק הוגוורט");
+    expect(result.icsText).toContain("נועה דוגמה -- תיעוד");
+    // Never the regular fixture's own summary text for this same date.
+    expect(result.icsText).not.toContain('אחמ"ש יום');
+    expect(result.icsText).not.toContain("שמירה 1");
+  });
+
+  it("a broken emergency workbook renders an EMPTY but still valid feed -- never a silent fallback to regular schedule data", async () => {
+    resolveCalendarFeedOwnerByToken.mockReset().mockResolvedValue({ status: "ok", email: "dani@example.com" });
+    getWorkbookSnapshot.mockReset().mockResolvedValue(makeSnapshot());
+    resolveOperationalMode.mockResolvedValue({ kind: "emergency", period: EMERGENCY_PERIOD });
+    resolveOperationalRoster.mockResolvedValue({
+      mode: "emergency_unavailable",
+      period: EMERGENCY_PERIOD,
+      message: "Missing GOOGLE_EMERGENCY_SPREADSHEET_ID.",
+    });
+
+    const result = await loadCalendarFeedForToken("tok");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+
+    expect(result.icsText).not.toContain("BEGIN:VEVENT");
+    expect(result.icsText).not.toContain('אחמ"ש יום');
+    expect(result.icsText).not.toContain("שמירה 1");
+  });
+
+  it("a date outside the ICS feed's window is excluded, same 30-day-past rule the regular feed uses", async () => {
+    resolveCalendarFeedOwnerByToken.mockReset().mockResolvedValue({ status: "ok", email: "dani@example.com" });
+    getWorkbookSnapshot.mockReset().mockResolvedValue(makeSnapshot());
+    resolveOperationalMode.mockResolvedValue({ kind: "emergency", period: EMERGENCY_PERIOD });
+    resolveOperationalRoster.mockResolvedValue({
+      mode: "emergency",
+      period: EMERGENCY_PERIOD,
+      assignments: [
+        { date: "2026-01-01", period: "day", desk: "הוגוורט", personId: stableIdFromName("דני בדיקה"), personName: "דני בדיקה", sourceCell: "C2" },
+      ],
+      diagnostics: [],
+      fetchedAt: "2026-08-19T09:00:00.000Z",
+    });
+
+    const result = await loadCalendarFeedForToken("tok");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.icsText).not.toContain("BEGIN:VEVENT");
+  });
+
+  it("resolves the roster against the SAME already-parsed personnel, never a second fetch", async () => {
+    resolveCalendarFeedOwnerByToken.mockReset().mockResolvedValue({ status: "ok", email: "dani@example.com" });
+    getWorkbookSnapshot.mockReset().mockResolvedValue(makeSnapshot());
+    resolveOperationalMode.mockResolvedValue({ kind: "emergency", period: EMERGENCY_PERIOD });
+    resolveOperationalRoster.mockResolvedValue({
+      mode: "emergency",
+      period: EMERGENCY_PERIOD,
+      assignments: [],
+      diagnostics: [],
+      fetchedAt: "2026-08-19T09:00:00.000Z",
+    });
+
+    await loadCalendarFeedForToken("tok");
+
+    expect(getWorkbookSnapshot).toHaveBeenCalledTimes(1);
+    expect(resolveOperationalRoster).toHaveBeenCalledTimes(1);
   });
 });

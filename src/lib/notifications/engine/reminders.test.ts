@@ -2360,3 +2360,215 @@ describe("editable system-rule copy -- title/body overrides applied at send time
     ]);
   });
 });
+
+describe("runReminders -- Emergency Mode (spec section 24/25)", () => {
+  it("tomorrow_shift builds desk-based content from emergencyAssignments when operationalMode is 'emergency', never from events", async () => {
+    const { runReminders } = await loadModule();
+    const now: LocalNow = { date: "2026-08-18", minuteOfDay: 1200 };
+    const week = getOperationalWeek(now);
+
+    await runReminders({
+      events: [event({ personId: "p1", date: "2026-08-19", category: "shift", period: "day" })],
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: resolutionWith("p1", "user-p1"),
+      operationalMode: "emergency",
+      emergencyAssignments: [
+        { date: "2026-08-19", period: "day", desk: "הוגוורט", personId: "p1", personName: "אחד", sourceCell: "C2" },
+      ],
+    });
+
+    expect(store.upsertPendingSystemReminderJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        category: "tomorrow_shift",
+        recipientUserId: "user-p1",
+        dedupeKey: "tomorrow_shift:2026-08-19:user-p1:day",
+        body: expect.stringContaining("הוגוורט"),
+        path: "/schedule",
+      }),
+      expect.anything(),
+    );
+  });
+
+  it("combines multiple desks for the same person+date+period into ONE job, never one per desk cell", async () => {
+    const { runReminders } = await loadModule();
+    const now: LocalNow = { date: "2026-08-18", minuteOfDay: 1200 };
+    const week = getOperationalWeek(now);
+
+    await runReminders({
+      events: [],
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: resolutionWith("p1", "user-p1"),
+      operationalMode: "emergency",
+      emergencyAssignments: [
+        { date: "2026-08-19", period: "day", desk: "הוגוורט", personId: "p1", personName: "אחד", sourceCell: "C2" },
+        { date: "2026-08-19", period: "day", desk: "תיעוד", personId: "p1", personName: "אחד", sourceCell: "J2" },
+      ],
+    });
+
+    const jobs = store.upsertPendingSystemReminderJob.mock.calls
+      .map((call) => call[0])
+      .filter((job) => job.category === "tomorrow_shift");
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0].body).toContain("הוגוורט");
+    expect(jobs[0].body).toContain("תיעוד");
+  });
+
+  it("an unresolved desk assignment (personId null) never becomes a reminder job", async () => {
+    const { runReminders } = await loadModule();
+    const now: LocalNow = { date: "2026-08-18", minuteOfDay: 1200 };
+    const week = getOperationalWeek(now);
+
+    await runReminders({
+      events: [],
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: resolutionWith("p1", "user-p1"),
+      operationalMode: "emergency",
+      emergencyAssignments: [
+        { date: "2026-08-19", period: "day", desk: "הוגוורט", personId: null, personName: "לא ידוע", sourceCell: "C2" },
+      ],
+    });
+
+    expect(store.upsertPendingSystemReminderJob).not.toHaveBeenCalled();
+  });
+
+  it("entering Emergency Mode cancels a stale regular tomorrow_shift job for someone no longer on any desk -- same category/dedupe-key prefix, no special transition handling needed", async () => {
+    store.listPendingJobDedupeKeysByPrefix.mockImplementation(async (prefix: string) =>
+      prefix === "tomorrow_shift:2026-08-19:" ? ["tomorrow_shift:2026-08-19:user-p1:day"] : [],
+    );
+    const { runReminders } = await loadModule();
+    const now: LocalNow = { date: "2026-08-18", minuteOfDay: 1200 };
+    const week = getOperationalWeek(now);
+
+    await runReminders({
+      events: [event({ personId: "p1", date: "2026-08-19", category: "shift", period: "day" })], // stale regular data, must not be consulted
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: resolutionWith("p1", "user-p1"),
+      operationalMode: "emergency",
+      emergencyAssignments: [], // p1 has no desk assignment tomorrow
+    });
+
+    expect(store.cancelPendingSystemReminderJob).toHaveBeenCalledWith("tomorrow_shift:2026-08-19:user-p1:day", expect.anything());
+  });
+
+  it("tomorrow_duty is suspended entirely during Emergency Mode -- no job created, and any already-pending job is cancelled", async () => {
+    store.listPendingJobDedupeKeysByPrefix.mockImplementation(async (prefix: string) =>
+      prefix === "tomorrow_duty:2026-08-19:" ? ["tomorrow_duty:2026-08-19:user-p1:guard:"] : [],
+    );
+    const { runReminders } = await loadModule();
+    const now: LocalNow = { date: "2026-08-18", minuteOfDay: 1200 };
+    const week = getOperationalWeek(now);
+
+    await runReminders({
+      events: [event({ personId: "p1", date: "2026-08-19", category: "duty", dutyFamily: "guard" })],
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: resolutionWith("p1", "user-p1"),
+      operationalMode: "emergency",
+      emergencyAssignments: [],
+    });
+
+    const dutyJobs = store.upsertPendingSystemReminderJob.mock.calls.map((call) => call[0]).filter((job) => job.category === "tomorrow_duty");
+    expect(dutyJobs).toHaveLength(0);
+    expect(store.cancelPendingSystemReminderJob).toHaveBeenCalledWith("tomorrow_duty:2026-08-19:user-p1:guard:", expect.anything());
+  });
+
+  it("almash_check_in is suspended entirely during Emergency Mode", async () => {
+    const { runReminders } = await loadModule();
+    const now: LocalNow = { date: "2026-08-19", minuteOfDay: 700 };
+    const week = getOperationalWeek(now);
+
+    await runReminders({
+      events: [event({ personId: "p1", date: "2026-08-19", category: "duty", dutyFamily: "guard" })],
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: resolutionWith("p1", "user-p1"),
+      operationalMode: "emergency",
+      emergencyAssignments: [],
+    });
+
+    const almashJobs = store.upsertPendingSystemReminderJob.mock.calls
+      .map((call) => call[0])
+      .filter((job) => job.category === "almash_check_in");
+    expect(almashJobs).toHaveLength(0);
+  });
+
+  it("every tomorrow/noon logistics-withdrawal reminder is suspended entirely during Emergency Mode (fail closed -- never reads regular 'who's on shift' data)", async () => {
+    const { runReminders } = await loadModule();
+    const now: LocalNow = { date: "2026-08-17", minuteOfDay: 1200 }; // Monday -- would normally be a fallback logistics-withdrawal date
+    const week = getOperationalWeek(now);
+
+    await runReminders({
+      events: [
+        event({ personId: "sup1", date: "2026-08-18", category: "shift", period: "day", role: "supervisor" }),
+        event({ personId: "tech1", date: "2026-08-18", category: "shift", period: "day", role: "technician" }),
+      ],
+      people: [
+        { id: "sup1", name: "מפקד", email: null, isManager: false, isTechnician: false, isSupervisor: true, personnelType: null },
+        { id: "tech1", name: "טכנאי", email: null, isManager: false, isTechnician: true, isSupervisor: false, personnelType: null },
+      ],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: {
+        resolved: new Map([
+          ["sup1", { personId: "sup1", email: "sup1@example.com", userId: "user-sup1" }],
+          ["tech1", { personId: "tech1", email: "tech1@example.com", userId: "user-tech1" }],
+        ]),
+        unmappedCount: 0,
+        ambiguousEmailCount: 0,
+        noEmailCount: 0,
+      },
+      operationalMode: "emergency",
+      emergencyAssignments: [],
+    });
+
+    const logisticsJobs = store.upsertPendingSystemReminderJob.mock.calls
+      .map((call) => call[0])
+      .filter((job) => job.category.includes("logistics_withdrawal"));
+    expect(logisticsJobs).toHaveLength(0);
+  });
+
+  it("regular mode (the default) is completely unaffected -- omitting operationalMode/emergencyAssignments still builds tomorrow_shift from events", async () => {
+    const { runReminders } = await loadModule();
+    const now: LocalNow = { date: "2026-08-18", minuteOfDay: 1200 };
+    const week = getOperationalWeek(now);
+
+    await runReminders({
+      events: [event({ personId: "p1", date: "2026-08-19", category: "shift", period: "day" })],
+      people: [],
+      shiftSchedule: schedule,
+      week,
+      now,
+      persist: true,
+      recipientResolution: resolutionWith("p1", "user-p1"),
+    });
+
+    expect(store.upsertPendingSystemReminderJob).toHaveBeenCalledWith(
+      expect.objectContaining({ category: "tomorrow_shift", recipientUserId: "user-p1" }),
+      expect.anything(),
+    );
+  });
+});

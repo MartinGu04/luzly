@@ -4,12 +4,15 @@ import type { Person } from "@/lib/domain/types";
 
 const loadFairnessWorkbookContext = vi.fn();
 const getJerusalemLocalNow = vi.fn();
+const getEmergencyDateSet = vi.fn();
+const resolveOperationalMode = vi.fn();
 
 vi.mock("./fairnessWorkbookContext", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./fairnessWorkbookContext")>();
   return { ...actual, loadFairnessWorkbookContext };
 });
 vi.mock("@/lib/time/jerusalemClock", () => ({ getJerusalemLocalNow }));
+vi.mock("@/lib/emergencyMode/state", () => ({ getEmergencyDateSet, resolveOperationalMode }));
 
 const { loadDutyFairnessReadModel } = await import("./dutyFairness");
 
@@ -59,6 +62,10 @@ beforeEach(() => {
   loadFairnessWorkbookContext.mockReset();
   getJerusalemLocalNow.mockReset();
   getJerusalemLocalNow.mockReturnValue({ date: "2026-08-15", minuteOfDay: 600 });
+  getEmergencyDateSet.mockReset();
+  getEmergencyDateSet.mockResolvedValue(new Set());
+  resolveOperationalMode.mockReset();
+  resolveOperationalMode.mockResolvedValue({ kind: "regular" });
 });
 
 describe("loadDutyFairnessReadModel — auth pass-through", () => {
@@ -696,5 +703,79 @@ describe("loadDutyFairnessReadModel — Justice Table redesign, corrected: perso
     expect(technicianGroup?.rows.find((r) => r.personId === STEVEN.id)?.personalTargetTotal).toBe(6.3);
     expect(technicianGroup?.rows.find((r) => r.personId === LIOR.id)?.personalTargetTotal).toBe(6.2);
     expect(technicianGroup?.rows.find((r) => r.personId === GIDON.id)?.personalTargetTotal).toBe(6);
+  });
+});
+
+describe("loadDutyFairnessReadModel — Emergency Mode date exclusion + suspended pace (spec section 19)", () => {
+  it("an emergency date touching a completed duty excludes it from completedAllocationTotal", async () => {
+    getEmergencyDateSet.mockResolvedValue(new Set(["2026-08-10"]));
+    loadFairnessWorkbookContext.mockResolvedValue(
+      okContext({
+        h2Rows: [["טל טכנאי", "טכנאי", "5", "6", "0", "-"]],
+        scheduleRows: [["10/08/2026", "ב", "שומר 1"]],
+      }),
+    );
+    const result = await loadDutyFairnessReadModel("h2");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    const technicianRow = result.model.groups.find((g) => g.key === "technician")?.rows[0];
+    expect(technicianRow?.completedAllocationTotal).toBe(0);
+  });
+
+  it("resolves getEmergencyDateSet against the loader's own resolved 'today' date", async () => {
+    loadFairnessWorkbookContext.mockResolvedValue(okContext({ h2Rows: [["טל טכנאי", "טכנאי", "5", "6", "0", "-"]] }));
+    await loadDutyFairnessReadModel("h2");
+    expect(getEmergencyDateSet).toHaveBeenCalledWith("2026-08-15");
+  });
+
+  it("a deployment that has never activated Emergency Mode (empty excluded set, regular mode) behaves byte-for-byte as before", async () => {
+    loadFairnessWorkbookContext.mockResolvedValue(
+      okContext({
+        h2Rows: [["טל טכנאי", "טכנאי", "5", "6", "0", "-"]],
+        scheduleRows: [["10/08/2026", "ב", "שומר 1"]],
+      }),
+    );
+    const result = await loadDutyFairnessReadModel("h2");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    const technicianRow = result.model.groups.find((g) => g.key === "technician")?.rows[0];
+    expect(technicianRow?.completedAllocationTotal).toBeCloseTo(0.25);
+    expect(technicianRow?.paceStatus).not.toBe("suspended");
+  });
+
+  it("while Emergency Mode is CURRENTLY active, every row's paceStatus is forced to 'suspended' regardless of elapsed time/progress", async () => {
+    resolveOperationalMode.mockResolvedValue({
+      kind: "emergency",
+      period: {
+        id: "p1",
+        startDate: "2026-08-01",
+        endDate: null,
+        activatedAt: "2026-08-01T00:00:00.000Z",
+        activatedByUserId: "u1",
+        activatedByPersonId: "p_manager",
+        activatedByPersonName: "מנהל בדיקה",
+        deactivatedAt: null,
+        deactivatedByUserId: null,
+        deactivatedByPersonId: null,
+        deactivatedByPersonName: null,
+      },
+    });
+    loadFairnessWorkbookContext.mockResolvedValue(okContext({ h2Rows: [["טל טכנאי", "טכנאי", "5", "6", "0", "-"]] }));
+    const result = await loadDutyFairnessReadModel("h2");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    const technicianRow = result.model.groups.find((g) => g.key === "technician")?.rows[0];
+    expect(technicianRow?.paceStatus).toBe("suspended");
+  });
+
+  it("after Emergency Mode deactivation (past periods still excluded, but currently regular), paceStatus resumes normal below/on/ahead judgment", async () => {
+    resolveOperationalMode.mockResolvedValue({ kind: "regular" });
+    getEmergencyDateSet.mockResolvedValue(new Set(["2026-07-01"]));
+    loadFairnessWorkbookContext.mockResolvedValue(okContext({ h2Rows: [["טל טכנאי", "טכנאי", "5", "6", "0", "-"]] }));
+    const result = await loadDutyFairnessReadModel("h2");
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    const technicianRow = result.model.groups.find((g) => g.key === "technician")?.rows[0];
+    expect(technicianRow?.paceStatus).not.toBe("suspended");
   });
 });

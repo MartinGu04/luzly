@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fairnessDutiesHref, fairnessShiftsHref, parseFairnessMode } from "./fairnessUrl";
+import { fairnessDutiesHref, fairnessEmergencyHref, fairnessShiftsHref, parseFairnessMode } from "./fairnessUrl";
 
 describe("parseFairnessMode", () => {
   it("null/missing -> shifts (the default)", () => {
@@ -9,6 +9,10 @@ describe("parseFairnessMode", () => {
 
   it('"duties" -> duties', () => {
     expect(parseFairnessMode("duties")).toBe("duties");
+  });
+
+  it('"emergency" -> emergency', () => {
+    expect(parseFairnessMode("emergency")).toBe("emergency");
   });
 
   it('"shifts" -> shifts', () => {
@@ -60,5 +64,11 @@ describe("fairnessDutiesHref", () => {
 
   it("a personId sets ?person=", () => {
     expect(fairnessDutiesHref({ period: "h2", personId: "p_2" })).toBe("/fairness?mode=duties&period=h2&person=p_2");
+  });
+});
+
+describe("fairnessEmergencyHref", () => {
+  it("mode=emergency is always explicit", () => {
+    expect(fairnessEmergencyHref()).toBe("/fairness?mode=emergency");
   });
 });

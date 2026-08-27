@@ -72,6 +72,15 @@ export interface DutyFairnessPersonRowView {
   normalizedLoad: number | null;
   /** below/balanced/above, EXACT comparison with no tolerance band -- `null` whenever currentScore or comparisonTarget is unavailable. */
   status: DutyFairnessStatus | null;
+  /**
+   * Raw workbook `סופ"שים` aggregate, one number per person per H1/H2
+   * period with no per-date breakdown anywhere in the source -- so it can
+   * never be trustworthily recomputed to exclude emergency-affected
+   * weekends. `null` whenever the selected period overlaps at least one
+   * recorded Emergency Mode date (`duty_weekend_count_emergency_period` on
+   * `dataCompleteness`), suppressed outright rather than shown contaminated
+   * or guessed at.
+   */
   weekendCount: number | null;
   /**
    * "הקצאות שבוצעו" -- the WEIGHTED total allocation value of duties this

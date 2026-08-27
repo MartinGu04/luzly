@@ -6,6 +6,7 @@ import type { ShiftFairnessPersonRowView, ShiftFairnessReadModel } from "@/lib/r
 
 const getRequestShiftFairness = vi.fn();
 const getRequestDutyFairness = vi.fn();
+const getRequestEmergencyFairness = vi.fn();
 const redirect = vi.fn((path: string) => {
   throw new Error(`REDIRECT:${path}`);
 });
@@ -13,6 +14,7 @@ const routerPush = vi.fn();
 
 vi.mock("@/lib/readModels/getRequestShiftFairness", () => ({ getRequestShiftFairness }));
 vi.mock("@/lib/readModels/getRequestDutyFairness", () => ({ getRequestDutyFairness }));
+vi.mock("@/lib/readModels/getRequestEmergencyFairness", () => ({ getRequestEmergencyFairness }));
 vi.mock("next/navigation", () => ({ redirect, useRouter: () => ({ push: routerPush }) }));
 vi.mock("@/components/ui/DataFreshnessStatus", () => ({
   DataFreshnessStatus: ({ fetchedAt }: { fetchedAt: string }) => <div data-testid="freshness">{fetchedAt}</div>,
@@ -32,6 +34,7 @@ async function renderFairnessPage(params: Record<string, string> = {}) {
 beforeEach(() => {
   getRequestShiftFairness.mockReset();
   getRequestDutyFairness.mockReset();
+  getRequestEmergencyFairness.mockReset();
   redirect.mockClear();
   routerPush.mockClear();
 });
@@ -1033,5 +1036,56 @@ describe("/fairness — empty states", () => {
     });
     await renderFairnessPage();
     expect(screen.getByText("אין נתוני משמרות זמינים לתקופה שנבחרה.")).toBeInTheDocument();
+  });
+});
+
+describe("FairnessPage — Emergency Mode (mode=emergency)", () => {
+  it("renders the emergency fairness groups with assignment counts", async () => {
+    getRequestEmergencyFairness.mockResolvedValue({
+      status: "ok",
+      model: {
+        activePeriod: null,
+        fetchedAt: "2026-08-26T14:05:00.000Z",
+        groups: [
+          {
+            label: "טבלת צדק - קבע",
+            rows: [{ personId: "p1", personName: "אליס בדיקה", total: 3, day: 2, night: 1 }],
+          },
+        ],
+      },
+    });
+
+    await renderFairnessPage({ mode: "emergency" });
+
+    expect(screen.getByTestId("emergency-fairness-section")).toBeInTheDocument();
+    expect(screen.getByText("אליס בדיקה")).toBeInTheDocument();
+    expect(screen.getByText(/סה״כ 3 · יום 2 · לילה 1/)).toBeInTheDocument();
+  });
+
+  it("shows a graceful unavailable state (not an auth-failure screen) when the emergency workbook is unconfigured", async () => {
+    getRequestEmergencyFairness.mockResolvedValue({ status: "unavailable" });
+
+    await renderFairnessPage({ mode: "emergency" });
+
+    expect(screen.getByText("אין עדיין נתוני חירום זמינים.")).toBeInTheDocument();
+    expect(redirect).not.toHaveBeenCalled();
+  });
+
+  it("redirects to login for an unauthenticated visitor, same as the other modes", async () => {
+    getRequestEmergencyFairness.mockResolvedValue({ status: "unauthenticated" });
+
+    await expect(renderFairnessPage({ mode: "emergency" })).rejects.toThrow("REDIRECT:/login");
+  });
+
+  it("never calls the regular shift/duty fairness loaders while in emergency mode", async () => {
+    getRequestEmergencyFairness.mockResolvedValue({
+      status: "ok",
+      model: { activePeriod: null, fetchedAt: "2026-08-26T14:05:00.000Z", groups: [] },
+    });
+
+    await renderFairnessPage({ mode: "emergency" });
+
+    expect(getRequestShiftFairness).not.toHaveBeenCalled();
+    expect(getRequestDutyFairness).not.toHaveBeenCalled();
   });
 });

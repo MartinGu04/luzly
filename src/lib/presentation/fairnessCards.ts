@@ -287,6 +287,8 @@ export interface DutyFairnessCardView {
   gapLabel: string | null;
   status: FairnessStatus | null;
   weekendLabel: string;
+  /** Set only when `weekendLabel` reads "—" BECAUSE the period overlaps a recorded Emergency Mode date (`duty_weekend_count_emergency_period`) -- never shown for an ordinary missing/unparseable workbook value, which stays a plain "—" with no explanation. */
+  weekendSuspendedNote: string | null;
   exemptionBadges: string[];
   /**
    * Justice Table redesign, corrected -- this person's own workbook target
@@ -328,6 +330,12 @@ export interface DutyFairnessCardView {
 
 const NO_TARGET_UNAVAILABLE_NOTE = "היעד האישי אינו זמין כרגע בנתונים.";
 const NO_TARGET_ROLE_NOTE = "אין תורנויות משובצות לפוטנציאל המפורסם בתקופה זו.";
+const WEEKEND_COUNT_EMERGENCY_NOTE = "ספירת סופ\"שים מושהית בתקופה זו עקב מצב חירום, כדי לא להציג נתון לא מהימן.";
+
+/** `null` unless `duty_weekend_count_emergency_period` is present -- every other reason is irrelevant to the weekend count specifically (see that reason's own docs on why it's a period-level, not per-row, fact). */
+function buildWeekendSuspendedNote(reasons: readonly FairnessDataCompletenessReason[]): string | null {
+  return reasons.includes("duty_weekend_count_emergency_period") ? WEEKEND_COUNT_EMERGENCY_NOTE : null;
+}
 
 /**
  * Justice Table redesign, corrected -- `personalTargetTotal === null` means
@@ -379,6 +387,7 @@ export function buildDutyFairnessCardView(
     gapLabel: row.gapToTarget !== null ? formatFairnessGap(row.gapToTarget) : null,
     status: row.status,
     weekendLabel: formatFairnessWeekendCount(row.weekendCount),
+    weekendSuspendedNote: buildWeekendSuspendedNote(row.dataCompleteness.reasons),
     exemptionBadges: row.exemptions.map(exemptionBadgeLabel),
     hasTarget,
     progressRatio: row.targetProgressRatio,

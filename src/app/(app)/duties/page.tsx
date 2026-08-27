@@ -2,9 +2,11 @@ import { ConfigurationErrorState } from "@/components/dashboard/ConfigurationErr
 import { DutiesHeader } from "@/components/duties/DutiesHeader";
 import { DutyBlockList } from "@/components/duties/DutyBlockList";
 import { DutyFocusSection } from "@/components/duties/DutyFocusSection";
+import { DutySuspendedState } from "@/components/duties/DutySuspendedState";
 import { DutyViewToggle } from "@/components/duties/DutyViewToggle";
 import type { DutyBlockView } from "@/components/duties/types";
 import { DataFreshnessStatus } from "@/components/ui/DataFreshnessStatus";
+import { resolveOperationalMode } from "@/lib/emergencyMode/state";
 import type { LocalNow } from "@/lib/domain/localNow";
 import {
   actionsForBlock,
@@ -68,6 +70,18 @@ export default async function DutiesPage({ searchParams }: DutiesPageProps) {
     return <ConfigurationErrorState />;
   }
 
+  /**
+   * Duty suspension (spec section 19/21) -- while Emergency Mode is
+   * active, regular duties are suspended system-wide: the "now/next"
+   * focus and the "upcoming" list stop implying a live regular
+   * operational reality, replaced by `DutySuspendedState`/a suspended
+   * empty-state message. The "history" tab is UNCHANGED -- already-past
+   * duty blocks stay real, already-clearly-labeled history ("היסטוריה
+   * אחרונה"), never hidden.
+   */
+  const operationalMode = await resolveOperationalMode();
+  const isEmergencyModeActive = operationalMode.kind === "emergency";
+
   const { model } = result;
   const todayDate = model.localNow.date;
 
@@ -115,7 +129,7 @@ export default async function DutiesPage({ searchParams }: DutiesPageProps) {
    * above").
    */
   const suppressRedundantUpcomingEmptyState =
-    view === "upcoming" && focus.status === "none" && upcomingList.length === 0;
+    !isEmergencyModeActive && view === "upcoming" && focus.status === "none" && upcomingList.length === 0;
 
   /**
    * A genuinely quiet period (no focus, no upcoming) would otherwise leave
@@ -135,17 +149,26 @@ export default async function DutiesPage({ searchParams }: DutiesPageProps) {
       <DutiesHeader exemptionBadges={exemptionBadges} />
       <DataFreshnessStatus fetchedAt={model.fetchedAt} />
 
-      <DutyFocusSection
-        status={focus.status}
-        blocks={focus.blocks.map((block) => buildDutyBlockView(block, model.dutyActions, model.localNow))}
-        holiday={focusDate ? getHolidayContext(focusDate) : null}
-      />
+      {isEmergencyModeActive ? (
+        <DutySuspendedState />
+      ) : (
+        <DutyFocusSection
+          status={focus.status}
+          blocks={focus.blocks.map((block) => buildDutyBlockView(block, model.dutyActions, model.localNow))}
+          holiday={focusDate ? getHolidayContext(focusDate) : null}
+        />
+      )}
 
       <div className="flex items-center justify-between gap-4">
         <DutyViewToggle view={view} />
       </div>
 
-      {suppressRedundantUpcomingEmptyState ? (
+      {isEmergencyModeActive && view !== "history" ? (
+        <DutyBlockList
+          blocks={[]}
+          emptyMessage="תורנויות קרובות אינן מוצגות בזמן מצב חירום. הרשימה תוצג שוב לאחר סיום מצב החירום."
+        />
+      ) : suppressRedundantUpcomingEmptyState ? (
         <DutyBlockList
           blocks={historyPreview.map((block) => buildDutyBlockView(block, model.dutyActions, model.localNow))}
           title="היסטוריה אחרונה"

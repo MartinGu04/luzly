@@ -8,8 +8,10 @@ import { ManagerCategoryNav } from "@/components/manager/ManagerCategoryNav";
 import { ManagerCommandBar } from "@/components/manager/ManagerCommandBar";
 import { ManagerCoverageSection } from "@/components/manager/ManagerCoverageSection";
 import { ManagerDutiesAbsencesSection } from "@/components/manager/ManagerDutiesAbsencesSection";
+import { EmergencyModeControl } from "@/components/manager/EmergencyModeControl";
 import { ManagerForbiddenState } from "@/components/manager/ManagerForbiddenState";
 import { ManagerHeader } from "@/components/manager/ManagerHeader";
+import { ManagerPersonSelector } from "@/components/manager/ManagerPersonSelector";
 import { ManagerPotentialSection } from "@/components/manager/ManagerPotentialSection";
 import { ManagerRosterSection } from "@/components/manager/ManagerRosterSection";
 import {
@@ -19,6 +21,11 @@ import {
 import { ManagerShiftSnapshotSection } from "@/components/manager/ManagerShiftSnapshotSection";
 import { ManagerSourceOfTruthNote } from "@/components/manager/ManagerSourceOfTruthNote";
 import { ManagerSummaryStrip } from "@/components/manager/ManagerSummaryStrip";
+import { EmergencyUnavailableState } from "@/components/emergencyMode/EmergencyUnavailableState";
+import { EmergencyManagerOperationalOverview } from "@/components/manager/EmergencyManagerOperationalOverview";
+import { EmergencyPersonalScheduleList } from "@/components/schedule/EmergencyPersonalScheduleList";
+import { EmergencyScheduleRangeSelector } from "@/components/schedule/EmergencyScheduleRangeSelector";
+import { DataFreshnessStatus } from "@/components/ui/DataFreshnessStatus";
 import type {
   ManagerAbsenceRowView,
   ManagerAttentionItem,
@@ -53,12 +60,15 @@ import {
   type ManagerHrefParams,
 } from "@/lib/presentation/managerUrl";
 import { buildManagerAdoptionSectionView } from "@/lib/presentation/managerAdoption";
+import { parseEmergencyScheduleRangeParam } from "@/lib/presentation/emergencyAgenda";
 import { managerIssueCoverageReasonLabel } from "@/lib/presentation/managerIssueCoverage";
 import { managerSummaryLabel } from "@/lib/presentation/managerSummary";
 import { roleCoverageMessage } from "@/lib/presentation/roleCoverage";
 import { scheduleEveryoneHref } from "@/lib/presentation/scheduleUrl";
 import { formatMissingIntervals } from "@/lib/presentation/scheduleTime";
+import { resolveOperationalMode } from "@/lib/emergencyMode/state";
 import { getRequestManagerOverview } from "@/lib/readModels/getRequestManagerOverview";
+import { loadManagerEmergencyOverview } from "@/lib/readModels/managerEmergencyOverview";
 import { parseManagerOverviewSearchParams } from "@/lib/readModels/managerOverviewParams";
 import type {
   ManagerAbsenceEntry,
@@ -367,6 +377,68 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
   // of stripping those fields to a bare `{id, name}` projection first.
   const people = model.roster;
 
+  /**
+   * Manager Area's Emergency Mode branch (spec section 13) -- takes
+   * precedence over BOTH the selected-person drill-down and the
+   * category switch below: while Emergency Mode is active, regular
+   * coverage/duties/potential/roster-drill-down data must never be
+   * shown as current operational truth (spec section 4/29). Desk
+   * staffing (`loadManagerEmergencyOverview`) reuses the SAME
+   * perspective resolution `/schedule`'s own Emergency Mode branch
+   * already established -- `model.selectedPersonId` (already validated
+   * by `getRequestManagerOverview`'s own fail-closed rules) narrows to
+   * one person's own desk assignments; otherwise the whole-roster "all"
+   * perspective is shown by default.
+   */
+  const operationalMode = await resolveOperationalMode();
+  if (operationalMode.kind === "emergency") {
+    const emergencyResult = await loadManagerEmergencyOverview(
+      { id: model.manager.id, name: model.manager.name },
+      model.selectedPersonId,
+    );
+    const emergencyRange = parseEmergencyScheduleRangeParam(
+      Array.isArray(rawParams.range) ? rawParams.range[0] : rawParams.range,
+    );
+
+    return (
+      <div className="flex flex-col gap-6">
+        <ManagerHeader />
+        <EmergencyModeControl />
+        {emergencyResult.status === "emergency_unavailable" ? (
+          <EmergencyUnavailableState />
+        ) : (
+          <>
+            <div className="flex flex-col gap-2.5">
+              <DataFreshnessStatus fetchedAt={emergencyResult.model.fetchedAt} />
+              <ManagerPersonSelector people={people} selectedId={model.selectedPersonId} />
+            </div>
+            {emergencyResult.model.perspective === "all" ? (
+              <EmergencyManagerOperationalOverview
+                overview={emergencyResult.operationalOverview ?? { previous: null, current: null, next: null }}
+                fullSchedule={emergencyResult.model.everyoneShifts ?? []}
+              />
+            ) : (
+              <>
+                <EmergencyScheduleRangeSelector
+                  basePath="/manager"
+                  personId={model.selectedPersonId}
+                  currentRange={emergencyRange}
+                />
+                <EmergencyPersonalScheduleList
+                  shifts={emergencyResult.model.personalShifts ?? []}
+                  emptyStateName={emergencyResult.model.selectedPersonName}
+                  range={emergencyRange}
+                  localNow={emergencyResult.model.localNow}
+                />
+              </>
+            )}
+          </>
+        )}
+        <ManagerSourceOfTruthNote />
+      </div>
+    );
+  }
+
   if (model.selectedPersonId && model.selectedPerson) {
     const selected = model.selectedPerson;
     const personDuties = model.duties
@@ -379,6 +451,7 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
     return (
       <div className="flex flex-col gap-6">
         <ManagerHeader />
+        <EmergencyModeControl />
         <ManagerCommandBar
           people={people}
           selectedPersonId={model.selectedPersonId}
@@ -447,6 +520,7 @@ export default async function ManagerPage({ searchParams }: ManagerPageProps) {
   return (
     <div className="flex flex-col gap-6">
       <ManagerHeader />
+      <EmergencyModeControl />
       <ManagerCategoryNav active={category} current={categoryNavCurrent} />
       <ManagerCommandBar
         people={people}

@@ -1,7 +1,14 @@
 import { dutyFamilyLabel, periodLabel, roleLabel } from "@/lib/presentation/labels";
 import { formatHebrewWeekday } from "@/lib/presentation/hebrewDate";
 import type { FactChange } from "./diffFacts";
-import type { CoverageFactValue, DutyFactValue, ShiftFactValue, TeamFactValue } from "./semanticFacts";
+import type {
+  CoverageFactValue,
+  DutyFactValue,
+  EmergencyShiftFactValue,
+  EmergencyTeamFactValue,
+  ShiftFactValue,
+  TeamFactValue,
+} from "./semanticFacts";
 
 export interface NotificationCopy {
   title: string;
@@ -24,6 +31,10 @@ export function buildSettledChangeCopy(
       return buildDutyChangeCopy(change);
     case "coverage":
       return buildCoverageGapCopy(change);
+    case "emergency_shift":
+      return buildEmergencyShiftChangeCopy(change);
+    case "emergency_team":
+      return buildEmergencyTeamChangeCopy(change, personNameById);
     default:
       return null;
   }
@@ -156,6 +167,78 @@ function buildDutyChangeCopy(change: FactChange): NotificationCopy | null {
     body,
     path: "/duties",
     tag: `duty-change-${personId}-${date}`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// E -- Emergency Mode desk shift change (spec section 23)
+// ---------------------------------------------------------------------------
+
+function buildEmergencyShiftChangeCopy(change: FactChange): NotificationCopy | null {
+  const [, personId, date] = parseFactKey(change.factKey);
+  const oldValue = change.oldValue as EmergencyShiftFactValue | null;
+  const newValue = change.newValue as EmergencyShiftFactValue | null;
+  const weekday = onWeekday(date);
+
+  const oldEntries = oldValue?.entries ?? [];
+  const newEntries = newValue?.entries ?? [];
+
+  let body: string;
+  if (oldEntries.length === 0 && newEntries.length > 0) {
+    body = `שובצת לדסק ${newEntries.map((entry) => entry.desk).join(", ")} ב${weekday}`;
+  } else if (oldEntries.length > 0 && newEntries.length === 0) {
+    body = `השיבוץ שלך לדסק ב${weekday} בוטל`;
+  } else {
+    body = `השיבוץ שלך לדסק ב${weekday} השתנה`;
+  }
+
+  return {
+    title: "🚨 שינוי בשיבוץ דסק",
+    body,
+    path: "/schedule",
+    tag: `emergency-shift-change-${personId}-${date}`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// F -- Emergency Mode desk team change (spec section 23)
+// ---------------------------------------------------------------------------
+
+function buildEmergencyTeamChangeCopy(
+  change: FactChange,
+  personNameById: ReadonlyMap<string, string>,
+): NotificationCopy | null {
+  const [, personId, date, period] = parseFactKey(change.factKey);
+  const oldValue = change.oldValue as EmergencyTeamFactValue | null;
+  const newValue = change.newValue as EmergencyTeamFactValue | null;
+  const weekday = onWeekday(date);
+  const periodText = periodLabel(period as ShiftFactValue["entries"][number]["period"]);
+
+  const oldColleagues = new Set(oldValue?.colleagues ?? []);
+  const newColleagues = new Set(newValue?.colleagues ?? []);
+  const joined = [...newColleagues].filter((id) => !oldColleagues.has(id));
+  const left = [...oldColleagues].filter((id) => !newColleagues.has(id));
+
+  const shiftLabel = periodText ? `למשמרת ה${periodText}` : "למשמרת";
+
+  let body: string;
+  if (joined.length === 1 && left.length === 0) {
+    const name = personNameById.get(joined[0]);
+    body = name ? `${name} שובץ איתך ${shiftLabel} ב${weekday}` : `מישהו שובץ איתך ${shiftLabel} ב${weekday}`;
+  } else if (left.length === 1 && joined.length === 0) {
+    const name = personNameById.get(left[0]);
+    body = name
+      ? `${name} כבר לא משובץ איתך ${shiftLabel} ב${weekday}`
+      : `מישהו כבר לא משובץ איתך ${shiftLabel} ב${weekday}`;
+  } else {
+    body = `הצוות שלך ${shiftLabel} ב${weekday} השתנה`;
+  }
+
+  return {
+    title: "👥 שינוי בצוות (מצב חירום)",
+    body,
+    path: "/",
+    tag: `emergency-team-change-${personId}-${date}-${period}`,
   };
 }
 

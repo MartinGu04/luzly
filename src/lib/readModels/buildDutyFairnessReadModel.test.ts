@@ -841,6 +841,249 @@ describe("buildDutyFairnessReadModel — Justice Table redesign, corrected: prog
   });
 });
 
+describe("buildDutyFairnessReadModel — Emergency Mode: excludedDates and isEmergencyModeActive default to zero-behavior-change (spec section 19)", () => {
+  it("omitting excludedDates/isEmergencyModeActive entirely behaves byte-for-byte identically to passing an empty set / false", () => {
+    const events: Event[] = [dutyEvent({ personId: "p1", date: "2026-01-05" })];
+    const input = {
+      parseResult: parseResult({
+        personRows: [personRow({ resolvedPersonId: "p1", allocationLabel: "טכנאי", currentScore: 0.25 })],
+        targets: { supervisorTarget: 4, technicianTarget: 8 },
+      }),
+      periodIdentity: { key: "h1", year: 2026 } as const,
+      fetchedAt: "2026-08-15T10:00:00.000Z",
+      now: NOW,
+      events,
+    };
+    const withoutFields = buildDutyFairnessReadModel(input);
+    const withExplicitDefaults = buildDutyFairnessReadModel({ ...input, excludedDates: new Set(), isEmergencyModeActive: false });
+    expect(withoutFields).toEqual(withExplicitDefaults);
+  });
+
+  it("excludedDates removes a completed duty on that date from completedAllocationTotal", () => {
+    const events: Event[] = [
+      dutyEvent({ personId: "p1", date: "2026-01-05" }),
+      dutyEvent({ personId: "p1", date: "2026-02-05" }),
+    ]; // 2 rasar days -> 0.4 completed, unless excluded
+    const model = buildDutyFairnessReadModel({
+      parseResult: parseResult({
+        personRows: [personRow({ resolvedPersonId: "p1", allocationLabel: "טכנאי", currentScore: 0.25 })],
+        targets: { supervisorTarget: 4, technicianTarget: 8 },
+      }),
+      periodIdentity: { key: "h1", year: 2026 },
+      fetchedAt: "2026-08-15T10:00:00.000Z",
+      now: NOW,
+      events,
+      excludedDates: new Set(["2026-01-05"]),
+    });
+    const row = model.groups.find((g) => g.key === "technician")?.rows[0];
+    expect(row?.completedAllocationTotal).toBeCloseTo(0.2); // only 02-05 counts
+  });
+
+  it("excludedDates shrinks the elapsed-time denominator used for paceStatus (numerator and denominator both exclude the same dates)", () => {
+    // H1 2026: Jan 1 - Jun 30 (181 days incl. both ends). NOW closes the
+    // period, so effectiveEndDate = periodEndDate either way -- this test
+    // isolates the excludedDates effect on completedAllocationTotal/target
+    // progress rather than elapsed%, which is already 100% for a closed
+    // period regardless of exclusion (see dutyPace.test.ts for elapsed%
+    // exclusion coverage in isolation).
+    const events: Event[] = [dutyEvent({ personId: "p1", date: "2026-01-05" })]; // excluded below
+    const excludedModel = buildDutyFairnessReadModel({
+      parseResult: parseResult({
+        personRows: [personRow({ resolvedPersonId: "p1", allocationLabel: "טכנאי", currentScore: 0.25 })],
+        targets: { supervisorTarget: 4, technicianTarget: 8 },
+      }),
+      periodIdentity: { key: "h1", year: 2026 },
+      fetchedAt: "2026-08-15T10:00:00.000Z",
+      now: NOW,
+      events,
+      excludedDates: new Set(["2026-01-05"]),
+    });
+    const excludedRow = excludedModel.groups.find((g) => g.key === "technician")?.rows[0];
+    expect(excludedRow?.completedAllocationTotal).toBe(0);
+    expect(excludedRow?.targetProgressRatio).toBe(0);
+  });
+
+  it("isEmergencyModeActive: true forces paceStatus to 'suspended' EVEN WHEN progress/elapsed% would otherwise resolve to a real below/on/ahead verdict", () => {
+    // Same fixture as the "ahead_of_pace" test above -- without
+    // isEmergencyModeActive this would resolve to "ahead_of_pace".
+    const events: Event[] = [
+      dutyEvent({ personId: "p1", date: "2026-01-05" }),
+      dutyEvent({ personId: "p1", date: "2026-02-05" }),
+    ];
+    const model = buildDutyFairnessReadModel({
+      parseResult: parseResult({
+        personRows: [personRow({ resolvedPersonId: "p1", allocationLabel: "טכנאי", currentScore: 0.25 })],
+        targets: { supervisorTarget: 4, technicianTarget: 8 },
+      }),
+      periodIdentity: { key: "h1", year: 2026 },
+      fetchedAt: "2026-08-15T10:00:00.000Z",
+      now: NOW,
+      events,
+      isEmergencyModeActive: true,
+    });
+    const row = model.groups.find((g) => g.key === "technician")?.rows[0];
+    expect(row?.targetProgressRatio).toBeCloseTo(1.6); // progress itself is unaffected
+    expect(row?.paceStatus).toBe("suspended");
+  });
+
+  it("isEmergencyModeActive: true still forces 'suspended' even for a row with no progress ratio at all (paceStatus would otherwise be null)", () => {
+    const model = buildDutyFairnessReadModel({
+      parseResult: parseResult({
+        personRows: [personRow({ resolvedPersonId: "p1", allocationLabel: "טכנאי", currentScore: null })],
+        targets: { supervisorTarget: 4, technicianTarget: 8 },
+      }),
+      periodIdentity: { key: "h1", year: 2026 },
+      fetchedAt: "2026-08-15T10:00:00.000Z",
+      now: NOW,
+      events: [],
+      isEmergencyModeActive: true,
+    });
+    const row = model.groups.find((g) => g.key === "technician")?.rows[0];
+    expect(row?.targetProgressRatio).toBeNull();
+    expect(row?.paceStatus).toBe("suspended");
+  });
+
+  it("isEmergencyModeActive: false (the default) never forces 'suspended' -- normal pace judgment applies", () => {
+    const events: Event[] = [
+      dutyEvent({ personId: "p1", date: "2026-01-05" }),
+      dutyEvent({ personId: "p1", date: "2026-02-05" }),
+    ];
+    const model = buildDutyFairnessReadModel({
+      parseResult: parseResult({
+        personRows: [personRow({ resolvedPersonId: "p1", allocationLabel: "טכנאי", currentScore: 0.25 })],
+        targets: { supervisorTarget: 4, technicianTarget: 8 },
+      }),
+      periodIdentity: { key: "h1", year: 2026 },
+      fetchedAt: "2026-08-15T10:00:00.000Z",
+      now: NOW,
+      events,
+      isEmergencyModeActive: false,
+    });
+    const row = model.groups.find((g) => g.key === "technician")?.rows[0];
+    expect(row?.paceStatus).toBe("ahead_of_pace");
+  });
+});
+
+describe("buildDutyFairnessReadModel — weekendCount suppression when the period overlaps an Emergency Mode date (product requirement: never distort normal fairness)", () => {
+  // H1 2026 runs 2026-01-01..2026-06-30 -- there is NO per-date breakdown
+  // anywhere in the source `weekendCount` figure (it's one raw workbook
+  // aggregate per person per period), so it can never be trustworthily
+  // recomputed to exclude an emergency weekend -- the whole value must be
+  // suppressed instead, never guessed at.
+  it("nulls weekendCount and adds duty_weekend_count_emergency_period when an excluded date falls inside the selected period", () => {
+    const model = buildDutyFairnessReadModel({
+      parseResult: parseResult({
+        personRows: [personRow({ resolvedPersonId: "p1", allocationLabel: "טכנאי", weekendCount: 4 })],
+      }),
+      periodIdentity: { key: "h1", year: 2026 },
+      fetchedAt: "2026-08-15T10:00:00.000Z",
+      now: NOW,
+      excludedDates: new Set(["2026-03-12"]),
+    });
+    const row = model.groups.find((g) => g.key === "technician")?.rows[0];
+    expect(row?.weekendCount).toBeNull();
+    expect(row?.dataCompleteness.reasons).toContain("duty_weekend_count_emergency_period");
+  });
+
+  it("leaves weekendCount untouched when excludedDates is non-empty but no date falls inside the selected period", () => {
+    const model = buildDutyFairnessReadModel({
+      parseResult: parseResult({
+        personRows: [personRow({ resolvedPersonId: "p1", allocationLabel: "טכנאי", weekendCount: 4 })],
+      }),
+      periodIdentity: { key: "h1", year: 2026 },
+      fetchedAt: "2026-08-15T10:00:00.000Z",
+      now: NOW,
+      excludedDates: new Set(["2026-08-20"]), // inside H2, not H1
+    });
+    const row = model.groups.find((g) => g.key === "technician")?.rows[0];
+    expect(row?.weekendCount).toBe(4);
+    expect(row?.dataCompleteness.reasons).not.toContain("duty_weekend_count_emergency_period");
+  });
+
+  it("suppresses weekendCount for a date exactly on the period's own start/end boundary (inclusive)", () => {
+    const startBoundaryModel = buildDutyFairnessReadModel({
+      parseResult: parseResult({ personRows: [personRow({ resolvedPersonId: "p1", allocationLabel: "טכנאי", weekendCount: 4 })] }),
+      periodIdentity: { key: "h1", year: 2026 },
+      fetchedAt: "2026-08-15T10:00:00.000Z",
+      now: NOW,
+      excludedDates: new Set(["2026-01-01"]),
+    });
+    const endBoundaryModel = buildDutyFairnessReadModel({
+      parseResult: parseResult({ personRows: [personRow({ resolvedPersonId: "p1", allocationLabel: "טכנאי", weekendCount: 4 })] }),
+      periodIdentity: { key: "h1", year: 2026 },
+      fetchedAt: "2026-08-15T10:00:00.000Z",
+      now: NOW,
+      excludedDates: new Set(["2026-06-30"]),
+    });
+    expect(startBoundaryModel.groups.find((g) => g.key === "technician")?.rows[0]?.weekendCount).toBeNull();
+    expect(endBoundaryModel.groups.find((g) => g.key === "technician")?.rows[0]?.weekendCount).toBeNull();
+  });
+
+  it("applies uniformly to every row in the period, not just the person whose duty happened during the emergency", () => {
+    const model = buildDutyFairnessReadModel({
+      parseResult: parseResult({
+        personRows: [
+          personRow({ resolvedPersonId: "p1", sourceName: "אדם ראשון", allocationLabel: "טכנאי", weekendCount: 4 }),
+          personRow({ resolvedPersonId: "p2", sourceName: "אדם שני", allocationLabel: "טכנאי", weekendCount: 1 }),
+        ],
+      }),
+      periodIdentity: { key: "h1", year: 2026 },
+      fetchedAt: "2026-08-15T10:00:00.000Z",
+      now: NOW,
+      excludedDates: new Set(["2026-03-12"]),
+    });
+    const rows = model.groups.find((g) => g.key === "technician")?.rows ?? [];
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row.weekendCount).toBeNull();
+      expect(row.dataCompleteness.reasons).toContain("duty_weekend_count_emergency_period");
+    }
+  });
+
+  it("an empty excludedDates set (the default) never suppresses weekendCount", () => {
+    const model = buildDutyFairnessReadModel({
+      parseResult: parseResult({
+        personRows: [personRow({ resolvedPersonId: "p1", allocationLabel: "טכנאי", weekendCount: 4 })],
+      }),
+      periodIdentity: { key: "h1", year: 2026 },
+      fetchedAt: "2026-08-15T10:00:00.000Z",
+      now: NOW,
+    });
+    const row = model.groups.find((g) => g.key === "technician")?.rows[0];
+    expect(row?.weekendCount).toBe(4);
+    expect(row?.dataCompleteness.reasons).not.toContain("duty_weekend_count_emergency_period");
+  });
+
+  it("suppression is independent of isEmergencyModeActive -- a PAST recorded emergency inside a closed period still suppresses even though Emergency Mode is not currently active", () => {
+    const model = buildDutyFairnessReadModel({
+      parseResult: parseResult({
+        personRows: [personRow({ resolvedPersonId: "p1", allocationLabel: "טכנאי", weekendCount: 4 })],
+      }),
+      periodIdentity: { key: "h1", year: 2026 },
+      fetchedAt: "2026-08-15T10:00:00.000Z",
+      now: NOW,
+      excludedDates: new Set(["2026-03-12"]),
+      isEmergencyModeActive: false,
+    });
+    const row = model.groups.find((g) => g.key === "technician")?.rows[0];
+    expect(row?.weekendCount).toBeNull();
+  });
+
+  it("a weekendCount already null for an unrelated reason (no workbook figure) is NOT tagged with the emergency reason when there's no overlap", () => {
+    const model = buildDutyFairnessReadModel({
+      parseResult: parseResult({
+        personRows: [personRow({ resolvedPersonId: "p1", allocationLabel: "טכנאי", weekendCount: null })],
+      }),
+      periodIdentity: { key: "h1", year: 2026 },
+      fetchedAt: "2026-08-15T10:00:00.000Z",
+      now: NOW,
+    });
+    const row = model.groups.find((g) => g.key === "technician")?.rows[0];
+    expect(row?.weekendCount).toBeNull();
+    expect(row?.dataCompleteness.reasons).not.toContain("duty_weekend_count_emergency_period");
+  });
+});
+
 describe("buildDutyFairnessReadModel — real-workbook regression: personalTargetTotal reuses the workbook's own currentScore, never the removed Potential-event reconstruction", () => {
   const targets: FairnessTargets = { supervisorTarget: 4, technicianTarget: 8 };
 

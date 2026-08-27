@@ -111,7 +111,8 @@ export function buildCalendarItem(
  * notification engine already uses for scheduling. Never touches
  * `Date`/UTC before this final step.
  */
-function minuteOnDateToInstant(date: string, minute: number): Date {
+/** Exported for `icsEmergencyItems.ts`'s reuse -- the SAME day-offset-aware minute-on-date-to-UTC-instant conversion, never a second implementation. */
+export function minuteOnDateToInstant(date: string, minute: number): Date {
   const dayOffset = Math.floor(minute / MINUTES_PER_DAY);
   const minuteOfDay = ((minute % MINUTES_PER_DAY) + MINUTES_PER_DAY) % MINUTES_PER_DAY;
   const hour = Math.floor(minuteOfDay / 60);

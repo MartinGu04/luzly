@@ -159,6 +159,19 @@ export function resolveFairnessPeriodStatus(periodEndDate: string, now: LocalNow
  *   `computeCompletedDutyAllocation` deliberately refuses to guess a weight
  *   for it, so the WHOLE total is `null` rather than a partial sum that
  *   silently drops the unclassifiable block's real contribution.
+ * - `duty_weekend_count_emergency_period` -- Emergency Mode audit (spec
+ *   section 19/22): `FairnessPersonRow.weekendCount` is parsed as ONE raw
+ *   aggregate number per person per H1/H2 period straight off the
+ *   workbook's own `סופ"שים` column (`lib/parsers/fairness.ts`) -- there is
+ *   no per-date breakdown anywhere in the source, so it is IMPOSSIBLE to
+ *   trustworthily subtract emergency-affected weekends from it. Rather than
+ *   inventing a recomputation, `buildDutyFairnessReadModel` nulls the whole
+ *   value out (never a partial/guessed adjustment) whenever the selected
+ *   period overlaps at least one date any recorded Emergency Mode period
+ *   ever touched -- this is a PERIOD-level fact (like
+ *   `shift_target_no_group_opportunities`), attached identically to every
+ *   row in that period, regardless of whether that specific person was
+ *   personally on desk during the emergency.
  */
 export type FairnessDataCompletenessReason =
   | "participation_assumed_full_period"
@@ -172,7 +185,8 @@ export type FairnessDataCompletenessReason =
   | "shift_target_no_group_opportunities"
   | "duty_identity_unresolved"
   | "duty_target_unavailable"
-  | "duty_allocation_unsupported_block_shape";
+  | "duty_allocation_unsupported_block_shape"
+  | "duty_weekend_count_emergency_period";
 
 export interface FairnessDataCompleteness {
   status: "complete" | "partial";

@@ -142,3 +142,87 @@ describe("buildSettledChangeCopy -- coverage gap", () => {
     expect(buildSettledChangeCopy(change, names)).toBeNull();
   });
 });
+
+describe("buildSettledChangeCopy -- Emergency Mode desk shift change (spec section 23)", () => {
+  it("a brand-new desk assignment names the desk(s) and says 'assigned', not 'changed'", () => {
+    const change: FactChange = {
+      factKey: "emergency_shift:p1:2026-08-18",
+      category: "emergency_shift",
+      oldValue: null,
+      newValue: { entries: [{ period: "day", desk: "הוגוורט" }] },
+    };
+    const copy = buildSettledChangeCopy(change, names);
+    expect(copy?.title).toBe("🚨 שינוי בשיבוץ דסק");
+    expect(copy?.body).toContain("שובצת לדסק הוגוורט");
+    expect(copy?.path).toBe("/schedule");
+  });
+
+  it("a removed desk assignment says the assignment was cancelled", () => {
+    const change: FactChange = {
+      factKey: "emergency_shift:p1:2026-08-18",
+      category: "emergency_shift",
+      oldValue: { entries: [{ period: "day", desk: "הוגוורט" }] },
+      newValue: null,
+    };
+    const copy = buildSettledChangeCopy(change, names);
+    expect(copy?.body).toContain("בוטל");
+  });
+
+  it("a desk swap falls back to a concise truthful 'changed' message", () => {
+    const change: FactChange = {
+      factKey: "emergency_shift:p1:2026-08-18",
+      category: "emergency_shift",
+      oldValue: { entries: [{ period: "day", desk: "הוגוורט" }] },
+      newValue: { entries: [{ period: "day", desk: "תיעוד" }] },
+    };
+    const copy = buildSettledChangeCopy(change, names);
+    expect(copy?.body).toContain("השתנה");
+  });
+
+  it("never uses the regular shift copy's title/path -- Emergency Mode's own vocabulary", () => {
+    const change: FactChange = {
+      factKey: "emergency_shift:p1:2026-08-18",
+      category: "emergency_shift",
+      oldValue: null,
+      newValue: { entries: [{ period: "day", desk: "הוגוורט" }] },
+    };
+    const copy = buildSettledChangeCopy(change, names);
+    expect(copy?.title).not.toBe("⚠️ שינוי בשיבוץ");
+  });
+});
+
+describe("buildSettledChangeCopy -- Emergency Mode desk team change (spec section 23)", () => {
+  it("a single colleague joining names them by their real name", () => {
+    const change: FactChange = {
+      factKey: "emergency_team:p1:2026-08-18:day",
+      category: "emergency_team",
+      oldValue: { colleagues: [] },
+      newValue: { colleagues: ["p2"] },
+    };
+    const copy = buildSettledChangeCopy(change, names);
+    expect(copy?.body).toBe("עילאי שפירא שובץ איתך למשמרת היום ביום שלישי");
+    expect(copy?.path).toBe("/");
+  });
+
+  it("a single colleague leaving says they're no longer assigned", () => {
+    const change: FactChange = {
+      factKey: "emergency_team:p1:2026-08-18:day",
+      category: "emergency_team",
+      oldValue: { colleagues: ["p2"] },
+      newValue: { colleagues: [] },
+    };
+    const copy = buildSettledChangeCopy(change, names);
+    expect(copy?.body).toBe("עילאי שפירא כבר לא משובץ איתך למשמרת היום ביום שלישי");
+  });
+
+  it("multiple simultaneous joins/leaves fall back to a generic team-change message", () => {
+    const change: FactChange = {
+      factKey: "emergency_team:p1:2026-08-18:day",
+      category: "emergency_team",
+      oldValue: { colleagues: ["p2"] },
+      newValue: { colleagues: ["p3", "p4"] },
+    };
+    const copy = buildSettledChangeCopy(change, names);
+    expect(copy?.body).toContain("הצוות שלך");
+  });
+});

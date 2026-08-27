@@ -4,6 +4,7 @@ import { AppRevalidator } from "@/components/layout/AppRevalidator";
 import { AppShell } from "@/components/layout/AppShell";
 import { AccessDeniedScreen } from "@/components/auth/AccessDeniedScreen";
 import { SearchPaletteProvider } from "@/components/search/SearchPaletteProvider";
+import { resolveOperationalMode } from "@/lib/emergencyMode/state";
 import { getRequestPersonalSchedule } from "@/lib/readModels/getRequestPersonalSchedule";
 import { getRequestSearchReadModel } from "@/lib/readModels/getRequestSearchReadModel";
 import { formatHebrewWeekdayAndDate } from "@/lib/presentation/hebrewDate";
@@ -55,18 +56,25 @@ export const dynamic = "force-dynamic";
  * `loadScheduleReadModel`'s manager branch already uses. `null` (only on
  * `configuration_error`) makes the whole feature quietly unavailable.
  *
- * These two loaders (PR #38) run CONCURRENTLY via `Promise.all` rather than
- * one `await` after the other -- they have no data dependency on each
- * other (the search read model independently re-resolves identity and its
- * own workbook read, see `loadSearchReadModel`), so awaiting them
- * sequentially was pure unnecessary latency on every single navigation
- * into this route group, gating this whole shell's render (including the
- * persistent Sidebar) behind the sum of both calls instead of the slower of
- * the two. This never changes what either call does or how its result is
- * used below -- only when the second one starts.
+ * These loaders (PR #38, plus Emergency Mode's `resolveOperationalMode()`)
+ * run CONCURRENTLY via `Promise.all` rather than one `await` after the
+ * other -- they have no data dependency on each other (the search read
+ * model independently re-resolves identity and its own workbook read, see
+ * `loadSearchReadModel`; `resolveOperationalMode()` is a small, request-
+ * scoped `cache()`-memoized DB read of its own, see
+ * `lib/emergencyMode/state.ts`), so awaiting them sequentially was pure
+ * unnecessary latency on every single navigation into this route group,
+ * gating this whole shell's render (including the persistent Sidebar)
+ * behind the sum of all calls instead of the slowest one. This never
+ * changes what any call does or how its result is used below -- only when
+ * the others start.
  */
 export default async function ProtectedLayout({ children }: { children: ReactNode }) {
-  const [result, searchResult] = await Promise.all([getRequestPersonalSchedule(), getRequestSearchReadModel()]);
+  const [result, searchResult, operationalMode] = await Promise.all([
+    getRequestPersonalSchedule(),
+    getRequestSearchReadModel(),
+    resolveOperationalMode(),
+  ]);
 
   if (result.status === "unauthenticated") {
     redirect("/login");
@@ -116,6 +124,7 @@ export default async function ProtectedLayout({ children }: { children: ReactNod
           person={{ name: person.name, isManager: person.isManager, avatarUrl, userId }}
           initialClockTime={initialClockTime}
           dateLabel={dateLabel}
+          emergencyModeActive={operationalMode.kind === "emergency"}
         >
           {children}
         </AppShell>

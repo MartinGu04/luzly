@@ -363,6 +363,32 @@ describe("buildDutyFairnessCardView", () => {
     expect(view.personId).toBeNull();
   });
 
+  it("weekendSuspendedNote is null when the row's data completeness has no emergency-period reason", () => {
+    const view = buildDutyFairnessCardView(dutyRow(), "/fairness?mode=duties&person=p_1");
+    expect(view.weekendSuspendedNote).toBeNull();
+  });
+
+  it("weekendSuspendedNote explains the suppression when weekendCount is null due to an emergency-period overlap", () => {
+    const view = buildDutyFairnessCardView(
+      dutyRow({
+        weekendCount: null,
+        dataCompleteness: fairnessDataCompleteness(["duty_weekend_count_emergency_period"]),
+      }),
+      "/fairness?mode=duties&person=p_1",
+    );
+    expect(view.weekendLabel).toBe("—");
+    expect(view.weekendSuspendedNote).not.toBeNull();
+  });
+
+  it("weekendSuspendedNote stays null for an ordinary missing weekend count unrelated to Emergency Mode", () => {
+    const view = buildDutyFairnessCardView(
+      dutyRow({ weekendCount: null, dataCompleteness: fairnessDataCompleteness(["duty_identity_unresolved"]) }),
+      "/fairness?mode=duties&person=p_1",
+    );
+    expect(view.weekendLabel).toBe("—");
+    expect(view.weekendSuspendedNote).toBeNull();
+  });
+
   it("exemptions map through exemptionBadgeLabel", () => {
     const view = buildDutyFairnessCardView(
       dutyRow({ exemptions: [{ raw: "מטבח", affectedDutyFamilies: ["daily_kitchen", "full_kitchen", "weekend_kitchen"] }] }),

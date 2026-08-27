@@ -1391,3 +1391,61 @@ describe("getManagerBroadcastDeliveryTiming", () => {
     expect(calls.deliveriesQueries).toBe(1);
   });
 });
+
+describe("peekLastOperationalGeneration / setLastOperationalGeneration -- Emergency Mode baseline tracking (spec section 22)", () => {
+  function makeBaselineStateFakeSupabase(initial: { last_operational_generation: string } | null) {
+    let row = initial;
+    const updateCalls: Record<string, unknown>[] = [];
+    const client = {
+      from: (table: string) => {
+        if (table !== "notification_baseline_state") throw new Error(`unexpected table ${table}`);
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: () => Promise.resolve({ data: row, error: null }),
+            }),
+          }),
+          update: (patch: Record<string, unknown>) => ({
+            eq: () => {
+              updateCalls.push(patch);
+              row = { last_operational_generation: patch.last_operational_generation as string };
+              return Promise.resolve({ error: null });
+            },
+          }),
+        };
+      },
+    };
+    return { client, updateCalls, getRow: () => row };
+  }
+
+  it("peekLastOperationalGeneration reads the stored value", async () => {
+    const { client } = makeBaselineStateFakeSupabase({ last_operational_generation: "emergency:period-a" });
+    const { peekLastOperationalGeneration } = await loadModule(client);
+    expect(await peekLastOperationalGeneration()).toBe("emergency:period-a");
+  });
+
+  it("peekLastOperationalGeneration returns null when the row doesn't exist yet (pre-first-tick), never a guessed default", async () => {
+    const { client } = makeBaselineStateFakeSupabase(null);
+    const { peekLastOperationalGeneration } = await loadModule(client);
+    expect(await peekLastOperationalGeneration()).toBeNull();
+  });
+
+  it("setLastOperationalGeneration writes the new value via a plain update, not the atomic baseline RPC", async () => {
+    const { client, updateCalls, getRow } = makeBaselineStateFakeSupabase({ last_operational_generation: "regular" });
+    const { setLastOperationalGeneration } = await loadModule(client);
+
+    await setLastOperationalGeneration("emergency:period-a");
+
+    expect(updateCalls).toEqual([{ last_operational_generation: "emergency:period-a" }]);
+    expect(getRow()).toEqual({ last_operational_generation: "emergency:period-a" });
+  });
+
+  it("setLastOperationalGeneration persists a generation swap between two different emergency sessions verbatim (period A -> period B)", async () => {
+    const { client, getRow } = makeBaselineStateFakeSupabase({ last_operational_generation: "emergency:period-a" });
+    const { setLastOperationalGeneration } = await loadModule(client);
+
+    await setLastOperationalGeneration("emergency:period-b");
+
+    expect(getRow()).toEqual({ last_operational_generation: "emergency:period-b" });
+  });
+});

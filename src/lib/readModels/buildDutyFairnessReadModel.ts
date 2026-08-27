@@ -24,7 +24,11 @@ import {
   type FairnessPeriodIdentity,
 } from "@/lib/domain/fairnessPeriod";
 import type { FairnessPersonRow, FairnessTableParseResult, FairnessTargets } from "@/lib/domain/fairnessTable";
-import { computePeriodElapsedPercent, resolveDutyPaceStatus, type DutyPaceStatus } from "@/lib/domain/dutyPace";
+import {
+  computePeriodElapsedPercentExcludingDates,
+  resolveDutyPaceStatus,
+  type DutyPaceStatus,
+} from "@/lib/domain/dutyPace";
 import type { LocalNow } from "@/lib/domain/localNow";
 import type {
   DutyFairnessGroupKey,
@@ -50,6 +54,25 @@ export interface BuildDutyFairnessReadModelInput {
    * unknown data) for any existing caller/test that predates this field.
    */
   events?: readonly Event[];
+  /**
+   * Emergency Mode date exclusion (spec section 19) -- every calendar
+   * date any recorded Emergency Mode period ever touched. Excludes
+   * duties on those dates from `completedAllocationTotal`, and removes
+   * them from BOTH the numerator and denominator of the elapsed-time
+   * pace calculation (`computePeriodElapsedPercentExcludingDates`) --
+   * never from the source target itself. Defaults to an empty set for
+   * any existing caller/test that predates this field (byte-for-byte
+   * unchanged behavior).
+   */
+  excludedDates?: ReadonlySet<string>;
+  /**
+   * Whether Emergency Mode is CURRENTLY active (not merely whether any
+   * excluded dates exist historically) -- while true, every row's
+   * `paceStatus` is forced to `"suspended"` regardless of elapsed time,
+   * per spec section 19 ("do NOT display 'מתחת לצפי' merely because time
+   * passed while duties were not operational"). Defaults to `false`.
+   */
+  isEmergencyModeActive?: boolean;
 }
 
 /**
@@ -78,7 +101,7 @@ export interface BuildDutyFairnessReadModelInput {
  * label -- landing in a group never by itself grants a target.
  */
 export function buildDutyFairnessReadModel(input: BuildDutyFairnessReadModelInput): DutyFairnessReadModel {
-  const { parseResult, periodIdentity, fetchedAt, now, events = [] } = input;
+  const { parseResult, periodIdentity, fetchedAt, now, events = [], excludedDates = EMPTY_EXCLUDED_DATES, isEmergencyModeActive = false } = input;
   const { personRows, totals, targets } = parseResult;
 
   const periodStartDate = fairnessPeriodStartDate(periodIdentity);
@@ -94,11 +117,40 @@ export function buildDutyFairnessReadModel(input: BuildDutyFairnessReadModelInpu
   // `lib/domain/dutyPace.ts`'s own documented limitation: no reliable
   // per-person participation window exists for Duty Fairness today, so
   // pace is measured against the same whole-period elapsed % for everyone,
-  // never a fabricated personalized window.
-  const periodElapsedPercent = computePeriodElapsedPercent(periodStartDate, periodEndDate, effectiveEndDate);
+  // never a fabricated personalized window. Emergency dates are excluded
+  // from BOTH the numerator and denominator (spec section 19) -- an empty
+  // `excludedDates` set behaves identically to the original
+  // `computePeriodElapsedPercent`.
+  const periodElapsedPercent = computePeriodElapsedPercentExcludingDates(
+    periodStartDate,
+    periodEndDate,
+    effectiveEndDate,
+    excludedDates,
+  );
+
+  // Period-level fact, computed once, never per-row: does the SELECTED
+  // period (its full start..end range, not merely the elapsed-to-date
+  // portion `effectiveEndDate` uses) overlap at least one date any recorded
+  // Emergency Mode period ever touched? Reused for every row via
+  // `duty_weekend_count_emergency_period` -- see that reason's own docs for
+  // why `weekendCount` can never be trustworthily recomputed instead of
+  // suppressed outright.
+  const weekendCountSuppressed = periodOverlapsExcludedDates(periodStartDate, periodEndDate, excludedDates);
 
   const rows = personRows.map((row, index) =>
-    toRowView(row, targets, index, events, periodStartDate, effectiveEndDate, periodStatus, periodElapsedPercent),
+    toRowView(
+      row,
+      targets,
+      index,
+      events,
+      periodStartDate,
+      effectiveEndDate,
+      periodStatus,
+      periodElapsedPercent,
+      excludedDates,
+      isEmergencyModeActive,
+      weekendCountSuppressed,
+    ),
   );
   const sortedRows = [...rows].sort(compareDutyFairnessRows);
 
@@ -126,6 +178,9 @@ function toRowView(
   effectiveEndDate: string,
   periodStatus: FairnessPeriodStatus,
   periodElapsedPercent: number | null,
+  excludedDates: ReadonlySet<string>,
+  isEmergencyModeActive: boolean,
+  weekendCountSuppressed: boolean,
 ): DutyFairnessPersonRowView {
   const role = resolveFairnessAllocationRole(row.allocationLabel);
   const comparisonTarget = resolveComparisonTarget(row.allocationLabel, targets);
@@ -134,6 +189,7 @@ function toRowView(
   const reasons: FairnessDataCompletenessReason[] = [];
   if (row.resolvedPersonId === null) reasons.push("duty_identity_unresolved");
   if (role !== null && comparisonTarget === null) reasons.push("duty_target_unavailable");
+  if (weekendCountSuppressed) reasons.push("duty_weekend_count_emergency_period");
 
   // Independent of `comparisonTarget`/`status` -- a person who cannot be
   // compared (no target-bearing allocation label) still gets a real
@@ -143,7 +199,7 @@ function toRowView(
   let completedAllocationTotal: number | null = null;
   let liveDuty: DutyFairnessPersonRowView["liveDuty"] = null;
   if (row.resolvedPersonId !== null) {
-    const allocation = computeCompletedDutyAllocation(events, row.resolvedPersonId, periodStartDate, effectiveEndDate);
+    const allocation = computeCompletedDutyAllocation(events, row.resolvedPersonId, periodStartDate, effectiveEndDate, excludedDates);
     completedAllocationTotal = allocation.total;
     if (allocation.unsupportedBlocks.length > 0) reasons.push("duty_allocation_unsupported_block_shape");
 
@@ -187,8 +243,15 @@ function toRowView(
   const targetProgressRatio = computeNormalizedLoad(completedAllocationTotal, personalTargetTotal);
   const remainingToTarget =
     personalTargetTotal !== null && completedAllocationTotal !== null ? personalTargetTotal - completedAllocationTotal : null;
-  const paceStatus: DutyPaceStatus | null =
-    targetProgressRatio !== null && periodElapsedPercent !== null
+  // Spec section 19 -- while Emergency Mode is CURRENTLY active, elapsed
+  // period time must never be read as "behind schedule": the pace verdict
+  // is forced to `"suspended"` unconditionally, taking precedence over the
+  // ordinary below/on/ahead computation below (never silently falling
+  // through to a stale "below_pace" just because `isEmergencyModeActive`
+  // happens to also have a resolvable ratio).
+  const paceStatus: DutyPaceStatus | null = isEmergencyModeActive
+    ? "suspended"
+    : targetProgressRatio !== null && periodElapsedPercent !== null
       ? resolveDutyPaceStatus(targetProgressRatio * 100, periodElapsedPercent)
       : null;
 
@@ -204,7 +267,8 @@ function toRowView(
     gapToTarget: computeGapToTarget(currentScore, comparisonTarget),
     normalizedLoad: computeNormalizedLoad(currentScore, comparisonTarget),
     status: resolveDutyFairnessStatus(currentScore, comparisonTarget),
-    weekendCount: row.weekendCount,
+    // Never a partial/guessed adjustment -- see `duty_weekend_count_emergency_period`'s own docs.
+    weekendCount: weekendCountSuppressed ? null : row.weekendCount,
     completedAllocationTotal,
     personalTargetTotal,
     targetProgressRatio,
@@ -229,6 +293,26 @@ function toTotalsView(
     displayedCurrentSum: displayed.displayedCurrentSum,
     displayedWeekendSum: displayed.displayedWeekendSum,
   };
+}
+
+/** Safe zero-exclusion default -- mirrors `dutyAllocationWeight.ts`'s own `EMPTY_EXCLUDED_DATES`, kept as a separate module-local constant since that one is not exported. */
+const EMPTY_EXCLUDED_DATES: ReadonlySet<string> = new Set();
+
+/**
+ * Whether ANY date in `excludedDates` falls within `[periodStartDate,
+ * periodEndDate]` (inclusive both ends) -- plain lexicographic comparison,
+ * valid for `"YYYY-MM-DD"` strings (same convention as the rest of this
+ * codebase's date-range checks). `excludedDates` holds every date any
+ * recorded Emergency Mode period EVER touched (`getEmergencyDateSet`), not
+ * merely a currently-active one, so a past emergency inside an otherwise
+ * long-closed period still counts.
+ */
+function periodOverlapsExcludedDates(periodStartDate: string, periodEndDate: string, excludedDates: ReadonlySet<string>): boolean {
+  if (excludedDates.size === 0) return false;
+  for (const date of excludedDates) {
+    if (date >= periodStartDate && date <= periodEndDate) return true;
+  }
+  return false;
 }
 
 const GROUP_ORDER: readonly DutyFairnessGroupKey[] = ["supervisor", "technician", "other"];

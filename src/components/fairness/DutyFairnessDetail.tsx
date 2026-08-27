@@ -84,6 +84,8 @@ export function DutyFairnessDetail({ view, previousLabel }: DutyFairnessDetailPr
         <Stat label='סופ"שים' value={view.weekendLabel} />
       </div>
 
+      {view.weekendSuspendedNote ? <p className="text-xs text-muted-2">{view.weekendSuspendedNote}</p> : null}
+
       {view.exemptionBadges.length > 0 ? (
         <div className="flex flex-wrap gap-1.5">
           {view.exemptionBadges.map((badge) => (

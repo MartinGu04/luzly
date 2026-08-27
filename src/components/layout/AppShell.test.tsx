@@ -56,6 +56,27 @@ describe("AppShell — mobile identity/sign-out", () => {
     expect(screen.getAllByText("מנהל/ת").length).toBeGreaterThan(0);
   });
 
+  it("renders the global Emergency Mode banner when emergencyModeActive is true", () => {
+    renderWithTheme(
+      <AppShell
+        person={{ name: "דני בדיקה", isManager: false, avatarUrl: null, userId: "user-test-1" }}
+        emergencyModeActive
+      >
+        <div>content</div>
+      </AppShell>,
+    );
+    expect(screen.getByTestId("emergency-mode-banner")).toBeInTheDocument();
+  });
+
+  it("does not render the Emergency Mode banner by default / when regular", () => {
+    renderWithTheme(
+      <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null, userId: "user-test-1" }}>
+        <div>content</div>
+      </AppShell>,
+    );
+    expect(screen.queryByTestId("emergency-mode-banner")).toBeNull();
+  });
+
   it("never renders an email anywhere in the shell", () => {
     const { container } = renderWithTheme(
       <AppShell person={{ name: "דני בדיקה", isManager: false, avatarUrl: null, userId: "user-test-1" }}>
