@@ -261,9 +261,16 @@ export function ManagerRecurringRuleComposer({ roster, adoptionPeople, editingRu
         ) : null}
 
         <div className="flex flex-col gap-1.5">
+          <button
+            type="button"
+            onClick={() => setExcludeExpanded((current) => !current)}
+            aria-expanded={excludeExpanded}
+            className="self-start text-xs font-medium text-muted underline"
+          >
+            {excludeExpanded ? "− הסתר לא לשלוח ל" : "+ לא לשלוח ל"}
+          </button>
           {excludeExpanded ? (
             <>
-              <span className="text-xs font-medium text-muted">לא לשלוח ל</span>
               <span className="text-[11px] text-muted-2">מי שנבחר כאן לעולם לא יקבל את ההתראה -- גם אם הוא/היא נכלל/ת בקהל היעד שנבחר למעלה.</span>
               <RosterPersonPicker
                 roster={roster}
@@ -274,11 +281,7 @@ export function ManagerRecurringRuleComposer({ roster, adoptionPeople, editingRu
                 onTogglePerson={toggleExcludedPerson}
               />
             </>
-          ) : (
-            <button type="button" onClick={() => setExcludeExpanded(true)} className="self-start text-xs font-medium text-muted underline">
-              + הוספת רשימת &quot;לא לשלוח ל&quot;
-            </button>
-          )}
+          ) : null}
         </div>
 
         <p className="text-xs text-muted">

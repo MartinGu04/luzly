@@ -132,3 +132,66 @@ describe("ManagerBroadcastComposer", () => {
     );
   });
 });
+
+describe("ManagerBroadcastComposer -- 'לא לשלוח ל' expand/collapse toggle", () => {
+  // Selects "כולם" first so the audience picker itself is hidden -- keeps
+  // "דנה"/checkbox queries unambiguous while only the exclusions picker is
+  // on screen, exactly like the existing "'כולם' mode hides the picker" test.
+  function renderWithEveryoneAudience() {
+    renderComposer();
+    fireEvent.click(screen.getByRole("radio", { name: "כולם" }));
+  }
+
+  it("starts collapsed; clicking the toggle expands it and shows the picker", () => {
+    renderWithEveryoneAudience();
+
+    expect(screen.getByText("+ לא לשלוח ל")).toBeInTheDocument();
+    expect(screen.queryByLabelText("חיפוש איש/אשת צוות")).toBeNull();
+
+    fireEvent.click(screen.getByText("+ לא לשלוח ל"));
+
+    expect(screen.getByText("− הסתר לא לשלוח ל")).toBeInTheDocument();
+    expect(screen.getByLabelText("חיפוש איש/אשת צוות")).toBeInTheDocument();
+  });
+
+  it("clicking the toggle again while expanded collapses it and hides the picker", () => {
+    renderWithEveryoneAudience();
+
+    fireEvent.click(screen.getByText("+ לא לשלוח ל"));
+    expect(screen.getByLabelText("חיפוש איש/אשת צוות")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("− הסתר לא לשלוח ל"));
+
+    expect(screen.getByText("+ לא לשלוח ל")).toBeInTheDocument();
+    expect(screen.queryByLabelText("חיפוש איש/אשת צוות")).toBeNull();
+  });
+
+  it("collapsing keeps a selected exclusion selected -- reopening shows it still checked, and it is still sent on submit", async () => {
+    sendManagerBroadcastAction.mockResolvedValue({
+      ok: true,
+      batchId: "batch_1",
+      resolvedRecipientCount: 1,
+      pushCapableCount: 1,
+      inboxOnlyCount: 0,
+      unresolved: [],
+    });
+    renderWithEveryoneAudience();
+
+    fireEvent.click(screen.getByText("+ לא לשלוח ל"));
+    fireEvent.click(screen.getByText("דנה"));
+    expect((screen.getByRole("checkbox", { name: /דנה/ }) as HTMLInputElement).checked).toBe(true);
+
+    fireEvent.click(screen.getByText("− הסתר לא לשלוח ל"));
+    expect(screen.queryByLabelText("חיפוש איש/אשת צוות")).toBeNull();
+
+    fireEvent.click(screen.getByText("+ לא לשלוח ל"));
+    expect((screen.getByRole("checkbox", { name: /דנה/ }) as HTMLInputElement).checked).toBe(true);
+
+    fireEvent.change(screen.getByPlaceholderText("לדוגמה: עדכון חשוב"), { target: { value: "כותרת" } });
+    fireEvent.change(screen.getByPlaceholderText("תוכן ההתראה שיוצג לאנשי הצוות"), { target: { value: "תוכן" } });
+    fireEvent.click(screen.getByRole("button", { name: "שלח התראה" }));
+
+    await waitFor(() => expect(sendManagerBroadcastAction).toHaveBeenCalledTimes(1));
+    expect(sendManagerBroadcastAction.mock.calls[0][0]).toMatchObject({ audienceKind: "everyone", excludedPersonIds: ["p_dana"] });
+  });
+});

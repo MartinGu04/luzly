@@ -214,3 +214,53 @@ describe("ManagerSystemRuleEditor -- fields + submission", () => {
     await waitFor(() => expect(screen.getByText(/פעם אחת בדיוק/)).toBeTruthy());
   });
 });
+
+describe("ManagerSystemRuleEditor -- 'לא לשלוח ל' expand/collapse toggle", () => {
+  // `dynamicRule()`'s default audienceMode is "all_eligible", so no audience
+  // RosterPersonPicker is on screen -- "דנה"/checkbox queries stay
+  // unambiguous with only the exclusions picker rendered.
+  it("starts collapsed; clicking the toggle expands it and shows the picker", () => {
+    render(<ManagerSystemRuleEditor rule={dynamicRule()} roster={ROSTER} adoptionPeople={ADOPTION} onSaved={vi.fn()} onCancel={vi.fn()} />);
+
+    expect(screen.getByText("+ לא לשלוח ל")).toBeTruthy();
+    expect(screen.queryByLabelText("חיפוש איש/אשת צוות")).toBeNull();
+
+    fireEvent.click(screen.getByText("+ לא לשלוח ל"));
+
+    expect(screen.getByText("− הסתר לא לשלוח ל")).toBeTruthy();
+    expect(screen.getByLabelText("חיפוש איש/אשת צוות")).toBeTruthy();
+  });
+
+  it("clicking the toggle again while expanded collapses it and hides the picker", () => {
+    render(<ManagerSystemRuleEditor rule={dynamicRule()} roster={ROSTER} adoptionPeople={ADOPTION} onSaved={vi.fn()} onCancel={vi.fn()} />);
+
+    fireEvent.click(screen.getByText("+ לא לשלוח ל"));
+    expect(screen.getByLabelText("חיפוש איש/אשת צוות")).toBeTruthy();
+
+    fireEvent.click(screen.getByText("− הסתר לא לשלוח ל"));
+
+    expect(screen.getByText("+ לא לשלוח ל")).toBeTruthy();
+    expect(screen.queryByLabelText("חיפוש איש/אשת צוות")).toBeNull();
+  });
+
+  it("collapsing keeps a selected exclusion selected -- reopening shows it still checked, and it is still saved on submit", async () => {
+    updateSystemRuleAction.mockResolvedValue({ ok: true, rule: dynamicRule() });
+
+    render(<ManagerSystemRuleEditor rule={dynamicRule()} roster={ROSTER} adoptionPeople={ADOPTION} onSaved={vi.fn()} onCancel={vi.fn()} />);
+
+    fireEvent.click(screen.getByText("+ לא לשלוח ל"));
+    fireEvent.click(screen.getByText("דנה"));
+    expect((screen.getByRole("checkbox", { name: /דנה/ }) as HTMLInputElement).checked).toBe(true);
+
+    fireEvent.click(screen.getByText("− הסתר לא לשלוח ל"));
+    expect(screen.queryByLabelText("חיפוש איש/אשת צוות")).toBeNull();
+
+    fireEvent.click(screen.getByText("+ לא לשלוח ל"));
+    expect((screen.getByRole("checkbox", { name: /דנה/ }) as HTMLInputElement).checked).toBe(true);
+
+    fireEvent.click(screen.getByText("שמירת שינויים"));
+    await waitFor(() =>
+      expect(updateSystemRuleAction).toHaveBeenCalledWith("rule-1", expect.objectContaining({ excludedPersonIds: ["p_dana"] })),
+    );
+  });
+});

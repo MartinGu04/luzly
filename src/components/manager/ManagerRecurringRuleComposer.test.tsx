@@ -147,3 +147,65 @@ describe("ManagerRecurringRuleComposer -- edit mode", () => {
     expect(onCancel).toHaveBeenCalled();
   });
 });
+
+describe("ManagerRecurringRuleComposer -- 'לא לשלוח ל' expand/collapse toggle", () => {
+  // Create mode defaults to "everyone", so no audience RosterPersonPicker
+  // is on screen -- "דנה"/checkbox queries stay unambiguous with only the
+  // exclusions picker rendered. A second roster person keeps the effective
+  // "everyone minus the exclusion" audience non-empty so submit stays
+  // enabled after excluding דנה.
+  const TWO_PERSON_ROSTER: ManagerPersonSummary[] = [
+    ...ROSTER,
+    { id: "p_noa", name: "נועה", isManager: false, isTechnician: false, isSupervisor: true, personnelType: null },
+  ];
+
+  it("starts collapsed; clicking the toggle expands it and shows the picker", () => {
+    render(<ManagerRecurringRuleComposer roster={ROSTER} adoptionPeople={ADOPTION} editingRule={null} onSaved={vi.fn()} onCancel={vi.fn()} />);
+
+    expect(screen.getByText("+ לא לשלוח ל")).toBeTruthy();
+    expect(screen.queryByLabelText("חיפוש איש/אשת צוות")).toBeNull();
+
+    fireEvent.click(screen.getByText("+ לא לשלוח ל"));
+
+    expect(screen.getByText("− הסתר לא לשלוח ל")).toBeTruthy();
+    expect(screen.getByLabelText("חיפוש איש/אשת צוות")).toBeTruthy();
+  });
+
+  it("clicking the toggle again while expanded collapses it and hides the picker", () => {
+    render(<ManagerRecurringRuleComposer roster={ROSTER} adoptionPeople={ADOPTION} editingRule={null} onSaved={vi.fn()} onCancel={vi.fn()} />);
+
+    fireEvent.click(screen.getByText("+ לא לשלוח ל"));
+    expect(screen.getByLabelText("חיפוש איש/אשת צוות")).toBeTruthy();
+
+    fireEvent.click(screen.getByText("− הסתר לא לשלוח ל"));
+
+    expect(screen.getByText("+ לא לשלוח ל")).toBeTruthy();
+    expect(screen.queryByLabelText("חיפוש איש/אשת צוות")).toBeNull();
+  });
+
+  it("collapsing keeps a selected exclusion selected -- reopening shows it still checked, and it is still sent on submit", async () => {
+    createCustomWeeklyRuleAction.mockResolvedValue({ ok: true, rule: existingRule() });
+
+    render(
+      <ManagerRecurringRuleComposer roster={TWO_PERSON_ROSTER} adoptionPeople={ADOPTION} editingRule={null} onSaved={vi.fn()} onCancel={vi.fn()} />,
+    );
+
+    fireEvent.click(screen.getByText("+ לא לשלוח ל"));
+    fireEvent.click(screen.getByText("דנה"));
+    expect((screen.getByRole("checkbox", { name: /דנה/ }) as HTMLInputElement).checked).toBe(true);
+
+    fireEvent.click(screen.getByText("− הסתר לא לשלוח ל"));
+    expect(screen.queryByLabelText("חיפוש איש/אשת צוות")).toBeNull();
+
+    fireEvent.click(screen.getByText("+ לא לשלוח ל"));
+    expect((screen.getByRole("checkbox", { name: /דנה/ }) as HTMLInputElement).checked).toBe(true);
+
+    fireEvent.change(screen.getByPlaceholderText("לדוגמה: 📌 תזכורת לאילוצים"), { target: { value: "כותרת" } });
+    fireEvent.change(screen.getByPlaceholderText("תוכן ההתראה שיוצג לאנשי הצוות"), { target: { value: "תוכן" } });
+    fireEvent.click(screen.getByText("יצירת התראה מחזורית"));
+
+    await waitFor(() =>
+      expect(createCustomWeeklyRuleAction).toHaveBeenCalledWith(expect.objectContaining({ excludedPersonIds: ["p_dana"] })),
+    );
+  });
+});
