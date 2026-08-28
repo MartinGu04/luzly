@@ -26,7 +26,7 @@ export function ReportOneQuickAction({ draft, reserveInclusionByPersonId }: Repo
 
   return (
     <>
-      <Panel variant="panel" className="flex items-center justify-between gap-3">
+      <Panel variant="compact" className="flex items-center justify-between gap-3">
         <div>
           <p className="text-sm font-semibold text-foreground">🛰️ דוח 1 למחר</p>
           {targetDateLabel ? <p className="mt-0.5 text-xs text-muted">מוכן עבור {targetDateLabel}</p> : null}
@@ -34,7 +34,7 @@ export function ReportOneQuickAction({ draft, reserveInclusionByPersonId }: Repo
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="shrink-0 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors duration-150 hover:opacity-90"
+          className="shrink-0 rounded-lg bg-primary px-3.5 py-1.5 text-sm font-medium text-primary-foreground transition-colors duration-150 hover:opacity-90"
         >
           פתיחה
         </button>

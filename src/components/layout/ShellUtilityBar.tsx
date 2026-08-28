@@ -91,7 +91,11 @@ function OrgLogoImage({ logo, heightClassName }: { logo: OrgLogo; heightClassNam
  * bigger marks actually need, not by added dead space. The bell
  * (`NotificationBell` `variant="shell"`) sits at the bar's own physical
  * left, replacing its old spot in `Sidebar`'s top row -- same component,
- * same push-notification behavior, purely relocated.
+ * same push-notification behavior, purely relocated. Home-dashboard-polish
+ * pass: the center group's own gap was trimmed (`gap-5 sm:gap-8` ->
+ * `gap-4 sm:gap-6`) -- the three elements read as loosely scattered rather
+ * than one composed unit; no size/alignment/structure change, purely
+ * tighter spacing between them.
  */
 export function ShellUtilityBar({ initialClockTime, dateLabel, userId }: ShellUtilityBarProps) {
   return (
@@ -105,7 +109,7 @@ export function ShellUtilityBar({ initialClockTime, dateLabel, userId }: ShellUt
             real rendered screenshot, not just this comment's own logic. */}
         <div aria-hidden="true" />
 
-        <div className="flex items-center justify-center gap-5 sm:gap-8">
+        <div className="flex items-center justify-center gap-4 sm:gap-6">
           <OrgLogoImage logo={ORG_LOGO_TAKSHAL} heightClassName="h-[90px]" />
 
           <div className="flex flex-col items-center gap-1 rounded-xl bg-surface-1 px-5 py-2">

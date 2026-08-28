@@ -18,7 +18,7 @@ export function formatMinutesHebrew(totalMinutes: number): string {
   return `${hoursPart} ו־${formatMinutesPart(remainderMinutes)}`;
 }
 
-function formatHoursPart(hours: number): string {
+export function formatHoursPart(hours: number): string {
   if (hours === 1) return "שעה";
   if (hours === 2) return "שעתיים";
   return `${hours} שעות`;
@@ -38,4 +38,18 @@ export function formatRemaining(totalMinutes: number): string {
 /** "מתחיל בעוד <duration>" for an upcoming assignment with a known live countdown. */
 export function formatStartsIn(totalMinutes: number): string {
   return `מתחיל בעוד ${formatMinutesHebrew(totalMinutes)}`;
+}
+
+/**
+ * The Home hero card's pre-start countdown wording: hour-only from 24h
+ * down to 6h away (avoids noisy minute precision this far out), then
+ * hour+minute below 6h, then minute-only below 1h -- this last tier falls
+ * out of `formatStartsIn` itself, which already omits a zero hours part.
+ */
+export function formatCountdownToStart(totalMinutes: number): string {
+  const minutes = Math.max(0, Math.round(totalMinutes));
+  if (minutes >= 360) {
+    return `מתחיל בעוד ${formatHoursPart(Math.floor(minutes / 60))}`;
+  }
+  return formatStartsIn(minutes);
 }

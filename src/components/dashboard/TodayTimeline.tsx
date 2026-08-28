@@ -124,7 +124,7 @@ export function TodayTimeline({ todayEvents, todayDutyActions, localNow }: Today
               <div className="relative z-10 flex w-8 shrink-0 justify-center pt-0.5">
                 <TimelineDot status={item.status} />
               </div>
-              <div className={`min-w-0 flex-1 ${item.status === "past" ? "opacity-55" : ""}`}>
+              <div className={`min-w-0 flex-1 ${item.status === "past" ? "opacity-70" : ""}`}>
                 <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
                   <p className="flex items-center gap-1.5 text-sm font-medium text-foreground">
                     {item.emoji ? (

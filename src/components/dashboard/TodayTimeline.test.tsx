@@ -99,7 +99,7 @@ describe("TodayTimeline", () => {
     );
     // The finished shift row should be visually de-emphasized.
     const items = container.querySelectorAll("li");
-    expect(items[0].querySelector(".opacity-55")).not.toBeNull();
+    expect(items[0].querySelector(".opacity-70")).not.toBeNull();
   });
 
   it("shows a semantic emoji anchor for a known day shift", () => {
