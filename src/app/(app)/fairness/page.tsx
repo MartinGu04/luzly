@@ -33,6 +33,7 @@ import { getRequestEmergencyFairness } from "@/lib/readModels/getRequestEmergenc
 import { EmergencyFairnessSection } from "@/components/fairness/EmergencyFairnessSection";
 import type { EmergencyFairnessReadModel } from "@/lib/readModels/emergencyFairnessTypes";
 import { getJerusalemLocalNow } from "@/lib/time/jerusalemClock";
+import { resolveOperationalMode } from "@/lib/emergencyMode/state";
 
 type SearchParamValue = string | string[] | undefined;
 
@@ -87,37 +88,61 @@ function renderAuthFailure(status: FairnessAuthFailureStatus): ReactNode {
  * switching mode or navigating periods within the short cache TTL reuses
  * the same snapshot instead of a fresh Google read.
  *
- * A single async function -- the actual async work (the one loader call
- * for the resolved mode) happens directly here, with the rest of the
- * rendering delegated to plain, synchronous helpers below. Deliberately
- * NOT split into further async sub-components: this keeps exactly one
- * `await` boundary for the whole page, easy to reason about, and testable
- * by simply awaiting this one function.
+ * A single async function -- the actual async work (`resolveOperationalMode()`
+ * plus the one loader call for the resolved mode) happens directly here,
+ * with the rest of the rendering delegated to plain, synchronous helpers
+ * below. Deliberately NOT split into further async sub-components: this
+ * keeps the whole page's async work in one function, easy to reason about,
+ * and testable by simply awaiting this one function.
+ *
+ * The "חירום" tab/mode is gated on Emergency Mode being CURRENTLY active
+ * (`resolveOperationalMode()` -- the same source of truth every other
+ * feature branches on, never a second flag or a date-based guess): the
+ * tab is entirely absent from `FairnessModeToggle` while inactive, and a
+ * direct `?mode=emergency` visit while inactive redirects to the default
+ * Shift tab rather than rendering an unavailable/empty emergency view.
  */
 export default async function FairnessPage({ searchParams }: FairnessPageProps) {
   const params = await searchParams;
   const mode = parseFairnessMode(firstParam(params.mode));
   const rawPersonId = firstParam(params.person) ?? null;
 
+  // The single source of truth for "is Emergency Mode live right now" --
+  // same `resolveOperationalMode()` every other feature branches on (see
+  // `duties/page.tsx`, `manager/page.tsx`, the protected layout). The
+  // "חירום" tab is never shown, and the emergency view is never reachable,
+  // unless this says so -- never inferred from dates or a hardcoded flag.
+  const operationalMode = await resolveOperationalMode();
+  const isEmergencyModeActive = operationalMode.kind === "emergency";
+
   if (mode === "duties") {
     const result = await getRequestDutyFairness(firstParam(params.period) ?? null);
     if (result.status !== "ok") return renderAuthFailure(result.status);
-    return renderDutyFairnessView(result.model, rawPersonId);
+    return renderDutyFairnessView(result.model, rawPersonId, isEmergencyModeActive);
   }
 
   if (mode === "emergency") {
+    // Direct navigation into the emergency tab while Emergency Mode is
+    // inactive must never render an unavailable/empty emergency view --
+    // fall back to the normal default Fairness tab instead.
+    if (!isEmergencyModeActive) redirect(fairnessShiftsHref());
+
     const result = await getRequestEmergencyFairness();
-    if (result.status === "unavailable") return renderEmergencyFairnessUnavailable();
+    if (result.status === "unavailable") return renderEmergencyFairnessUnavailable(isEmergencyModeActive);
     if (result.status !== "ok") return renderAuthFailure(result.status);
-    return renderEmergencyFairnessView(result.model);
+    return renderEmergencyFairnessView(result.model, isEmergencyModeActive);
   }
 
   const result = await getRequestShiftFairness(firstParam(params.month) ?? null);
   if (result.status !== "ok") return renderAuthFailure(result.status);
-  return renderShiftFairnessView(result.model, rawPersonId);
+  return renderShiftFairnessView(result.model, rawPersonId, isEmergencyModeActive);
 }
 
-function renderShiftFairnessView(model: ShiftFairnessReadModel, rawPersonId: string | null): ReactNode {
+function renderShiftFairnessView(
+  model: ShiftFairnessReadModel,
+  rawPersonId: string | null,
+  isEmergencyModeActive: boolean,
+): ReactNode {
   const now = getJerusalemLocalNow();
   // `model.month` is already the loader's own resolved (never invalid) month -- an absent/invalid `?month=` already fell back to the current Jerusalem-local month inside `loadShiftFairnessReadModel`, so this always parses.
   const displayMonthKey = parseMonthParam(model.month) ?? calendarMonthOfLocalNow(now);
@@ -163,7 +188,7 @@ function renderShiftFairnessView(model: ShiftFairnessReadModel, rawPersonId: str
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <FairnessHeader />
-        <FairnessModeToggle active="shifts" emergencyAvailable />
+        <FairnessModeToggle active="shifts" emergencyAvailable={isEmergencyModeActive} />
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -207,7 +232,11 @@ function renderShiftFairnessView(model: ShiftFairnessReadModel, rawPersonId: str
   );
 }
 
-function renderDutyFairnessView(model: DutyFairnessReadModel, rawPersonId: string | null): ReactNode {
+function renderDutyFairnessView(
+  model: DutyFairnessReadModel,
+  rawPersonId: string | null,
+  isEmergencyModeActive: boolean,
+): ReactNode {
   const allRows = model.groups.flatMap((group) => group.rows);
   const selectedRow = rawPersonId ? (allRows.find((row) => row.personId === rawPersonId) ?? null) : null;
 
@@ -224,7 +253,7 @@ function renderDutyFairnessView(model: DutyFairnessReadModel, rawPersonId: strin
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <FairnessHeader />
-        <FairnessModeToggle active="duties" emergencyAvailable />
+        <FairnessModeToggle active="duties" emergencyAvailable={isEmergencyModeActive} />
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -273,12 +302,12 @@ function renderDutyFairnessView(model: DutyFairnessReadModel, rawPersonId: strin
  * weekend, or target concept at all -- only assignment counts grouped by
  * `גזירת נתונים` membership.
  */
-function renderEmergencyFairnessView(model: EmergencyFairnessReadModel): ReactNode {
+function renderEmergencyFairnessView(model: EmergencyFairnessReadModel, isEmergencyModeActive: boolean): ReactNode {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <FairnessHeader />
-        <FairnessModeToggle active="emergency" emergencyAvailable />
+        <FairnessModeToggle active="emergency" emergencyAvailable={isEmergencyModeActive} />
       </div>
 
       <DataFreshnessStatus fetchedAt={model.fetchedAt} />
@@ -288,13 +317,13 @@ function renderEmergencyFairnessView(model: EmergencyFairnessReadModel): ReactNo
   );
 }
 
-/** The emergency workbook itself is not configured/readable -- a graceful, non-blocking state (never an auth-failure screen), since a deployment that has never touched Emergency Mode should still be able to view this tab without alarm. */
-function renderEmergencyFairnessUnavailable(): ReactNode {
+/** The emergency workbook itself is not configured/readable -- a graceful, non-blocking state (never an auth-failure screen), reached only while Emergency Mode is actually active (an inactive direct visit already redirected away before this loader even ran). */
+function renderEmergencyFairnessUnavailable(isEmergencyModeActive: boolean): ReactNode {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <FairnessHeader />
-        <FairnessModeToggle active="emergency" emergencyAvailable />
+        <FairnessModeToggle active="emergency" emergencyAvailable={isEmergencyModeActive} />
       </div>
       <Panel variant="compact" className="text-sm text-muted">
         אין עדיין נתוני חירום זמינים.
