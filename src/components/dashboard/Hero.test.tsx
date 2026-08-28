@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import type {
   PersonalAdjacentShiftContext,
@@ -163,6 +163,86 @@ describe("Hero — next state", () => {
     const group = nextGroup([dutyAssignment({ temporalState: "upcoming", date: "2026-08-20" })]);
     render(<Hero {...defaultProps} nextAssignmentGroup={group} localNowDate="2026-08-12" />);
     expect(screen.getByText("השעה טרם מוגדרת")).toBeInTheDocument();
+  });
+});
+
+describe("Hero — live event progress", () => {
+  // `EventLiveProgress` advances from `fetchedAt` using the real wall clock
+  // (`Date.now()` inside its own effect) -- pin the system clock to
+  // `fetchedAt` itself so these fixtures' fixed 2026 dates aren't compared
+  // against whatever the real "now" happens to be when this suite runs.
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(defaultProps.fetchedAt));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("shows a countdown + progressbar for a next shift starting within 24h", () => {
+    // fetchedAt is 2026-08-12T08:00:00Z = 11:00 Asia/Jerusalem (IDT, +3); the
+    // shift starts at 13:00 local the same day, 2h later -- well within the
+    // 24h countdown window.
+    const shiftEvent = baseAssignment({
+      date: "2026-08-12",
+      temporalState: "upcoming",
+      timing: {
+        status: "resolved",
+        startLocalTime: "13:00",
+        endLocalTime: "19:30",
+        durationMinutes: 390,
+        elapsedMinutesAtLoad: 0,
+        remainingMinutesAtLoad: 390,
+        progressPercentAtLoad: 0,
+        minutesUntilStartAtLoad: 120,
+      },
+    });
+    render(<Hero {...defaultProps} nextAssignmentGroup={nextGroup([shiftEvent])} />);
+    expect(screen.getByText(/מתחיל בעוד/)).toBeInTheDocument();
+    expect(screen.getByRole("progressbar")).toBeInTheDocument();
+  });
+
+  it("shows nothing extra for a next shift starting more than 24h away", () => {
+    const shiftEvent = baseAssignment({
+      date: "2026-08-20",
+      temporalState: "upcoming",
+      timing: {
+        status: "resolved",
+        startLocalTime: "08:00",
+        endLocalTime: "20:00",
+        durationMinutes: 720,
+        elapsedMinutesAtLoad: 0,
+        remainingMinutesAtLoad: 720,
+        progressPercentAtLoad: 0,
+        minutesUntilStartAtLoad: 0,
+      },
+    });
+    render(<Hero {...defaultProps} nextAssignmentGroup={nextGroup([shiftEvent])} />);
+    expect(screen.queryByText(/מתחיל בעוד/)).toBeNull();
+    expect(screen.queryByRole("progressbar")).toBeNull();
+  });
+
+  it("shows live remaining-time progress for a current shift", () => {
+    // Shift started at 07:30 local (fetchedAt is 11:00 local), still running.
+    const shiftEvent = baseAssignment({
+      date: "2026-08-12",
+      timing: {
+        status: "resolved",
+        startLocalTime: "07:30",
+        endLocalTime: "19:30",
+        durationMinutes: 720,
+        elapsedMinutesAtLoad: 210,
+        remainingMinutesAtLoad: 510,
+        progressPercentAtLoad: 29,
+        minutesUntilStartAtLoad: 0,
+      },
+    });
+    render(<Hero {...defaultProps} currentAssignments={[shiftEvent]} />);
+    expect(screen.getByText(/נשארו/)).toBeInTheDocument();
+    const bar = screen.getByRole("progressbar");
+    expect(Number(bar.getAttribute("aria-valuenow"))).toBeGreaterThan(0);
+    expect(Number(bar.getAttribute("aria-valuenow"))).toBeLessThan(100);
   });
 });
 

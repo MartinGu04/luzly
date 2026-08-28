@@ -65,7 +65,7 @@ function WeekDayCard({ day, isPastDay }: WeekDayCardProps) {
       aria-current={day.isToday ? "date" : undefined}
       className={`min-w-[78%] shrink-0 snap-center rounded-xl p-4 ring-1 sm:min-w-[280px] lg:min-w-0 ${
         day.isToday ? "bg-surface-2 ring-2 ring-primary" : "bg-surface-1 ring-border"
-      } ${isPastDay ? "opacity-70" : ""}`}
+      } ${isPastDay ? "opacity-85" : ""}`}
     >
       <div className="flex items-baseline justify-between gap-2">
         <div>

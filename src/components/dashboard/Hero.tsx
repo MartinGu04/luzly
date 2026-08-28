@@ -6,7 +6,9 @@ import type {
   PersonalNextAssignmentGroup,
   PersonalShiftContext,
 } from "@/lib/readModels/types";
+import type { AssignmentTiming } from "@/lib/domain/assignmentTiming";
 import type { EventPeriod, EventRole } from "@/lib/domain/event";
+import { jerusalemLocalTimeToInstant } from "@/lib/time/jerusalemClock";
 import { relativeDayLabel, formatHebrewWeekdayAndDate } from "@/lib/presentation/hebrewDate";
 import { assignmentEmoji } from "@/lib/presentation/emoji";
 import { periodLabel, roleLabel } from "@/lib/presentation/labels";
@@ -14,8 +16,8 @@ import { Badge } from "@/components/ui/Badge";
 import { Panel } from "@/components/ui/Panel";
 import { AdjacentShiftContextRow } from "./AdjacentShiftContext";
 import { CounterpartPanel } from "./CounterpartPanel";
+import { EventLiveProgress } from "./EventLiveProgress";
 import { PulseIndicator } from "./PulseIndicator";
-import { ShiftProgress } from "./ShiftProgress";
 import { TimeRange } from "./TimeRange";
 
 interface HeroProps {
@@ -106,6 +108,24 @@ function findMatchingShiftContext<T extends { date: string; role: EventRole; per
   );
 }
 
+type ResolvedTiming = Extract<AssignmentTiming, { status: "resolved" }>;
+
+/**
+ * The real Asia/Jerusalem instants (ISO) for a resolved shift timing,
+ * anchored to the event's own calendar `date` -- the one place `Hero`
+ * turns local schedule time into a real instant, via the app's one
+ * Jerusalem time-conversion utility (`lib/time/jerusalemClock`), never a
+ * separate interpretation. `endInstant` reuses the already-resolved
+ * `durationMinutes` rather than re-deriving whether the shift wraps past
+ * midnight -- that overnight logic already lives once, in `domain`.
+ */
+function resolveEventInstants(date: string, timing: ResolvedTiming): { startInstant: string; endInstant: string } {
+  const [startHour, startMinute] = timing.startLocalTime.split(":").map(Number);
+  const start = jerusalemLocalTimeToInstant(date, startHour, startMinute);
+  const end = new Date(start.getTime() + timing.durationMinutes * 60_000);
+  return { startInstant: start.toISOString(), endInstant: end.toISOString() };
+}
+
 /** A small restrained emoji anchor, rendered before the title it describes. Returns null (renders nothing) when the assignment maps to no known emoji. */
 function EmojiAnchor({ emoji }: { emoji: string | null }) {
   if (!emoji) return null;
@@ -161,7 +181,11 @@ function CurrentHero({
 
       {lead.category === "shift" && lead.timing.status === "resolved" ? (
         <div className="relative mt-5">
-          <ShiftProgress timing={lead.timing} fetchedAt={fetchedAt} mode="current" />
+          <EventLiveProgress
+            {...resolveEventInstants(lead.date, lead.timing)}
+            mode="active"
+            fetchedAt={fetchedAt}
+          />
         </div>
       ) : null}
 
@@ -270,7 +294,11 @@ function NextHero({
 
       {lead.timing.status === "resolved" ? (
         <div className="mt-4">
-          <ShiftProgress timing={lead.timing} fetchedAt={fetchedAt} mode="upcoming" />
+          <EventLiveProgress
+            {...resolveEventInstants(lead.date, lead.timing)}
+            mode="countdown"
+            fetchedAt={fetchedAt}
+          />
         </div>
       ) : null}
 
