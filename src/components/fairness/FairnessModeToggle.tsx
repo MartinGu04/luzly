@@ -3,7 +3,13 @@ import { fairnessDutiesHref, fairnessEmergencyHref, fairnessShiftsHref, type Fai
 
 interface FairnessModeToggleProps {
   active: FairnessMode;
-  /** Renders the third "טבלת צדק חירום" tab only when the emergency workbook is actually configured/readable -- a deployment that has never touched Emergency Mode never sees a broken/empty tab. */
+  /**
+   * Renders the third "חירום" tab only while Emergency Mode is CURRENTLY
+   * active (`resolveOperationalMode().kind === "emergency"`, the app's one
+   * source of truth for this, computed by the caller -- see `fairness/page.tsx`).
+   * Absent from the DOM entirely when false/omitted, never rendered
+   * disabled/muted.
+   */
   emergencyAvailable?: boolean;
 }
 

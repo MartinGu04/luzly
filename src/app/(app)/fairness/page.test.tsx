@@ -7,6 +7,7 @@ import type { ShiftFairnessPersonRowView, ShiftFairnessReadModel } from "@/lib/r
 const getRequestShiftFairness = vi.fn();
 const getRequestDutyFairness = vi.fn();
 const getRequestEmergencyFairness = vi.fn();
+const resolveOperationalMode = vi.fn();
 const redirect = vi.fn((path: string) => {
   throw new Error(`REDIRECT:${path}`);
 });
@@ -15,6 +16,7 @@ const routerPush = vi.fn();
 vi.mock("@/lib/readModels/getRequestShiftFairness", () => ({ getRequestShiftFairness }));
 vi.mock("@/lib/readModels/getRequestDutyFairness", () => ({ getRequestDutyFairness }));
 vi.mock("@/lib/readModels/getRequestEmergencyFairness", () => ({ getRequestEmergencyFairness }));
+vi.mock("@/lib/emergencyMode/state", () => ({ resolveOperationalMode }));
 vi.mock("next/navigation", () => ({ redirect, useRouter: () => ({ push: routerPush }) }));
 vi.mock("@/components/ui/DataFreshnessStatus", () => ({
   DataFreshnessStatus: ({ fetchedAt }: { fetchedAt: string }) => <div data-testid="freshness">{fetchedAt}</div>,
@@ -37,6 +39,10 @@ beforeEach(() => {
   getRequestEmergencyFairness.mockReset();
   redirect.mockClear();
   routerPush.mockClear();
+  resolveOperationalMode.mockReset();
+  // Default: Emergency Mode inactive -- the common case, and the one every
+  // pre-existing test (which never mocked this) implicitly assumed.
+  resolveOperationalMode.mockResolvedValue({ kind: "regular" });
 });
 
 afterEach(() => {
@@ -1041,6 +1047,7 @@ describe("/fairness — empty states", () => {
 
 describe("FairnessPage — Emergency Mode (mode=emergency)", () => {
   it("renders the emergency fairness groups with assignment counts", async () => {
+    resolveOperationalMode.mockResolvedValue({ kind: "emergency" });
     getRequestEmergencyFairness.mockResolvedValue({
       status: "ok",
       model: {
@@ -1063,6 +1070,7 @@ describe("FairnessPage — Emergency Mode (mode=emergency)", () => {
   });
 
   it("shows a graceful unavailable state (not an auth-failure screen) when the emergency workbook is unconfigured", async () => {
+    resolveOperationalMode.mockResolvedValue({ kind: "emergency" });
     getRequestEmergencyFairness.mockResolvedValue({ status: "unavailable" });
 
     await renderFairnessPage({ mode: "emergency" });
@@ -1072,12 +1080,14 @@ describe("FairnessPage — Emergency Mode (mode=emergency)", () => {
   });
 
   it("redirects to login for an unauthenticated visitor, same as the other modes", async () => {
+    resolveOperationalMode.mockResolvedValue({ kind: "emergency" });
     getRequestEmergencyFairness.mockResolvedValue({ status: "unauthenticated" });
 
     await expect(renderFairnessPage({ mode: "emergency" })).rejects.toThrow("REDIRECT:/login");
   });
 
   it("never calls the regular shift/duty fairness loaders while in emergency mode", async () => {
+    resolveOperationalMode.mockResolvedValue({ kind: "emergency" });
     getRequestEmergencyFairness.mockResolvedValue({
       status: "ok",
       model: { activePeriod: null, fetchedAt: "2026-08-26T14:05:00.000Z", groups: [] },
@@ -1087,5 +1097,47 @@ describe("FairnessPage — Emergency Mode (mode=emergency)", () => {
 
     expect(getRequestShiftFairness).not.toHaveBeenCalled();
     expect(getRequestDutyFairness).not.toHaveBeenCalled();
+  });
+});
+
+describe("FairnessPage — emergency tab visibility follows Emergency Mode's own active state", () => {
+  it("1. hides the חירום tab on the default (shifts) view while Emergency Mode is inactive", async () => {
+    resolveOperationalMode.mockResolvedValue({ kind: "regular" });
+    getRequestShiftFairness.mockResolvedValue({ status: "ok", model: shiftModel({ groups: [] }) });
+
+    await renderFairnessPage();
+
+    expect(screen.queryByRole("tab", { name: "חירום" })).toBeNull();
+  });
+
+  it("2. shows the חירום tab on the default (shifts) view while Emergency Mode is active", async () => {
+    resolveOperationalMode.mockResolvedValue({ kind: "emergency" });
+    getRequestShiftFairness.mockResolvedValue({ status: "ok", model: shiftModel({ groups: [] }) });
+
+    await renderFairnessPage();
+
+    expect(screen.getByRole("tab", { name: "חירום" })).toBeInTheDocument();
+  });
+
+  it("3. a direct visit to the emergency view while Emergency Mode is inactive redirects to the default Shift tab, never rendering an unavailable/empty emergency view", async () => {
+    resolveOperationalMode.mockResolvedValue({ kind: "regular" });
+
+    await expect(renderFairnessPage({ mode: "emergency" })).rejects.toThrow("REDIRECT:/fairness");
+    expect(getRequestEmergencyFairness).not.toHaveBeenCalled();
+  });
+
+  it("4. the משמרות/תורנויות tabs are unaffected by Emergency Mode state, active or inactive", async () => {
+    resolveOperationalMode.mockResolvedValue({ kind: "regular" });
+    getRequestShiftFairness.mockResolvedValue({ status: "ok", model: shiftModel({ groups: [] }) });
+    const { unmount } = await renderFairnessPage();
+    expect(screen.getByRole("tab", { name: "משמרות" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "תורנויות" })).toBeInTheDocument();
+    unmount();
+
+    resolveOperationalMode.mockResolvedValue({ kind: "emergency" });
+    getRequestDutyFairness.mockResolvedValue({ status: "ok", model: dutyModel({ groups: [] }) });
+    await renderFairnessPage({ mode: "duties" });
+    expect(screen.getByRole("tab", { name: "משמרות" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "תורנויות" })).toBeInTheDocument();
   });
 });
