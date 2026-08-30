@@ -1,5 +1,6 @@
 import type { AbsenceKind, Event } from "./event";
 import { analyzeShiftCounterparts } from "./shiftCoverage";
+import { classifyQualificationStatus, requiresWeaponQualification, type WeaponQualificationInfo } from "./shootingRangeQualification";
 import type { MinuteInterval, ShiftSchedule } from "./shiftSchedule";
 import type { Person } from "./types";
 
@@ -10,7 +11,8 @@ export type IssueReason =
   | "shift_coverage_missing"
   | "shift_coverage_partial"
   | "invalid_shift_time"
-  | "role_capability_mismatch";
+  | "role_capability_mismatch"
+  | "weapon_qualification_invalid";
 
 export interface RoleCapabilityMismatchMetadata {
   requiredCapability: "isSupervisor" | "isTechnician";
@@ -44,6 +46,7 @@ export function detectOperationalIssues(
   events: readonly Event[],
   people: readonly Person[],
   schedule: ShiftSchedule,
+  qualificationByPersonId: ReadonlyMap<string, WeaponQualificationInfo> = new Map(),
 ): OperationalIssue[] {
   const peopleById = new Map(people.map((person) => [person.id, person]));
 
@@ -51,6 +54,7 @@ export function detectOperationalIssues(
     ...detectBlockingAbsenceIssues(events),
     ...detectShiftTimingIssues(events, schedule),
     ...detectCapabilityMismatchIssues(events, peopleById),
+    ...detectWeaponQualificationIssues(events, qualificationByPersonId),
   ];
 
   return dedupeIssues(issues);
@@ -233,6 +237,60 @@ export function detectCapabilityMismatchIssues(
       targetEvent: event,
       missingIntervals: null,
       metadata: { requiredCapability },
+    });
+  }
+
+  return issues;
+}
+
+// ---------------------------------------------------------------------------
+// Rule 5 — weapon qualification required for the scheduled activity
+// ---------------------------------------------------------------------------
+
+/**
+ * שמירה/עתודה/אוקסיד all require a weapon (`requiresWeaponQualification`,
+ * the ONE place that list is decided -- this is a GENERAL rule over every
+ * duty family that needs one, never an oxid-specific check). Fires
+ * whenever the assigned person's own weapon-qualification baseline
+ * (`qualificationByPersonId`, keyed by personId -- absent entirely for
+ * anyone out of this feature's scope, e.g. not `isEligibleForShootingRanges`)
+ * is not valid ON THE ACTIVITY'S OWN DATE, never merely "as of today": a
+ * qualification that's valid right now but will have expired by a FUTURE
+ * activity date still fires here (`classifyQualificationStatus` is
+ * re-evaluated against `event.date`, never a fixed "today"), and one
+ * that's already expired today but whose activity is scheduled further in
+ * the future is judged against THAT future date on its own terms.
+ * `classifyQualificationStatus` already encodes the project's one
+ * inclusive/exclusive validity rule (valid through the END of the expiry
+ * calendar day) -- never reimplemented here. An explicit `notRelevant`
+ * override (the מטווחים sheet's `לא רלוונטי`) always wins, same as every
+ * other מטווחים surface, and a person entirely absent from the map (never
+ * tracked for this feature at all) never raises a "missing data" issue.
+ */
+export function detectWeaponQualificationIssues(
+  events: readonly Event[],
+  qualificationByPersonId: ReadonlyMap<string, WeaponQualificationInfo>,
+): OperationalIssue[] {
+  const issues: OperationalIssue[] = [];
+
+  for (const event of events) {
+    if (event.category !== "duty" || !requiresWeaponQualification(event.dutyFamily)) continue;
+
+    const info = qualificationByPersonId.get(event.personId);
+    if (!info || info.notRelevant) continue;
+
+    const status = classifyQualificationStatus(info.expiryDate, event.date);
+    if (status !== "expired" && status !== "none") continue;
+
+    issues.push({
+      reason: "weapon_qualification_invalid",
+      severity: "critical",
+      personId: event.personId,
+      date: event.date,
+      events: [event],
+      targetEvent: event,
+      missingIntervals: null,
+      metadata: null,
     });
   }
 

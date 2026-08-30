@@ -14,6 +14,7 @@ import {
   type ManagerRequirementReconciliation,
 } from "@/lib/domain/potentialReconciliation";
 import { isShiftCapable } from "@/lib/domain/personnelType";
+import type { WeaponQualificationInfo } from "@/lib/domain/shootingRangeQualification";
 import { scopeManagerPotentialAllocation } from "@/lib/domain/potentialSourceOwnership";
 import { resolveReserveRoleParticipation, type ReserveRoleParticipationByPeriod } from "@/lib/domain/reserveParticipation";
 import { buildShiftCoverageRecommendation } from "@/lib/domain/shiftCoverageRecommendation";
@@ -85,6 +86,19 @@ export interface BuildManagerOverviewReadModelInput {
    * "lookup failed" notice to show).
    */
   rosterAvatars: RosterAvatarLookup;
+  /**
+   * Every ELIGIBLE person's weapon-qualification baseline (`isEligibleForShootingRanges`
+   * -- the SAME population the מטווחים feature already scopes itself to),
+   * already resolved by the caller (`managerOverview.ts`'s `loadWeaponQualificationIndex`,
+   * itself built on the SAME `buildShootingRangeQualificationReadModel`
+   * every other מטווחים surface uses -- never a second qualification
+   * computation) -- fed straight into `detectOperationalIssues` below so
+   * "דורש טיפול" can flag someone scheduled for a weapon-requiring activity
+   * (שמירה/עתודה/אוקסיד) whose qualification isn't valid on that activity's
+   * OWN date. A person absent from this map is simply out of scope for the
+   * rule, never treated as "missing data".
+   */
+  qualificationByPersonId: ReadonlyMap<string, WeaponQualificationInfo>;
 }
 
 /**
@@ -129,6 +143,7 @@ export function buildManagerOverviewReadModel(
     selectedPersonId,
     adoption: rawAdoption,
     rosterAvatars: rawRosterAvatars,
+    qualificationByPersonId,
   } = input;
 
   const peopleById = new Map(people.map((person) => [person.id, person]));
@@ -139,7 +154,7 @@ export function buildManagerOverviewReadModel(
   const resolvedSelectedPerson =
     selectedPersonId !== null ? (peopleById.get(selectedPersonId) ?? null) : null;
 
-  const issues = detectOperationalIssues(events, people, shiftSchedule)
+  const issues = detectOperationalIssues(events, people, shiftSchedule, qualificationByPersonId)
     .filter((issue) => rangeDates.has(issue.date))
     .sort(compareManagerIssues)
     .map((issue) => toManagerIssue(issue, peopleById, people, events, shiftSchedule, reserveParticipationByPeriod));
@@ -260,7 +275,14 @@ function issueEvidenceSortKey(issue: OperationalIssue): string {
 }
 
 function toIssueTargetSummary(event: Event): PersonalIssueTargetSummary {
-  return { date: event.date, category: event.category, title: event.title, role: event.role, period: event.period };
+  return {
+    date: event.date,
+    category: event.category,
+    title: event.title,
+    role: event.role,
+    period: event.period,
+    dutyFamily: event.dutyFamily,
+  };
 }
 
 function toManagerIssue(

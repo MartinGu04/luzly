@@ -18,6 +18,7 @@ function target(overrides: Partial<PersonalIssueTargetSummary> = {}): PersonalIs
     title: "טכנאי לילה",
     role: "technician",
     period: "night",
+    dutyFamily: null,
     ...overrides,
   };
 }

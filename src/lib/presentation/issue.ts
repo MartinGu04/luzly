@@ -2,8 +2,8 @@ import type { EventRole } from "@/lib/domain/event";
 import type { IssueReason, IssueSeverity } from "@/lib/domain/operationalIssues";
 import type { PersonalIssue, PersonalIssueTargetSummary } from "@/lib/readModels/types";
 import { assignmentEmoji } from "./emoji";
-import { formatHebrewWeekdayAndDate, relativeDayLabel } from "./hebrewDate";
-import { issueReasonLabel, periodLabel, requiredCapabilityLabel, roleLabel } from "./labels";
+import { formatCompactDate, formatHebrewWeekdayAndDate, relativeDayLabel } from "./hebrewDate";
+import { dutyFamilyLabel, issueReasonLabel, periodLabel, requiredCapabilityLabel, roleLabel } from "./labels";
 
 function oppositeRole(role: EventRole): EventRole {
   if (role === "supervisor") return "technician";
@@ -23,7 +23,12 @@ function oppositeRole(role: EventRole): EventRole {
  * (no `targetEvent`, or the assignee's own role on it is unspecified) or
  * the reason isn't a coverage issue at all.
  */
-export function personalIssueReasonLabel(issue: Pick<PersonalIssue, "reason" | "targetEvent">): string {
+export function personalIssueReasonLabel(
+  issue: Pick<PersonalIssue, "reason" | "targetEvent"> & Partial<Pick<PersonalIssue, "date">>,
+): string {
+  const weaponLabel = weaponQualificationIssueReasonLabel(issue);
+  if (weaponLabel) return weaponLabel;
+
   const fallback = issueReasonLabel(issue.reason);
   if (issue.reason !== "shift_coverage_missing" && issue.reason !== "shift_coverage_partial") return fallback;
 
@@ -34,12 +39,37 @@ export function personalIssueReasonLabel(issue: Pick<PersonalIssue, "reason" | "
   return issue.reason === "shift_coverage_missing" ? `חסר ${label} למשמרת שלך` : `כיסוי ${label} חלקי למשמרת שלך`;
 }
 
+/**
+ * Dynamic "מטווחים לא בתוקף לקראת אוקסיד – 31.8" wording for
+ * `weapon_qualification_invalid`, shared by the personal fallback above
+ * AND the manager overview's own `managerIssueReasonLabelFor` -- neither
+ * duplicates this string-building, and both stay in sync automatically
+ * when the wording changes. States WHY the issue is urgent (which activity,
+ * on which date) rather than the generic "qualification expired" -- never
+ * static, since both the activity family (שמירה/עתודה/אוקסיד) and date vary
+ * per issue. `null` for any other reason, or for the (structurally
+ * unreachable in practice) case of a `weapon_qualification_invalid` issue
+ * with no `targetEvent`/`dutyFamily` -- callers fall back to the static
+ * `issueReasonLabel`/`managerIssueReasonLabel` copy in that case.
+ */
+export function weaponQualificationIssueReasonLabel(
+  issue: Pick<PersonalIssue, "reason" | "targetEvent"> & Partial<Pick<PersonalIssue, "date">>,
+): string | null {
+  if (issue.reason !== "weapon_qualification_invalid") return null;
+  const dutyFamily = issue.targetEvent?.dutyFamily ?? null;
+  if (!dutyFamily || issue.date === undefined) return null;
+
+  const dateLabel = formatCompactDate(issue.date) ?? issue.date;
+  return `מטווחים לא בתוקף לקראת ${dutyFamilyLabel(dutyFamily)} – ${dateLabel}`;
+}
+
 const ISSUE_GUIDANCE_LABELS: Record<IssueReason, string> = {
   blocking_absence_with_assignment: "בדוק איזה מהשניים נכון בסידור.",
   shift_coverage_missing: "בדוק מי אמור להשלים את הכיסוי למשמרת.",
   shift_coverage_partial: "בדוק מי משלים את שעות הכיסוי החסרות.",
   invalid_shift_time: "בדוק את שעות המשמרת בסידור.",
   role_capability_mismatch: 'בדוק שסימון התפקיד בכ"א מעודכן.',
+  weapon_qualification_invalid: "יש לתאם חידוש כשירות מטווחים או שיבוץ מחליף לפני מועד הפעילות.",
 };
 
 /**
@@ -65,11 +95,21 @@ const STATIC_ISSUE_EXPLANATIONS: Partial<Record<IssueReason, string>> = {
  * unqualified". Returns null for reasons with nothing further to add
  * (coverage issues speak for themselves via `missingIntervals`).
  */
-export function issueExplanation(issue: Pick<PersonalIssue, "reason" | "metadata">): string | null {
+export function issueExplanation(
+  issue: Pick<PersonalIssue, "reason" | "metadata"> & Partial<Pick<PersonalIssue, "date" | "targetEvent">>,
+): string | null {
   if (issue.reason === "role_capability_mismatch") {
     const capability = issue.metadata?.requiredCapability;
     if (!capability) return null;
     return `השיבוץ מוגדר כ${requiredCapabilityLabel(capability)}, אבל סימון התפקיד בכ"א דורש בדיקה.`;
+  }
+  if (issue.reason === "weapon_qualification_invalid") {
+    const dutyFamily = issue.targetEvent?.dutyFamily ?? null;
+    const activityLabel = dutyFamily ? dutyFamilyLabel(dutyFamily) : "הפעילות";
+    const dateLabel = issue.date ? (formatCompactDate(issue.date) ?? issue.date) : null;
+    return dateLabel
+      ? `נדרשת כשירות מטווחים בתוקף ל${activityLabel} בתאריך ${dateLabel}, אך הכשירות אינה בתוקף למועד זה.`
+      : `נדרשת כשירות מטווחים בתוקף ל${activityLabel}, אך הכשירות אינה בתוקף למועד הפעילות.`;
   }
   return STATIC_ISSUE_EXPLANATIONS[issue.reason] ?? null;
 }

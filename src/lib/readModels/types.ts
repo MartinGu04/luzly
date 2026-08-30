@@ -125,6 +125,7 @@ export interface PersonalIssueTargetSummary {
   title: string;
   role: EventRole;
   period: EventPeriod;
+  dutyFamily: DutyFamily | null;
 }
 
 /**

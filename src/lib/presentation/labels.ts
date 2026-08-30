@@ -39,6 +39,7 @@ const ISSUE_REASON_LABELS: Record<IssueReason, string> = {
   shift_coverage_partial: "הכיסוי למשמרת שלך חלקי",
   invalid_shift_time: "שעות המשמרת דורשות בדיקה",
   role_capability_mismatch: "השיבוץ שלך דורש בדיקת תפקיד",
+  weapon_qualification_invalid: "הכשירות שלך למטווחים אינה בתוקף לשיבוץ הזה",
 };
 
 export function issueReasonLabel(reason: IssueReason): string {
@@ -58,6 +59,7 @@ const MANAGER_ISSUE_REASON_LABELS: Record<IssueReason, string> = {
   shift_coverage_partial: "הכיסוי למשמרת חלקי",
   invalid_shift_time: "שעות המשמרת דורשות בדיקה",
   role_capability_mismatch: "השיבוץ דורש בדיקת תפקיד",
+  weapon_qualification_invalid: "הכשירות למטווחים אינה בתוקף לשיבוץ",
 };
 
 export function managerIssueReasonLabel(reason: IssueReason): string {

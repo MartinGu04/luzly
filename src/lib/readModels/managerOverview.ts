@@ -2,9 +2,10 @@ import "server-only";
 import { resolveManagerDateRange } from "@/lib/domain/dateRange";
 import { deriveReserveRoleParticipation, type ReserveRoleParticipationSource } from "@/lib/domain/reserveParticipation";
 import { ShiftConfigurationError, buildShiftSchedule, type ShiftSchedule } from "@/lib/domain/shiftSchedule";
+import { isEligibleForShootingRanges, type WeaponQualificationInfo } from "@/lib/domain/shootingRangeQualification";
 import type { Person } from "@/lib/domain/types";
 import { timedStage, timedSyncStage } from "@/lib/config/timingDiagnostics";
-import { parseSourcePeriodYear, type RawSheet } from "@/lib/google";
+import { parseSourcePeriodYear, type RawSheet, type RawWorkbookSnapshot } from "@/lib/google";
 import { fetchAllUserIdsByEmail, resolvePersonIdentity } from "@/lib/notifications/engine/recipients";
 import { computeNotificationReadiness } from "@/lib/notifications/engine/readiness";
 import { parseEvent } from "@/lib/parsers/event";
@@ -12,12 +13,15 @@ import { parseFairnessTable } from "@/lib/parsers/fairness";
 import { parsePotentialSheet } from "@/lib/parsers/potential";
 import { parseScheduleSheet } from "@/lib/parsers/schedule";
 import { parseSettingsSheet } from "@/lib/parsers/settings";
+import { parseShootingRangeRelevanceSheet, parseShootingRangesSheet } from "@/lib/parsers/shootingRanges";
+import { getCompletionsForPersonIds } from "@/lib/shootingRanges/store";
 import { getJerusalemLocalNow } from "@/lib/time/jerusalemClock";
 import { buildManagerOverviewReadModel, type RosterAvatarLookup } from "./buildManagerOverviewReadModel";
 import { type AdoptionReadinessLookup } from "./managerAdoptionProjection";
 import { getManagerWorkbookSheet, loadManagerWorkbookContext } from "./managerWorkbookContext";
 import type { ManagerOverviewParams } from "./managerOverviewParams";
 import type { ManagerOverviewReadModel } from "./managerTypes";
+import { buildWeaponQualificationIndex } from "./shootingRangeQualification";
 
 export type ManagerOverviewLoadResult =
   | { status: "unauthenticated" }
@@ -73,6 +77,7 @@ async function loadManagerOverviewReadModelInner(
   if (contextResult.status !== "ok") return contextResult;
 
   const { manager, people, snapshot, avatarUrl } = contextResult.context;
+  const now = getJerusalemLocalNow();
 
   // Started now (the manager is already authorized above by
   // `loadManagerWorkbookContext`) so its Supabase Admin API + bulk
@@ -85,6 +90,14 @@ async function loadManagerOverviewReadModelInner(
   // after it. `loadRosterAvatarLookup` never touches `push_subscriptions`
   // (PR #96's performance fix) -- see its own docstring.
   const rosterAvatarsPromise = loadRosterAvatarLookup(people, params.personId, needsRosterAvatars);
+  // Same reasoning again -- the מטווחים app-owned completions lookup for
+  // "דורש טיפול"'s weapon-qualification rule, kicked off alongside the two
+  // privileged lookups above rather than serialized after the sheet
+  // parsing below (`shootingRanges` is already part of THIS request's own
+  // workbook batch -- see the widened `loadManagerWorkbookContext` sources
+  // above -- so this costs one extra Supabase read, never a second Google
+  // fetch).
+  const qualificationPromise = loadWeaponQualificationIndex(people, snapshot, now.date);
 
   const settings = timedSyncStage("manager.settings.parse", () =>
     parseSettingsSheet(getManagerWorkbookSheet(snapshot, "settings")),
@@ -127,10 +140,13 @@ async function loadManagerOverviewReadModelInner(
     h2: reserveParticipationSource(getManagerWorkbookSheet(snapshot, "potentialH2"), people),
   }));
 
-  const now = getJerusalemLocalNow();
   const range = resolveManagerDateRange(params.range, params.month, now);
 
-  const [adoption, rosterAvatars] = await Promise.all([adoptionReadinessPromise, rosterAvatarsPromise]);
+  const [adoption, rosterAvatars, qualificationByPersonId] = await Promise.all([
+    adoptionReadinessPromise,
+    rosterAvatarsPromise,
+    qualificationPromise,
+  ]);
 
   const model = timedSyncStage("manager.readModel.build", () =>
     buildManagerOverviewReadModel({
@@ -147,6 +163,7 @@ async function loadManagerOverviewReadModelInner(
       selectedPersonId: params.personId,
       adoption,
       rosterAvatars,
+      qualificationByPersonId,
     }),
   );
 
@@ -242,6 +259,40 @@ async function loadRosterAvatarLookup(
   } catch {
     console.error("[manager-overview] roster avatar lookup failed");
     return { status: "unavailable" };
+  }
+}
+
+/**
+ * "דורש טיפול"'s weapon-qualification rule (spec: a GENERAL rule over
+ * every שמירה/עתודה/אוקסיד activity, never an oxid-specific patch) needs
+ * every eligible person's own מטווחים baseline -- this parses the SAME
+ * "shootingRanges" sheet (already in this request's own widened workbook
+ * batch, see the caller's `loadManagerWorkbookContext` call) and reuses
+ * `buildWeaponQualificationIndex`, the EXACT SAME per-person precedence
+ * `shootingRangeManagerOverview.ts`'s own team overview already
+ * establishes -- never a second/competing qualification computation. Fails
+ * soft to an empty map (a real Supabase outage degrades to "nobody flagged
+ * this tick", never a thrown exception that would take down the whole
+ * manager overview) -- same defensive convention as `loadAdoptionReadiness`/
+ * `loadRosterAvatarLookup` above.
+ */
+async function loadWeaponQualificationIndex(
+  people: readonly Person[],
+  snapshot: RawWorkbookSnapshot,
+  today: string,
+): Promise<ReadonlyMap<string, WeaponQualificationInfo>> {
+  try {
+    const shootingRangesSheet = getManagerWorkbookSheet(snapshot, "shootingRanges");
+    const sheetRecords = parseShootingRangesSheet(shootingRangesSheet, people);
+    const relevanceRecords = parseShootingRangeRelevanceSheet(shootingRangesSheet, people);
+    const eligiblePersonIds = people.filter((person) => isEligibleForShootingRanges(person)).map((person) => person.id);
+    const completions = await timedStage("manager.weaponQualification", () =>
+      getCompletionsForPersonIds(eligiblePersonIds),
+    );
+    return buildWeaponQualificationIndex({ people, sheetRecords, relevanceRecords, completions, today });
+  } catch {
+    console.error("[manager-overview] weapon qualification lookup failed");
+    return new Map();
   }
 }
 

@@ -38,7 +38,8 @@ export type WorkerStage =
   | "recurring_rules_due_lookup"
   | "recurring_rules"
   | "fresh_personnel_read"
-  | "manual_broadcast_immediate_delivery";
+  | "manual_broadcast_immediate_delivery"
+  | "weapon_qualification";
 
 export class WorkerStageError extends Error {
   readonly stage: WorkerStage;

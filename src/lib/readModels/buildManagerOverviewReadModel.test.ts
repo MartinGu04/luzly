@@ -116,6 +116,7 @@ function buildModel(overrides: Partial<Parameters<typeof buildManagerOverviewRea
     managerAvatarUrl: null,
     adoption: { status: "skipped" },
     rosterAvatars: { status: "skipped" },
+    qualificationByPersonId: new Map(),
     ...overrides,
   });
 }
@@ -179,6 +180,65 @@ describe("buildManagerOverviewReadModel — global issues", () => {
       ],
     });
     expect(model.issues.every((issue) => issue.date === "2026-08-13")).toBe(true);
+  });
+});
+
+describe("buildManagerOverviewReadModel — weapon qualification (מטווחים) issues wired into דורש טיפול", () => {
+  it("a person scheduled for אוקסיד with an expired qualification on the activity date surfaces as a critical issue", () => {
+    const duty = event({
+      personId: MARTIN.id,
+      personName: MARTIN.name,
+      date: "2026-08-15",
+      category: "duty",
+      role: null,
+      period: "unspecified",
+      dutyFamily: "oxid",
+      title: "אוקסיד",
+      rawValue: "אוקסיד",
+    });
+    const model = buildModel({
+      events: [duty],
+      qualificationByPersonId: new Map([[MARTIN.id, { expiryDate: "2026-08-01", notRelevant: false }]]),
+    });
+
+    const issue = model.issues.find((i) => i.reason === "weapon_qualification_invalid");
+    expect(issue).toBeDefined();
+    expect(issue).toMatchObject({ personId: MARTIN.id, severity: "critical", date: "2026-08-15" });
+  });
+
+  it("no qualification map entry (out of scope) -> no weapon-qualification issue", () => {
+    const duty = event({
+      personId: MARTIN.id,
+      personName: MARTIN.name,
+      date: "2026-08-15",
+      category: "duty",
+      role: null,
+      period: "unspecified",
+      dutyFamily: "oxid",
+      title: "אוקסיד",
+      rawValue: "אוקסיד",
+    });
+    const model = buildModel({ events: [duty] }); // default empty qualificationByPersonId
+    expect(model.issues.some((i) => i.reason === "weapon_qualification_invalid")).toBe(false);
+  });
+
+  it("a valid qualification through the activity date -> no issue", () => {
+    const duty = event({
+      personId: MARTIN.id,
+      personName: MARTIN.name,
+      date: "2026-08-15",
+      category: "duty",
+      role: null,
+      period: "unspecified",
+      dutyFamily: "oxid",
+      title: "אוקסיד",
+      rawValue: "אוקסיד",
+    });
+    const model = buildModel({
+      events: [duty],
+      qualificationByPersonId: new Map([[MARTIN.id, { expiryDate: "2026-12-01", notRelevant: false }]]),
+    });
+    expect(model.issues.some((i) => i.reason === "weapon_qualification_invalid")).toBe(false);
   });
 });
 

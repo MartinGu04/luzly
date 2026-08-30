@@ -44,6 +44,7 @@ import {
   issueTargetEmoji,
   issueTargetTitle,
   personalIssueReasonLabel,
+  weaponQualificationIssueReasonLabel,
 } from "@/lib/presentation/issue";
 import { buildIssueRecommendationView } from "@/lib/presentation/issueRecommendation";
 import {
@@ -111,6 +112,9 @@ function managerIssueReasonLabelFor(
   issue: ManagerIssue,
   coverageByDatePeriod: ReadonlyMap<string, ManagerShiftOverviewEntry>,
 ): string {
+  const weaponLabel = weaponQualificationIssueReasonLabel(issue);
+  if (weaponLabel) return weaponLabel;
+
   const fallback = managerIssueReasonLabel(issue.reason);
   if (!COVERAGE_ISSUE_REASONS.has(issue.reason) || !issue.targetEvent) return fallback;
 

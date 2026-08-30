@@ -1061,6 +1061,7 @@ describe("issues", () => {
       title: "טכנאי יום",
       role: "technician",
       period: "day",
+      dutyFamily: null,
     });
   });
 });

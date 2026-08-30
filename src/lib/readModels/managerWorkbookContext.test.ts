@@ -113,11 +113,18 @@ describe("loadManagerWorkbookContext — manager authorization", () => {
     expect(result).toEqual({ status: "forbidden" });
   });
 
-  it("manager: fetches exactly the 5 shared manager sources, exactly once", async () => {
+  it("manager: fetches exactly the 6 shared manager sources, exactly once", async () => {
     await loadManagerWorkbookContext();
     expect(getWorkbookSnapshot).toHaveBeenCalledTimes(1);
     expect(getWorkbookSnapshot).toHaveBeenCalledWith(MANAGER_WORKBOOK_SOURCES);
-    expect(MANAGER_WORKBOOK_SOURCES).toEqual(["personnel", "schedule", "settings", "potentialH1", "potentialH2"]);
+    expect(MANAGER_WORKBOOK_SOURCES).toEqual([
+      "personnel",
+      "schedule",
+      "settings",
+      "potentialH1",
+      "potentialH2",
+      "shootingRanges",
+    ]);
   });
 
   it("a narrower caller's own `sources` is what actually gets fetched, not the fixed 5-source default", async () => {

@@ -58,7 +58,7 @@ describe("IssuesPanel", () => {
         issues={[
           issue({
             reason: "shift_coverage_missing",
-            targetEvent: { date: "2026-08-12", category: "shift", title: "טכנאי יום", role: "technician", period: "day" },
+            targetEvent: { date: "2026-08-12", category: "shift", title: "טכנאי יום", role: "technician", period: "day", dutyFamily: null },
           }),
         ]}
       />,
