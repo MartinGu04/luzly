@@ -12,6 +12,7 @@ import { runReminders, type RemindersSummary } from "./reminders";
 import { loadNotificationRuleConfig, type NotificationRuleConfig } from "./ruleConfig";
 import { runDueScheduledBroadcastDispatch } from "./scheduledBroadcast";
 import { runDelivery, type DeliverySummary } from "./delivery";
+import { runWeaponQualificationCheck } from "./weaponQualification";
 import { resolveOperationalGeneration } from "./operationalGeneration";
 import { peekDueJobsCount, peekDueManagerScheduledBroadcastsCount, peekLastOperationalGeneration, setLastOperationalGeneration } from "./store";
 import { formatWorkerErrorLog, runStage, sanitizeWorkerError, WorkerStageError } from "./workerErrors";
@@ -114,7 +115,7 @@ export async function runNotificationWorkerTick(mode: WorkerMode): Promise<Worke
     return { status: "configuration_error", message: freshRead.message };
   }
 
-  const { people, events, shiftSchedule } = freshRead.read;
+  const { people, events, shiftSchedule, shootingRangeSheetRecords, shootingRangeRelevanceRecords } = freshRead.read;
   const now = getJerusalemLocalNow();
   const week = getOperationalWeek(now);
 
@@ -245,6 +246,33 @@ export async function runNotificationWorkerTick(mode: WorkerMode): Promise<Worke
     console.error(formatWorkerErrorLog(stage, sanitizeWorkerError(cause)));
   }
 
+  // "דורש טיפול"'s weapon-qualification rule (spec: a GENERAL rule over
+  // every שמירה/עתודה/אוקסיד activity) -- isolated in its own try/catch,
+  // same reasoning as the reminders phase above: a failure here (e.g. the
+  // מטווחים completions table being briefly unreachable) must never take
+  // down scheduled-broadcast dispatch / due-job delivery below, and this
+  // tick simply notifies zero weapon-qualification issues rather than
+  // crashing the whole tick.
+  let weaponQualificationJobsCreated = 0;
+  try {
+    const weaponQualificationResult = await runStage("weapon_qualification", () =>
+      runWeaponQualificationCheck(
+        people,
+        events,
+        shootingRangeSheetRecords,
+        shootingRangeRelevanceRecords,
+        now.date,
+        persist,
+        recipientResolution,
+      ),
+    );
+    weaponQualificationJobsCreated = weaponQualificationResult.jobsCreated;
+  } catch (error) {
+    const stage = error instanceof WorkerStageError ? error.stage : "weapon_qualification";
+    const cause = error instanceof WorkerStageError ? error.cause : error;
+    console.error(formatWorkerErrorLog(stage, sanitizeWorkerError(cause)));
+  }
+
   let scheduledBroadcastsDue: number;
   let scheduledBroadcastsDispatched = 0;
   let scheduledBroadcastsFailed = 0;
@@ -312,7 +340,8 @@ export async function runNotificationWorkerTick(mode: WorkerMode): Promise<Worke
       remindersSummary.logisticsWithdrawalNoonSupervisorJobs +
       remindersSummary.logisticsWithdrawalNoonTeamJobs +
       remindersSummary.almashCheckInJobs +
-      remindersSummary.constraintsJobs,
+      remindersSummary.constraintsJobs +
+      weaponQualificationJobsCreated,
     jobsDue,
     scheduledBroadcastsDue,
     scheduledBroadcastsDispatched,

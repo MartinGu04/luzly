@@ -31,6 +31,7 @@ const resolveOperationalMode = vi.fn();
 const resolveOperationalRoster = vi.fn();
 const peekLastOperationalGeneration = vi.fn();
 const setLastOperationalGeneration = vi.fn();
+const runWeaponQualificationCheck = vi.fn();
 
 vi.mock("./freshRead", () => ({ fetchFreshWorkbookRead: (...args: unknown[]) => fetchFreshWorkbookRead(...args) }));
 vi.mock("./recipients", () => ({ resolveNotificationRecipients: (...args: unknown[]) => resolveNotificationRecipients(...args) }));
@@ -53,6 +54,9 @@ vi.mock("./store", () => ({
 }));
 vi.mock("@/lib/emergencyMode/state", () => ({ resolveOperationalMode: (...args: unknown[]) => resolveOperationalMode(...args) }));
 vi.mock("@/lib/readModels/operationalMode", () => ({ resolveOperationalRoster: (...args: unknown[]) => resolveOperationalRoster(...args) }));
+vi.mock("./weaponQualification", () => ({
+  runWeaponQualificationCheck: (...args: unknown[]) => runWeaponQualificationCheck(...args),
+}));
 
 async function loadModule() {
   return import("./pipeline");
@@ -100,6 +104,7 @@ function setupHappyDefaults() {
     jobsSkipped: 0,
     jobsPending: 0,
   });
+  runWeaponQualificationCheck.mockResolvedValue({ issuesDetected: 0, jobsCreated: 0 });
 }
 
 afterEach(() => {

@@ -615,6 +615,7 @@ function toIssueTargetSummary(event: Event): PersonalIssueTargetSummary {
     title: event.title,
     role: event.role,
     period: event.period,
+    dutyFamily: event.dutyFamily,
   };
 }
 

@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import type { AbsenceKind, Event } from "./event";
 import type { Person } from "./types";
 import { buildShiftSchedule } from "./shiftSchedule";
+import type { WeaponQualificationInfo } from "./shootingRangeQualification";
 import {
   detectBlockingAbsenceIssues,
   detectCapabilityMismatchIssues,
   detectOperationalIssues,
   detectShiftTimingIssues,
+  detectWeaponQualificationIssues,
 } from "./operationalIssues";
 
 const schedule = buildShiftSchedule("07:30"); // day 07:30-19:30, night 19:30-07:30(+1)
@@ -396,6 +398,95 @@ describe("detectCapabilityMismatchIssues — rule 4", () => {
   });
 });
 
+function qualificationMap(entries: Record<string, WeaponQualificationInfo>): Map<string, WeaponQualificationInfo> {
+  return new Map(Object.entries(entries));
+}
+
+describe("detectWeaponQualificationIssues — rule 5", () => {
+  it("expired qualification + oxid tomorrow -> issue", () => {
+    const event = dutyEvent({ personId: "p_1", dutyFamily: "oxid", date: "2026-08-31" });
+    const qualification = qualificationMap({ p_1: { expiryDate: "2026-08-23", notRelevant: false } });
+    const issues = detectWeaponQualificationIssues([event], qualification);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toMatchObject({ reason: "weapon_qualification_invalid", severity: "critical", personId: "p_1", date: "2026-08-31" });
+    expect(issues[0].targetEvent).toBe(event);
+  });
+
+  it("expired qualification + guard duty (שמירות) -> issue", () => {
+    const event = dutyEvent({ personId: "p_1", dutyFamily: "guard", date: "2026-08-31" });
+    const qualification = qualificationMap({ p_1: { expiryDate: "2026-08-23", notRelevant: false } });
+    expect(detectWeaponQualificationIssues([event], qualification)).toHaveLength(1);
+  });
+
+  it("expired qualification + reserve duty (עתודה) -> issue", () => {
+    const event = dutyEvent({ personId: "p_1", dutyFamily: "reserve", date: "2026-08-31" });
+    const qualification = qualificationMap({ p_1: { expiryDate: "2026-08-23", notRelevant: false } });
+    expect(detectWeaponQualificationIssues([event], qualification)).toHaveLength(1);
+  });
+
+  it("qualification expires BEFORE the activity date -> issue", () => {
+    const event = dutyEvent({ personId: "p_1", dutyFamily: "oxid", date: "2026-03-01" });
+    const qualification = qualificationMap({ p_1: { expiryDate: "2026-02-28", notRelevant: false } });
+    expect(detectWeaponQualificationIssues([event], qualification)).toHaveLength(1);
+  });
+
+  it("qualification expires ON the activity date -> no issue (valid through the end of the expiry day)", () => {
+    const event = dutyEvent({ personId: "p_1", dutyFamily: "oxid", date: "2026-03-01" });
+    const qualification = qualificationMap({ p_1: { expiryDate: "2026-03-01", notRelevant: false } });
+    expect(detectWeaponQualificationIssues([event], qualification)).toEqual([]);
+  });
+
+  it("qualification remains valid through the activity date -> no issue", () => {
+    const event = dutyEvent({ personId: "p_1", dutyFamily: "oxid", date: "2026-03-01" });
+    const qualification = qualificationMap({ p_1: { expiryDate: "2026-06-01", notRelevant: false } });
+    expect(detectWeaponQualificationIssues([event], qualification)).toEqual([]);
+  });
+
+  it("no recorded valid qualification (expiryDate: null) -> issue", () => {
+    const event = dutyEvent({ personId: "p_1", dutyFamily: "oxid", date: "2026-03-01" });
+    const qualification = qualificationMap({ p_1: { expiryDate: null, notRelevant: false } });
+    expect(detectWeaponQualificationIssues([event], qualification)).toHaveLength(1);
+  });
+
+  it("unrelated activity (a plain shift, no dutyFamily) -> no issue", () => {
+    const event = technicianShift({ personId: "p_1" });
+    const qualification = qualificationMap({ p_1: { expiryDate: null, notRelevant: false } });
+    expect(detectWeaponQualificationIssues([event], qualification)).toEqual([]);
+  });
+
+  it("a duty family that does not require a weapon (e.g. rasar) -> no issue even with an expired qualification", () => {
+    const event = dutyEvent({ personId: "p_1", dutyFamily: "rasar", date: "2026-03-01" });
+    const qualification = qualificationMap({ p_1: { expiryDate: "2026-01-01", notRelevant: false } });
+    expect(detectWeaponQualificationIssues([event], qualification)).toEqual([]);
+  });
+
+  it("an explicit לא רלוונטי override always wins, regardless of expiry -> no issue", () => {
+    const event = dutyEvent({ personId: "p_1", dutyFamily: "oxid", date: "2026-03-01" });
+    const qualification = qualificationMap({ p_1: { expiryDate: "2020-01-01", notRelevant: true } });
+    expect(detectWeaponQualificationIssues([event], qualification)).toEqual([]);
+  });
+
+  it("a person entirely absent from the map (out of scope) -> no issue, never a 'missing data' fabrication", () => {
+    const event = dutyEvent({ personId: "p_unknown", dutyFamily: "oxid", date: "2026-03-01" });
+    expect(detectWeaponQualificationIssues([event], new Map())).toEqual([]);
+  });
+
+  it("activity in the future: qualification valid TODAY but expires before the activity date -> issue (checked against the activity date, never 'today')", () => {
+    // Baseline expires 2026-02-01; the activity itself is scheduled for
+    // 2026-03-01, well after expiry -- even though, evaluated against an
+    // earlier "today", the same baseline would still read as valid.
+    const event = dutyEvent({ personId: "p_1", dutyFamily: "oxid", date: "2026-03-01" });
+    const qualification = qualificationMap({ p_1: { expiryDate: "2026-02-01", notRelevant: false } });
+    expect(detectWeaponQualificationIssues([event], qualification)).toHaveLength(1);
+  });
+
+  it("a future activity where the qualification stays valid through that date -> no issue", () => {
+    const event = dutyEvent({ personId: "p_1", dutyFamily: "oxid", date: "2026-03-01" });
+    const qualification = qualificationMap({ p_1: { expiryDate: "2026-04-01", notRelevant: false } });
+    expect(detectWeaponQualificationIssues([event], qualification)).toEqual([]);
+  });
+});
+
 describe("detectOperationalIssues — integration", () => {
   it("10. multiple events on a clean day produce no issues at all", () => {
     const supervisor = supervisorShift({ personId: "p_sup" });
@@ -473,5 +564,21 @@ describe("detectOperationalIssues — integration", () => {
       expect(typeof issue.reason).toBe("string");
       expect(issue.reason).toMatch(/^[a-z_]+$/);
     }
+  });
+
+  it("30. detectOperationalIssues wires the qualification map through to the weapon-qualification rule (default: no map, no issue)", () => {
+    const duty = dutyEvent({ personId: "p_1", dutyFamily: "oxid", date: "2026-08-31" });
+    expect(detectOperationalIssues([duty], [], schedule)).toEqual([]);
+
+    const qualification = qualificationMap({ p_1: { expiryDate: "2026-08-23", notRelevant: false } });
+    const issues = detectOperationalIssues([duty], [], schedule, qualification);
+    expect(issues.filter((issue) => issue.reason === "weapon_qualification_invalid")).toHaveLength(1);
+  });
+
+  it("31. repeated/duplicate processing of the same weapon-qualification evidence produces one logical issue, not duplicates", () => {
+    const duty = dutyEvent({ personId: "p_1", dutyFamily: "oxid", date: "2026-08-31" });
+    const qualification = qualificationMap({ p_1: { expiryDate: "2026-08-23", notRelevant: false } });
+    const issues = detectOperationalIssues([duty, duty], [], schedule, qualification);
+    expect(issues.filter((issue) => issue.reason === "weapon_qualification_invalid")).toHaveLength(1);
   });
 });

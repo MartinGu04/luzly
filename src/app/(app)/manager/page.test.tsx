@@ -730,7 +730,7 @@ describe("ManagerPage — PR #37 recommendation wiring", () => {
                 date: "2026-08-13",
                 missingIntervals: null,
                 metadata: null,
-                targetEvent: { date: "2026-08-13", category: "shift", title: "טכנאי יום", role: "technician", period: "day" },
+                targetEvent: { date: "2026-08-13", category: "shift", title: "טכנאי יום", role: "technician", period: "day" , dutyFamily: null },
               },
             ],
           }),
@@ -752,7 +752,7 @@ describe("ManagerPage — Overview issue wording matches the domain's own role-c
             issue({
               reason: "shift_coverage_missing",
               personName: "טוביה פרי",
-              targetEvent: { date: "2026-08-13", category: "shift", title: "יום", role: "technician", period: "day" },
+              targetEvent: { date: "2026-08-13", category: "shift", title: "יום", role: "technician", period: "day" , dutyFamily: null },
             }),
           ],
           coverageOverview: [
@@ -782,7 +782,7 @@ describe("ManagerPage — Overview issue wording matches the domain's own role-c
             issue({
               reason: "shift_coverage_missing",
               personName: "דנה כהן",
-              targetEvent: { date: "2026-08-13", category: "shift", title: "יום", role: "supervisor", period: "day" },
+              targetEvent: { date: "2026-08-13", category: "shift", title: "יום", role: "supervisor", period: "day" , dutyFamily: null },
             }),
           ],
           coverageOverview: [
@@ -811,7 +811,7 @@ describe("ManagerPage — Overview issue wording matches the domain's own role-c
             issue({
               reason: "shift_coverage_missing",
               personName: "רון קבוע",
-              targetEvent: { date: "2026-08-13", category: "shift", title: "יום", role: "technician", period: "day" },
+              targetEvent: { date: "2026-08-13", category: "shift", title: "יום", role: "technician", period: "day" , dutyFamily: null },
             }),
           ],
           coverageOverview: [
@@ -840,7 +840,7 @@ describe("ManagerPage — Overview issue wording matches the domain's own role-c
             issue({
               reason: "shift_coverage_missing",
               personName: "מרטין בדיקה",
-              targetEvent: { date: "2026-08-13", category: "shift", title: "יום", role: "technician", period: "day" },
+              targetEvent: { date: "2026-08-13", category: "shift", title: "יום", role: "technician", period: "day" , dutyFamily: null },
             }),
           ],
           coverageOverview: [
@@ -870,7 +870,7 @@ describe("ManagerPage — Overview issue wording matches the domain's own role-c
               reason: "shift_coverage_partial",
               personName: "גיל טכנאי",
               missingIntervals: [{ startMinute: 330, endMinute: 450 }],
-              targetEvent: { date: "2026-08-13", category: "shift", title: "יום", role: "technician", period: "day" },
+              targetEvent: { date: "2026-08-13", category: "shift", title: "יום", role: "technician", period: "day" , dutyFamily: null },
             }),
           ],
           coverageOverview: [
@@ -899,7 +899,7 @@ describe("ManagerPage — Overview issue wording matches the domain's own role-c
               reason: "shift_coverage_missing",
               severity: "critical",
               personName: "טוביה פרי",
-              targetEvent: { date: "2026-08-13", category: "shift", title: "יום", role: "technician", period: "day" },
+              targetEvent: { date: "2026-08-13", category: "shift", title: "יום", role: "technician", period: "day" , dutyFamily: null },
             }),
           ],
           coverageOverview: [
@@ -1215,7 +1215,7 @@ describe("ManagerPage — selected person view", () => {
                 date: "2026-08-13",
                 missingIntervals: null,
                 metadata: null,
-                targetEvent: { date: "2026-08-13", category: "shift", title: "טכנאי יום", role: "technician", period: "day" },
+                targetEvent: { date: "2026-08-13", category: "shift", title: "טכנאי יום", role: "technician", period: "day" , dutyFamily: null },
               },
             ],
           }),

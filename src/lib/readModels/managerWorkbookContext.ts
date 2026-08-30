@@ -38,8 +38,14 @@ export interface ManagerWorkbookContext {
 /**
  * The single manager-wide batch this whole app ever fetches, shared by
  * EVERY manager-only feature (Manager Overview PR #14, Manager Fairness
- * PR #15, and any future one) -- never fetched a second/third time for
- * the same request.
+ * PR #15, the weapon-qualification "דורש טיפול" rule, and any future one)
+ * -- never fetched a second/third time for the same request. `shootingRanges`
+ * joined this set for the weapon-qualification rule (Manager Overview
+ * needs it to build `qualificationByPersonId`) rather than being requested
+ * as a one-off narrower batch -- keeping Overview and Fairness on the
+ * IDENTICAL source set means tapping between `/manager` and
+ * `/manager/fairness` within `getWorkbookSnapshot`'s short cache TTL still
+ * reuses the same snapshot instead of triggering a second Google fetch.
  */
 export const MANAGER_WORKBOOK_SOURCES: SheetSourceKey[] = [
   "personnel",
@@ -47,6 +53,7 @@ export const MANAGER_WORKBOOK_SOURCES: SheetSourceKey[] = [
   "settings",
   "potentialH1",
   "potentialH2",
+  "shootingRanges",
 ];
 
 export function getManagerWorkbookSheet(snapshot: RawWorkbookSnapshot, key: SheetSourceKey): RawSheet {

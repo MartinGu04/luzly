@@ -5,6 +5,12 @@ import { parseEvent } from "@/lib/parsers/event";
 import { parsePersonnelSheet } from "@/lib/parsers/personnel";
 import { parseScheduleSheet } from "@/lib/parsers/schedule";
 import { parseSettingsSheet } from "@/lib/parsers/settings";
+import {
+  parseShootingRangeRelevanceSheet,
+  parseShootingRangesSheet,
+  type ShootingRangeRelevanceRecord,
+  type ShootingRangeSheetRecord,
+} from "@/lib/parsers/shootingRanges";
 import { ShiftConfigurationError, buildShiftSchedule, type ShiftSchedule } from "@/lib/domain/shiftSchedule";
 import type { Event } from "@/lib/domain/event";
 import type { Person } from "@/lib/domain/types";
@@ -14,13 +20,16 @@ export interface FreshWorkbookRead {
   events: Event[];
   shiftSchedule: ShiftSchedule;
   fetchedAt: string;
+  /** The "מטווחים" sheet, already structurally parsed -- feeds the weapon-qualification "דורש טיפול" rule (`runWeaponQualificationCheck`), never re-fetched/re-parsed a second time for it. */
+  shootingRangeSheetRecords: ShootingRangeSheetRecord[];
+  shootingRangeRelevanceRecords: ShootingRangeRelevanceRecord[];
 }
 
 export type FreshWorkbookReadResult =
   | { status: "ok"; read: FreshWorkbookRead }
   | { status: "configuration_error"; message: string };
 
-const REQUIRED_SOURCES: SheetSourceKey[] = ["personnel", "schedule", "settings"];
+const REQUIRED_SOURCES: SheetSourceKey[] = ["personnel", "schedule", "settings", "shootingRanges"];
 const PERSONNEL_ONLY_SOURCES: SheetSourceKey[] = ["personnel"];
 
 function getSheetByKey(snapshot: RawWorkbookSnapshot, key: SheetSourceKey): RawSheet {
@@ -63,9 +72,20 @@ export async function fetchFreshWorkbookRead(): Promise<FreshWorkbookReadResult>
   const rawAssignments = parseScheduleSheet(getSheetByKey(snapshot, "schedule"), people);
   const events = rawAssignments.map(parseEvent);
 
+  const shootingRangesSheet = getSheetByKey(snapshot, "shootingRanges");
+  const shootingRangeSheetRecords = parseShootingRangesSheet(shootingRangesSheet, people);
+  const shootingRangeRelevanceRecords = parseShootingRangeRelevanceSheet(shootingRangesSheet, people);
+
   return {
     status: "ok",
-    read: { people, events, shiftSchedule, fetchedAt: snapshot.fetchedAt },
+    read: {
+      people,
+      events,
+      shiftSchedule,
+      fetchedAt: snapshot.fetchedAt,
+      shootingRangeSheetRecords,
+      shootingRangeRelevanceRecords,
+    },
   };
 }
 

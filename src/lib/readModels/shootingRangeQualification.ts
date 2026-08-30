@@ -1,7 +1,7 @@
 import "server-only";
 import { getRequestAuthenticatedIdentity } from "@/lib/auth/getRequestAuthenticatedIdentity";
 import { resolveIdentityAgainstPeople } from "@/lib/auth/resolveCurrentPerson";
-import { isEligibleForShootingRanges } from "@/lib/domain/shootingRangeQualification";
+import { isEligibleForShootingRanges, type WeaponQualificationInfo } from "@/lib/domain/shootingRangeQualification";
 import type { Person } from "@/lib/domain/types";
 import { SHEET_SOURCES, type RawWorkbookSnapshot, type SheetSourceKey } from "@/lib/google";
 import { parsePersonnelSheet } from "@/lib/parsers/personnel";
@@ -11,7 +11,7 @@ import {
   type ShootingRangeRelevanceRecord,
   type ShootingRangeSheetRecord,
 } from "@/lib/parsers/shootingRanges";
-import { getCompletionsForPersonIds, getPlannedOccurrencesForPersonIds } from "@/lib/shootingRanges/store";
+import { getCompletionsForPersonIds, getPlannedOccurrencesForPersonIds, type CompletionRow } from "@/lib/shootingRanges/store";
 import { getWorkbookSnapshot } from "@/lib/sync";
 import { getJerusalemLocalNow } from "@/lib/time/jerusalemClock";
 import {
@@ -142,4 +142,57 @@ export async function loadShootingRangeQualification(): Promise<ShootingRangeQua
   });
 
   return { status: "ok", person, model, avatarUrl: identity.avatarUrl };
+}
+
+export interface WeaponQualificationIndexInput {
+  /** The FULL roster -- never pre-filtered; ineligible people are simply skipped below (`isEligibleForShootingRanges`, the ONE eligibility gate the whole מטווחים feature already shares). */
+  people: readonly Person[];
+  sheetRecords: readonly ShootingRangeSheetRecord[];
+  relevanceRecords: readonly ShootingRangeRelevanceRecord[];
+  /** Every completion CLAIM across every eligible person, any status -- grouped internally by `personId`. */
+  completions: readonly CompletionRow[];
+  /** "YYYY-MM-DD", Asia/Jerusalem civil date -- the SHEET/APP baseline-resolution "today", never the activity date the resulting map is later checked against (that happens per-event, in `detectWeaponQualificationIssues`). */
+  today: string;
+}
+
+/**
+ * Every ELIGIBLE person's `WeaponQualificationInfo` -- `detectOperationalIssues`'s
+ * general "requires a valid מטווחים qualification for the scheduled
+ * activity" rule needs exactly `expiryDate`/`notRelevant` per person, never
+ * a whole `ShootingRangeQualificationReadModel`. Reuses the EXACT SAME
+ * per-person precedence `buildShootingRangeQualificationReadModel` already
+ * establishes (latest APPROVED app completion, else the Sheet baseline,
+ * else none; an explicit `לא רלוונטי` always overriding) -- never a second,
+ * competing qualification computation. `plannedOccurrences` is deliberately
+ * never fetched for this index -- `expiryDate`/`status` never depend on it
+ * (see that read model's own docs); only `plannedRange`/`pendingSelfReport`
+ * would, and this index never surfaces either.
+ */
+export function buildWeaponQualificationIndex(
+  input: WeaponQualificationIndexInput,
+): Map<string, WeaponQualificationInfo> {
+  const completionsByPersonId = new Map<string, CompletionRow[]>();
+  for (const completion of input.completions) {
+    const list = completionsByPersonId.get(completion.personId);
+    if (list) list.push(completion);
+    else completionsByPersonId.set(completion.personId, [completion]);
+  }
+
+  const index = new Map<string, WeaponQualificationInfo>();
+  for (const person of input.people) {
+    if (!isEligibleForShootingRanges(person)) continue;
+
+    const model = buildShootingRangeQualificationReadModel({
+      personId: person.id,
+      sheetBaseline: selectSheetBaselineForPerson(input.sheetRecords, person.id, input.today),
+      sheetRelevance: selectRelevanceRecordForPerson(input.relevanceRecords, person.id),
+      completions: completionsByPersonId.get(person.id) ?? [],
+      plannedOccurrences: [],
+      today: input.today,
+    });
+
+    index.set(person.id, { expiryDate: model.expiryDate, notRelevant: model.status === "not_relevant" });
+  }
+
+  return index;
 }

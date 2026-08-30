@@ -1,6 +1,7 @@
 import { daysInCalendarMonth } from "./calendarMonth";
 import { formatCalendarDate } from "./dateRange";
 import { daysBetweenCalendarDates, parseCalendarDate, type CalendarDate } from "./dutyBlocks";
+import type { DutyFamily } from "./event";
 import { classifyPersonnelType, isShiftCapable, type RoleGroupable } from "./personnelType";
 
 /**
@@ -113,4 +114,37 @@ export function classifyQualificationStatus(expiryDate: string | null, today: st
   if (daysUntilExpiry <= EXPIRING_VERY_SOON_THRESHOLD_DAYS) return "expiring_very_soon";
   if (daysUntilExpiry <= EXPIRING_SOON_THRESHOLD_DAYS) return "expiring_soon";
   return "valid";
+}
+
+/**
+ * Every `DutyFamily` that requires a weapon -- and therefore a valid
+ * shooting-range ("מטווחים") qualification -- to be scheduled safely:
+ * שמירה (guard), עתודה (reserve), and אוקסיד (oxid). The ONE place this
+ * list is decided (spec: a GENERAL rule, never an oxid-specific patch) --
+ * `detectWeaponQualificationIssues` (`operationalIssues.ts`) and the
+ * notification worker both check THIS function rather than re-listing
+ * duty families themselves. A future duty family that also needs a weapon
+ * is added here once, and both surfaces pick it up automatically.
+ */
+const WEAPON_QUALIFICATION_DUTY_FAMILIES: ReadonlySet<DutyFamily> = new Set(["guard", "reserve", "oxid"]);
+
+export function requiresWeaponQualification(dutyFamily: DutyFamily | null): boolean {
+  return dutyFamily !== null && WEAPON_QUALIFICATION_DUTY_FAMILIES.has(dutyFamily);
+}
+
+/**
+ * A person's weapon-qualification baseline, scoped down to exactly what
+ * `detectWeaponQualificationIssues` needs to evaluate validity against an
+ * arbitrary ACTIVITY date -- never a whole `ShootingRangeQualificationReadModel`
+ * (planned ranges/history/pending self-reports are irrelevant to this
+ * check). `expiryDate` is fixed regardless of "today" -- validity for a
+ * specific date is decided by re-running `classifyQualificationStatus(expiryDate, thatDate)`,
+ * never by reading a status already computed against "today". `notRelevant`
+ * mirrors the מטווחים sheet's explicit `לא רלוונטי` override (spec:
+ * "Applicability must win over stale Sheet qualification data") -- when
+ * true, no issue is ever raised for this person regardless of `expiryDate`.
+ */
+export interface WeaponQualificationInfo {
+  expiryDate: string | null;
+  notRelevant: boolean;
 }

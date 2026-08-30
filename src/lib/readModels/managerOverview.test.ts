@@ -142,7 +142,7 @@ describe("loadManagerOverviewReadModel — manager authorization", () => {
     expect(result).toEqual({ status: "forbidden" });
   });
 
-  it("manager: the manager batch fetch is allowed, requesting exactly the 5 manager sources", async () => {
+  it("manager: the manager batch fetch is allowed, requesting exactly the 6 manager sources", async () => {
     await loadManagerOverviewReadModel(DEFAULT_PARAMS, false);
     expect(getWorkbookSnapshot).toHaveBeenCalledTimes(1);
     expect(getWorkbookSnapshot).toHaveBeenCalledWith([
@@ -151,6 +151,7 @@ describe("loadManagerOverviewReadModel — manager authorization", () => {
       "settings",
       "potentialH1",
       "potentialH2",
+      "shootingRanges",
     ]);
   });
 
