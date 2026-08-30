@@ -267,4 +267,35 @@ describe("runNotificationWorkerTick -- Emergency Mode wiring (spec section 22)",
       expect.objectContaining({ operationalMode: "emergency", emergencyAssignments: assignments }),
     );
   });
+
+  it("regular mode: runs the weapon-qualification stage (same as every regular-mode stage)", async () => {
+    setupHappyDefaults();
+    const { runNotificationWorkerTick } = await loadModule();
+
+    await runNotificationWorkerTick("send");
+
+    expect(runWeaponQualificationCheck).toHaveBeenCalledTimes(1);
+  });
+
+  it("emergency mode: NEVER runs the weapon-qualification stage -- it reads the regular schedule, which Emergency Mode suspends as current operational truth (same boundary changeDetection/reminders already gate on, see pipeline.weaponQualificationEmergencyMode.test.ts for the full regression)", async () => {
+    setupHappyDefaults();
+    resolveOperationalMode.mockResolvedValue({ kind: "emergency", period: { id: "p1" } });
+    resolveOperationalRoster.mockResolvedValue({ mode: "emergency", assignments: [], diagnostics: [], fetchedAt: "2026-08-19T09:00:00.000Z" });
+    const { runNotificationWorkerTick } = await loadModule();
+
+    await runNotificationWorkerTick("send");
+
+    expect(runWeaponQualificationCheck).not.toHaveBeenCalled();
+  });
+
+  it("emergency mode with an unreadable roster: still never runs the weapon-qualification stage -- gated purely on operationalMode.kind, independent of roster readability", async () => {
+    setupHappyDefaults();
+    resolveOperationalMode.mockResolvedValue({ kind: "emergency", period: { id: "p1" } });
+    resolveOperationalRoster.mockResolvedValue({ mode: "emergency_unavailable", period: { id: "p1" }, message: "boom" });
+    const { runNotificationWorkerTick } = await loadModule();
+
+    await runNotificationWorkerTick("send");
+
+    expect(runWeaponQualificationCheck).not.toHaveBeenCalled();
+  });
 });

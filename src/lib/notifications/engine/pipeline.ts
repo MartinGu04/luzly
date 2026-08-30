@@ -253,24 +253,42 @@ export async function runNotificationWorkerTick(mode: WorkerMode): Promise<Worke
   // down scheduled-broadcast dispatch / due-job delivery below, and this
   // tick simply notifies zero weapon-qualification issues rather than
   // crashing the whole tick.
+  //
+  // Skipped ENTIRELY while Emergency Mode is active -- same boundary
+  // `changeDetectionRunnable`/every `reminders.ts` builder already gates
+  // on (`operationalMode.kind`), never a second concept of "which world
+  // is live". `events` here is still the REGULAR schedule, which
+  // Emergency Mode has suspended as current operational truth (spec:
+  // regular coverage/duty data must never be acted on as current truth
+  // while Emergency Mode is active) -- a regular-schedule guard/reserve/
+  // oxid assignment is not actually happening during an active emergency,
+  // so checking its qualification validity and paging managers about it
+  // would be a false, contradictory alert (Manager Area's own Emergency
+  // Mode branch shows the emergency operational view instead, with no
+  // trace of this "issue"). There is no Emergency Mode equivalent of this
+  // check to run instead -- Emergency Mode's own desk assignments carry
+  // no weapon-qualification concern -- so this is a plain skip, not a
+  // second Emergency Mode rule.
   let weaponQualificationJobsCreated = 0;
-  try {
-    const weaponQualificationResult = await runStage("weapon_qualification", () =>
-      runWeaponQualificationCheck(
-        people,
-        events,
-        shootingRangeSheetRecords,
-        shootingRangeRelevanceRecords,
-        now.date,
-        persist,
-        recipientResolution,
-      ),
-    );
-    weaponQualificationJobsCreated = weaponQualificationResult.jobsCreated;
-  } catch (error) {
-    const stage = error instanceof WorkerStageError ? error.stage : "weapon_qualification";
-    const cause = error instanceof WorkerStageError ? error.cause : error;
-    console.error(formatWorkerErrorLog(stage, sanitizeWorkerError(cause)));
+  if (operationalMode.kind === "regular") {
+    try {
+      const weaponQualificationResult = await runStage("weapon_qualification", () =>
+        runWeaponQualificationCheck(
+          people,
+          events,
+          shootingRangeSheetRecords,
+          shootingRangeRelevanceRecords,
+          now.date,
+          persist,
+          recipientResolution,
+        ),
+      );
+      weaponQualificationJobsCreated = weaponQualificationResult.jobsCreated;
+    } catch (error) {
+      const stage = error instanceof WorkerStageError ? error.stage : "weapon_qualification";
+      const cause = error instanceof WorkerStageError ? error.cause : error;
+      console.error(formatWorkerErrorLog(stage, sanitizeWorkerError(cause)));
+    }
   }
 
   let scheduledBroadcastsDue: number;
