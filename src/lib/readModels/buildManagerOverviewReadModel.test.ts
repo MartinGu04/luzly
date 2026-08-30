@@ -206,6 +206,57 @@ describe("buildManagerOverviewReadModel — weapon qualification (מטווחים
     expect(issue).toMatchObject({ personId: MARTIN.id, severity: "critical", date: "2026-08-15" });
   });
 
+  it("8. multiple weapon-qualification problems all surface individually -- Manager Area stays fully granular, never collapsed/aggregated (aggregation is a notification-layer-only concern, see weaponQualification.ts)", () => {
+    const dutyA = event({
+      personId: MARTIN.id,
+      personName: MARTIN.name,
+      date: "2026-08-14",
+      category: "duty",
+      role: null,
+      period: "unspecified",
+      dutyFamily: "oxid",
+      title: "אוקסיד",
+      rawValue: "אוקסיד",
+    });
+    const dutyB = event({
+      personId: EITAN.id,
+      personName: EITAN.name,
+      date: "2026-08-15",
+      category: "duty",
+      role: null,
+      period: "unspecified",
+      dutyFamily: "guard",
+      title: "שמירה",
+      rawValue: "שמירה",
+      sourceCell: nextCell(),
+    });
+    const dutyC = event({
+      personId: NOA.id,
+      personName: NOA.name,
+      date: "2026-08-16",
+      category: "duty",
+      role: null,
+      period: "unspecified",
+      dutyFamily: "reserve",
+      title: "עתודה",
+      rawValue: "עתודה",
+      sourceCell: nextCell(),
+    });
+    const model = buildModel({
+      events: [dutyA, dutyB, dutyC],
+      qualificationByPersonId: new Map([
+        [MARTIN.id, { expiryDate: "2026-08-01", notRelevant: false }],
+        [EITAN.id, { expiryDate: null, notRelevant: false }],
+        [NOA.id, { expiryDate: "2026-07-01", notRelevant: false }],
+      ]),
+    });
+
+    const weaponIssues = model.issues.filter((issue) => issue.reason === "weapon_qualification_invalid");
+    expect(weaponIssues).toHaveLength(3);
+    expect(weaponIssues.map((issue) => issue.personId).sort()).toEqual([EITAN.id, MARTIN.id, NOA.id].sort());
+    expect(weaponIssues.map((issue) => issue.date).sort()).toEqual(["2026-08-14", "2026-08-15", "2026-08-16"]);
+  });
+
   it("no qualification map entry (out of scope) -> no weapon-qualification issue", () => {
     const duty = event({
       personId: MARTIN.id,
