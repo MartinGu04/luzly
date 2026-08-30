@@ -220,4 +220,68 @@ describe("runWeaponQualificationCheck", () => {
     const result = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, recipients);
     expect(result).toEqual({ issuesDetected: 1, jobsCreated: 0 });
   });
+
+  describe("notification-only date narrowing (never mine historical assignments)", () => {
+    it("a PAST invalid weapon-duty (date < today) creates no notification, even though the qualification was genuinely invalid back then", async () => {
+      getCompletionsForPersonIds.mockResolvedValue([approvedCompletion("p1", "2026-01-01")]); // expires 2026-07-01
+      const people = [person(), manager()];
+      const events = [dutyEvent({ date: "2026-08-01" })]; // in the past relative to "today" below, and after expiry
+      const recipients = resolution([recipient("mgr1", "u_mgr1")]);
+
+      const result = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, recipients);
+
+      expect(result).toEqual({ issuesDetected: 0, jobsCreated: 0 });
+      expect(insertNotificationJobIfAbsent).not.toHaveBeenCalled();
+    });
+
+    it("an invalid weapon-duty scheduled for TODAY still creates a notification (today is not yet 'past')", async () => {
+      getCompletionsForPersonIds.mockResolvedValue([approvedCompletion("p1", "2026-01-01")]); // expires 2026-07-01
+      const people = [person(), manager()];
+      const events = [dutyEvent({ date: "2026-08-30" })];
+      const recipients = resolution([recipient("mgr1", "u_mgr1")]);
+
+      const result = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, recipients);
+
+      expect(result).toEqual({ issuesDetected: 1, jobsCreated: 1 });
+    });
+
+    it("an invalid weapon-duty scheduled in the FUTURE still creates a notification", async () => {
+      getCompletionsForPersonIds.mockResolvedValue([approvedCompletion("p1", "2026-01-01")]); // expires 2026-07-01
+      const people = [person(), manager()];
+      const events = [dutyEvent({ date: "2026-09-15" })];
+      const recipients = resolution([recipient("mgr1", "u_mgr1")]);
+
+      const result = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, recipients);
+
+      expect(result).toEqual({ issuesDetected: 1, jobsCreated: 1 });
+    });
+
+    it("a future activity where the qualification is valid TODAY but will have expired by the activity date is still detected -- the date filter only drops PAST activities, it never blocks a legitimate future-expiry issue", async () => {
+      // Baseline expires 2026-09-10 -- still valid as of "today" (2026-08-30),
+      // but the oxid activity itself is scheduled for 2026-09-15, after expiry.
+      getCompletionsForPersonIds.mockResolvedValue([approvedCompletion("p1", "2026-03-10")]); // expires 2026-09-10
+      const people = [person(), manager()];
+      const events = [dutyEvent({ date: "2026-09-15" })];
+      const recipients = resolution([recipient("mgr1", "u_mgr1")]);
+
+      const result = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, recipients);
+
+      expect(result).toEqual({ issuesDetected: 1, jobsCreated: 1 });
+    });
+
+    it("a mix of past and future invalid duties for the same person notifies only for the future one", async () => {
+      getCompletionsForPersonIds.mockResolvedValue([approvedCompletion("p1", "2026-01-01")]); // expires 2026-07-01
+      const people = [person(), manager()];
+      const pastEvent = dutyEvent({ date: "2026-08-01", sourceCell: nextCell() });
+      const futureEvent = dutyEvent({ date: "2026-09-15", sourceCell: nextCell() });
+      const recipients = resolution([recipient("mgr1", "u_mgr1")]);
+
+      const result = await runWeaponQualificationCheck(people, [pastEvent, futureEvent], [], [], "2026-08-30", true, recipients);
+
+      expect(result).toEqual({ issuesDetected: 1, jobsCreated: 1 });
+      const [job] = insertNotificationJobIfAbsent.mock.calls[0];
+      expect(job.dedupeKey).toContain("2026-09-15");
+      expect(job.dedupeKey).not.toContain("2026-08-01");
+    });
+  });
 });

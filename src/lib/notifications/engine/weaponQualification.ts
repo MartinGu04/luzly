@@ -30,6 +30,18 @@ export interface WeaponQualificationCheckResult {
  * `relevanceRecords` are already parsed by THIS tick's own `freshRead.ts`
  * -- never re-fetched/re-parsed here.
  *
+ * `events` here is the FULL parsed schedule -- `parseScheduleSheet` never
+ * filters by date, so it still carries every historical assignment. Manager
+ * Area's own "דורש טיפול" is fine seeing those (its own range filter,
+ * `buildManagerOverviewReadModel`'s own concern, decides what's currently
+ * visible) -- but a fresh production tick must never mine that full history
+ * and fire a notification for a long-past guard/reserve/oxid assignment
+ * whose qualification happened to be invalid back then. So, for
+ * NOTIFICATION purposes only, `events` is narrowed to `date >= today`
+ * before `detectWeaponQualificationIssues` ever sees it -- historical
+ * detection stays fully available to the domain layer/Manager Area, this
+ * narrowing is local to this worker-facing wrapper.
+ *
  * `persist: false` (dry-run) still runs detection (a real, read-only
  * Supabase completions query -- cheap, and needed for an honest
  * `issuesDetected` count) but never creates a job, mirroring every other
@@ -39,11 +51,15 @@ export interface WeaponQualificationCheckResult {
  * `insertNotificationJobIfAbsent`'s unique `dedupe_key` means a tick that
  * observes the SAME still-unresolved problem creates nothing new --
  * exactly one logical notification per underlying occurrence, however many
- * worker ticks re-observe it before it's resolved (a renewed qualification,
- * a changed assignment, or the activity date simply passing). A genuinely
- * different date/duty-family/person combination is a different key, and
- * gets its own notification. This is a one-shot, immediate ("this is
- * happening") job -- never a future-scheduled `upsertPendingReminderJob`
+ * worker ticks re-observe it before it's resolved (a renewed qualification
+ * or a changed assignment). Once the activity date itself falls behind
+ * `today`, the date filter above removes it from consideration entirely --
+ * it neither creates a new job (already covered by the dedupe key) NOR
+ * cancels a previously-created one; a job already sent for it stays exactly
+ * as it was, a factual record that the problem existed at the time. A
+ * genuinely different date/duty-family/person combination is a different
+ * key, and gets its own notification. This is a one-shot, immediate ("this
+ * is happening") job -- never a future-scheduled `upsertPendingReminderJob`
  * that would need its own cancellation path, since there is nothing to
  * revert before send: the condition is either true right now or it isn't.
  */
@@ -66,7 +82,14 @@ export async function runWeaponQualificationCheck(
     today,
   });
 
-  const issues = detectWeaponQualificationIssues(events, qualificationByPersonId);
+  // NOTIFICATION-only narrowing -- see this function's own docstring. A
+  // historical assignment (`event.date < today`) never reaches detection
+  // here, however invalid the qualification was back then; today's own
+  // date is still included (an activity happening today is very much a
+  // live, actionable problem).
+  const upcomingEvents = events.filter((event) => event.date >= today);
+
+  const issues = detectWeaponQualificationIssues(upcomingEvents, qualificationByPersonId);
   if (issues.length === 0 || !persist) return { issuesDetected: issues.length, jobsCreated: 0 };
 
   const managers = filterManagerRecipients(people, recipientResolution);
