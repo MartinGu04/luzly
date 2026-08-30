@@ -425,6 +425,35 @@ export async function insertNotificationJobIfAbsent(job: NewNotificationJob): Pr
 }
 
 /**
+ * The `source_ref` of the most recently CREATED job for `recipientUserId`
+ * within `category`, regardless of that job's own delivery outcome/status
+ * -- same "delivery status is irrelevant to whether the logical
+ * notification happened" convention `getRecentSettledJobsForRecipient`'s
+ * own docstring already establishes. `null` when no such job has ever been
+ * created for this recipient (a genuinely first-time case, or the row's
+ * own `source_ref` was never set) -- callers treat that as "nothing known
+ * to compare against yet", never as a fabricated empty state. Used by
+ * aggregate/summary notification categories (e.g. `weapon_qualification_summary`
+ * in `weaponQualification.ts`) to decide whether the CURRENT aggregate
+ * content is genuinely new relative to the last one actually sent, without
+ * needing a second/parallel persisted-state table -- this one `text`
+ * column on the EXISTING `notification_jobs` row already carries it.
+ */
+export async function getLatestNotificationSourceRef(recipientUserId: string, category: string): Promise<string | null> {
+  const supabase = getNotificationServiceClient();
+  const { data, error } = await supabase
+    .from("notification_jobs")
+    .select("source_ref")
+    .eq("recipient_user_id", recipientUserId)
+    .eq("category", category)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<{ source_ref: string | null }>();
+  if (error) throw error;
+  return data?.source_ref ?? null;
+}
+
+/**
  * Upsert semantics for time-based reminders (tomorrow shift/duty), whose
  * content can legitimately change before send (the underlying assignment
  * changed) -- see PR #30 spec sections 16-17. Only touches a job still

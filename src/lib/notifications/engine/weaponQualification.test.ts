@@ -1,24 +1,66 @@
-import { beforeEach, describe, expect, it } from "vitest";
-import { vi } from "vitest";
-import type { Event } from "@/lib/domain/event";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { addCalendarDays, formatCalendarDate } from "@/lib/domain/dateRange";
+import { parseCalendarDate } from "@/lib/domain/dutyBlocks";
+import type { DutyFamily, Event } from "@/lib/domain/event";
 import type { Person } from "@/lib/domain/types";
 import type { CompletionRow } from "@/lib/shootingRanges/store";
 import type { RecipientResolution, ResolvedRecipient } from "./recipients";
 
 const getCompletionsForPersonIds = vi.fn();
 const insertNotificationJobIfAbsent = vi.fn();
+const getLatestNotificationSourceRef = vi.fn();
 
-// `filterManagerRecipients` (`./recipients`) and `buildWeaponQualificationIndex`/
-// `buildShootingRangeQualificationReadModel` (readModels) and
+// `filterManagerRecipients` (`./recipients`), `buildWeaponQualificationIndex`/
+// `buildShootingRangeQualificationReadModel` (readModels), and
 // `detectWeaponQualificationIssues` (domain) are all kept REAL -- pure
-// functions, no I/O of their own -- so this test exercises the SAME
-// business logic Manager Area's own "דורש טיפול" reads, never a mocked
-// pass-through. Only the two genuine I/O boundaries are mocked: the
-// app-owned מטווחים completions table, and notification-job creation.
+// functions, no I/O of their own -- so this exercises the SAME business
+// logic Manager Area's own "דורש טיפול" reads, never a mocked pass-through.
+// Only the genuine I/O boundaries are mocked: the מטווחים completions
+// table and notification-job creation/read-back.
 vi.mock("@/lib/shootingRanges/store", () => ({ getCompletionsForPersonIds: (...args: unknown[]) => getCompletionsForPersonIds(...args) }));
-vi.mock("./store", () => ({ insertNotificationJobIfAbsent: (...args: unknown[]) => insertNotificationJobIfAbsent(...args) }));
+vi.mock("./store", () => ({
+  insertNotificationJobIfAbsent: (...args: unknown[]) => insertNotificationJobIfAbsent(...args),
+  getLatestNotificationSourceRef: (...args: unknown[]) => getLatestNotificationSourceRef(...args),
+}));
 
 const { runWeaponQualificationCheck } = await import("./weaponQualification");
+
+/**
+ * A tiny in-memory stand-in for the real `notification_jobs` table's
+ * relevant slice -- `insertNotificationJobIfAbsent` (unique by dedupeKey)
+ * and `getLatestNotificationSourceRef` (most-recently-inserted `sourceRef`
+ * for a recipient+category) -- so multi-tick tests (repeated evaluation,
+ * resolved issues, a later new issue) exercise the REAL read-back/compare
+ * round trip `runWeaponQualificationCheck` depends on, not just a stateless
+ * mock return value.
+ */
+interface FakeJob {
+  category: string;
+  recipientUserId: string;
+  dedupeKey: string;
+  title: string;
+  body: string;
+  path: string;
+  sourceRef?: string;
+}
+
+let fakeJobs: FakeJob[] = [];
+
+function resetFakeStore() {
+  fakeJobs = [];
+  insertNotificationJobIfAbsent.mockReset();
+  insertNotificationJobIfAbsent.mockImplementation(async (job: FakeJob) => {
+    if (fakeJobs.some((existing) => existing.dedupeKey === job.dedupeKey)) return false;
+    fakeJobs.push(job);
+    return true;
+  });
+  getLatestNotificationSourceRef.mockReset();
+  getLatestNotificationSourceRef.mockImplementation(async (recipientUserId: string, category: string) => {
+    const matches = fakeJobs.filter((job) => job.recipientUserId === recipientUserId && job.category === category);
+    if (matches.length === 0) return null;
+    return matches[matches.length - 1].sourceRef ?? null;
+  });
+}
 
 function person(overrides: Partial<Person> = {}): Person {
   return {
@@ -80,208 +122,221 @@ function dutyEvent(overrides: Partial<Event> = {}): Event {
   };
 }
 
-/** A single APPROVED app completion -- `performedOn` + 6 calendar months is the resulting expiry date. */
-function approvedCompletion(personId: string, performedOn: string): CompletionRow {
+/** `2026-09-02` plus `daysAhead` calendar days, via the SAME `dateRange.ts` arithmetic production code uses -- never a second/ad-hoc date implementation. */
+function futureDate(daysAhead: number): string {
+  const base = parseCalendarDate("2026-09-02")!;
+  return formatCalendarDate(addCalendarDays(base, daysAhead));
+}
+
+/** A single APPROVED app completion, expired well before "today" (2026-08-30) -- `performedOn` + 6 calendar months = 2026-07-01. */
+function expiredCompletion(personId: string): CompletionRow {
   return {
-    id: `completion_${personId}_${performedOn}`,
+    id: `completion_${personId}`,
     personId,
-    performedOn,
+    performedOn: "2026-01-01",
     source: "self_report",
     status: "approved",
     notes: null,
     submittedByPersonId: personId,
-    submittedByPersonName: "איתי בדיקה",
+    submittedByPersonName: "בדיקה",
     approvedByPersonId: "mgr1",
     approvedByPersonName: "מנהל בדיקה",
     approvedAt: "2026-01-02T00:00:00.000Z",
     linkedPlannedDate: null,
-    createdAt: `${performedOn}T00:00:00.000Z`,
+    createdAt: "2026-01-01T00:00:00.000Z",
   };
 }
 
-describe("runWeaponQualificationCheck", () => {
+/** Every person referenced by `events`, all with the SAME expired baseline, resolved eligibly (חובה + טכנאי). */
+function eligiblePeopleFor(events: readonly Event[]): Person[] {
+  const ids = [...new Set(events.map((event) => event.personId))];
+  return ids.map((id) => person({ id, name: id }));
+}
+
+describe("runWeaponQualificationCheck -- aggregate notification (spec: fix production notification spam)", () => {
+  const MGR_RECIPIENTS = resolution([recipient("mgr1", "u_mgr1")]);
+
   beforeEach(() => {
+    resetFakeStore();
     getCompletionsForPersonIds.mockReset();
-    insertNotificationJobIfAbsent.mockReset();
-    insertNotificationJobIfAbsent.mockResolvedValue(true);
   });
 
-  it("expired qualification + oxid tomorrow -> a manager-facing job is created", async () => {
-    getCompletionsForPersonIds.mockResolvedValue([approvedCompletion("p1", "2026-01-01")]); // expires 2026-07-01
-    const people = [person(), manager()];
-    const events = [dutyEvent({ date: "2026-08-31" })];
-    const recipients = resolution([recipient("mgr1", "u_mgr1")]);
+  it("1. 39 invalid activity events -> exactly ONE notification per manager, never 39", async () => {
+    const events = Array.from({ length: 39 }, (_, i) =>
+      dutyEvent({
+        personId: `p${(i % 7) + 1}`,
+        date: futureDate(i),
+        dutyFamily: (["oxid", "guard", "reserve"] as DutyFamily[])[i % 3],
+      }),
+    );
+    const people = [...eligiblePeopleFor(events), manager()];
+    getCompletionsForPersonIds.mockResolvedValue(people.filter((p) => p.id !== "mgr1").map((p) => expiredCompletion(p.id)));
 
-    const result = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, recipients);
+    const result = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, MGR_RECIPIENTS);
 
-    expect(result).toEqual({ issuesDetected: 1, jobsCreated: 1 });
+    expect(result.issuesDetected).toBe(39);
     expect(insertNotificationJobIfAbsent).toHaveBeenCalledTimes(1);
-    const [job] = insertNotificationJobIfAbsent.mock.calls[0];
-    expect(job.recipientUserId).toBe("u_mgr1");
+    expect(result.jobsCreated).toBe(1);
+
+    const [job] = fakeJobs;
+    expect(job.category).toBe("weapon_qualification_summary");
     expect(job.path).toBe("/manager");
-    expect(job.title).toContain("אוקסיד");
-    expect(job.body).toContain("איתי בדיקה");
+    expect(job.title).toBe("⚠️ בעיות כשירות מטווחים");
+    expect(job.body).toBe(
+      "נמצאו 39 שיבוצים עתידיים ללא כשירות מטווחים בתוקף אצל 7 אנשים. האירוע הקרוב: 2.9. נדרש טיפול.",
+    );
+    expect(JSON.parse(job.sourceRef!)).toHaveLength(39);
   });
 
-  it("expired qualification + guard duty (שמירות) -> a job is created", async () => {
-    getCompletionsForPersonIds.mockResolvedValue([approvedCompletion("p1", "2026-01-01")]);
-    const people = [person(), manager()];
-    const events = [dutyEvent({ dutyFamily: "guard", title: "שמירה", date: "2026-08-31" })];
-    const recipients = resolution([recipient("mgr1", "u_mgr1")]);
+  it("2. multiple invalid events for the SAME person -> still one aggregate notification", async () => {
+    const events = [
+      dutyEvent({ personId: "p1", dutyFamily: "oxid", date: futureDate(0) }),
+      dutyEvent({ personId: "p1", dutyFamily: "guard", date: futureDate(3) }),
+      dutyEvent({ personId: "p1", dutyFamily: "reserve", date: futureDate(6) }),
+    ];
+    const people = [person({ id: "p1" }), manager()];
+    getCompletionsForPersonIds.mockResolvedValue([expiredCompletion("p1")]);
 
-    const result = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, recipients);
+    const result = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, MGR_RECIPIENTS);
+
+    expect(result.issuesDetected).toBe(3);
+    expect(insertNotificationJobIfAbsent).toHaveBeenCalledTimes(1);
+    expect(fakeJobs[0].body).toContain("אצל אדם אחד"); // singular -- only one affected person
+    expect(JSON.parse(fakeJobs[0].sourceRef!)).toHaveLength(3);
+  });
+
+  it("3. multiple affected people -> one aggregate notification with the correct affected-person count", async () => {
+    const events = [
+      dutyEvent({ personId: "p1", dutyFamily: "oxid", date: futureDate(0) }),
+      dutyEvent({ personId: "p2", dutyFamily: "guard", date: futureDate(1) }),
+      dutyEvent({ personId: "p3", dutyFamily: "reserve", date: futureDate(2) }),
+    ];
+    const people = [...eligiblePeopleFor(events), manager()];
+    getCompletionsForPersonIds.mockResolvedValue(["p1", "p2", "p3"].map(expiredCompletion));
+
+    const result = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, MGR_RECIPIENTS);
+
+    expect(insertNotificationJobIfAbsent).toHaveBeenCalledTimes(1);
     expect(result.jobsCreated).toBe(1);
+    expect(fakeJobs[0].body).toContain("אצל 3 אנשים");
   });
 
-  it("expired qualification + reserve duty (עתודה) -> a job is created", async () => {
-    getCompletionsForPersonIds.mockResolvedValue([approvedCompletion("p1", "2026-01-01")]);
-    const people = [person(), manager()];
-    const events = [dutyEvent({ dutyFamily: "reserve", title: "עתודה", date: "2026-08-31" })];
-    const recipients = resolution([recipient("mgr1", "u_mgr1")]);
+  it("4. repeated evaluation with UNCHANGED issues -> no duplicate notification", async () => {
+    const events = [
+      dutyEvent({ personId: "p1", dutyFamily: "oxid", date: futureDate(0) }),
+      dutyEvent({ personId: "p2", dutyFamily: "guard", date: futureDate(1) }),
+    ];
+    const people = [...eligiblePeopleFor(events), manager()];
+    getCompletionsForPersonIds.mockResolvedValue(["p1", "p2"].map(expiredCompletion));
 
-    const result = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, recipients);
-    expect(result.jobsCreated).toBe(1);
+    await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, MGR_RECIPIENTS);
+    await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, MGR_RECIPIENTS);
+
+    expect(insertNotificationJobIfAbsent).toHaveBeenCalledTimes(1);
+    expect(fakeJobs).toHaveLength(1);
   });
 
-  it("valid qualification on the activity date -> no issue, no job", async () => {
-    getCompletionsForPersonIds.mockResolvedValue([approvedCompletion("p1", "2026-08-01")]); // expires 2027-02-01
-    const people = [person(), manager()];
-    const events = [dutyEvent({ date: "2026-08-31" })];
-    const recipients = resolution([recipient("mgr1", "u_mgr1")]);
+  it("5. issue ORDERING changes -> no duplicate notification", async () => {
+    const eventA = dutyEvent({ personId: "p1", dutyFamily: "oxid", date: futureDate(0) });
+    const eventB = dutyEvent({ personId: "p2", dutyFamily: "guard", date: futureDate(1) });
+    const people = [...eligiblePeopleFor([eventA, eventB]), manager()];
+    getCompletionsForPersonIds.mockResolvedValue(["p1", "p2"].map(expiredCompletion));
 
-    const result = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, recipients);
-    expect(result).toEqual({ issuesDetected: 0, jobsCreated: 0 });
-    expect(insertNotificationJobIfAbsent).not.toHaveBeenCalled();
+    await runWeaponQualificationCheck(people, [eventA, eventB], [], [], "2026-08-30", true, MGR_RECIPIENTS);
+    await runWeaponQualificationCheck(people, [eventB, eventA], [], [], "2026-08-30", true, MGR_RECIPIENTS); // same set, reversed order
+
+    expect(insertNotificationJobIfAbsent).toHaveBeenCalledTimes(1);
   });
 
-  it("unrelated activity (a plain shift) -> no issue, no job", async () => {
+  it("6. issues being RESOLVED/removed -> no new warning merely because the set shrank", async () => {
+    const eventA = dutyEvent({ personId: "p1", dutyFamily: "oxid", date: futureDate(0) });
+    const eventB = dutyEvent({ personId: "p2", dutyFamily: "guard", date: futureDate(1) });
+    const eventC = dutyEvent({ personId: "p3", dutyFamily: "reserve", date: futureDate(2) });
+    const people = [...eligiblePeopleFor([eventA, eventB, eventC]), manager()];
+    getCompletionsForPersonIds.mockResolvedValue(["p1", "p2", "p3"].map(expiredCompletion));
+
+    await runWeaponQualificationCheck(people, [eventA, eventB, eventC], [], [], "2026-08-30", true, MGR_RECIPIENTS);
+    // p3's issue resolved (e.g. requalified / assignment removed) -- only A and B remain.
+    await runWeaponQualificationCheck(people, [eventA, eventB], [], [], "2026-08-30", true, MGR_RECIPIENTS);
+
+    expect(insertNotificationJobIfAbsent).toHaveBeenCalledTimes(1);
+    expect(fakeJobs).toHaveLength(1);
+  });
+
+  it("7. a genuinely NEW invalid assignment appears later -> a new warning CAN be generated", async () => {
+    const eventA = dutyEvent({ personId: "p1", dutyFamily: "oxid", date: futureDate(0) });
+    const eventB = dutyEvent({ personId: "p2", dutyFamily: "guard", date: futureDate(1) });
+    const eventD = dutyEvent({ personId: "p4", dutyFamily: "reserve", date: futureDate(5) });
+    const people = [...eligiblePeopleFor([eventA, eventB, eventD]), manager()];
+    getCompletionsForPersonIds.mockResolvedValue(["p1", "p2", "p4"].map(expiredCompletion));
+
+    await runWeaponQualificationCheck(people, [eventA, eventB], [], [], "2026-08-30", true, MGR_RECIPIENTS);
+    // A genuinely new problem (p4/reserve) appears on a later tick.
+    await runWeaponQualificationCheck(people, [eventA, eventB, eventD], [], [], "2026-08-30", true, MGR_RECIPIENTS);
+
+    expect(insertNotificationJobIfAbsent).toHaveBeenCalledTimes(2);
+    expect(fakeJobs).toHaveLength(2);
+    expect(fakeJobs[0].dedupeKey).not.toBe(fakeJobs[1].dedupeKey);
+    expect(JSON.parse(fakeJobs[1].sourceRef!)).toHaveLength(3);
+  });
+
+  it("valid qualification / unrelated activity -> no issue, no notification", async () => {
     getCompletionsForPersonIds.mockResolvedValue([]);
+    const events: Event[] = [dutyEvent({ dutyFamily: null, category: "shift", title: "טכנאי יום" })];
     const people = [person(), manager()];
-    const events: Event[] = [dutyEvent({ dutyFamily: null, category: "shift", title: "טכנאי יום", date: "2026-08-31" })];
-    const recipients = resolution([recipient("mgr1", "u_mgr1")]);
 
-    const result = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, recipients);
+    const result = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, MGR_RECIPIENTS);
+
     expect(result).toEqual({ issuesDetected: 0, jobsCreated: 0 });
+    expect(insertNotificationJobIfAbsent).not.toHaveBeenCalled();
   });
 
-  it("dry-run (persist: false) detects the issue but never creates a job", async () => {
-    getCompletionsForPersonIds.mockResolvedValue([approvedCompletion("p1", "2026-01-01")]);
-    const people = [person(), manager()];
-    const events = [dutyEvent({ date: "2026-08-31" })];
-    const recipients = resolution([recipient("mgr1", "u_mgr1")]);
+  it("dry-run (persist: false) detects issues but never creates or reads back a notification", async () => {
+    const events = [dutyEvent({ personId: "p1", date: futureDate(0) })];
+    const people = [person({ id: "p1" }), manager()];
+    getCompletionsForPersonIds.mockResolvedValue([expiredCompletion("p1")]);
 
-    const result = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", false, recipients);
+    const result = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", false, MGR_RECIPIENTS);
+
     expect(result).toEqual({ issuesDetected: 1, jobsCreated: 0 });
     expect(insertNotificationJobIfAbsent).not.toHaveBeenCalled();
   });
 
-  it("repeated processing of the SAME still-unresolved issue creates exactly one logical notification (dedupe_key uniqueness), not duplicates on every run", async () => {
-    getCompletionsForPersonIds.mockResolvedValue([approvedCompletion("p1", "2026-01-01")]);
-    const people = [person(), manager()];
-    const events = [dutyEvent({ date: "2026-08-31" })];
-    const recipients = resolution([recipient("mgr1", "u_mgr1")]);
+  it("a past invalid duty (date < today) never reaches detection, and creates no notification -- existing future-only filtering preserved", async () => {
+    const events = [dutyEvent({ personId: "p1", date: "2026-08-01" })]; // before "today" (2026-08-30)
+    const people = [person({ id: "p1" }), manager()];
+    getCompletionsForPersonIds.mockResolvedValue([expiredCompletion("p1")]);
 
-    await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, recipients);
-    const [firstJob] = insertNotificationJobIfAbsent.mock.calls[0];
+    const result = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, MGR_RECIPIENTS);
 
-    // A second worker tick re-observing the SAME still-unresolved problem
-    // must reuse the exact same dedupe key -- `insertNotificationJobIfAbsent`
-    // (the real DB unique constraint in production) is what actually
-    // suppresses the duplicate; this asserts the key itself is stable
-    // across repeated ticks, which is what makes that suppression work.
-    insertNotificationJobIfAbsent.mockClear();
-    await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, recipients);
-    const [secondJob] = insertNotificationJobIfAbsent.mock.calls[0];
-
-    expect(secondJob.dedupeKey).toBe(firstJob.dedupeKey);
+    expect(result).toEqual({ issuesDetected: 0, jobsCreated: 0 });
+    expect(insertNotificationJobIfAbsent).not.toHaveBeenCalled();
   });
 
-  it("a different activity date produces a genuinely different dedupe key -- a real new occurrence still gets notified", async () => {
-    getCompletionsForPersonIds.mockResolvedValue([approvedCompletion("p1", "2026-01-01")]);
-    const people = [person(), manager()];
-    const recipients = resolution([recipient("mgr1", "u_mgr1")]);
+  it("no managers resolved -> no notification, but issues are still counted as detected", async () => {
+    const events = [dutyEvent({ personId: "p1", date: futureDate(0) })];
+    const people = [person({ id: "p1" })]; // no manager at all
+    getCompletionsForPersonIds.mockResolvedValue([expiredCompletion("p1")]);
 
-    await runWeaponQualificationCheck(people, [dutyEvent({ date: "2026-08-31" })], [], [], "2026-08-30", true, recipients);
-    const [firstJob] = insertNotificationJobIfAbsent.mock.calls[0];
+    const result = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, resolution([]));
 
-    insertNotificationJobIfAbsent.mockClear();
-    await runWeaponQualificationCheck(people, [dutyEvent({ date: "2026-09-15" })], [], [], "2026-09-01", true, recipients);
-    const [secondJob] = insertNotificationJobIfAbsent.mock.calls[0];
-
-    expect(secondJob.dedupeKey).not.toBe(firstJob.dedupeKey);
-  });
-
-  it("no managers resolved -> no job, but the issue is still counted as detected", async () => {
-    getCompletionsForPersonIds.mockResolvedValue([approvedCompletion("p1", "2026-01-01")]);
-    const people = [person()]; // no manager at all
-    const events = [dutyEvent({ date: "2026-08-31" })];
-    const recipients = resolution([]);
-
-    const result = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, recipients);
     expect(result).toEqual({ issuesDetected: 1, jobsCreated: 0 });
   });
 
-  describe("notification-only date narrowing (never mine historical assignments)", () => {
-    it("a PAST invalid weapon-duty (date < today) creates no notification, even though the qualification was genuinely invalid back then", async () => {
-      getCompletionsForPersonIds.mockResolvedValue([approvedCompletion("p1", "2026-01-01")]); // expires 2026-07-01
-      const people = [person(), manager()];
-      const events = [dutyEvent({ date: "2026-08-01" })]; // in the past relative to "today" below, and after expiry
-      const recipients = resolution([recipient("mgr1", "u_mgr1")]);
+  it("each manager is notified independently -- a manager who already has a fully-covered set is skipped while a different/newer manager is not", async () => {
+    const events = [dutyEvent({ personId: "p1", date: futureDate(0) })];
+    const people = [person({ id: "p1" }), manager(), manager({ id: "mgr2", name: "מנהל שתיים" })];
+    getCompletionsForPersonIds.mockResolvedValue([expiredCompletion("p1")]);
+    const bothManagers = resolution([recipient("mgr1", "u_mgr1"), recipient("mgr2", "u_mgr2")]);
 
-      const result = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, recipients);
+    // mgr1 already covered on a previous tick; mgr2 has never been notified.
+    await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, resolution([recipient("mgr1", "u_mgr1")]));
+    expect(insertNotificationJobIfAbsent).toHaveBeenCalledTimes(1);
 
-      expect(result).toEqual({ issuesDetected: 0, jobsCreated: 0 });
-      expect(insertNotificationJobIfAbsent).not.toHaveBeenCalled();
-    });
+    await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, bothManagers);
 
-    it("an invalid weapon-duty scheduled for TODAY still creates a notification (today is not yet 'past')", async () => {
-      getCompletionsForPersonIds.mockResolvedValue([approvedCompletion("p1", "2026-01-01")]); // expires 2026-07-01
-      const people = [person(), manager()];
-      const events = [dutyEvent({ date: "2026-08-30" })];
-      const recipients = resolution([recipient("mgr1", "u_mgr1")]);
-
-      const result = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, recipients);
-
-      expect(result).toEqual({ issuesDetected: 1, jobsCreated: 1 });
-    });
-
-    it("an invalid weapon-duty scheduled in the FUTURE still creates a notification", async () => {
-      getCompletionsForPersonIds.mockResolvedValue([approvedCompletion("p1", "2026-01-01")]); // expires 2026-07-01
-      const people = [person(), manager()];
-      const events = [dutyEvent({ date: "2026-09-15" })];
-      const recipients = resolution([recipient("mgr1", "u_mgr1")]);
-
-      const result = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, recipients);
-
-      expect(result).toEqual({ issuesDetected: 1, jobsCreated: 1 });
-    });
-
-    it("a future activity where the qualification is valid TODAY but will have expired by the activity date is still detected -- the date filter only drops PAST activities, it never blocks a legitimate future-expiry issue", async () => {
-      // Baseline expires 2026-09-10 -- still valid as of "today" (2026-08-30),
-      // but the oxid activity itself is scheduled for 2026-09-15, after expiry.
-      getCompletionsForPersonIds.mockResolvedValue([approvedCompletion("p1", "2026-03-10")]); // expires 2026-09-10
-      const people = [person(), manager()];
-      const events = [dutyEvent({ date: "2026-09-15" })];
-      const recipients = resolution([recipient("mgr1", "u_mgr1")]);
-
-      const result = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, recipients);
-
-      expect(result).toEqual({ issuesDetected: 1, jobsCreated: 1 });
-    });
-
-    it("a mix of past and future invalid duties for the same person notifies only for the future one", async () => {
-      getCompletionsForPersonIds.mockResolvedValue([approvedCompletion("p1", "2026-01-01")]); // expires 2026-07-01
-      const people = [person(), manager()];
-      const pastEvent = dutyEvent({ date: "2026-08-01", sourceCell: nextCell() });
-      const futureEvent = dutyEvent({ date: "2026-09-15", sourceCell: nextCell() });
-      const recipients = resolution([recipient("mgr1", "u_mgr1")]);
-
-      const result = await runWeaponQualificationCheck(people, [pastEvent, futureEvent], [], [], "2026-08-30", true, recipients);
-
-      expect(result).toEqual({ issuesDetected: 1, jobsCreated: 1 });
-      const [job] = insertNotificationJobIfAbsent.mock.calls[0];
-      expect(job.dedupeKey).toContain("2026-09-15");
-      expect(job.dedupeKey).not.toContain("2026-08-01");
-    });
+    expect(insertNotificationJobIfAbsent).toHaveBeenCalledTimes(2);
+    const recipientIds = fakeJobs.map((job) => job.recipientUserId).sort();
+    expect(recipientIds).toEqual(["u_mgr1", "u_mgr2"]);
   });
 });

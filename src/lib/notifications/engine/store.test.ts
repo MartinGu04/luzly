@@ -486,6 +486,86 @@ describe("getRecentSettledJobsForRecipient (personal Home 'since your previous v
   });
 });
 
+describe("getLatestNotificationSourceRef (aggregate/summary notification dedupe read-back, e.g. weaponQualification.ts)", () => {
+  interface FakeSourceRefRow {
+    recipient_user_id: string;
+    category: string;
+    source_ref: string | null;
+    created_at: string;
+  }
+
+  /** A minimal fake of `.from("notification_jobs").select("source_ref").eq().eq().order().limit(1).maybeSingle()`. */
+  function makeSourceRefFakeSupabase(rows: FakeSourceRefRow[]) {
+    const client = {
+      from: (table: string) => {
+        if (table !== "notification_jobs") throw new Error(`unexpected table ${table}`);
+        let filtered = [...rows];
+        const builder = {
+          select: () => builder,
+          eq: (column: string, value: unknown) => {
+            filtered = filtered.filter((row) => (row as unknown as Record<string, unknown>)[column] === value);
+            return builder;
+          },
+          order: (column: string, opts: { ascending: boolean }) => {
+            filtered = [...filtered].sort((a, b) => {
+              const av = String((a as unknown as Record<string, unknown>)[column]);
+              const bv = String((b as unknown as Record<string, unknown>)[column]);
+              const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+              return opts.ascending ? cmp : -cmp;
+            });
+            return builder;
+          },
+          limit: () => builder,
+          maybeSingle: () => Promise.resolve({ data: filtered[0] ?? null, error: null }),
+        };
+        return builder;
+      },
+    };
+    return client;
+  }
+
+  function row(overrides: Partial<FakeSourceRefRow> = {}): FakeSourceRefRow {
+    return {
+      recipient_user_id: "u_mgr1",
+      category: "weapon_qualification_summary",
+      source_ref: '["p1:2026-09-02:oxid"]',
+      created_at: "2026-08-30T10:00:00.000Z",
+      ...overrides,
+    };
+  }
+
+  it("returns the source_ref of the MOST RECENTLY created job for this recipient+category", async () => {
+    const client = makeSourceRefFakeSupabase([
+      row({ source_ref: '["a"]', created_at: "2026-08-30T09:00:00.000Z" }),
+      row({ source_ref: '["a","b"]', created_at: "2026-08-30T10:00:00.000Z" }),
+    ]);
+    const { getLatestNotificationSourceRef } = await loadModule(client);
+
+    const result = await getLatestNotificationSourceRef("u_mgr1", "weapon_qualification_summary");
+
+    expect(result).toBe('["a","b"]');
+  });
+
+  it("scopes strictly to the given recipient AND category -- another recipient's or another category's job never leaks through", async () => {
+    const client = makeSourceRefFakeSupabase([
+      row({ recipient_user_id: "u_other", source_ref: '["should-not-appear"]' }),
+      row({ category: "coverage_gap", source_ref: '["should-not-appear-either"]' }),
+    ]);
+    const { getLatestNotificationSourceRef } = await loadModule(client);
+
+    const result = await getLatestNotificationSourceRef("u_mgr1", "weapon_qualification_summary");
+
+    expect(result).toBeNull();
+  });
+
+  it("returns null when this recipient has never received a job of this category -- never a fabricated empty-array string", async () => {
+    const client = makeSourceRefFakeSupabase([]);
+    const { getLatestNotificationSourceRef } = await loadModule(client);
+
+    expect(await getLatestNotificationSourceRef("u_mgr1", "weapon_qualification_summary")).toBeNull();
+  });
+});
+
 describe("notification center -- inbox read/dismiss state", () => {
   interface FakeInboxJobRow {
     id: string;

@@ -35,6 +35,7 @@ const peekLastOperationalGeneration = vi.fn();
 const setLastOperationalGeneration = vi.fn();
 const getCompletionsForPersonIds = vi.fn();
 const insertNotificationJobIfAbsent = vi.fn();
+const getLatestNotificationSourceRef = vi.fn();
 
 vi.mock("./freshRead", () => ({ fetchFreshWorkbookRead: (...args: unknown[]) => fetchFreshWorkbookRead(...args) }));
 // `filterManagerRecipients` (called by the REAL `runWeaponQualificationCheck`)
@@ -67,6 +68,7 @@ vi.mock("./store", () => ({
   peekLastOperationalGeneration: (...args: unknown[]) => peekLastOperationalGeneration(...args),
   setLastOperationalGeneration: (...args: unknown[]) => setLastOperationalGeneration(...args),
   insertNotificationJobIfAbsent: (...args: unknown[]) => insertNotificationJobIfAbsent(...args),
+  getLatestNotificationSourceRef: (...args: unknown[]) => getLatestNotificationSourceRef(...args),
 }));
 vi.mock("@/lib/emergencyMode/state", () => ({ resolveOperationalMode: (...args: unknown[]) => resolveOperationalMode(...args) }));
 vi.mock("@/lib/readModels/operationalMode", () => ({ resolveOperationalRoster: (...args: unknown[]) => resolveOperationalRoster(...args) }));
@@ -171,6 +173,37 @@ const ZERO_REMINDERS_SUMMARY = {
   constraintsCancelled: 0,
 };
 
+/**
+ * A tiny in-memory stand-in for the relevant slice of `notification_jobs`
+ * -- unique-by-dedupeKey insert, plus "most recently inserted `sourceRef`
+ * for this recipient+category" read-back -- so the "dedupe remains intact
+ * across repeated ticks" test exercises the REAL aggregate/read-back round
+ * trip `runWeaponQualificationCheck` now depends on, not just a stateless
+ * mock return value. Mirrors the identical fake in `weaponQualification.test.ts`.
+ */
+interface FakeJob {
+  category: string;
+  recipientUserId: string;
+  dedupeKey: string;
+  sourceRef?: string;
+}
+let fakeJobs: FakeJob[] = [];
+
+function resetFakeNotificationStore() {
+  fakeJobs = [];
+  insertNotificationJobIfAbsent.mockReset();
+  insertNotificationJobIfAbsent.mockImplementation(async (job: FakeJob) => {
+    if (fakeJobs.some((existing) => existing.dedupeKey === job.dedupeKey)) return false;
+    fakeJobs.push(job);
+    return true;
+  });
+  getLatestNotificationSourceRef.mockReset();
+  getLatestNotificationSourceRef.mockImplementation(async (recipientUserId: string, category: string) => {
+    const matches = fakeJobs.filter((job) => job.recipientUserId === recipientUserId && job.category === category);
+    return matches.length === 0 ? null : (matches[matches.length - 1].sourceRef ?? null);
+  });
+}
+
 function setupCommonDefaults(events: readonly Event[]) {
   fetchFreshWorkbookRead.mockResolvedValue({
     status: "ok",
@@ -210,7 +243,7 @@ function setupCommonDefaults(events: readonly Event[]) {
   peekDueJobsCount.mockResolvedValue(0);
   peekDueManagerScheduledBroadcastsCount.mockResolvedValue(0);
   getCompletionsForPersonIds.mockResolvedValue([expiredCompletion("p1")]);
-  insertNotificationJobIfAbsent.mockResolvedValue(true);
+  resetFakeNotificationStore();
 }
 
 function mockEmergencyMode() {
@@ -271,7 +304,7 @@ describe("runNotificationWorkerTick -- weapon-qualification stage vs Emergency M
     expect(resolveOperationalRoster).not.toHaveBeenCalled();
     expect(insertNotificationJobIfAbsent).toHaveBeenCalledTimes(1);
     const [job] = insertNotificationJobIfAbsent.mock.calls[0];
-    expect(job.category).toBe("weapon_qualification_invalid");
+    expect(job.category).toBe("weapon_qualification_summary");
     expect(job.recipientUserId).toBe("u_mgr1");
     expect(result.status).toBe("ok");
     if (result.status === "ok") expect(result.summary.jobsCreated).toBe(1);
@@ -287,19 +320,21 @@ describe("runNotificationWorkerTick -- weapon-qualification stage vs Emergency M
     expect(insertNotificationJobIfAbsent).not.toHaveBeenCalled();
   });
 
-  it("6. Existing dedupe behavior remains intact -- repeated regular-mode ticks reuse the identical dedupe key", async () => {
+  it("6. Existing dedupe behavior remains intact -- a repeated regular-mode tick with the SAME unresolved issue creates zero additional notifications", async () => {
     setupCommonDefaults([dutyEvent({ dutyFamily: "oxid", title: "אוקסיד", date: "2026-08-31" })]);
     resolveOperationalMode.mockResolvedValue({ kind: "regular" });
     const { runNotificationWorkerTick } = await loadModule();
 
+    // `loadModule()` re-imports a fresh pipeline module each time
+    // (`vi.resetModules()` in `afterEach`), but `fakeJobs`/the mock
+    // implementations here are module-level in THIS test file and persist
+    // across both calls within one `it()` -- exactly what's needed to
+    // prove the second tick's read-back sees the first tick's own insert.
     await runNotificationWorkerTick("send");
-    const [firstJob] = insertNotificationJobIfAbsent.mock.calls[0];
+    expect(insertNotificationJobIfAbsent).toHaveBeenCalledTimes(1);
 
-    insertNotificationJobIfAbsent.mockClear();
     await runNotificationWorkerTick("send");
-    const [secondJob] = insertNotificationJobIfAbsent.mock.calls[0];
-
-    expect(secondJob.dedupeKey).toBe(firstJob.dedupeKey);
+    expect(insertNotificationJobIfAbsent).toHaveBeenCalledTimes(1); // still 1 -- the second tick found nothing new and never called it again
   });
 
   it("Emergency Mode skips the stage regardless of whether the emergency roster itself is readable", async () => {
