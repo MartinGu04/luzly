@@ -2208,9 +2208,9 @@
     "semantic_hash": ""
   },
   "src/lib/domain/operationalIssues.ts": {
-    "mtime": 1788167245.2643545,
-    "seen": 1788168216.9335618,
-    "ast_hash": "5b81e2bc1db410ff687105b5eb132ce9",
+    "mtime": 1788168861.6567774,
+    "seen": 1788169364.390242,
+    "ast_hash": "86de5c2449c5dd335e68d606df0a65d2",
     "semantic_hash": ""
   },
   "src/lib/domain/operationalWeek.test.ts": {
@@ -3564,9 +3564,9 @@
     "semantic_hash": ""
   },
   "src/lib/readModels/buildManagerOverviewReadModel.ts": {
-    "mtime": 1788167245.4003546,
-    "seen": 1788168216.9339116,
-    "ast_hash": "02c54a01a8d72a1a52a6c63b66a6c676",
+    "mtime": 1788168833.052777,
+    "seen": 1788169364.3909981,
+    "ast_hash": "189aea7e218fd587a652b003502ae37c",
     "semantic_hash": ""
   },
   "src/lib/readModels/buildPermanentManagerHomeReadModel.test.ts": {
@@ -3762,9 +3762,9 @@
     "semantic_hash": ""
   },
   "src/lib/readModels/managerOverview.ts": {
-    "mtime": 1788167245.4203546,
-    "seen": 1788168216.9339776,
-    "ast_hash": "d925e5149d9e7b380752e3d47267850e",
+    "mtime": 1788168824.336777,
+    "seen": 1788169364.3911726,
+    "ast_hash": "c0e767ba4f513159f683eef5993c4e32",
     "semantic_hash": ""
   },
   "src/lib/readModels/managerOverviewParams.test.ts": {
@@ -4758,15 +4758,15 @@
     "semantic_hash": ""
   },
   "src/lib/readModels/shootingRangeQualification.test.ts": {
-    "mtime": 1788167645.8527608,
-    "seen": 1788168216.9340982,
-    "ast_hash": "b81c56da982c1d61a1432890a1e20395",
+    "mtime": 1788168999.6447794,
+    "seen": 1788169364.3913217,
+    "ast_hash": "ec37ce54a8034ad34ad9bfa752889a1b",
     "semantic_hash": ""
   },
   "src/lib/readModels/shootingRangeQualification.ts": {
-    "mtime": 1788167587.1167598,
-    "seen": 1788168216.9340994,
-    "ast_hash": "48b9e4ce02761f8a2f9d8cb34fafde99",
+    "mtime": 1788168773.1167762,
+    "seen": 1788169364.3913238,
+    "ast_hash": "439a49cb546cab45f989f646939a3718",
     "semantic_hash": ""
   },
   "src/lib/shootingRanges/actions.test.ts": {
@@ -4830,9 +4830,9 @@
     "semantic_hash": ""
   },
   "src/lib/shootingRanges/README.md": {
-    "mtime": 1788167621.7567604,
-    "seen": 1788168216.934231,
-    "ast_hash": "6c6d6fb9f26f23bcabbd20b0f4733568",
+    "mtime": 1788168883.856778,
+    "seen": 1788169364.3916514,
+    "ast_hash": "d30061f92d97e9ce49006b749f9cc6ae",
     "semantic_hash": ""
   },
   "src/lib/notifications/engine/shootingRanges.test.ts": {
@@ -5376,15 +5376,15 @@
     "semantic_hash": ""
   },
   "src/lib/notifications/engine/weaponQualification.test.ts": {
-    "mtime": 1788167757.6127622,
-    "seen": 1788168216.9337127,
-    "ast_hash": "e580bd794a7c23623cae020a396e16af",
+    "mtime": 1788168962.8567789,
+    "seen": 1788169364.3905723,
+    "ast_hash": "910184ebea7a1930b66545eea7758148",
     "semantic_hash": ""
   },
   "src/lib/notifications/engine/weaponQualification.ts": {
-    "mtime": 1788167245.3243546,
-    "seen": 1788168216.933714,
-    "ast_hash": "83cdb3ef735ef1a40e8b20b97ffa5426",
+    "mtime": 1788168794.5687766,
+    "seen": 1788169364.390576,
+    "ast_hash": "2d17c64294ed60bdf4eaa43126f761c0",
     "semantic_hash": ""
   },
   "src/lib/notifications/engine/pipeline.weaponQualificationEmergencyMode.test.ts": {
