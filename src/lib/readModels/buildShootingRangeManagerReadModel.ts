@@ -1,28 +1,56 @@
-import { classifyRoleGroup, type FairnessRoleGroupKey } from "@/lib/domain/personnelType";
+import { classifyPersonnelType, classifyRoleGroup } from "@/lib/domain/personnelType";
 import type { QualificationStatus } from "@/lib/domain/shootingRangeQualification";
 import type {
   PlannedRangeView,
   ShootingRangeQualificationReadModel,
 } from "./buildShootingRangeQualificationReadModel";
 
+/**
+ * מטווחים-specific personnel grouping for the manager team overview -- a
+ * DELIBERATELY SEPARATE, narrower union from the shared `FairnessRoleGroupKey`
+ * (`lib/domain/personnelType.ts`), never widening that shared roster/
+ * Fairness concept with a מטווחים-only value. `"permanent"` (קבע) takes
+ * precedence over role (product decision: permanent staff get their OWN
+ * top-level group here, never folded into אחמ"שים/טכנאים, even though they
+ * DO carry real `isSupervisor`/`isTechnician` flags for eligibility and
+ * scheduling purposes elsewhere) -- see `classifyShootingRangeRoleGroup`.
+ */
+export type ShootingRangeRoleGroupKey = "permanent" | "supervisor" | "technician";
+
+/** The minimal shape `classifyShootingRangeRoleGroup` needs. */
+export interface ShootingRangeRoleGroupable {
+  personnelType: string | null;
+  isSupervisor: boolean;
+  isTechnician: boolean;
+}
+
+/**
+ * `"permanent"` (קבע, via the SAME canonical `classifyPersonnelType` every
+ * other מטווחים surface uses) unconditionally wins over role, regardless of
+ * `isSupervisor`/`isTechnician` -- a permanent אחמ"ש/טכנאי is grouped under
+ * "קבע", never under "אחמ"שים"/"טכנאים". Otherwise defers to the SAME
+ * canonical `classifyRoleGroup` the roster/Fairness views already use
+ * (supervisor takes precedence over technician when a person is both) --
+ * never a second/duplicated role-classification scheme. `classifyRoleGroup`'s
+ * `"other"` branch is structurally unreachable here for a non-permanent
+ * person: every row in this model already passed `isEligibleForShootingRanges`
+ * (regular/permanent service AND `isShiftCapable`) upstream, so
+ * `isSupervisor || isTechnician` always holds -- the fallback exists only
+ * because TypeScript can't see that invariant.
+ */
+export function classifyShootingRangeRoleGroup(person: ShootingRangeRoleGroupable): ShootingRangeRoleGroupKey {
+  if (classifyPersonnelType(person.personnelType) === "permanent") return "permanent";
+  const roleGroup = classifyRoleGroup(person);
+  return roleGroup === "other" ? "technician" : roleGroup;
+}
+
 export interface ManagerShootingRangeRow {
   personId: string;
   personName: string;
   /** The person's connected Google profile photo, resolved in bulk by `shootingRangeManagerOverview.ts` via `personAvatarLookup.ts` -- `null` when they have no connected account or no usable photo; `TeamMemberRow` falls back to initials. */
   avatarUrl: string | null;
-  /**
-   * "supervisor" (אחמ"ש) or "technician" (טכנאי), via the SAME canonical
-   * `classifyRoleGroup` the roster/Fairness views already use -- never a
-   * second role-classification scheme. Supervisor takes precedence when a
-   * person is both (`classifyRoleGroup`'s own documented rule), so a
-   * person is NEVER duplicated across the manager UI's two role sections.
-   * Structurally never `"other"` here: every row in this model already
-   * passed `isEligibleForShootingRanges` (regular/permanent service AND
-   * `isShiftCapable`) upstream, so `isSupervisor || isTechnician` always
-   * holds -- the type still allows it only because it's the same shared
-   * `FairnessRoleGroupKey` the rest of the domain uses.
-   */
-  roleGroup: FairnessRoleGroupKey;
+  /** "permanent" (קבע), "supervisor" (אחמ"ש), or "technician" (טכנאי) -- see `classifyShootingRangeRoleGroup`'s own docs for the precedence rule. A person is NEVER duplicated across the manager UI's three group sections. */
+  roleGroup: ShootingRangeRoleGroupKey;
   status: QualificationStatus;
   baselineDate: string | null;
   expiryDate: string | null;
@@ -94,6 +122,7 @@ const NEARING_EXPIRY_STATUSES: ReadonlySet<QualificationStatus> = new Set(["expi
 export interface ManagerShootingRangePersonInput {
   personId: string;
   personName: string;
+  personnelType: string | null;
   isSupervisor: boolean;
   isTechnician: boolean;
   avatarUrl: string | null;
@@ -113,7 +142,7 @@ export function buildShootingRangeManagerReadModel(
   unresolvedSheetRowNames: readonly string[] = [],
 ): ShootingRangeManagerReadModel {
   const rows: ManagerShootingRangeRow[] = people.map(
-    ({ personId, personName, isSupervisor, isTechnician, avatarUrl, model }) => {
+    ({ personId, personName, personnelType, isSupervisor, isTechnician, avatarUrl, model }) => {
       const isNotRelevant = model.status === "not_relevant";
       const pendingConfirmation = model.plannedRange?.status === "pending_confirmation";
       const requiresAttention =
@@ -127,7 +156,7 @@ export function buildShootingRangeManagerReadModel(
         personId,
         personName,
         avatarUrl,
-        roleGroup: classifyRoleGroup({ isSupervisor, isTechnician }),
+        roleGroup: classifyShootingRangeRoleGroup({ personnelType, isSupervisor, isTechnician }),
         status: model.status,
         baselineDate: model.baselineDate,
         expiryDate: model.expiryDate,
