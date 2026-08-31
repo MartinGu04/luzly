@@ -17,7 +17,7 @@ export interface ManagerShootingRangeRow {
    * person is both (`classifyRoleGroup`'s own documented rule), so a
    * person is NEVER duplicated across the manager UI's two role sections.
    * Structurally never `"other"` here: every row in this model already
-   * passed `isEligibleForShootingRanges` (regular-service AND
+   * passed `isEligibleForShootingRanges` (regular/permanent service AND
    * `isShiftCapable`) upstream, so `isSupervisor || isTechnician` always
    * holds -- the type still allows it only because it's the same shared
    * `FairnessRoleGroupKey` the rest of the domain uses.

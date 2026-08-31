@@ -28,15 +28,15 @@ export type ShootingRangeQualificationLoadResult =
   | { status: "ambiguous_identity" }
   /**
    * Authenticated + uniquely mapped, but `!isEligibleForShootingRanges(person)`
-   * -- מטווחים is scoped to regular-service (חובה) personnel who are also
-   * אחמ"ש or טכנאי (product decision); everyone else (permanent, reserve,
-   * or a regular person in neither role) is entirely out of scope, not
-   * merely hidden from the UI. No model is ever built for this caller.
+   * -- מטווחים is scoped to regular (חובה) or permanent (קבע) personnel who
+   * are also אחמ"ש or טכנאי (product decision); everyone else (reserve, or
+   * a regular/permanent person in neither role) is entirely out of scope,
+   * not merely hidden from the UI. No model is ever built for this caller.
    * `person`/`avatarUrl` are still carried (same shape as "ok") so the page
    * can still render identity chrome and the manager-overview link for a
-   * non-eligible MANAGER (e.g. a קבע person overseeing regular personnel is
-   * a real case -- their own personal ineligibility must never hide their
-   * access to the team overview).
+   * non-eligible MANAGER (e.g. a מילואים person overseeing eligible
+   * personnel is a real case -- their own personal ineligibility must
+   * never hide their access to the team overview).
    */
   | { status: "not_applicable"; person: Person; avatarUrl: string | null }
   | { status: "ok"; person: Person; model: ShootingRangeQualificationReadModel; avatarUrl: string | null };
@@ -96,8 +96,8 @@ export function selectRelevanceRecordForPerson(
  * 2. Fetches personnel + "מטווחים" via `lib/sync`'s cached
  *    `getWorkbookSnapshot` -- never a second/duplicate Google source.
  * 3. Gates on `isEligibleForShootingRanges(person)` -- מטווחים applies only
- *    to regular-service (חובה) personnel who are also אחמ"ש or טכנאי
- *    (product decision); anyone else gets `{status: "not_applicable"}`
+ *    to regular (חובה) or permanent (קבע) personnel who are also אחמ"ש or
+ *    טכנאי (product decision); anyone else gets `{status: "not_applicable"}`
  *    before the sheet is even parsed.
  * 4. Parses the sheet with `parseShootingRangesSheet` and narrows it to
  *    this person's own most recent past-dated row (`selectSheetBaselineForPerson`).

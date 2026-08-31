@@ -1,24 +1,24 @@
 # מטווחים (shooting-range qualification)
 
-## Scope: regular-service (חובה) personnel who are also אחמ"ש/טכנאי
+## Scope: regular (חובה) or permanent (קבע) personnel who are also אחמ"ש/טכנאי
 
 Product decision: this feature applies ONLY to personnel for whom
 `isEligibleForShootingRanges(person)` (`lib/domain/shootingRangeQualification.ts`)
-is true -- `classifyPersonnelType(person.personnelType) === "regular"` AND
-`isShiftCapable(person)` (i.e. `isSupervisor || isTechnician`). Both are
-the EXISTING canonical classifiers from `lib/domain/personnelType.ts`;
+is true -- `classifyPersonnelType(person.personnelType)` is `"regular"` or
+`"permanent"` AND `isShiftCapable(person)` (i.e. `isSupervisor || isTechnician`).
+Both are the EXISTING canonical classifiers from `lib/domain/personnelType.ts`;
 `isEligibleForShootingRanges` composes them and is the ONE place this
 feature's eligibility rule is decided -- never a second/ad-hoc inference
-from name/role/text, and never duplicated at each call site. Permanent
-(קבע)/reserve (מילואים) personnel, and a regular person who is neither
-אחמ"ש nor טכנאי, are all equally out of scope, not merely hidden from the
-UI -- every server entry point re-checks eligibility itself:
+from name/role/text, and never duplicated at each call site. Reserve
+(מילואים) personnel, and a regular/permanent person who is neither אחמ"ש
+nor טכנאי, are all equally out of scope, not merely hidden from the UI --
+every server entry point re-checks eligibility itself:
 
 - **Personal loader** (`shootingRangeQualification.ts`): an ineligible
   person gets `{status: "not_applicable"}` before the "מטווחים" sheet is
   even parsed or any app-owned table is read. `person`/`avatarUrl` are
   still carried on that result so the page can still show identity chrome
-  and the manager-overview link for an ineligible MANAGER (e.g. a קבע
+  and the manager-overview link for an ineligible MANAGER (e.g. a מילואים
   person overseeing eligible personnel is a real case).
 - **Manager overview** (`shootingRangeManagerOverview.ts`): the roster is
   filtered to eligible personnel BEFORE building any per-person model --

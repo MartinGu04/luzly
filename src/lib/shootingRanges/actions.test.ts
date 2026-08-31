@@ -127,7 +127,7 @@ describe("submitSelfReportShootingRangeAction -- eligibility (regular-service AN
     });
 
     it("never notifies managers when an eligibility/relevance check rejects the submission before any insert is attempted", async () => {
-      getWorkbookSnapshot.mockResolvedValue(personnelSnapshot(personnelRowsWithType("קבע")));
+      getWorkbookSnapshot.mockResolvedValue(personnelSnapshot(personnelRowsWithType("מילואים")));
 
       const result = await submitSelfReportShootingRangeAction("2026-08-20", null);
 
@@ -137,8 +137,17 @@ describe("submitSelfReportShootingRangeAction -- eligibility (regular-service AN
     });
   });
 
-  it("rejects a permanent (קבע) person -- never trusts the client, never inserts a report", async () => {
+  it("allows a permanent (קבע) person to submit a self-report, via the same rule as regular", async () => {
     getWorkbookSnapshot.mockResolvedValue(personnelSnapshot(personnelRowsWithType("קבע")));
+
+    const result = await submitSelfReportShootingRangeAction("2026-08-20", null);
+
+    expect(result).toEqual({ ok: true });
+    expect(insertSelfReport).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a permanent (קבע) person who is neither אחמ\"ש nor טכנאי -- the role half of the rule still applies", async () => {
+    getWorkbookSnapshot.mockResolvedValue(personnelSnapshot(personnelRowsWithType("קבע", { technician: false, supervisor: false })));
 
     const result = await submitSelfReportShootingRangeAction("2026-08-20", null);
 
@@ -229,17 +238,21 @@ describe("createPlannedShootingRangeAction -- eligibility (regular-service AND �
     getWorkbookSnapshot.mockResolvedValue({ fetchedAt: "2026-08-25T08:00:00.000Z", sheets: [shootingRangesSheet([])] });
   });
 
-  it("drops permanent/reserve/foreign ids from the scheduled set -- only genuinely regular roster ids ever reach createPlannedOccurrences or the notifications", async () => {
+  it("drops reserve/foreign ids from the scheduled set but keeps an eligible permanent id -- only genuinely eligible roster ids ever reach createPlannedOccurrences or the notifications", async () => {
     const regular = person({ id: "p_regular", personnelType: "חובה" });
     const permanent = person({ id: "p_permanent", personnelType: "קבע" });
     const reserve = person({ id: "p_reserve", personnelType: "מילואים" });
     loadManagerPersonnelContext.mockResolvedValue({ status: "ok", context: { manager: MANAGER, people: [regular, permanent, reserve] } });
+    createPlannedOccurrences.mockResolvedValue([
+      { id: "o1", rangeDate: "2026-09-03", personId: "p_regular", status: "planned", createdByPersonId: "mgr1", createdByPersonName: "מנהל בדיקה", resolvedByPersonId: null, resolvedByPersonName: null, resolvedAt: null, createdAt: "2026-08-25T00:00:00.000Z" },
+      { id: "o2", rangeDate: "2026-09-03", personId: "p_permanent", status: "planned", createdByPersonId: "mgr1", createdByPersonName: "מנהל בדיקה", resolvedByPersonId: null, resolvedByPersonName: null, resolvedAt: null, createdAt: "2026-08-25T00:00:00.000Z" },
+    ]);
 
     const result = await createPlannedShootingRangeAction("2026-09-03", ["p_regular", "p_permanent", "p_reserve", "not-in-roster"]);
 
-    expect(result).toEqual({ ok: true, scheduledCount: 1 });
-    expect(createPlannedOccurrences).toHaveBeenCalledWith("2026-09-03", ["p_regular"], "mgr1", "מנהל בדיקה");
-    expect(notifyPeopleScheduledForRange).toHaveBeenCalledWith([regular, permanent, reserve], ["p_regular"], "2026-09-03");
+    expect(result).toEqual({ ok: true, scheduledCount: 2 });
+    expect(createPlannedOccurrences).toHaveBeenCalledWith("2026-09-03", ["p_regular", "p_permanent"], "mgr1", "מנהל בדיקה");
+    expect(notifyPeopleScheduledForRange).toHaveBeenCalledWith([regular, permanent, reserve], ["p_regular", "p_permanent"], "2026-09-03");
   });
 
   it("drops a regular person who is neither אחמ\"ש nor טכנאי from the scheduled set", async () => {
@@ -253,16 +266,31 @@ describe("createPlannedShootingRangeAction -- eligibility (regular-service AND �
     expect(createPlannedOccurrences).toHaveBeenCalledWith("2026-09-03", ["p_eligible"], "mgr1", "מנהל בדיקה");
   });
 
-  it("fails with invalid_targets when EVERY submitted id is non-regular -- never silently schedules nobody as a false success", async () => {
-    const permanent = person({ id: "p_permanent", personnelType: "קבע" });
+  it("fails with invalid_targets when EVERY submitted id is ineligible -- never silently schedules nobody as a false success", async () => {
+    const permanentOther = person({ id: "p_permanent_other", personnelType: "קבע", isTechnician: false, isSupervisor: false });
     const reserve = person({ id: "p_reserve", personnelType: "מילואים" });
-    loadManagerPersonnelContext.mockResolvedValue({ status: "ok", context: { manager: MANAGER, people: [permanent, reserve] } });
+    loadManagerPersonnelContext.mockResolvedValue({ status: "ok", context: { manager: MANAGER, people: [permanentOther, reserve] } });
 
-    const result = await createPlannedShootingRangeAction("2026-09-03", ["p_permanent", "p_reserve"]);
+    const result = await createPlannedShootingRangeAction("2026-09-03", ["p_permanent_other", "p_reserve"]);
 
     expect(result).toEqual({ ok: false, error: "invalid_targets" });
     expect(createPlannedOccurrences).not.toHaveBeenCalled();
     expect(notifyPeopleScheduledForRange).not.toHaveBeenCalled();
+  });
+
+  it("schedules successfully when every submitted id is eligible permanent staff (no regression, same rule as regular)", async () => {
+    const perm1 = person({ id: "p_perm1", personnelType: "קבע" });
+    const perm2 = person({ id: "p_perm2", personnelType: "קבע" });
+    loadManagerPersonnelContext.mockResolvedValue({ status: "ok", context: { manager: MANAGER, people: [perm1, perm2] } });
+    createPlannedOccurrences.mockResolvedValue([
+      { id: "o1", rangeDate: "2026-09-03", personId: "p_perm1", status: "planned", createdByPersonId: "mgr1", createdByPersonName: "מנהל בדיקה", resolvedByPersonId: null, resolvedByPersonName: null, resolvedAt: null, createdAt: "2026-08-25T00:00:00.000Z" },
+      { id: "o2", rangeDate: "2026-09-03", personId: "p_perm2", status: "planned", createdByPersonId: "mgr1", createdByPersonName: "מנהל בדיקה", resolvedByPersonId: null, resolvedByPersonName: null, resolvedAt: null, createdAt: "2026-08-25T00:00:00.000Z" },
+    ]);
+
+    const result = await createPlannedShootingRangeAction("2026-09-03", ["p_perm1", "p_perm2"]);
+
+    expect(result).toEqual({ ok: true, scheduledCount: 2 });
+    expect(createPlannedOccurrences).toHaveBeenCalledWith("2026-09-03", ["p_perm1", "p_perm2"], "mgr1", "מנהל בדיקה");
   });
 
   it("schedules successfully when every submitted id is regular (no regression on the happy path)", async () => {

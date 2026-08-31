@@ -19,8 +19,16 @@ describe("isEligibleForShootingRanges", () => {
     expect(isEligibleForShootingRanges({ personnelType: "חובה", isSupervisor: false, isTechnician: false })).toBe(false);
   });
 
-  it("permanent (קבע) is never eligible, even if אחמ\"ש/טכנאי", () => {
-    expect(isEligibleForShootingRanges({ personnelType: "קבע", isSupervisor: true, isTechnician: true })).toBe(false);
+  it("permanent (קבע) + טכנאי is eligible, via the same rule as regular", () => {
+    expect(isEligibleForShootingRanges({ personnelType: "קבע", isSupervisor: false, isTechnician: true })).toBe(true);
+  });
+
+  it("permanent (קבע) + אחמ\"ש is eligible too, not just טכנאי", () => {
+    expect(isEligibleForShootingRanges({ personnelType: "קבע", isSupervisor: true, isTechnician: false })).toBe(true);
+  });
+
+  it("permanent (קבע) but neither אחמ\"ש nor טכנאי is NOT eligible -- the role half of the rule still applies", () => {
+    expect(isEligibleForShootingRanges({ personnelType: "קבע", isSupervisor: false, isTechnician: false })).toBe(false);
   });
 
   it("reserve (מילואים) is never eligible, even if אחמ\"ש/טכנאי", () => {

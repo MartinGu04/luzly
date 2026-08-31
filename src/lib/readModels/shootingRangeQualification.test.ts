@@ -195,7 +195,7 @@ describe("loadShootingRangeQualification", () => {
     await expect(loadShootingRangeQualification()).rejects.toThrow(/מטווחים/);
   });
 
-  describe("eligibility (regular-service AND אחמ\"ש/טכנאי)", () => {
+  describe("eligibility (regular/permanent-service AND אחמ\"ש/טכנאי)", () => {
     function personnelRowsWithType(type: string): string[][] {
       return [
         ["שם", "מייל", 'סוג כ"א'],
@@ -204,7 +204,6 @@ describe("loadShootingRangeQualification", () => {
     }
 
     it.each([
-      ["permanent (קבע)", "קבע"],
       ["reserve (מילואים)", "מילואים"],
       ["unclassified/unrecognized type", "משהו אחר"],
     ])("returns not_applicable for %s -- never builds a model, never touches the app-owned tables", async (_label, type) => {
@@ -283,6 +282,42 @@ describe("loadShootingRangeQualification", () => {
       const result = await loadShootingRangeQualification();
 
       expect(result.status).toBe("ok");
+    });
+
+    it("a permanent (קבע) + טכנאי person is eligible too, via the same rule as regular -- proceeds to a full ok result with the same qualification model", async () => {
+      getRequestAuthenticatedIdentity.mockResolvedValue({ status: "authenticated", userId: "u1", email: "dani@example.invalid", avatarUrl: null });
+      getWorkbookSnapshot.mockResolvedValue({
+        fetchedAt: "2026-08-25T08:00:00.000Z",
+        sheets: [
+          personnelSheet([
+            ["שם", "מייל", 'סוג כ"א', "טכנאי"],
+            ["דני בדיקה", "dani@example.invalid", "קבע", "TRUE"],
+          ]),
+          shootingRangesSheet([
+            ["שם", "תאריך ביצוע מטווח"],
+            ["דני בדיקה", "29/06/2026"],
+          ]),
+        ],
+      });
+
+      const result = await loadShootingRangeQualification();
+
+      expect(result.status).toBe("ok");
+      if (result.status !== "ok") throw new Error("unreachable");
+      expect(result.model.baselineDate).toBe("2026-06-29");
+      expect(result.model.expiryDate).toBe("2026-12-29");
+    });
+
+    it("a permanent (קבע) person who is NEITHER אחמ\"ש NOR טכנאי is not_applicable, same as a regular person in neither role", async () => {
+      getRequestAuthenticatedIdentity.mockResolvedValue({ status: "authenticated", userId: "u1", email: "dani@example.invalid", avatarUrl: null });
+      getWorkbookSnapshot.mockResolvedValue({
+        fetchedAt: "2026-08-25T08:00:00.000Z",
+        sheets: [personnelSheet(personnelRowsWithType("קבע")), shootingRangesSheet([])],
+      });
+
+      const result = await loadShootingRangeQualification();
+
+      expect(result.status).toBe("not_applicable");
     });
   });
 });

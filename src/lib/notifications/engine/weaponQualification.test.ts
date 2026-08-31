@@ -280,6 +280,20 @@ describe("runWeaponQualificationCheck -- aggregate notification (spec: fix produ
     expect(JSON.parse(fakeJobs[1].sourceRef!)).toHaveLength(3);
   });
 
+  it("8. a permanent (קבע) staff member with an expired qualification produces the SAME alert as a regular person -- requiresWeaponQualification is driven by the activity, never a personnel-category special case", async () => {
+    const permanentGuard = person({ id: "p_perm", name: "קבע בדיקה", personnelType: "קבע", isTechnician: true });
+    const events = [dutyEvent({ personId: "p_perm", personName: "קבע בדיקה", dutyFamily: "guard", date: futureDate(0) })];
+    const people = [permanentGuard, manager()];
+    getCompletionsForPersonIds.mockResolvedValue([expiredCompletion("p_perm")]);
+
+    const result = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, MGR_RECIPIENTS);
+
+    expect(result.issuesDetected).toBe(1);
+    expect(insertNotificationJobIfAbsent).toHaveBeenCalledTimes(1);
+    expect(result.jobsCreated).toBe(1);
+    expect(getCompletionsForPersonIds).toHaveBeenCalledWith(["p_perm"]);
+  });
+
   it("valid qualification / unrelated activity -> no issue, no notification", async () => {
     getCompletionsForPersonIds.mockResolvedValue([]);
     const events: Event[] = [dutyEvent({ dutyFamily: null, category: "shift", title: "טכנאי יום" })];
