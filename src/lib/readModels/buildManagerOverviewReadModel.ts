@@ -87,16 +87,22 @@ export interface BuildManagerOverviewReadModelInput {
    */
   rosterAvatars: RosterAvatarLookup;
   /**
-   * Every ELIGIBLE person's weapon-qualification baseline (`isEligibleForShootingRanges`
-   * -- the SAME population the מטווחים feature already scopes itself to),
-   * already resolved by the caller (`managerOverview.ts`'s `loadWeaponQualificationIndex`,
-   * itself built on the SAME `buildShootingRangeQualificationReadModel`
-   * every other מטווחים surface uses -- never a second qualification
+   * The FULL roster's weapon-qualification baseline, deliberately never
+   * pre-filtered by `isEligibleForShootingRanges` (product decision: this
+   * alert is driven by the ACTIVITY's own requirement alone, never by
+   * service category or shift-capable role -- see
+   * `buildWeaponQualificationIndex`'s own docs), already resolved by the
+   * caller (`managerOverview.ts`'s `loadWeaponQualificationIndex`, itself
+   * built on the SAME `buildShootingRangeQualificationReadModel` every
+   * other מטווחים surface uses -- never a second qualification
    * computation) -- fed straight into `detectOperationalIssues` below so
-   * "דורש טיפול" can flag someone scheduled for a weapon-requiring activity
+   * "דורש טיפול" can flag ANYONE scheduled for a weapon-requiring activity
    * (שמירה/עתודה/אוקסיד) whose qualification isn't valid on that activity's
-   * OWN date. A person absent from this map is simply out of scope for the
-   * rule, never treated as "missing data".
+   * OWN date, including missing qualification data entirely (`expiryDate: null`
+   * resolves to status `"none"`, which IS flagged -- never silently
+   * ignored). A person absent from this map is a genuine data-integrity
+   * edge case (not part of the roster snapshot the index was built from),
+   * never a role/service-category exclusion.
    */
   qualificationByPersonId: ReadonlyMap<string, WeaponQualificationInfo>;
 }

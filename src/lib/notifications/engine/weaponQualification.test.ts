@@ -291,7 +291,73 @@ describe("runWeaponQualificationCheck -- aggregate notification (spec: fix produ
     expect(result.issuesDetected).toBe(1);
     expect(insertNotificationJobIfAbsent).toHaveBeenCalledTimes(1);
     expect(result.jobsCreated).toBe(1);
-    expect(getCompletionsForPersonIds).toHaveBeenCalledWith(["p_perm"]);
+    // Completions are fetched for the FULL roster, never pre-filtered by isEligibleForShootingRanges.
+    expect(getCompletionsForPersonIds).toHaveBeenCalledWith(expect.arrayContaining(["p_perm", "mgr1"]));
+  });
+
+  describe("9. weapon-qualification alert is activity-driven, never scoped by isEligibleForShootingRanges (role/service-category)", () => {
+    it("a permanent (קבע) staff member who is NEITHER אחמ\"ש nor טכנאי, with an expired qualification, still produces the alert", async () => {
+      const permanentNonShiftCapable = person({ id: "p_perm_ns", name: "קבע לא כשיר", personnelType: "קבע", isTechnician: false, isSupervisor: false });
+      const events = [dutyEvent({ personId: "p_perm_ns", personName: "קבע לא כשיר", dutyFamily: "guard", date: futureDate(0) })];
+      const people = [permanentNonShiftCapable, manager()];
+      getCompletionsForPersonIds.mockResolvedValue([expiredCompletion("p_perm_ns")]);
+
+      const result = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, MGR_RECIPIENTS);
+
+      expect(result.issuesDetected).toBe(1);
+      expect(result.jobsCreated).toBe(1);
+    });
+
+    it("a regular (חובה) staff member who is NEITHER אחמ\"ש nor טכנאי, with an expired qualification, still produces the alert -- same rule, not permanent-specific", async () => {
+      const regularNonShiftCapable = person({ id: "p_reg_ns", name: "חובה לא כשיר", personnelType: "חובה", isTechnician: false, isSupervisor: false });
+      const events = [dutyEvent({ personId: "p_reg_ns", personName: "חובה לא כשיר", dutyFamily: "oxid", date: futureDate(0) })];
+      const people = [regularNonShiftCapable, manager()];
+      getCompletionsForPersonIds.mockResolvedValue([expiredCompletion("p_reg_ns")]);
+
+      const result = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, MGR_RECIPIENTS);
+
+      expect(result.issuesDetected).toBe(1);
+      expect(result.jobsCreated).toBe(1);
+    });
+
+    it("a permanent (קבע) staff member who is NEITHER אחמ\"ש nor טכנאי, with NO qualification data at all, still produces the alert -- missing data is never silently ignored", async () => {
+      const permanentNoData = person({ id: "p_perm_missing", name: "קבע חסר נתונים", personnelType: "קבע", isTechnician: false, isSupervisor: false });
+      const events = [dutyEvent({ personId: "p_perm_missing", personName: "קבע חסר נתונים", dutyFamily: "reserve", date: futureDate(0) })];
+      const people = [permanentNoData, manager()];
+      getCompletionsForPersonIds.mockResolvedValue([]); // no completions at all, and no sheet baseline either
+
+      const result = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, MGR_RECIPIENTS);
+
+      expect(result.issuesDetected).toBe(1);
+      expect(result.jobsCreated).toBe(1);
+    });
+
+    it("a valid (non-expired) qualification for a non-shift-capable permanent person -> no issue, no notification", async () => {
+      const permanentValid = person({ id: "p_perm_valid", name: "קבע תקין", personnelType: "קבע", isTechnician: false, isSupervisor: false });
+      const events = [dutyEvent({ personId: "p_perm_valid", personName: "קבע תקין", dutyFamily: "guard", date: futureDate(0) })];
+      const people = [permanentValid, manager()];
+      // Completed 2026-08-01, expires 2027-02-01 -- well past futureDate(0) (2026-09-02).
+      getCompletionsForPersonIds.mockResolvedValue([
+        { ...expiredCompletion("p_perm_valid"), performedOn: "2026-08-01" },
+      ]);
+
+      const result = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, MGR_RECIPIENTS);
+
+      expect(result).toEqual({ issuesDetected: 0, jobsCreated: 0 });
+      expect(insertNotificationJobIfAbsent).not.toHaveBeenCalled();
+    });
+
+    it("an activity that does NOT require weapon qualification -> no issue even for an expired non-shift-capable permanent person", async () => {
+      const permanentExpired = person({ id: "p_perm_unrelated", name: "קבע לא רלוונטי לפעילות", personnelType: "קבע", isTechnician: false, isSupervisor: false });
+      const events = [dutyEvent({ personId: "p_perm_unrelated", personName: "קבע לא רלוונטי לפעילות", dutyFamily: null, category: "shift", title: "משמרת יום", date: futureDate(0) })];
+      const people = [permanentExpired, manager()];
+      getCompletionsForPersonIds.mockResolvedValue([expiredCompletion("p_perm_unrelated")]);
+
+      const result = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, MGR_RECIPIENTS);
+
+      expect(result).toEqual({ issuesDetected: 0, jobsCreated: 0 });
+      expect(insertNotificationJobIfAbsent).not.toHaveBeenCalled();
+    });
   });
 
   it("valid qualification / unrelated activity -> no issue, no notification", async () => {

@@ -250,22 +250,31 @@ export function detectCapabilityMismatchIssues(
 /**
  * שמירה/עתודה/אוקסיד all require a weapon (`requiresWeaponQualification`,
  * the ONE place that list is decided -- this is a GENERAL rule over every
- * duty family that needs one, never an oxid-specific check). Fires
- * whenever the assigned person's own weapon-qualification baseline
- * (`qualificationByPersonId`, keyed by personId -- absent entirely for
- * anyone out of this feature's scope, e.g. not `isEligibleForShootingRanges`)
- * is not valid ON THE ACTIVITY'S OWN DATE, never merely "as of today": a
- * qualification that's valid right now but will have expired by a FUTURE
- * activity date still fires here (`classifyQualificationStatus` is
- * re-evaluated against `event.date`, never a fixed "today"), and one
- * that's already expired today but whose activity is scheduled further in
- * the future is judged against THAT future date on its own terms.
- * `classifyQualificationStatus` already encodes the project's one
+ * duty family that needs one, never an oxid-specific check). This rule is
+ * driven ENTIRELY by the activity's own duty family -- never by the
+ * assigned person's service category (regular/permanent/reserve) or
+ * shift-capable role (`isEligibleForShootingRanges` gates the מטווחים
+ * UI/feature itself, never this alert; see `buildWeaponQualificationIndex`'s
+ * own docs). Fires whenever the assigned person's own weapon-qualification
+ * baseline (`qualificationByPersonId`, keyed by personId) is not valid ON
+ * THE ACTIVITY'S OWN DATE, never merely "as of today": a qualification
+ * that's valid right now but will have expired by a FUTURE activity date
+ * still fires here (`classifyQualificationStatus` is re-evaluated against
+ * `event.date`, never a fixed "today"), and one that's already expired
+ * today but whose activity is scheduled further in the future is judged
+ * against THAT future date on its own terms. Missing qualification data
+ * entirely (`expiryDate: null`) resolves to `classifyQualificationStatus`'s
+ * `"none"`, which this rule treats exactly like `"expired"` -- it is never
+ * silently ignored just because nobody ever recorded a baseline for this
+ * person. `classifyQualificationStatus` already encodes the project's one
  * inclusive/exclusive validity rule (valid through the END of the expiry
  * calendar day) -- never reimplemented here. An explicit `notRelevant`
  * override (the מטווחים sheet's `לא רלוונטי`) always wins, same as every
- * other מטווחים surface, and a person entirely absent from the map (never
- * tracked for this feature at all) never raises a "missing data" issue.
+ * other מטווחים surface -- a genuine, existing per-person exemption, never
+ * a role/service-category one. A person entirely absent from the map is a
+ * data-integrity edge case (not part of the roster snapshot the index was
+ * built from), not an eligibility exclusion -- `buildWeaponQualificationIndex`
+ * builds an entry for the FULL roster.
  */
 export function detectWeaponQualificationIssues(
   events: readonly Event[],

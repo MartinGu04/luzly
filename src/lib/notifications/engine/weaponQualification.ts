@@ -7,7 +7,6 @@ import type { ShootingRangeRelevanceRecord, ShootingRangeSheetRecord } from "@/l
 import { formatCompactDate } from "@/lib/presentation/hebrewDate";
 import { getCompletionsForPersonIds } from "@/lib/shootingRanges/store";
 import { buildWeaponQualificationIndex } from "@/lib/readModels/shootingRangeQualification";
-import { isEligibleForShootingRanges } from "@/lib/domain/shootingRangeQualification";
 import { filterManagerRecipients, type RecipientResolution } from "./recipients";
 import { getLatestNotificationSourceRef, insertNotificationJobIfAbsent } from "./store";
 
@@ -84,12 +83,14 @@ function affectedPeopleLabel(count: number): string {
 /**
  * The notification worker's own weapon-qualification check (spec: a
  * GENERAL rule over every שמירה/עתודה/אוקסיד activity, never an
- * oxid-specific patch) -- reuses the EXACT SAME `detectWeaponQualificationIssues`
- * "דורש טיפול" already reads for Manager Area, fed from the EXACT SAME
- * `buildWeaponQualificationIndex` the manager overview loader uses (never
- * a second/competing qualification computation). `sheetRecords`/
- * `relevanceRecords` are already parsed by THIS tick's own `freshRead.ts`
- * -- never re-fetched/re-parsed here.
+ * oxid-specific patch, and driven by the ACTIVITY's own requirement alone
+ * -- never by a person's service category or shift-capable role, see
+ * `buildWeaponQualificationIndex`'s own docs) -- reuses the EXACT SAME
+ * `detectWeaponQualificationIssues` "דורש טיפול" already reads for Manager
+ * Area, fed from the EXACT SAME `buildWeaponQualificationIndex` the
+ * manager overview loader uses (never a second/competing qualification
+ * computation). `sheetRecords`/`relevanceRecords` are already parsed by
+ * THIS tick's own `freshRead.ts` -- never re-fetched/re-parsed here.
  *
  * `events` here is the FULL parsed schedule -- `parseScheduleSheet` never
  * filters by date, so it still carries every historical assignment. Manager
@@ -147,8 +148,11 @@ export async function runWeaponQualificationCheck(
   persist: boolean,
   recipientResolution: RecipientResolution,
 ): Promise<WeaponQualificationCheckResult> {
-  const eligiblePersonIds = people.filter((person) => isEligibleForShootingRanges(person)).map((person) => person.id);
-  const completions = await getCompletionsForPersonIds(eligiblePersonIds);
+  // The FULL roster, never pre-filtered by `isEligibleForShootingRanges` --
+  // see `buildWeaponQualificationIndex`'s own docs: this alert is
+  // activity-driven, not scoped to the מטווחים UI's own eligibility rule.
+  const personIds = people.map((person) => person.id);
+  const completions = await getCompletionsForPersonIds(personIds);
   const qualificationByPersonId = buildWeaponQualificationIndex({
     people,
     sheetRecords,

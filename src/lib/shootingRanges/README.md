@@ -41,6 +41,52 @@ every server entry point re-checks eligibility itself:
   (confirmation only ever resolves occurrences that were actually
   created).
 
+**This eligibility scope applies ONLY to the מטווחים feature/UI surfaces
+above -- it does NOT apply to the weapon-qualification manager alert.**
+See the dedicated section below.
+
+## Weapon-qualification manager alert is activity-driven, never role-scoped
+
+The "דורש טיפול" / notification-worker rule that flags someone assigned to
+a weapon-requiring activity (שמירה/עתודה/אוקסיד, `requiresWeaponQualification`
+in `lib/domain/shootingRangeQualification.ts`) with an invalid qualification
+is a SEPARATE product concern from the מטווחים feature's own UI scope above,
+and is deliberately NOT gated by `isEligibleForShootingRanges`:
+
+> If a person is assigned to an event where `requiresWeaponQualification(dutyFamily)`
+> is true, their qualification must be evaluated for that event's own date --
+> regardless of service category (regular/permanent/reserve) or role
+> (supervisor/technician/neither).
+
+`buildWeaponQualificationIndex` (`lib/readModels/shootingRangeQualification.ts`)
+therefore builds a `WeaponQualificationInfo` entry for the FULL roster
+passed to it, never pre-filtered by eligibility -- both of its callers
+(`lib/notifications/engine/weaponQualification.ts`'s `runWeaponQualificationCheck`
+and `lib/readModels/managerOverview.ts`'s `loadWeaponQualificationIndex`,
+feeding "דורש טיפול") fetch completions for and pass in every roster person,
+not just eligible ones. `detectWeaponQualificationIssues`
+(`lib/domain/operationalIssues.ts`) itself never knew or needed to know
+about eligibility -- it purely looks up `qualificationByPersonId` by the
+assigned person's id and evaluates the activity's own date; the fix lives
+entirely in what population the index is BUILT from, never in that
+detection function.
+
+A person with genuinely no baseline/completion data still gets a real
+index entry (`expiryDate: null`), which `classifyQualificationStatus`
+resolves to `"none"` -- `detectWeaponQualificationIssues` treats `"none"`
+exactly like `"expired"`, so missing qualification data for someone
+assigned a weapon-requiring activity is flagged, never silently dropped
+because "no map entry exists". A person is absent from the index only as a
+genuine data-integrity edge case (not part of the roster snapshot the
+index was built from), never because of their role or service category.
+
+The one thing that still overrides this alert per person is the same
+`רלוונטיות` sheet exemption the rest of this feature already honors (an
+explicit `לא רלוונטי` row) -- a genuine, pre-existing per-person domain
+concept, not a new exemption invented for this rule. `isEligibleForShootingRanges`
+is untouched by any of this and keeps gating the מטווחים UI/write-path
+surfaces listed in the section above exactly as before.
+
 ## Source-of-truth precedence
 
 1. The most recent **approved** `shooting_range_completions` row for a
