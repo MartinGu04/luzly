@@ -17,11 +17,12 @@ function model(overrides: Partial<ShootingRangeQualificationReadModel> = {}): Sh
   };
 }
 
-// Technician by default -- every eligible row in the real feature is a supervisor or technician (or both); tests that don't care about roleGroup just get a stable default.
+// Regular (חובה) + technician by default -- every eligible row in the real feature is a supervisor or technician (or both); tests that don't care about roleGroup just get a stable default.
 function personInput(overrides: Partial<ManagerShootingRangePersonInput> = {}): ManagerShootingRangePersonInput {
   return {
     personId: "p1",
     personName: "א",
+    personnelType: "חובה",
     isSupervisor: false,
     isTechnician: true,
     avatarUrl: null,
@@ -138,6 +139,56 @@ describe("buildShootingRangeManagerReadModel", () => {
       const result = buildShootingRangeManagerReadModel([personInput({ isSupervisor: true, isTechnician: true })]);
       expect(result.rows).toHaveLength(1);
       expect(result.rows[0].roleGroup).toBe("supervisor");
+    });
+  });
+
+  describe("roleGroup -- permanent (קבע) staff get their OWN group, never folded into supervisor/technician", () => {
+    it("a permanent (קבע) technician is classified as 'permanent', not 'technician'", () => {
+      const result = buildShootingRangeManagerReadModel([
+        personInput({ personnelType: "קבע", isSupervisor: false, isTechnician: true }),
+      ]);
+      expect(result.rows[0].roleGroup).toBe("permanent");
+    });
+
+    it("a permanent (קבע) supervisor is classified as 'permanent', not 'supervisor' -- personnel category wins over role entirely", () => {
+      const result = buildShootingRangeManagerReadModel([
+        personInput({ personnelType: "קבע", isSupervisor: true, isTechnician: false }),
+      ]);
+      expect(result.rows[0].roleGroup).toBe("permanent");
+    });
+
+    it("a permanent (קבע) person who is BOTH supervisor and technician is still classified as 'permanent' only -- never duplicated across groups", () => {
+      const result = buildShootingRangeManagerReadModel([
+        personInput({ personnelType: "קבע", isSupervisor: true, isTechnician: true }),
+      ]);
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0].roleGroup).toBe("permanent");
+    });
+
+    it("a regular (חובה) technician is still classified as 'technician' -- no regression for existing personnel categories", () => {
+      const result = buildShootingRangeManagerReadModel([
+        personInput({ personnelType: "חובה", isSupervisor: false, isTechnician: true }),
+      ]);
+      expect(result.rows[0].roleGroup).toBe("technician");
+    });
+
+    it("a regular (חובה) supervisor is still classified as 'supervisor' -- no regression for existing personnel categories", () => {
+      const result = buildShootingRangeManagerReadModel([
+        personInput({ personnelType: "חובה", isSupervisor: true, isTechnician: false }),
+      ]);
+      expect(result.rows[0].roleGroup).toBe("supervisor");
+    });
+
+    it("mixed roster: permanent, supervisor, and technician rows are each classified into their own distinct group", () => {
+      const result = buildShootingRangeManagerReadModel([
+        personInput({ personId: "p_perm", personnelType: "קבע", isSupervisor: false, isTechnician: true }),
+        personInput({ personId: "p_sup", personnelType: "חובה", isSupervisor: true, isTechnician: false }),
+        personInput({ personId: "p_tech", personnelType: "חובה", isSupervisor: false, isTechnician: true }),
+      ]);
+
+      expect(result.rows.find((r) => r.personId === "p_perm")?.roleGroup).toBe("permanent");
+      expect(result.rows.find((r) => r.personId === "p_sup")?.roleGroup).toBe("supervisor");
+      expect(result.rows.find((r) => r.personId === "p_tech")?.roleGroup).toBe("technician");
     });
   });
 });

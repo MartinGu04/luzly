@@ -70,9 +70,9 @@ export async function loadShootingRangeManagerOverview(): Promise<ShootingRangeM
   // not in `pendingSelfReports`, and never fetched from the app-owned
   // tables below at all. A eligible person marked `לא רלוונטי` on the
   // sheet DOES still appear here (spec: "remains visible in their correct
-  // אחמ"ש/טכנאי group") -- only role/service scope excludes someone from
-  // the roster entirely; relevance only changes how an included person's
-  // row is classified (see `buildShootingRangeManagerReadModel`).
+  // קבע/אחמ"ש/טכנאי group") -- only role/service scope excludes someone
+  // from the roster entirely; relevance only changes how an included
+  // person's row is classified (see `buildShootingRangeManagerReadModel`).
   const eligiblePeople = people.filter((person) => isEligibleForShootingRanges(person));
 
   const avatarByPersonId = resolveAvatarUrlsByPersonId(eligiblePeople, await emailToAvatarUrlPromise);
@@ -89,6 +89,7 @@ export async function loadShootingRangeManagerOverview(): Promise<ShootingRangeM
   const perPersonModels = eligiblePeople.map((person) => ({
     personId: person.id,
     personName: person.name,
+    personnelType: person.personnelType,
     isSupervisor: person.isSupervisor,
     isTechnician: person.isTechnician,
     avatarUrl: avatarByPersonId.get(person.id) ?? null,

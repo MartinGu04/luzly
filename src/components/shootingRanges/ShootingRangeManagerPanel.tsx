@@ -336,6 +336,7 @@ export function ShootingRangeManagerPanel({
   }, [rows]);
 
   const visibleRows = attentionOnly ? rows.filter((row) => row.requiresAttention) : rows;
+  const permanentRows = visibleRows.filter((row) => row.roleGroup === "permanent");
   const supervisorRows = visibleRows.filter((row) => row.roleGroup === "supervisor");
   const technicianRows = visibleRows.filter((row) => row.roleGroup === "technician");
 
@@ -362,6 +363,7 @@ export function ShootingRangeManagerPanel({
           </label>
         </div>
 
+        <RoleGroupSection title="קבע" rows={permanentRows} />
         <RoleGroupSection title="אחמ״שים" rows={supervisorRows} />
         <RoleGroupSection title="טכנאים" rows={technicianRows} />
 
