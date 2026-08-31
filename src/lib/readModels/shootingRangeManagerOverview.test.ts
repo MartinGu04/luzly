@@ -205,11 +205,10 @@ describe("loadShootingRangeManagerOverview", () => {
       expect(result.model.rows.map((row) => row.personId)).toEqual(["p_sup"]);
     });
 
-    it("excludes permanent (קבע) and reserve (מילואים) personnel from rows/summary/counts entirely", async () => {
+    it("excludes reserve (מילואים) personnel from rows/summary/counts entirely, even when shift-capable", async () => {
       const regular = person({ id: "p_regular", name: "רגיל בדיקה", personnelType: "חובה" });
-      const permanent = person({ id: "p_permanent", name: "קבע בדיקה", personnelType: "קבע" });
       const reserve = person({ id: "p_reserve", name: "מילואים בדיקה", personnelType: "מילואים" });
-      loadManagerWorkbookContext.mockResolvedValue(okContext([regular, permanent, reserve]));
+      loadManagerWorkbookContext.mockResolvedValue(okContext([regular, reserve]));
 
       const result = await loadShootingRangeManagerOverview();
 
@@ -219,10 +218,34 @@ describe("loadShootingRangeManagerOverview", () => {
       expect(result.model.summary.totalCount).toBe(1);
     });
 
-    it("never even fetches completions/planned occurrences for permanent/reserve person ids", async () => {
-      const regular = person({ id: "p_regular", personnelType: "חובה" });
-      const permanent = person({ id: "p_permanent", personnelType: "קבע" });
+    it("includes permanent (קבע) personnel alongside regular (חובה) personnel, via the same shift-capable rule", async () => {
+      const regular = person({ id: "p_regular", name: "רגיל בדיקה", personnelType: "חובה" });
+      const permanent = person({ id: "p_permanent", name: "קבע בדיקה", personnelType: "קבע" });
       loadManagerWorkbookContext.mockResolvedValue(okContext([regular, permanent]));
+
+      const result = await loadShootingRangeManagerOverview();
+
+      expect(result.status).toBe("ok");
+      if (result.status !== "ok") throw new Error("unreachable");
+      expect(result.model.rows.map((row) => row.personId).sort()).toEqual(["p_permanent", "p_regular"]);
+      expect(result.model.summary.totalCount).toBe(2);
+    });
+
+    it("excludes a permanent (קבע) person who is neither אחמ\"ש nor טכנאי, same role-half rule as regular", async () => {
+      const permanentOther = person({ id: "p_permanent_other", name: "קבע אחר", personnelType: "קבע", isTechnician: false, isSupervisor: false });
+      loadManagerWorkbookContext.mockResolvedValue(okContext([permanentOther]));
+
+      const result = await loadShootingRangeManagerOverview();
+
+      expect(result.status).toBe("ok");
+      if (result.status !== "ok") throw new Error("unreachable");
+      expect(result.model.rows).toEqual([]);
+    });
+
+    it("never even fetches completions/planned occurrences for a reserve person id", async () => {
+      const regular = person({ id: "p_regular", personnelType: "חובה" });
+      const reserve = person({ id: "p_reserve", personnelType: "מילואים" });
+      loadManagerWorkbookContext.mockResolvedValue(okContext([regular, reserve]));
 
       await loadShootingRangeManagerOverview();
 
@@ -230,11 +253,21 @@ describe("loadShootingRangeManagerOverview", () => {
       expect(getPlannedOccurrencesForPersonIds).toHaveBeenCalledWith(["p_regular"]);
     });
 
-    it("an ambiguous name shared between a regular and a non-regular person still fails closed to null resolution -- filtering never happens before name resolution", async () => {
+    it("fetches completions/planned occurrences for an eligible permanent person id too", async () => {
+      const permanent = person({ id: "p_permanent", personnelType: "קבע" });
+      loadManagerWorkbookContext.mockResolvedValue(okContext([permanent]));
+
+      await loadShootingRangeManagerOverview();
+
+      expect(getCompletionsForPersonIds).toHaveBeenCalledWith(["p_permanent"]);
+      expect(getPlannedOccurrencesForPersonIds).toHaveBeenCalledWith(["p_permanent"]);
+    });
+
+    it("an ambiguous name shared between an eligible and a reserve (ineligible) person still fails closed to null resolution -- filtering never happens before name resolution", async () => {
       const regular = person({ id: "p_regular", name: "כפול כפולי", personnelType: "חובה" });
-      const permanent = person({ id: "p_permanent", name: "כפול כפולי", personnelType: "קבע" });
+      const reserve = person({ id: "p_reserve", name: "כפול כפולי", personnelType: "מילואים" });
       loadManagerWorkbookContext.mockResolvedValue(
-        okContext([regular, permanent], [
+        okContext([regular, reserve], [
           ["שם", "תאריך ביצוע מטווח"],
           ["כפול כפולי", "01/01/2026"],
         ]),
@@ -248,9 +281,9 @@ describe("loadShootingRangeManagerOverview", () => {
       expect(result.model.rows.find((row) => row.personId === "p_regular")?.baselineDate).toBeNull();
     });
 
-    it("excludes a permanent/reserve person's pending self-report from the manager review queue too", async () => {
-      const permanent = person({ id: "p_permanent", personnelType: "קבע" });
-      loadManagerWorkbookContext.mockResolvedValue(okContext([permanent]));
+    it("excludes a reserve person's pending self-report from the manager review queue too", async () => {
+      const reserve = person({ id: "p_reserve", personnelType: "מילואים" });
+      loadManagerWorkbookContext.mockResolvedValue(okContext([reserve]));
       getCompletionsForPersonIds.mockResolvedValue([]);
 
       const result = await loadShootingRangeManagerOverview();
@@ -258,6 +291,34 @@ describe("loadShootingRangeManagerOverview", () => {
       expect(result.status).toBe("ok");
       if (result.status !== "ok") throw new Error("unreachable");
       expect(result.model.pendingSelfReports).toEqual([]);
+    });
+
+    it("includes an eligible permanent person's pending self-report in the manager review queue", async () => {
+      const permanent = person({ id: "p_permanent", name: "קבע בדיקה", personnelType: "קבע" });
+      loadManagerWorkbookContext.mockResolvedValue(okContext([permanent]));
+      getCompletionsForPersonIds.mockResolvedValue([
+        {
+          id: "c1",
+          personId: "p_permanent",
+          performedOn: "2026-08-01",
+          source: "self_report",
+          status: "pending",
+          notes: null,
+          submittedByPersonId: "p_permanent",
+          submittedByPersonName: "קבע בדיקה",
+          approvedByPersonId: null,
+          approvedByPersonName: null,
+          approvedAt: null,
+          linkedPlannedDate: null,
+          createdAt: "2026-08-01T00:00:00.000Z",
+        },
+      ]);
+
+      const result = await loadShootingRangeManagerOverview();
+
+      expect(result.status).toBe("ok");
+      if (result.status !== "ok") throw new Error("unreachable");
+      expect(result.model.pendingSelfReports.map((row) => row.personId)).toEqual(["p_permanent"]);
     });
   });
 
@@ -297,10 +358,10 @@ describe("loadShootingRangeManagerOverview", () => {
 
     it("counts an unresolved row even when it belongs to an INELIGIBLE person -- the count reflects the whole sheet, computed against the full roster, not just eligible rows", async () => {
       const eligible = person({ id: "p_eligible" });
-      const permanentDup = person({ id: "p_dup_a", name: "כפול כפולי", personnelType: "קבע" });
-      const otherDup = person({ id: "p_dup_b", name: "כפול כפולי", personnelType: "קבע" });
+      const reserveDup = person({ id: "p_dup_a", name: "כפול כפולי", personnelType: "מילואים" });
+      const otherDup = person({ id: "p_dup_b", name: "כפול כפולי", personnelType: "מילואים" });
       loadManagerWorkbookContext.mockResolvedValue(
-        okContext([eligible, permanentDup, otherDup], [
+        okContext([eligible, reserveDup, otherDup], [
           ["שם", "תאריך ביצוע מטווח"],
           ["כפול כפולי", "29/06/2026"],
         ]),

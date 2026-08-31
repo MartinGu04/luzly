@@ -55,17 +55,17 @@ export async function loadShootingRangeManagerOverview(): Promise<ShootingRangeM
   const { manager, people, snapshot, avatarUrl } = contextResult.context;
   // Name resolution (`parseShootingRangesSheet`'s fail-closed ambiguity
   // check) is run against the FULL roster, never a pre-filtered subset --
-  // a name that's ambiguous against permanent/reserve personnel too must
-  // still fail closed, even though this feature is scoped to regular
-  // personnel only below. Filtering before resolution could silently turn
-  // a genuinely ambiguous name into a falsely-unique match.
+  // a name that's ambiguous against a reserve/out-of-role namesake too
+  // must still fail closed, even though this feature is scoped to
+  // eligible personnel only below. Filtering before resolution could
+  // silently turn a genuinely ambiguous name into a falsely-unique match.
   const shootingRangesSheet = getManagerWorkbookSheet(snapshot, "shootingRanges");
   const sheetRecords = parseShootingRangesSheet(shootingRangesSheet, people);
   const relevanceRecords = parseShootingRangeRelevanceSheet(shootingRangesSheet, people);
   const now = getJerusalemLocalNow();
 
-  // מטווחים is scoped to regular-service (חובה) personnel who are also
-  // אחמ"ש or טכנאי (product decision) -- everyone else is entirely
+  // מטווחים is scoped to regular (חובה) or permanent (קבע) personnel who
+  // are also אחמ"ש or טכנאי (product decision) -- everyone else is entirely
   // excluded from the overview: not in `rows`, not counted in `summary`,
   // not in `pendingSelfReports`, and never fetched from the app-owned
   // tables below at all. A eligible person marked `לא רלוונטי` on the

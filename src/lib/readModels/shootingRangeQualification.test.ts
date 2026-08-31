@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RawSheet } from "@/lib/google";
+import type { Person } from "@/lib/domain/types";
 
 const getRequestAuthenticatedIdentity = vi.fn();
 const getWorkbookSnapshot = vi.fn();
@@ -12,9 +13,12 @@ vi.mock("@/lib/sync", () => ({ getWorkbookSnapshot }));
 vi.mock("@/lib/time/jerusalemClock", () => ({ getJerusalemLocalNow }));
 vi.mock("@/lib/shootingRanges/store", () => ({ getCompletionsForPersonIds, getPlannedOccurrencesForPersonIds }));
 
-const { loadShootingRangeQualification, selectSheetBaselineForPerson, selectRelevanceRecordForPerson } = await import(
-  "./shootingRangeQualification"
-);
+const {
+  loadShootingRangeQualification,
+  selectSheetBaselineForPerson,
+  selectRelevanceRecordForPerson,
+  buildWeaponQualificationIndex,
+} = await import("./shootingRangeQualification");
 
 function personnelSheet(rows: string[][]): RawSheet {
   return { name: 'כ"א', values: rows };
@@ -195,7 +199,7 @@ describe("loadShootingRangeQualification", () => {
     await expect(loadShootingRangeQualification()).rejects.toThrow(/מטווחים/);
   });
 
-  describe("eligibility (regular-service AND אחמ\"ש/טכנאי)", () => {
+  describe("eligibility (regular/permanent-service AND אחמ\"ש/טכנאי)", () => {
     function personnelRowsWithType(type: string): string[][] {
       return [
         ["שם", "מייל", 'סוג כ"א'],
@@ -204,7 +208,6 @@ describe("loadShootingRangeQualification", () => {
     }
 
     it.each([
-      ["permanent (קבע)", "קבע"],
       ["reserve (מילואים)", "מילואים"],
       ["unclassified/unrecognized type", "משהו אחר"],
     ])("returns not_applicable for %s -- never builds a model, never touches the app-owned tables", async (_label, type) => {
@@ -283,6 +286,42 @@ describe("loadShootingRangeQualification", () => {
       const result = await loadShootingRangeQualification();
 
       expect(result.status).toBe("ok");
+    });
+
+    it("a permanent (קבע) + טכנאי person is eligible too, via the same rule as regular -- proceeds to a full ok result with the same qualification model", async () => {
+      getRequestAuthenticatedIdentity.mockResolvedValue({ status: "authenticated", userId: "u1", email: "dani@example.invalid", avatarUrl: null });
+      getWorkbookSnapshot.mockResolvedValue({
+        fetchedAt: "2026-08-25T08:00:00.000Z",
+        sheets: [
+          personnelSheet([
+            ["שם", "מייל", 'סוג כ"א', "טכנאי"],
+            ["דני בדיקה", "dani@example.invalid", "קבע", "TRUE"],
+          ]),
+          shootingRangesSheet([
+            ["שם", "תאריך ביצוע מטווח"],
+            ["דני בדיקה", "29/06/2026"],
+          ]),
+        ],
+      });
+
+      const result = await loadShootingRangeQualification();
+
+      expect(result.status).toBe("ok");
+      if (result.status !== "ok") throw new Error("unreachable");
+      expect(result.model.baselineDate).toBe("2026-06-29");
+      expect(result.model.expiryDate).toBe("2026-12-29");
+    });
+
+    it("a permanent (קבע) person who is NEITHER אחמ\"ש NOR טכנאי is not_applicable, same as a regular person in neither role", async () => {
+      getRequestAuthenticatedIdentity.mockResolvedValue({ status: "authenticated", userId: "u1", email: "dani@example.invalid", avatarUrl: null });
+      getWorkbookSnapshot.mockResolvedValue({
+        fetchedAt: "2026-08-25T08:00:00.000Z",
+        sheets: [personnelSheet(personnelRowsWithType("קבע")), shootingRangesSheet([])],
+      });
+
+      const result = await loadShootingRangeQualification();
+
+      expect(result.status).toBe("not_applicable");
     });
   });
 });
@@ -431,5 +470,108 @@ describe("selectRelevanceRecordForPerson", () => {
 
   it("returns null when the person has no explicit רלוונטיות row at all", () => {
     expect(selectRelevanceRecordForPerson([], "p1")).toBeNull();
+  });
+});
+
+describe("buildWeaponQualificationIndex -- activity-driven, deliberately NOT scoped by isEligibleForShootingRanges", () => {
+  function makePerson(overrides: Partial<Person> = {}): Person {
+    return {
+      id: "p1",
+      name: "בדיקה",
+      email: null,
+      isManager: false,
+      isTechnician: false,
+      isSupervisor: false,
+      personnelType: "קבע",
+      ...overrides,
+    };
+  }
+
+  it("includes a permanent (קבע) person who is neither אחמ\"ש nor טכנאי -- never pre-filtered by role/service category", () => {
+    const person = makePerson({ id: "p_perm_ns", personnelType: "קבע", isTechnician: false, isSupervisor: false });
+
+    const index = buildWeaponQualificationIndex({
+      people: [person],
+      sheetRecords: [],
+      relevanceRecords: [],
+      completions: [],
+      today: "2026-08-25",
+    });
+
+    expect(index.has("p_perm_ns")).toBe(true);
+  });
+
+  it("includes a reserve (מילואים) person too -- the index covers the FULL roster, not just the מטווחים-eligible subset", () => {
+    const reservist = makePerson({ id: "p_reserve", personnelType: "מילואים" });
+
+    const index = buildWeaponQualificationIndex({
+      people: [reservist],
+      sheetRecords: [],
+      relevanceRecords: [],
+      completions: [],
+      today: "2026-08-25",
+    });
+
+    expect(index.has("p_reserve")).toBe(true);
+  });
+
+  it("a person with no baseline/completion data at all gets a real entry with expiryDate: null -- never simply absent", () => {
+    const person = makePerson({ id: "p_no_data" });
+
+    const index = buildWeaponQualificationIndex({
+      people: [person],
+      sheetRecords: [],
+      relevanceRecords: [],
+      completions: [],
+      today: "2026-08-25",
+    });
+
+    expect(index.get("p_no_data")).toEqual({ expiryDate: null, notRelevant: false });
+  });
+
+  it("resolves a non-shift-capable permanent person's real completion via the SAME baseline/expiry pipeline as everyone else", () => {
+    const person = makePerson({ id: "p_perm" });
+
+    const index = buildWeaponQualificationIndex({
+      people: [person],
+      sheetRecords: [],
+      relevanceRecords: [],
+      completions: [
+        {
+          id: "c1",
+          personId: "p_perm",
+          performedOn: "2026-06-29",
+          source: "self_report",
+          status: "approved",
+          notes: null,
+          submittedByPersonId: "p_perm",
+          submittedByPersonName: "בדיקה",
+          approvedByPersonId: "mgr1",
+          approvedByPersonName: "מנהל",
+          approvedAt: "2026-06-30T00:00:00.000Z",
+          linkedPlannedDate: null,
+          createdAt: "2026-06-29T00:00:00.000Z",
+        },
+      ],
+      today: "2026-08-25",
+    });
+
+    expect(index.get("p_perm")).toEqual({ expiryDate: "2026-12-29", notRelevant: false });
+  });
+
+  it("still honors an explicit לא רלוונטי sheet override for a non-shift-capable permanent person -- a genuine existing exemption, not eligibility-gated", () => {
+    const person = makePerson({ id: "p_perm_nr" });
+
+    const index = buildWeaponQualificationIndex({
+      people: [person],
+      sheetRecords: [],
+      relevanceRecords: [
+        { sourceName: "בדיקה", resolvedPersonId: "p_perm_nr", relevance: "not_relevant", reason: "פטור שמירות", sourceSheet: "מטווחים", sourceCell: "E2" },
+      ],
+      completions: [],
+      today: "2026-08-25",
+    });
+
+    expect(index.get("p_perm_nr")).toEqual({ expiryDate: null, notRelevant: true });
   });
 });

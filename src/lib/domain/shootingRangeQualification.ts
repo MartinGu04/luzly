@@ -2,7 +2,7 @@ import { daysInCalendarMonth } from "./calendarMonth";
 import { formatCalendarDate } from "./dateRange";
 import { daysBetweenCalendarDates, parseCalendarDate, type CalendarDate } from "./dutyBlocks";
 import type { DutyFamily } from "./event";
-import { classifyPersonnelType, isShiftCapable, type RoleGroupable } from "./personnelType";
+import { classifyPersonnelType, isShiftCapable, type PersonnelServiceCategory, type RoleGroupable } from "./personnelType";
 
 /**
  * Shooting-range ("מטווחים") qualification validity rules -- pure calendar-
@@ -60,23 +60,28 @@ export interface ShootingRangeEligibilityCandidate extends RoleGroupable {
   personnelType: string | null;
 }
 
+/** Service categories in scope for מטווחים -- regular (חובה) AND permanent (קבע), never reserve (מילואים). */
+const ELIGIBLE_SERVICE_CATEGORIES: ReadonlySet<PersonnelServiceCategory> = new Set(["regular", "permanent"]);
+
 /**
- * The ONE place this feature's eligibility rule is decided: regular
- * service (`classifyPersonnelType(...) === "regular"`, i.e. חובה) AND
- * shift-capable (`isShiftCapable`, i.e. אחמ"ש or טכנאי). Composes the two
- * EXISTING canonical classifiers from `personnelType.ts` -- never a third,
- * duplicated role/service inference, and never a text/name-based guess.
- * Every server entry point (personal loader, manager overview, self-report,
- * planned-range scheduling) calls this SAME function -- see
- * `lib/shootingRanges/README.md` for the full list of call sites.
+ * The ONE place this feature's eligibility rule is decided: regular OR
+ * permanent service (`classifyPersonnelType(...)` is `"regular"` or
+ * `"permanent"`, i.e. חובה or קבע) AND shift-capable (`isShiftCapable`,
+ * i.e. אחמ"ש or טכנאי). Composes the two EXISTING canonical classifiers
+ * from `personnelType.ts` -- never a third, duplicated role/service
+ * inference, and never a text/name-based guess. Every server entry point
+ * (personal loader, manager overview, self-report, planned-range
+ * scheduling, the weapon-qualification alert index) calls this SAME
+ * function -- see `lib/shootingRanges/README.md` for the full list of call
+ * sites.
  *
- * A permanent (קבע) or reserve (מילואים) person is out of scope regardless
- * of role; a regular (חובה) person who is neither אחמ"ש nor טכנאי is
- * equally out of scope -- both are simply not eligible, never surfaced as
- * "missing qualification data".
+ * A reserve (מילואים) person is out of scope regardless of role; a
+ * regular/permanent person who is neither אחמ"ש nor טכנאי is equally out
+ * of scope -- both are simply not eligible, never surfaced as "missing
+ * qualification data".
  */
 export function isEligibleForShootingRanges(person: ShootingRangeEligibilityCandidate): boolean {
-  return classifyPersonnelType(person.personnelType) === "regular" && isShiftCapable(person);
+  return ELIGIBLE_SERVICE_CATEGORIES.has(classifyPersonnelType(person.personnelType)) && isShiftCapable(person);
 }
 
 /**

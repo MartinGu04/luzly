@@ -28,15 +28,15 @@ export type ShootingRangeQualificationLoadResult =
   | { status: "ambiguous_identity" }
   /**
    * Authenticated + uniquely mapped, but `!isEligibleForShootingRanges(person)`
-   * -- מטווחים is scoped to regular-service (חובה) personnel who are also
-   * אחמ"ש or טכנאי (product decision); everyone else (permanent, reserve,
-   * or a regular person in neither role) is entirely out of scope, not
-   * merely hidden from the UI. No model is ever built for this caller.
+   * -- מטווחים is scoped to regular (חובה) or permanent (קבע) personnel who
+   * are also אחמ"ש or טכנאי (product decision); everyone else (reserve, or
+   * a regular/permanent person in neither role) is entirely out of scope,
+   * not merely hidden from the UI. No model is ever built for this caller.
    * `person`/`avatarUrl` are still carried (same shape as "ok") so the page
    * can still render identity chrome and the manager-overview link for a
-   * non-eligible MANAGER (e.g. a קבע person overseeing regular personnel is
-   * a real case -- their own personal ineligibility must never hide their
-   * access to the team overview).
+   * non-eligible MANAGER (e.g. a מילואים person overseeing eligible
+   * personnel is a real case -- their own personal ineligibility must
+   * never hide their access to the team overview).
    */
   | { status: "not_applicable"; person: Person; avatarUrl: string | null }
   | { status: "ok"; person: Person; model: ShootingRangeQualificationReadModel; avatarUrl: string | null };
@@ -96,8 +96,8 @@ export function selectRelevanceRecordForPerson(
  * 2. Fetches personnel + "מטווחים" via `lib/sync`'s cached
  *    `getWorkbookSnapshot` -- never a second/duplicate Google source.
  * 3. Gates on `isEligibleForShootingRanges(person)` -- מטווחים applies only
- *    to regular-service (חובה) personnel who are also אחמ"ש or טכנאי
- *    (product decision); anyone else gets `{status: "not_applicable"}`
+ *    to regular (חובה) or permanent (קבע) personnel who are also אחמ"ש or
+ *    טכנאי (product decision); anyone else gets `{status: "not_applicable"}`
  *    before the sheet is even parsed.
  * 4. Parses the sheet with `parseShootingRangesSheet` and narrows it to
  *    this person's own most recent past-dated row (`selectSheetBaselineForPerson`).
@@ -145,28 +145,53 @@ export async function loadShootingRangeQualification(): Promise<ShootingRangeQua
 }
 
 export interface WeaponQualificationIndexInput {
-  /** The FULL roster -- never pre-filtered; ineligible people are simply skipped below (`isEligibleForShootingRanges`, the ONE eligibility gate the whole מטווחים feature already shares). */
+  /**
+   * The FULL roster -- literally every person, deliberately NEVER filtered
+   * by `isEligibleForShootingRanges` (product decision: the weapon-
+   * qualification alert is driven by the ACTIVITY's own requirement
+   * (`requiresWeaponQualification`) alone, never by service category or
+   * shift-capable role -- see `detectWeaponQualificationIssues`'s own
+   * docs). `isEligibleForShootingRanges` still gates the מטווחים UI/feature
+   * itself (personal page, team overview, self-report, planned-range
+   * scheduling) -- this index is a SEPARATE, operational-alert-only
+   * concern and must never re-adopt that gate, even though it reuses the
+   * SAME underlying qualification computation below.
+   */
   people: readonly Person[];
   sheetRecords: readonly ShootingRangeSheetRecord[];
   relevanceRecords: readonly ShootingRangeRelevanceRecord[];
-  /** Every completion CLAIM across every eligible person, any status -- grouped internally by `personId`. */
+  /** Every completion CLAIM across the FULL roster, any status -- grouped internally by `personId`. */
   completions: readonly CompletionRow[];
   /** "YYYY-MM-DD", Asia/Jerusalem civil date -- the SHEET/APP baseline-resolution "today", never the activity date the resulting map is later checked against (that happens per-event, in `detectWeaponQualificationIssues`). */
   today: string;
 }
 
 /**
- * Every ELIGIBLE person's `WeaponQualificationInfo` -- `detectOperationalIssues`'s
+ * Every roster person's `WeaponQualificationInfo` -- `detectOperationalIssues`'s
  * general "requires a valid מטווחים qualification for the scheduled
  * activity" rule needs exactly `expiryDate`/`notRelevant` per person, never
  * a whole `ShootingRangeQualificationReadModel`. Reuses the EXACT SAME
  * per-person precedence `buildShootingRangeQualificationReadModel` already
  * establishes (latest APPROVED app completion, else the Sheet baseline,
  * else none; an explicit `לא רלוונטי` always overriding) -- never a second,
- * competing qualification computation. `plannedOccurrences` is deliberately
- * never fetched for this index -- `expiryDate`/`status` never depend on it
- * (see that read model's own docs); only `plannedRange`/`pendingSelfReport`
- * would, and this index never surfaces either.
+ * competing qualification computation.
+ *
+ * Deliberately NOT filtered by `isEligibleForShootingRanges` -- see this
+ * input's own docs. A person with no baseline/completion data at all still
+ * gets a real entry here, with `expiryDate: null` (never fabricated, and
+ * never simply absent) -- `classifyQualificationStatus(null, ...)` already
+ * resolves that to `"none"`, which `detectWeaponQualificationIssues`
+ * correctly treats as "needs attention", so missing qualification data for
+ * anyone actually assigned a weapon-requiring activity is flagged exactly
+ * like an expired one, regardless of their role or service category. An
+ * explicit `לא רלוונטי` sheet override is still honored (it is a genuine,
+ * existing per-person domain exemption, orthogonal to eligibility -- not a
+ * new one invented here).
+ *
+ * `plannedOccurrences` is deliberately never fetched for this index --
+ * `expiryDate`/`status` never depend on it (see that read model's own
+ * docs); only `plannedRange`/`pendingSelfReport` would, and this index
+ * never surfaces either.
  */
 export function buildWeaponQualificationIndex(
   input: WeaponQualificationIndexInput,
@@ -180,8 +205,6 @@ export function buildWeaponQualificationIndex(
 
   const index = new Map<string, WeaponQualificationInfo>();
   for (const person of input.people) {
-    if (!isEligibleForShootingRanges(person)) continue;
-
     const model = buildShootingRangeQualificationReadModel({
       personId: person.id,
       sheetBaseline: selectSheetBaselineForPerson(input.sheetRecords, person.id, input.today),

@@ -2,7 +2,7 @@ import "server-only";
 import { resolveManagerDateRange } from "@/lib/domain/dateRange";
 import { deriveReserveRoleParticipation, type ReserveRoleParticipationSource } from "@/lib/domain/reserveParticipation";
 import { ShiftConfigurationError, buildShiftSchedule, type ShiftSchedule } from "@/lib/domain/shiftSchedule";
-import { isEligibleForShootingRanges, type WeaponQualificationInfo } from "@/lib/domain/shootingRangeQualification";
+import type { WeaponQualificationInfo } from "@/lib/domain/shootingRangeQualification";
 import type { Person } from "@/lib/domain/types";
 import { timedStage, timedSyncStage } from "@/lib/config/timingDiagnostics";
 import { parseSourcePeriodYear, type RawSheet, type RawWorkbookSnapshot } from "@/lib/google";
@@ -264,8 +264,12 @@ async function loadRosterAvatarLookup(
 
 /**
  * "דורש טיפול"'s weapon-qualification rule (spec: a GENERAL rule over
- * every שמירה/עתודה/אוקסיד activity, never an oxid-specific patch) needs
- * every eligible person's own מטווחים baseline -- this parses the SAME
+ * every שמירה/עתודה/אוקסיד activity, never an oxid-specific patch, and
+ * driven by the ACTIVITY's own requirement alone -- never by a person's
+ * service category or shift-capable role) needs the FULL roster's own
+ * מטווחים baseline, never pre-filtered by `isEligibleForShootingRanges` --
+ * see `buildWeaponQualificationIndex`'s own docs: that UI eligibility gate
+ * is a separate concern from this operational alert. This parses the SAME
  * "shootingRanges" sheet (already in this request's own widened workbook
  * batch, see the caller's `loadManagerWorkbookContext` call) and reuses
  * `buildWeaponQualificationIndex`, the EXACT SAME per-person precedence
@@ -285,9 +289,9 @@ async function loadWeaponQualificationIndex(
     const shootingRangesSheet = getManagerWorkbookSheet(snapshot, "shootingRanges");
     const sheetRecords = parseShootingRangesSheet(shootingRangesSheet, people);
     const relevanceRecords = parseShootingRangeRelevanceSheet(shootingRangesSheet, people);
-    const eligiblePersonIds = people.filter((person) => isEligibleForShootingRanges(person)).map((person) => person.id);
+    const personIds = people.map((person) => person.id);
     const completions = await timedStage("manager.weaponQualification", () =>
-      getCompletionsForPersonIds(eligiblePersonIds),
+      getCompletionsForPersonIds(personIds),
     );
     return buildWeaponQualificationIndex({ people, sheetRecords, relevanceRecords, completions, today });
   } catch {

@@ -48,9 +48,9 @@ function validateNotes(notes: string | null | undefined): string | null | "inval
  * `performedOn` must be a real calendar date that is not in the future --
  * a self-report is a claim about something that already happened.
  *
- * מטווחים is scoped to regular-service (חובה) personnel who are also
- * אחמ"ש or טכנאי (product decision) -- everyone else is completely out of
- * scope for this feature, not merely hidden from the UI. Re-checked here
+ * מטווחים is scoped to regular (חובה) or permanent (קבע) personnel who are
+ * also אחמ"ש or טכנאי (product decision) -- everyone else is completely out
+ * of scope for this feature, not merely hidden from the UI. Re-checked here
  * server-side via the canonical `isEligibleForShootingRanges` (composing
  * `classifyPersonnelType`/`isShiftCapable`, never inferred from name/role/
  * text) against the FRESHLY resolved identity -- an ineligible person can
@@ -162,8 +162,8 @@ export type CreatePlannedShootingRangeResult =
  * is always safe to re-call.
  *
  * Also re-validates each id against `isEligibleForShootingRanges(...)`
- * (product decision: מטווחים applies only to regular-service personnel who
- * are also אחמ"ש/טכנאי, see this file's `submitSelfReportShootingRangeAction`
+ * (product decision: מטווחים applies only to regular/permanent-service
+ * personnel who are also אחמ"ש/טכנאי, see this file's `submitSelfReportShootingRangeAction`
  * docs) -- an ineligible person can never become the target of a planned
  * occurrence, even if their id is somehow submitted (a stale UI, a direct
  * call). Silently dropped from the scheduled set, exactly like a foreign/
