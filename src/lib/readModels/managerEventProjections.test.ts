@@ -100,21 +100,70 @@ describe('buildShiftStaffingOverview — generic (period-unspecified) role assig
 
     const day = entryFor(entries, "day")!;
     const night = entryFor(entries, "night")!;
+    const genericEntry = entries.find((entry) => entry.date === "2026-01-10" && entry.period === "unspecified")!;
     expect(day).not.toBeNull();
     expect(night).not.toBeNull();
 
-    // Supervisor role is covered on BOTH from the ONE real assignment --
-    // never counted as if it were two separate people/Events.
-    expect(day.supervisors).toHaveLength(1);
-    expect(night.supervisors).toHaveLength(1);
-    expect(day.supervisors[0].personId).toBe(generic.personId);
-    expect(night.supervisors[0].personId).toBe(generic.personId);
+    // Supervisor role is COVERED on both from the ONE real assignment --
+    // but the assignment's own roster/name lives ONLY in its native
+    // "unspecified" entry, never duplicated into the day AND night
+    // entries' own `supervisors` lists (that would misrepresent one
+    // generic assignment as two independent shift assignments).
+    expect(day.supervisors).toHaveLength(0);
+    expect(night.supervisors).toHaveLength(0);
+    expect(day.roleCoverage.supervisor.status).toBe("full");
+    expect(night.roleCoverage.supervisor.status).toBe("full");
+    expect(genericEntry.supervisors).toHaveLength(1);
+    expect(genericEntry.supervisors[0].personId).toBe(generic.personId);
 
     // Technician is still genuinely missing on both -- the generic
     // supervisor assignment never spills over into covering a DIFFERENT
     // role.
     expect(day.roleCoverage.technician.status).toBe("missing");
     expect(night.roleCoverage.technician.status).toBe("missing");
+  });
+
+  describe('presentation/data-model boundary: a generic supervisor is never duplicated into both the day and night ASSIGNMENT lists (only its coverage verdict applies to both)', () => {
+    it("satisfies both day and night supervisor coverage, suppresses both missing-supervisor warnings, yet is not a member of either period's own `supervisors` roster", () => {
+      const generic = supervisorGeneric({ personName: "עילאי שפירא" });
+      const entries = buildShiftStaffingOverview([technicianDay(), technicianNight(), generic], schedule, DATES);
+      const day = entryFor(entries, "day")!;
+      const night = entryFor(entries, "night")!;
+
+      // 1. satisfies both day and night supervisor coverage
+      expect(day.roleCoverage.supervisor.status).toBe("full");
+      expect(night.roleCoverage.supervisor.status).toBe("full");
+      // 2. suppresses both missing-supervisor warnings
+      expect(day.coverageStatus).toBe("full");
+      expect(night.coverageStatus).toBe("full");
+      expect(day.missingIntervals).toHaveLength(0);
+      expect(night.missingIntervals).toHaveLength(0);
+      // 4. is NOT duplicated into both day and night assignment lists
+      expect(day.supervisors).toHaveLength(0);
+      expect(night.supervisors).toHaveLength(0);
+      expect(day.supervisors.some((p) => p.personId === generic.personId)).toBe(false);
+      expect(night.supervisors.some((p) => p.personId === generic.personId)).toBe(false);
+    });
+
+    it("3. remains one underlying assignment -- the exact same Event reference, never cloned, appears in exactly ONE entry's roster (its own native 'unspecified' entry)", () => {
+      const generic = supervisorGeneric({ personName: "עילאי שפירא" });
+      const entries = buildShiftStaffingOverview([technicianDay(), technicianNight(), generic], schedule, DATES);
+
+      const entriesListingThisPerson = entries.filter((entry) =>
+        entry.supervisors.some((p) => p.personId === generic.personId),
+      );
+      expect(entriesListingThisPerson).toHaveLength(1);
+      expect(entriesListingThisPerson[0].period).toBe("unspecified");
+      expect(entriesListingThisPerson[0].supervisors).toEqual([
+        {
+          personId: generic.personId,
+          personName: generic.personName,
+          certainty: generic.certainty,
+          startTimeOverride: generic.startTimeOverride,
+          endTimeOverride: generic.endTimeOverride,
+        },
+      ]);
+    });
   });
 
   it("3b. the source Event array itself is never mutated or duplicated -- still exactly one Event in, one Event out, for the generic assignment", () => {
@@ -153,15 +202,20 @@ describe('buildShiftStaffingOverview — generic (period-unspecified) role assig
     expect(day.roleCoverage.supervisor.status).toBe("missing");
   });
 
-  it("a shadow generic assignment (e.g. a period-less shadow אחמ״ש) never counts toward coverage on either period", () => {
+  it("a shadow generic assignment (e.g. a period-less shadow אחמ״ש) never counts toward coverage on either period, and is never added to either period's own roster (its shadow context lives only in its native 'unspecified' entry)", () => {
     const shadowGeneric = supervisorGeneric({ shadow: true });
     const entries = buildShiftStaffingOverview([technicianDay(), technicianNight(), shadowGeneric], schedule, DATES);
     const day = entryFor(entries, "day")!;
     const night = entryFor(entries, "night")!;
+    const genericEntry = entries.find((entry) => entry.date === "2026-01-10" && entry.period === "unspecified")!;
     expect(day.roleCoverage.supervisor.status).toBe("missing");
     expect(night.roleCoverage.supervisor.status).toBe("missing");
-    // Still visible as shadow staffing on both, though -- shadow context is preserved.
-    expect(day.shadowSupervisors).toHaveLength(1);
-    expect(night.shadowSupervisors).toHaveLength(1);
+    // Never folded into either period's own shadow list -- that would be
+    // the same "two independent shifts" misrepresentation the non-shadow
+    // case guards against, just for the shadow list instead.
+    expect(day.shadowSupervisors).toHaveLength(0);
+    expect(night.shadowSupervisors).toHaveLength(0);
+    // Its shadow context is still visible, once, on its own native entry.
+    expect(genericEntry.shadowSupervisors).toHaveLength(1);
   });
 });

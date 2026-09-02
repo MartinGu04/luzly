@@ -35,7 +35,7 @@ function periodView(overrides: Partial<SchedulePeriodStaffingView> = {}): Schedu
 }
 
 function dayView(overrides: Partial<ScheduleEveryoneDayView> = {}): ScheduleEveryoneDayView {
-  return { date: "2026-08-12", day: null, night: null, duties: [], absences: [], ...overrides };
+  return { date: "2026-08-12", day: null, night: null, genericSupervisorNames: [], genericTechnicianNames: [], duties: [], absences: [], ...overrides };
 }
 
 describe("EveryoneSelectedDayPanel", () => {
@@ -161,8 +161,8 @@ describe("EveryoneSelectedDayPanel", () => {
     });
   });
 
-  describe('regression: a generic (period-unspecified) אחמ"ש assignment renders as covered, never "חסר אחמ״ש" on either period', () => {
-    it("through the REAL production pipeline (Event[] -> buildShiftStaffingOverview -> buildScheduleEveryoneDayViews), a date staffed with real technicians and only a generic supervisor shows full coverage on both day and night", async () => {
+  describe('regression: a generic (period-unspecified) אחמ"ש assignment renders as covered, once, never "חסר אחמ״ש" and never as if the person worked two separate shifts', () => {
+    it("through the REAL production pipeline (Event[] -> buildShiftStaffingOverview -> buildScheduleEveryoneDayViews), a date staffed with real technicians and only a generic supervisor shows full coverage on both day and night, with the generic supervisor's name shown EXACTLY ONCE -- via the shared generic-assignment line, never duplicated into both the day and night role lists", async () => {
       const { buildShiftSchedule } = await import("@/lib/domain/shiftSchedule");
       const { buildShiftStaffingOverview } = await import("@/lib/readModels/managerEventProjections");
       const { buildScheduleEveryoneDayViews } = await import("@/lib/presentation/scheduleEveryone");
@@ -203,10 +203,16 @@ describe("EveryoneSelectedDayPanel", () => {
 
       render(<EveryoneSelectedDayPanel dayMeta={dayMeta({ date: "2026-08-12" })} dayView={views["2026-08-12"]} />);
 
-      // עילאי שפירא appears exactly once per period section (day AND
-      // night), never doubled/split into two separate assignments, and
-      // the missing-supervisor message never appears anywhere.
-      expect(screen.getAllByText("עילאי שפירא")).toHaveLength(2); // once under יום, once under לילה
+      // עילאי שפירא appears EXACTLY ONCE on the whole panel -- via the
+      // single shared generic-assignment line -- never once under "יום"
+      // and again under "לילה" as if it were two separate assignments,
+      // and the missing-supervisor message never appears anywhere.
+      const occurrences = screen.getAllByText(/עילאי שפירא/);
+      expect(occurrences).toHaveLength(1);
+      // The single occurrence is the shared generic-assignment line, not
+      // an entry in either period's own "אחמ"שים" `<li>` roster -- that
+      // roster only ever holds NATIVE day/night-specific supervisors.
+      expect(occurrences[0].closest("li")).toBeNull();
       expect(screen.queryByText(/חסר אחמ/)).toBeNull();
       expect(screen.getByText("טכנאי יום")).toBeTruthy();
       expect(screen.getByText("טכנאי לילה")).toBeTruthy();

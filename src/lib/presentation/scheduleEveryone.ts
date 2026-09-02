@@ -57,6 +57,18 @@ export interface ScheduleEveryoneDayView {
   date: string;
   day: SchedulePeriodStaffingView | null;
   night: SchedulePeriodStaffingView | null;
+  /**
+   * People with a GENERIC (period-unspecified) role assignment for this
+   * date -- e.g. a weekend cell that just says `אחמ"ש`, with no יום/לילה
+   * split. Deliberately date-scoped, not nested inside `day`/`night`: such
+   * an assignment covers BOTH periods internally (see
+   * `buildShiftStaffingOverview`'s own `roleCoverage`), but is still ONE
+   * assignment -- listing it here once, rather than inside both `day.
+   * supervisors` and `night.supervisors`, is what keeps a consumer from
+   * rendering it as if the person worked two independent shifts.
+   */
+  genericSupervisorNames: string[];
+  genericTechnicianNames: string[];
   duties: ScheduleDutyRowView[];
   absences: ScheduleAbsenceRowView[];
 }
@@ -137,7 +149,9 @@ export function buildScheduleEveryoneDayViews(
 ): Record<string, ScheduleEveryoneDayView> {
   const staffingByDate = new Map<string, ManagerShiftOverviewEntry[]>();
   for (const entry of staffing) {
-    if (entry.period === "day" || entry.period === "night") pushTo(staffingByDate, entry.date, entry);
+    if (entry.period === "day" || entry.period === "night" || entry.period === "unspecified") {
+      pushTo(staffingByDate, entry.date, entry);
+    }
   }
 
   const dutiesByDate = new Map<string, ManagerDutyEntry[]>();
@@ -151,11 +165,14 @@ export function buildScheduleEveryoneDayViews(
     const dateGroups = staffingByDate.get(date) ?? [];
     const dayGroup = dateGroups.find((group) => group.period === "day") ?? null;
     const nightGroup = dateGroups.find((group) => group.period === "night") ?? null;
+    const genericGroup = dateGroups.find((group) => group.period === "unspecified") ?? null;
 
     result[date] = {
       date,
       day: dayGroup ? toPeriodStaffingView(dayGroup) : null,
       night: nightGroup ? toPeriodStaffingView(nightGroup) : null,
+      genericSupervisorNames: genericGroup?.supervisors.map((person) => person.personName) ?? [],
+      genericTechnicianNames: genericGroup?.technicians.map((person) => person.personName) ?? [],
       duties: (dutiesByDate.get(date) ?? []).map(toDutyRowView),
       absences: (absencesByDate.get(date) ?? []).map(toAbsenceRowView),
     };

@@ -212,6 +212,8 @@ describe("EveryoneMonthGrid", () => {
         date: "2026-08-12",
         day: null,
         night: null,
+        genericSupervisorNames: [],
+        genericTechnicianNames: [],
         duties: [],
         absences: [],
         ...overrides,
@@ -365,7 +367,7 @@ describe("EveryoneMonthGrid", () => {
 
   describe('role presentation order: אחמ"ש before טכנאי (never independently reordered per-consumer)', () => {
     function dayView(overrides: Partial<ScheduleEveryoneDayView> = {}): ScheduleEveryoneDayView {
-      return { date: "2026-08-12", day: null, night: null, duties: [], absences: [], ...overrides };
+      return { date: "2026-08-12", day: null, night: null, genericSupervisorNames: [], genericTechnicianNames: [], duties: [], absences: [], ...overrides };
     }
 
     it('lists names in "אחמ"ש first, טכנאי second" order when both roles are staffed and full', () => {
@@ -447,7 +449,7 @@ describe("EveryoneMonthGrid", () => {
     }
 
     function dayView(overrides: Partial<ScheduleEveryoneDayView> = {}): ScheduleEveryoneDayView {
-      return { date: "2026-08-12", day: null, night: null, duties: [], absences: [], ...overrides };
+      return { date: "2026-08-12", day: null, night: null, genericSupervisorNames: [], genericTechnicianNames: [], duties: [], absences: [], ...overrides };
     }
 
     /** The mobile-only labeled-dot group (`role="group"`) for a rendered cell, scoped so assertions never accidentally match the sm:+ text lines. */
@@ -568,7 +570,7 @@ describe("EveryoneMonthGrid", () => {
     });
   });
 
-  describe('regression: a generic (period-unspecified) אחמ"ש assignment renders as covered, never "חסר אחמ״ש" on either period', () => {
+  describe('regression: a generic (period-unspecified) אחמ"ש assignment renders as covered, never "חסר אחמ״ש" on either period, and never as a duplicated name on both period lines', () => {
     it("through the REAL production pipeline (Event[] -> buildShiftStaffingOverview -> buildScheduleEveryoneDayViews), a date staffed with real technicians and only a generic supervisor shows full coverage on both day and night cells", async () => {
       const { buildShiftSchedule } = await import("@/lib/domain/shiftSchedule");
       const { buildShiftStaffingOverview } = await import("@/lib/readModels/managerEventProjections");
@@ -612,9 +614,20 @@ describe("EveryoneMonthGrid", () => {
         <EveryoneMonthGrid grid={WEEK_GRID} days={weekDays()} dayViews={views} selectedDate={null} onSelectDate={noop} />,
       );
       const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
-      expect(cell.textContent).toContain("עילאי שפירא");
+      // The compact cell never lists a generic assignment's name at all
+      // (the shared per-period `supervisors`/`technicians` roster this
+      // cell reads from deliberately never includes it, to avoid printing
+      // it once on the "☀️" line and again on the "🌙" line as if it were
+      // two separate shifts) -- the full, correctly single-shown detail
+      // lives in the selected-day panel (see
+      // `EveryoneSelectedDayPanel.test.tsx`'s own regression test). This
+      // cell's job is just an accurate coverage verdict: full, never
+      // "missing", on both periods.
       expect(cell.textContent).not.toContain("חסר אחמ");
       expect(cell.querySelector(".bg-critical")).toBeNull();
+      // Technician staffing (unaffected by this change) still shows.
+      expect(cell.textContent).toContain("טכנאי יום");
+      expect(cell.textContent).toContain("טכנאי לילה");
     });
   });
 });

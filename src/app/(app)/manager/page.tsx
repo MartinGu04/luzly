@@ -226,23 +226,29 @@ function buildManagerShiftGroupView(group: ManagerShiftOverviewEntry, todayDate:
  * date+period sort, not guaranteed date-major.
  */
 function buildManagerShiftDayViews(entries: ManagerShiftOverviewEntry[], todayDate: string): ManagerShiftDayView[] {
-  const byDate = new Map<string, { day: ManagerShiftOverviewEntry | null; night: ManagerShiftOverviewEntry | null }>();
+  const byDate = new Map<
+    string,
+    { day: ManagerShiftOverviewEntry | null; night: ManagerShiftOverviewEntry | null; generic: ManagerShiftOverviewEntry | null }
+  >();
   for (const entry of entries) {
-    if (entry.period !== "day" && entry.period !== "night") continue;
-    const bucket = byDate.get(entry.date) ?? { day: null, night: null };
+    if (entry.period !== "day" && entry.period !== "night" && entry.period !== "unspecified") continue;
+    const bucket = byDate.get(entry.date) ?? { day: null, night: null, generic: null };
     if (entry.period === "day") bucket.day = entry;
-    else bucket.night = entry;
+    else if (entry.period === "night") bucket.night = entry;
+    else bucket.generic = entry;
     byDate.set(entry.date, bucket);
   }
 
   return [...byDate.entries()]
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-    .map(([date, { day, night }]) => ({
+    .map(([date, { day, night, generic }]) => ({
       key: date,
       date,
       dateLabel: issueDateLabel(date, todayDate),
       day: day ? buildManagerShiftGroupView(day, todayDate) : null,
       night: night ? buildManagerShiftGroupView(night, todayDate) : null,
+      genericSupervisorNames: generic?.supervisors.map((p) => p.personName) ?? [],
+      genericTechnicianNames: generic?.technicians.map((p) => p.personName) ?? [],
     }));
 }
 

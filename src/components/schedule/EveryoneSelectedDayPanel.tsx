@@ -47,6 +47,24 @@ function ShadowLine({ label, names }: { label: string; names: string[] }) {
   );
 }
 
+/**
+ * A GENERIC (period-unspecified) role assignment, e.g. a weekend cell that
+ * just says `אחמ"ש` -- rendered ONCE, here, outside both the day and night
+ * `PeriodDetail` sections. Internally the assignment satisfies both
+ * periods' coverage (see `ScheduleEveryoneDayView.genericSupervisorNames`'s
+ * own doc comment), but showing the SAME name once under "יום" and again
+ * under "לילה" would misrepresent one real assignment as two independent
+ * shifts -- this is the single place it's ever shown.
+ */
+function GenericAssignmentLine({ label, names }: { label: string; names: string[] }) {
+  if (names.length === 0) return null;
+  return (
+    <p className="text-sm font-medium text-foreground">
+      <span className="text-muted-2">{label}:</span> {names.join(", ")}
+    </p>
+  );
+}
+
 function PeriodDetail({
   title,
   emoji,
@@ -98,6 +116,9 @@ export function EveryoneSelectedDayPanel({ dayMeta, dayView }: EveryoneSelectedD
 
   const duties = dayView?.duties ?? [];
   const absences = dayView?.absences ?? [];
+  const genericSupervisorNames = dayView?.genericSupervisorNames ?? [];
+  const genericTechnicianNames = dayView?.genericTechnicianNames ?? [];
+  const hasGenericAssignment = genericSupervisorNames.length > 0 || genericTechnicianNames.length > 0;
 
   return (
     <section aria-label="פרטי היום הנבחר">
@@ -111,6 +132,13 @@ export function EveryoneSelectedDayPanel({ dayMeta, dayView }: EveryoneSelectedD
             </span>
           ) : null}
         </div>
+
+        {hasGenericAssignment ? (
+          <div className="rounded-lg bg-overlay-soft px-3 py-2">
+            <GenericAssignmentLine label='אחמ"ש (כל היום)' names={genericSupervisorNames} />
+            <GenericAssignmentLine label="טכנאי (כל היום)" names={genericTechnicianNames} />
+          </div>
+        ) : null}
 
         <PeriodDetail title="יום" emoji="☀️" view={dayView?.day ?? null} />
         <PeriodDetail title="לילה" emoji="🌙" view={dayView?.night ?? null} />

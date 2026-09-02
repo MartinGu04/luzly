@@ -43,6 +43,24 @@ function ShadowList({ label, names }: { label: string; names: string[] }) {
 }
 
 /**
+ * A GENERIC (period-unspecified) role assignment, e.g. a weekend cell that
+ * just says `אחמ"ש` -- rendered ONCE per date card, above the day/night
+ * `PeriodColumn`s. Internally the assignment satisfies both periods'
+ * coverage (see `ManagerShiftDayView.genericSupervisorNames`'s own doc
+ * comment), but listing the SAME name in the day column AND the night
+ * column would misrepresent one real assignment as two independent
+ * shifts -- this is the single place it's ever shown.
+ */
+function GenericAssignmentLine({ label, names }: { label: string; names: string[] }) {
+  if (names.length === 0) return null;
+  return (
+    <p className="text-xs text-muted">
+      <span className="text-muted-2">{label}:</span> {names.join(", ")}
+    </p>
+  );
+}
+
+/**
  * One role's explicit coverage line -- "טכנאים: X, Y" when full (calm,
  * names only); "חסר טכנאי" / "כיסוי טכנאי חלקי · 05:30–07:30" / "לא ניתן
  * להעריך כיסוי טכנאי" otherwise -- NEVER inferred from an empty name list,
@@ -122,6 +140,12 @@ function DayCard({ view }: { view: ManagerShiftDayView }) {
           ללוח ←
         </Link>
       </div>
+      {view.genericSupervisorNames.length > 0 || view.genericTechnicianNames.length > 0 ? (
+        <div className="border-t border-border pt-2.5">
+          <GenericAssignmentLine label='אחמ״ש (כל היום)' names={view.genericSupervisorNames} />
+          <GenericAssignmentLine label="טכנאי (כל היום)" names={view.genericTechnicianNames} />
+        </div>
+      ) : null}
       <div className="flex gap-4 border-t border-border pt-2.5">
         <PeriodColumn emoji="☀️" periodLabel="יום" group={view.day} />
         <PeriodColumn emoji="🌙" periodLabel="לילה" group={view.night} />
