@@ -296,6 +296,27 @@ interface RoleCoverageResult {
   ambiguous: boolean;
 }
 
+/**
+ * A GENERIC role assignment -- `role` set, but `period: "unspecified"`
+ * (e.g. a weekend schedule cell that just says `אחמ"ש`, with no יום/לילה
+ * split) -- covers the role's ENTIRE canonical window for `canonical`'s
+ * period, by domain rule: one such assignment satisfies both the day AND
+ * the night requirement for its date, without ever being converted/
+ * normalized into a day- or night-specific Event (see this function's own
+ * caller, `analyzeRoleCoverage`, and `managerEventProjections.ts`'s
+ * `buildShiftStaffingOverview`, which is what actually feeds the SAME
+ * generic Event into both the day and the night group's `groupEvents` in
+ * the first place -- this function only decides how one such Event
+ * resolves once it's already in the group being evaluated). Deliberately
+ * ignores `startTimeOverride`/`endTimeOverride` -- a truly generic,
+ * period-less assignment has no partial-time concept to apply against
+ * (the parser, `lib/parsers/event.ts`, never produces a time override on
+ * a period-less shift phrase either).
+ */
+function isGenericRoleEvent(event: Event): boolean {
+  return event.period === "unspecified";
+}
+
 function analyzeRoleCoverage(
   role: EventRole,
   groupEvents: readonly Event[],
@@ -308,13 +329,16 @@ function analyzeRoleCoverage(
     return { covered: [], missing: [canonical], ambiguous: false };
   }
 
-  const resolutions = roleEvents.map((event) => resolveEventShiftInterval(event, schedule));
+  const genericIntervals = roleEvents.some(isGenericRoleEvent) ? [canonical] : [];
+
+  const dayNightEvents = roleEvents.filter((event) => !isGenericRoleEvent(event));
+  const resolutions = dayNightEvents.map((event) => resolveEventShiftInterval(event, schedule));
   const resolvedIntervals = resolutions
     .filter(isResolved)
     .map((resolution) => clipInterval(resolution.interval, canonical))
     .filter(isInterval);
 
-  const covered = mergeIntervals(resolvedIntervals);
+  const covered = mergeIntervals([...genericIntervals, ...resolvedIntervals]);
   const missing = computeMissingIntervals(canonical, covered);
 
   const hasUnresolved = resolutions.some(

@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
+import type { Event } from "@/lib/domain/event";
+import { buildShiftSchedule } from "@/lib/domain/shiftSchedule";
+import type { ManagerShiftOverviewEntry } from "@/lib/readModels/managerTypes";
+import { buildShiftStaffingOverview } from "@/lib/readModels/managerEventProjections";
 import { ManagerCoverageSection } from "./ManagerCoverageSection";
 import type { ManagerRoleCoverageRowView, ManagerShiftDayView, ManagerShiftGroupView } from "./types";
 
@@ -251,5 +255,89 @@ describe("ManagerCoverageSection", () => {
     const cards = container.querySelectorAll(".rounded-xl.bg-surface-1");
     const withAccent = [...cards].filter((card) => card.className.includes("border-s-critical"));
     expect(withAccent.length).toBe(1);
+  });
+
+  describe('regression: a generic (period-unspecified) אחמ"ש assignment renders as covered, never "חסר אחמ״ש" on either period', () => {
+    function toGroupView(entry: ManagerShiftOverviewEntry): ManagerShiftGroupView {
+      // Trivial field rename, mirroring app/(app)/manager/page.tsx's private
+      // buildManagerShiftGroupView -- deliberately NOT re-implementing any
+      // coverage logic here, just reshaping the REAL analyzeUnitShiftCoverage
+      // output (via buildShiftStaffingOverview) into this component's props,
+      // exactly like the real page does.
+      return {
+        key: `${entry.date}-${entry.period}`,
+        dateLabel: entry.date,
+        periodLabel: entry.period === "day" ? "יום" : "לילה",
+        emoji: entry.period === "day" ? "☀️" : "🌙",
+        technicianNames: entry.technicians.map((p) => p.personName),
+        supervisorNames: entry.supervisors.map((p) => p.personName),
+        shadowTechnicianNames: entry.shadowTechnicians.map((p) => p.personName),
+        shadowSupervisorNames: entry.shadowSupervisors.map((p) => p.personName),
+        coverageStatus: entry.coverageStatus,
+        missingIntervalLabels: [],
+        technicianCoverage: coverage({ status: entry.roleCoverage.technician.status }),
+        supervisorCoverage: coverage({ status: entry.roleCoverage.supervisor.status }),
+      };
+    }
+
+    it("through the REAL production pipeline (Event[] -> buildShiftStaffingOverview), a date staffed with real technicians and only a generic supervisor shows full coverage on both day and night", () => {
+      const schedule = buildShiftSchedule("07:30");
+
+      function event(overrides: Partial<Event>): Event {
+        return {
+          personId: "p_default",
+          personName: "ברירת מחדל",
+          date: "2026-08-12",
+          title: "",
+          rawValue: "",
+          category: "shift",
+          certainty: "confirmed",
+          role: null,
+          period: "unspecified",
+          sourceSheet: "משמרות + תורנויות",
+          sourceCell: "C2",
+          slot: null,
+          shadow: false,
+          startTimeOverride: null,
+          endTimeOverride: null,
+          changeNote: null,
+          dutyFamily: null,
+          absenceKind: null,
+          ...overrides,
+        };
+      }
+
+      const events = [
+        event({ personId: "p_tech_day", personName: "טכנאי יום", role: "technician", period: "day" }),
+        event({ personId: "p_tech_night", personName: "טכנאי לילה", role: "technician", period: "night" }),
+        event({ personId: "p_ilay", personName: "עילאי שפירא", role: "supervisor", period: "unspecified" }),
+      ];
+
+      const entries = buildShiftStaffingOverview(events, schedule, new Set(["2026-08-12"]));
+      const day = entries.find((e) => e.period === "day")!;
+      const night = entries.find((e) => e.period === "night")!;
+
+      render(
+        <ManagerCoverageSection
+          days={[
+            {
+              key: "2026-08-12",
+              date: "2026-08-12",
+              dateLabel: "2026-08-12",
+              day: toGroupView(day),
+              night: toGroupView(night),
+            },
+          ]}
+        />,
+      );
+
+      // עילאי שפירא appears once under day and once under night -- covered
+      // on both from the ONE real generic assignment, never split into two
+      // separate assignments -- and no missing-supervisor message anywhere.
+      expect(screen.getAllByText(/עילאי שפירא/)).toHaveLength(2);
+      expect(screen.queryByText(/חסר אחמ/)).toBeNull();
+      expect(screen.getByText(/טכנאי יום/)).toBeInTheDocument();
+      expect(screen.getByText(/טכנאי לילה/)).toBeInTheDocument();
+    });
   });
 });

@@ -1098,14 +1098,14 @@
     "semantic_hash": "4849478afb99809361ae7a4a5fb2905c"
   },
   "src/components/manager/ManagerCoverageSection.test.tsx": {
-    "mtime": 1788385152.8528354,
-    "seen": 1788385297.6228392,
-    "ast_hash": "9fc3ca0c97ffb8ba92dc8f1d8d0f8cd4",
+    "mtime": 1788386387.9687896,
+    "seen": 1788386521.6631174,
+    "ast_hash": "7ab83299dbe2091ad4ada1fb4568ac2d",
     "semantic_hash": ""
   },
   "src/components/manager/ManagerCoverageSection.tsx": {
-    "mtime": 1788385110.512837,
-    "seen": 1788385297.6228416,
+    "mtime": 1788385522.8208215,
+    "seen": 1788386521.6631193,
     "ast_hash": "80c94a8b46dd2ad65949d6a80a913137",
     "semantic_hash": ""
   },
@@ -1464,20 +1464,20 @@
     "semantic_hash": "604241b771a021b61b1ff8b53cd52e8b"
   },
   "src/components/schedule/EveryoneMonthGrid.test.tsx": {
-    "mtime": 1788384385.6320283,
-    "seen": 1788384825.1720176,
-    "ast_hash": "45049f78bf7b8053c5593b7db1569730",
+    "mtime": 1788386152.3247983,
+    "seen": 1788386521.6632254,
+    "ast_hash": "d23fff55e3fa3f18f25208278b36b123",
     "semantic_hash": ""
   },
   "src/components/schedule/EveryoneMonthGrid.tsx": {
-    "mtime": 1788384268.6400213,
-    "seen": 1788384825.1720197,
+    "mtime": 1788385522.8208215,
+    "seen": 1788386521.6632268,
     "ast_hash": "34fb043a66ba47047f15a89618fb93bc",
     "semantic_hash": ""
   },
   "src/components/schedule/EveryoneSelectedDayPanel.tsx": {
-    "mtime": 1788384293.2800229,
-    "seen": 1788384825.1720233,
+    "mtime": 1788385522.8208215,
+    "seen": 1788386521.6632302,
     "ast_hash": "c35f021f7afd8cc4b9e1cfaadaf23f42",
     "semantic_hash": ""
   },
@@ -2304,16 +2304,16 @@
     "semantic_hash": "cad800cd16a04d658f6ac90f8850daac"
   },
   "src/lib/domain/shiftCoverage.test.ts": {
-    "mtime": 1788167245.2763546,
-    "seen": 1788168216.9335809,
-    "ast_hash": "b88d8202876e502e485a293073e5f7d8",
-    "semantic_hash": "b88d8202876e502e485a293073e5f7d8"
+    "mtime": 1788385932.1688066,
+    "seen": 1788386521.6634665,
+    "ast_hash": "5cdde0e8c51e3d9fe333b0856c256dec",
+    "semantic_hash": ""
   },
   "src/lib/domain/shiftCoverage.ts": {
-    "mtime": 1788167245.2763546,
-    "seen": 1788168216.9335818,
-    "ast_hash": "d6368a36ce925becd23fbfa1e5cf8d28",
-    "semantic_hash": "d6368a36ce925becd23fbfa1e5cf8d28"
+    "mtime": 1788385760.6648128,
+    "seen": 1788386521.663468,
+    "ast_hash": "7e05535978b911d88e4c2883f75df558",
+    "semantic_hash": ""
   },
   "src/lib/domain/shiftCoverageRecommendation.test.ts": {
     "mtime": 1788167245.2763546,
@@ -3294,8 +3294,8 @@
     "semantic_hash": ""
   },
   "src/lib/presentation/roleCoverage.ts": {
-    "mtime": 1788384252.3800204,
-    "seen": 1788384825.1725905,
+    "mtime": 1788385522.8208215,
+    "seen": 1788386521.6637733,
     "ast_hash": "5d13b999d13916e3291cc7b615d6a3ff",
     "semantic_hash": ""
   },
@@ -3750,10 +3750,10 @@
     "semantic_hash": "27deb4af3596390f24505a12c3f47e61"
   },
   "src/lib/readModels/managerEventProjections.ts": {
-    "mtime": 1788167245.4203546,
-    "seen": 1788168216.9339745,
-    "ast_hash": "ca58fee3347c01c84e854e10acda4314",
-    "semantic_hash": "ca58fee3347c01c84e854e10acda4314"
+    "mtime": 1788385996.140804,
+    "seen": 1788386521.663949,
+    "ast_hash": "e42a168225dbd21c523e131bf12cfdcb",
+    "semantic_hash": ""
   },
   "src/lib/readModels/managerOverview.test.ts": {
     "mtime": 1788167245.4203546,
@@ -5424,15 +5424,21 @@
     "semantic_hash": ""
   },
   "src/components/schedule/EveryoneSelectedDayPanel.test.tsx": {
-    "mtime": 1788384413.82403,
-    "seen": 1788384825.1720214,
-    "ast_hash": "3b8f210747aacafa41c85cba3f885eda",
+    "mtime": 1788386175.3687975,
+    "seen": 1788386521.663229,
+    "ast_hash": "de77f1757793c2409e8649bd2a91cd5f",
     "semantic_hash": ""
   },
   "src/lib/presentation/roleCoverage.test.ts": {
-    "mtime": 1788384438.7600315,
-    "seen": 1788384825.172589,
+    "mtime": 1788385522.8208215,
+    "seen": 1788386521.6637719,
     "ast_hash": "95b84a88a7aaa7a6ec04909fab91d09e",
+    "semantic_hash": ""
+  },
+  "src/lib/readModels/managerEventProjections.test.ts": {
+    "mtime": 1788385965.1848052,
+    "seen": 1788386521.6639462,
+    "ast_hash": "79928bb8479bfba9de2cbca0f469e890",
     "semantic_hash": ""
   }
 }

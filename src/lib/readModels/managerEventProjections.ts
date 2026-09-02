@@ -39,6 +39,40 @@ function toShiftGroupPerson(event: Event): ManagerShiftGroupPerson {
 }
 
 /**
+ * A GENERIC role assignment -- `period: "unspecified"` (e.g. a weekend
+ * schedule cell that just says `אחמ"ש`, with no יום/לילה split) -- is, by
+ * domain rule, that person's supervisor (or technician) coverage for the
+ * WHOLE date: both the day AND the night canonical window, never merely
+ * one or the other. So, for staffing-group purposes ONLY, one such Event
+ * is folded into BOTH the date's "day" and "night" groups -- creating
+ * either group if no OTHER day/night-specific Event already produced one
+ * (a date staffed ONLY by a generic אחמ"ש must still surface as covered,
+ * never silently absent). This is never a second/duplicated Event, never
+ * a period conversion, and never touches `lib/parsers/event.ts`'s own
+ * classification -- the exact same Event object/reference is simply
+ * included in up to three groups' own local `Event[]` (its native
+ * "unspecified" group, plus "day" and "night"), and
+ * `analyzeUnitShiftCoverage`/`analyzeRoleCoverage`
+ * (`lib/domain/shiftCoverage.ts`) is what actually decides such an Event
+ * satisfies a role's ENTIRE canonical window once it's in a group being
+ * evaluated -- this function only decides group MEMBERSHIP.
+ *
+ * Deliberately INCLUDES a shadow generic assignment (`- צל` with no
+ * period) too -- shadow context (who's shadowing today) is exactly as
+ * relevant to both the day and night view as a real one, even though
+ * shadow Events never count toward the actual coverage verdict. That
+ * exclusion already happens downstream, exactly like every other shadow
+ * Event: `analyzeRoleCoverage` filters `!event.shadow` before computing
+ * coverage, and the caller below already splits `supervisors`/
+ * `technicians` from `shadowSupervisors`/`shadowTechnicians` by the same
+ * flag -- this function only decides which GROUPS an Event is a member
+ * of, never whether it counts once it's there.
+ */
+function isGenericCoverageEvent(event: Event): boolean {
+  return event.period === "unspecified" && event.role !== null;
+}
+
+/**
  * Groups every shift Event within `dates` by date+period, preserving EVERY
  * assigned person (never collapsed to one). `coverageStatus`/
  * `missingIntervals` reuse `analyzeUnitShiftCoverage` -- a PURE,
@@ -52,7 +86,10 @@ function toShiftGroupPerson(event: Event): ManagerShiftGroupPerson {
  * Event -- a date+period with zero shift Events at all produces no entry,
  * same convention `ManagerCoverageSection` already relies on (never a
  * fabricated "missing" verdict for a date that simply has no shift data
- * yet).
+ * yet). A date whose only shift Event is a generic (period-unspecified)
+ * role assignment is the one exception: see `isGenericCoverageEvent`
+ * above -- that date DOES get real "day"/"night" entries, because the
+ * generic assignment genuinely covers both.
  */
 export function buildShiftStaffingOverview(
   events: readonly Event[],
@@ -67,6 +104,16 @@ export function buildShiftStaffingOverview(
     const group = groups.get(key);
     if (group) group.push(event);
     else groups.set(key, [event]);
+  }
+
+  for (const event of shiftEvents) {
+    if (!isGenericCoverageEvent(event)) continue;
+    for (const period of ["day", "night"] as const) {
+      const key = `${event.date}|${period}`;
+      const group = groups.get(key);
+      if (group) group.push(event);
+      else groups.set(key, [event]);
+    }
   }
 
   const entries: ManagerShiftOverviewEntry[] = [];

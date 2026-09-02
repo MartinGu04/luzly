@@ -742,6 +742,89 @@ describe("analyzeUnitShiftCoverage — multi-supervisor staffing waiver (2 super
   });
 });
 
+describe('analyzeUnitShiftCoverage — generic (period-unspecified) role assignment, e.g. a weekend cell that just says אחמ"ש', () => {
+  function supervisorGeneric(overrides: Partial<Event> = {}): Event {
+    return shiftEvent({ role: "supervisor", period: "unspecified", title: 'אחמ"ש', rawValue: 'אחמ"ש', ...overrides });
+  }
+
+  it('1. a generic אחמ"ש alone satisfies the DAY supervisor requirement -- never "חסר אחמ״ש"', () => {
+    const result = analyzeUnitShiftCoverage("day", [technicianDay(), supervisorGeneric()], schedule);
+    expect(result.roleCoverage.supervisor).toEqual({ status: "full", missingIntervals: [] });
+    expect(result.coverageStatus).toBe("full");
+  });
+
+  it('2. the SAME generic אחמ"ש Event also satisfies the NIGHT supervisor requirement -- both periods, from one assignment', () => {
+    const generic = supervisorGeneric();
+    const technicianNight = technicianDay({ period: "night" });
+    const result = analyzeUnitShiftCoverage("night", [technicianNight, generic], schedule);
+    expect(result.roleCoverage.supervisor).toEqual({ status: "full", missingIntervals: [] });
+    expect(result.coverageStatus).toBe("full");
+  });
+
+  it("3. a generic assignment is never treated as two actual shift assignments -- hasMultiSupervisorStaffing still counts ONE distinct person, not two, and does not by itself trigger the multi-supervisor waiver", () => {
+    const generic = supervisorGeneric();
+    expect(hasMultiSupervisorStaffing([generic])).toBe(false); // one person, one assignment -- not 2 distinct supervisors
+
+    // A lone generic supervisor + zero technicians is still a genuine
+    // missing-technician gap -- the generic assignment covers the
+    // SUPERVISOR role only, it is never silently counted twice to also
+    // waive the technician requirement.
+    const result = analyzeUnitShiftCoverage("day", [generic], schedule);
+    expect(result.roleCoverage.supervisor).toEqual({ status: "full", missingIntervals: [] });
+    expect(result.roleCoverage.technician.status).toBe("missing");
+    expect(result.coverageStatus).toBe("missing");
+  });
+
+  it('4. an explicit "אחמ"ש יום" (day-specific) still covers ONLY day -- a generic assignment elsewhere never leaks into this, and this event never covers night', () => {
+    const dayResult = analyzeUnitShiftCoverage("day", [supervisorDay(), technicianDay()], schedule);
+    expect(dayResult.roleCoverage.supervisor.status).toBe("full");
+
+    const nightResult = analyzeUnitShiftCoverage("night", [supervisorDay(), technicianDay({ period: "night" })], schedule);
+    expect(nightResult.roleCoverage.supervisor.status).toBe("missing"); // the day-specific event never covers night
+  });
+
+  it('5. an explicit "אחמ"ש לילה" (night-specific) still covers ONLY night', () => {
+    const supervisorNight = supervisorDay({ period: "night" });
+    const nightResult = analyzeUnitShiftCoverage("night", [supervisorNight, technicianDay({ period: "night" })], schedule);
+    expect(nightResult.roleCoverage.supervisor.status).toBe("full");
+
+    const dayResult = analyzeUnitShiftCoverage("day", [supervisorNight, technicianDay()], schedule);
+    expect(dayResult.roleCoverage.supervisor.status).toBe("missing"); // the night-specific event never covers day
+  });
+
+  it("never converts/normalizes the generic Event itself -- role stays supervisor, period stays unspecified, completely untouched by the domain layer", () => {
+    const generic = supervisorGeneric();
+    const before = { ...generic };
+    analyzeUnitShiftCoverage("day", [generic], schedule);
+    analyzeUnitShiftCoverage("night", [generic], schedule);
+    expect(generic).toEqual(before);
+    expect(generic.role).toBe("supervisor");
+    expect(generic.period).toBe("unspecified");
+  });
+
+  it("a generic TECHNICIAN assignment is symmetric -- the same domain rule applies to either role via the same role-agnostic logic, not a supervisor-only special case", () => {
+    const genericTechnician = shiftEvent({ role: "technician", period: "unspecified", title: "טכנאי", rawValue: "טכנאי" });
+    const dayResult = analyzeUnitShiftCoverage("day", [supervisorDay(), genericTechnician], schedule);
+    const nightResult = analyzeUnitShiftCoverage("night", [supervisorDay({ period: "night" }), genericTechnician], schedule);
+    expect(dayResult.roleCoverage.technician.status).toBe("full");
+    expect(nightResult.roleCoverage.technician.status).toBe("full");
+  });
+
+  it("a SHADOW generic assignment never counts toward coverage -- same shadow-exclusion rule as every other role Event", () => {
+    const shadowGeneric = supervisorGeneric({ shadow: true });
+    const result = analyzeUnitShiftCoverage("day", [technicianDay(), shadowGeneric], schedule);
+    expect(result.roleCoverage.supervisor.status).toBe("missing");
+  });
+
+  it("a generic assignment + a partial time override still resolves sensibly (defensive -- the parser never actually produces overrides on a period-less phrase, but the domain layer must not misbehave if one somehow existed)", () => {
+    const generic = supervisorGeneric({ startTimeOverride: "10:00" });
+    // Generic coverage deliberately ignores start/end overrides -- a
+    // period-less assignment has no partial-time concept to apply.
+    const result = analyzeUnitShiftCoverage("day", [generic], schedule);
+    expect(result.roleCoverage.supervisor).toEqual({ status: "full", missingIntervals: [] });
+  });
+});
+
 describe("buildShiftRoster — מי איתי roster context, separate from coverage validity", () => {
   it("a same-role colleague (e.g. a second supervisor) IS on the roster, unlike analyzeShiftCounterparts", () => {
     const martin = supervisorDay();

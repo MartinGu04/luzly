@@ -160,4 +160,56 @@ describe("EveryoneSelectedDayPanel", () => {
       expect(screen.getByText(/צל אחמ"ש אמיתי/)).toBeTruthy();
     });
   });
+
+  describe('regression: a generic (period-unspecified) אחמ"ש assignment renders as covered, never "חסר אחמ״ש" on either period', () => {
+    it("through the REAL production pipeline (Event[] -> buildShiftStaffingOverview -> buildScheduleEveryoneDayViews), a date staffed with real technicians and only a generic supervisor shows full coverage on both day and night", async () => {
+      const { buildShiftSchedule } = await import("@/lib/domain/shiftSchedule");
+      const { buildShiftStaffingOverview } = await import("@/lib/readModels/managerEventProjections");
+      const { buildScheduleEveryoneDayViews } = await import("@/lib/presentation/scheduleEveryone");
+      const schedule = buildShiftSchedule("07:30");
+
+      function event(overrides: Partial<import("@/lib/domain/event").Event>): import("@/lib/domain/event").Event {
+        return {
+          personId: "p_default",
+          personName: "ברירת מחדל",
+          date: "2026-08-12",
+          title: "",
+          rawValue: "",
+          category: "shift",
+          certainty: "confirmed",
+          role: null,
+          period: "unspecified",
+          sourceSheet: "משמרות + תורנויות",
+          sourceCell: "C2",
+          slot: null,
+          shadow: false,
+          startTimeOverride: null,
+          endTimeOverride: null,
+          changeNote: null,
+          dutyFamily: null,
+          absenceKind: null,
+          ...overrides,
+        };
+      }
+
+      const events = [
+        event({ personId: "p_tech_day", personName: "טכנאי יום", role: "technician", period: "day" }),
+        event({ personId: "p_tech_night", personName: "טכנאי לילה", role: "technician", period: "night" }),
+        event({ personId: "p_ilay", personName: "עילאי שפירא", role: "supervisor", period: "unspecified" }),
+      ];
+
+      const overview = buildShiftStaffingOverview(events, schedule, new Set(["2026-08-12"]));
+      const views = buildScheduleEveryoneDayViews(["2026-08-12"], overview, [], []);
+
+      render(<EveryoneSelectedDayPanel dayMeta={dayMeta({ date: "2026-08-12" })} dayView={views["2026-08-12"]} />);
+
+      // עילאי שפירא appears exactly once per period section (day AND
+      // night), never doubled/split into two separate assignments, and
+      // the missing-supervisor message never appears anywhere.
+      expect(screen.getAllByText("עילאי שפירא")).toHaveLength(2); // once under יום, once under לילה
+      expect(screen.queryByText(/חסר אחמ/)).toBeNull();
+      expect(screen.getByText("טכנאי יום")).toBeTruthy();
+      expect(screen.getByText("טכנאי לילה")).toBeTruthy();
+    });
+  });
 });
