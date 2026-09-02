@@ -1464,22 +1464,22 @@
     "semantic_hash": "604241b771a021b61b1ff8b53cd52e8b"
   },
   "src/components/schedule/EveryoneMonthGrid.test.tsx": {
-    "mtime": 1788167245.2097964,
-    "seen": 1788168216.933363,
-    "ast_hash": "95164945bf64fda0c1ec6cf5d91b8fe8",
-    "semantic_hash": "95164945bf64fda0c1ec6cf5d91b8fe8"
+    "mtime": 1788384385.6320283,
+    "seen": 1788384825.1720176,
+    "ast_hash": "45049f78bf7b8053c5593b7db1569730",
+    "semantic_hash": ""
   },
   "src/components/schedule/EveryoneMonthGrid.tsx": {
-    "mtime": 1788167245.2097964,
-    "seen": 1788168216.933364,
-    "ast_hash": "71d84223ccdd74d237ec1c3dbe1ce112",
-    "semantic_hash": "71d84223ccdd74d237ec1c3dbe1ce112"
+    "mtime": 1788384268.6400213,
+    "seen": 1788384825.1720197,
+    "ast_hash": "34fb043a66ba47047f15a89618fb93bc",
+    "semantic_hash": ""
   },
   "src/components/schedule/EveryoneSelectedDayPanel.tsx": {
-    "mtime": 1788167245.2097964,
-    "seen": 1788168216.9333656,
-    "ast_hash": "8a85eb48936fea6a4f776846ca280ac4",
-    "semantic_hash": "8a85eb48936fea6a4f776846ca280ac4"
+    "mtime": 1788384293.2800229,
+    "seen": 1788384825.1720233,
+    "ast_hash": "c35f021f7afd8cc4b9e1cfaadaf23f42",
+    "semantic_hash": ""
   },
   "src/components/schedule/MonthNav.test.tsx": {
     "mtime": 1788167245.2097964,
@@ -2280,8 +2280,8 @@
     "semantic_hash": "d2e6b4bc53fdbbaad209b46fe1777d27"
   },
   "src/lib/domain/reportOne.test.ts": {
-    "mtime": 1788381842.7379446,
-    "seen": 1788381964.1310692,
+    "mtime": 1788384160.7200148,
+    "seen": 1788384825.1722412,
     "ast_hash": "b14cdd5c6832a2dfafe41b8046410ff0",
     "semantic_hash": ""
   },
@@ -2868,8 +2868,8 @@
     "semantic_hash": ""
   },
   "src/lib/parsers/event.test.ts": {
-    "mtime": 1788381821.8379436,
-    "seen": 1788381964.1312027,
+    "mtime": 1788384160.7200148,
+    "seen": 1788384825.172472,
     "ast_hash": "30e030cc6d77d059f36190443a4d66a9",
     "semantic_hash": ""
   },
@@ -3294,10 +3294,10 @@
     "semantic_hash": ""
   },
   "src/lib/presentation/roleCoverage.ts": {
-    "mtime": 1788167245.3723545,
-    "seen": 1788168216.9338446,
-    "ast_hash": "5fa415053cac6710e5996ba3dcb3a080",
-    "semantic_hash": "5fa415053cac6710e5996ba3dcb3a080"
+    "mtime": 1788384252.3800204,
+    "seen": 1788384825.1725905,
+    "ast_hash": "5d13b999d13916e3291cc7b615d6a3ff",
+    "semantic_hash": ""
   },
   "src/lib/presentation/roster.test.ts": {
     "mtime": 1788167245.3723545,
@@ -3906,14 +3906,14 @@
     "semantic_hash": ""
   },
   "src/lib/readModels/schedule.test.ts": {
-    "mtime": 1788382461.5859816,
-    "seen": 1788382738.400213,
+    "mtime": 1788384160.7200148,
+    "seen": 1788384825.1728306,
     "ast_hash": "0b68338a3f2ea44239248a4638a0f1d6",
     "semantic_hash": ""
   },
   "src/lib/readModels/schedule.ts": {
-    "mtime": 1788382447.5419807,
-    "seen": 1788382738.4002142,
+    "mtime": 1788384160.7200148,
+    "seen": 1788384825.1728318,
     "ast_hash": "9de60b0f9772f278c2b845c36488e9f2",
     "semantic_hash": ""
   },
@@ -5412,15 +5412,27 @@
     "semantic_hash": ""
   },
   "src/lib/domain/reportOneShadowRoleRawPipelineRegression.test.ts": {
-    "mtime": 1788382350.141975,
-    "seen": 1788382738.3997087,
+    "mtime": 1788384160.7200148,
+    "seen": 1788384825.1722443,
     "ast_hash": "86850ca81efcf250c37049610247c098",
     "semantic_hash": ""
   },
   "src/lib/sync/scheduleReportOneCacheKeyDivergence.test.ts": {
-    "mtime": 1788383120.9780207,
-    "seen": 1788383235.0637317,
+    "mtime": 1788384160.724015,
+    "seen": 1788384825.1729047,
     "ast_hash": "3db0bad4bdbe74123f52adfaba0b7a46",
+    "semantic_hash": ""
+  },
+  "src/components/schedule/EveryoneSelectedDayPanel.test.tsx": {
+    "mtime": 1788384413.82403,
+    "seen": 1788384825.1720214,
+    "ast_hash": "3b8f210747aacafa41c85cba3f885eda",
+    "semantic_hash": ""
+  },
+  "src/lib/presentation/roleCoverage.test.ts": {
+    "mtime": 1788384438.7600315,
+    "seen": 1788384825.172589,
+    "ast_hash": "95b84a88a7aaa7a6ec04909fab91d09e",
     "semantic_hash": ""
   }
 }

@@ -363,6 +363,72 @@ describe("EveryoneMonthGrid", () => {
     });
   });
 
+  describe('role presentation order: אחמ"ש before טכנאי (never independently reordered per-consumer)', () => {
+    function dayView(overrides: Partial<ScheduleEveryoneDayView> = {}): ScheduleEveryoneDayView {
+      return { date: "2026-08-12", day: null, night: null, duties: [], absences: [], ...overrides };
+    }
+
+    it('lists names in "אחמ"ש first, טכנאי second" order when both roles are staffed and full', () => {
+      render(
+        <EveryoneMonthGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          dayViews={{
+            "2026-08-12": dayView({
+              day: {
+                period: "day",
+                label: "יום",
+                emoji: "☀️",
+                technicians: { people: [{ key: "p1", name: "גדעון פולין", tentative: false }], status: "full", message: null },
+                supervisors: { people: [{ key: "p2", name: "איתי אוליר", tentative: false }], status: "full", message: null },
+                shadowTechnicianNames: [],
+                shadowSupervisorNames: [],
+                coverageStatus: "full",
+              },
+            }),
+          }}
+          selectedDate={null}
+          onSelectDate={noop}
+        />,
+      );
+      const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+      const text = cell.textContent ?? "";
+      expect(text).toContain("איתי אוליר, גדעון פולין");
+      // Never the reverse order.
+      expect(text).not.toContain("גדעון פולין, איתי אוליר");
+      expect(text.indexOf("איתי אוליר")).toBeLessThan(text.indexOf("גדעון פולין"));
+    });
+
+    it('lists the coverage-status MESSAGES in "אחמ"ש first, טכנאי second" order too, when both roles are short-staffed', () => {
+      render(
+        <EveryoneMonthGrid
+          grid={WEEK_GRID}
+          days={weekDays()}
+          dayViews={{
+            "2026-08-12": dayView({
+              night: {
+                period: "night",
+                label: "לילה",
+                emoji: "🌙",
+                technicians: { people: [], status: "missing", message: "חסר טכנאי" },
+                supervisors: { people: [], status: "missing", message: 'חסר אחמ"ש' },
+                shadowTechnicianNames: [],
+                shadowSupervisorNames: [],
+                coverageStatus: "missing",
+              },
+            }),
+          }}
+          selectedDate={null}
+          onSelectDate={noop}
+        />,
+      );
+      const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+      const text = cell.textContent ?? "";
+      expect(text.indexOf('חסר אחמ"ש')).toBeGreaterThanOrEqual(0);
+      expect(text.indexOf('חסר אחמ"ש')).toBeLessThan(text.indexOf("חסר טכנאי"));
+    });
+  });
+
   describe("mobile day/night coverage visibility (correctness fix: night status must never disappear below sm:)", () => {
     function periodView(period: "day" | "night", coverageStatus: CoverageStatus): NonNullable<ScheduleEveryoneDayView["day"]> {
       return {

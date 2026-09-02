@@ -1,6 +1,7 @@
 import type { CoverageStatus } from "@/lib/domain/shiftCoverage";
 import type { CalendarGridCell } from "@/lib/domain/calendarMonth";
 import { coverageStatusLabel } from "@/lib/presentation/labels";
+import { inRoleDisplayOrder } from "@/lib/presentation/roleCoverage";
 import type { ScheduleEveryoneDayView, SchedulePeriodStaffingView } from "@/lib/presentation/scheduleEveryone";
 import {
   CalendarDayCell,
@@ -48,7 +49,9 @@ interface PeriodSummary {
 function summarizePeriod(view: SchedulePeriodStaffingView | null): PeriodSummary {
   if (!view) return { text: "אין נתונים", toneClassName: "text-muted-2" };
 
-  const messages = [view.technicians.message, view.supervisors.message].filter(
+  const [supervisors, technicians] = inRoleDisplayOrder(view);
+
+  const messages = [supervisors.message, technicians.message].filter(
     (message): message is string => message !== null,
   );
   if (messages.length > 0) {
@@ -61,7 +64,7 @@ function summarizePeriod(view: SchedulePeriodStaffingView | null): PeriodSummary
     return { text: messages.join(" · "), toneClassName };
   }
 
-  const names = [...view.technicians.people, ...view.supervisors.people].map((person) => person.name);
+  const names = [...supervisors.people, ...technicians.people].map((person) => person.name);
   return { text: names.length > 0 ? names.join(", ") : "—", toneClassName: "text-muted" };
 }
 
