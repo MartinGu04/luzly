@@ -7,8 +7,8 @@ import type { CompletionRow } from "@/lib/shootingRanges/store";
 import type { RecipientResolution, ResolvedRecipient } from "./recipients";
 
 const getCompletionsForPersonIds = vi.fn();
-const insertNotificationJobIfAbsent = vi.fn();
-const getLatestNotificationSourceRef = vi.fn();
+const upsertAggregateNotificationJob = vi.fn();
+const resolveAggregateNotificationJob = vi.fn();
 
 // `filterManagerRecipients` (`./recipients`), `buildWeaponQualificationIndex`/
 // `buildShootingRangeQualificationReadModel` (readModels), and
@@ -16,23 +16,31 @@ const getLatestNotificationSourceRef = vi.fn();
 // functions, no I/O of their own -- so this exercises the SAME business
 // logic Manager Area's own "דורש טיפול" reads, never a mocked pass-through.
 // Only the genuine I/O boundaries are mocked: the מטווחים completions
-// table and notification-job creation/read-back.
+// table and the aggregate-episode notification-job read/write RPCs.
 vi.mock("@/lib/shootingRanges/store", () => ({ getCompletionsForPersonIds: (...args: unknown[]) => getCompletionsForPersonIds(...args) }));
 vi.mock("./store", () => ({
-  insertNotificationJobIfAbsent: (...args: unknown[]) => insertNotificationJobIfAbsent(...args),
-  getLatestNotificationSourceRef: (...args: unknown[]) => getLatestNotificationSourceRef(...args),
+  upsertAggregateNotificationJob: (...args: unknown[]) => upsertAggregateNotificationJob(...args),
+  resolveAggregateNotificationJob: (...args: unknown[]) => resolveAggregateNotificationJob(...args),
 }));
 
 const { runWeaponQualificationCheck } = await import("./weaponQualification");
 
 /**
  * A tiny in-memory stand-in for the real `notification_jobs` table's
- * relevant slice -- `insertNotificationJobIfAbsent` (unique by dedupeKey)
- * and `getLatestNotificationSourceRef` (most-recently-inserted `sourceRef`
- * for a recipient+category) -- so multi-tick tests (repeated evaluation,
- * resolved issues, a later new issue) exercise the REAL read-back/compare
- * round trip `runWeaponQualificationCheck` depends on, not just a stateless
- * mock return value.
+ * relevant slice, mirroring the EXACT episode semantics
+ * `upsert_aggregate_notification_job`/`resolve_aggregate_notification_job`
+ * implement in Postgres (see the migration
+ * `20260902130000_add_aggregate_notification_episode_dedupe.sql`): ONE row
+ * per `dedupeKey`, ever: a fresh/reopened episode (no row yet, or the
+ * existing row is resolved) replaces the row and reports `true`; an
+ * already-open episode is content-refreshed in place and reports `false`.
+ * The genuine proof that the real SQL implements this exact contract
+ * (including under real concurrent connections) lives in
+ * `notificationEngineFunctions.integration.test.ts`, not here -- this
+ * fake exists so `runWeaponQualificationCheck`'s own orchestration
+ * (which manager gets called, with what content, when) is exercised
+ * against a real read-back round trip rather than a stateless mock
+ * return value.
  */
 interface FakeJob {
   category: string;
@@ -42,24 +50,36 @@ interface FakeJob {
   body: string;
   path: string;
   sourceRef?: string;
+  resolvedAt: string | null;
 }
 
-let fakeJobs: FakeJob[] = [];
+let fakeJobsByDedupeKey = new Map<string, FakeJob>();
 
 function resetFakeStore() {
-  fakeJobs = [];
-  insertNotificationJobIfAbsent.mockReset();
-  insertNotificationJobIfAbsent.mockImplementation(async (job: FakeJob) => {
-    if (fakeJobs.some((existing) => existing.dedupeKey === job.dedupeKey)) return false;
-    fakeJobs.push(job);
-    return true;
+  fakeJobsByDedupeKey = new Map();
+
+  upsertAggregateNotificationJob.mockReset();
+  upsertAggregateNotificationJob.mockImplementation(async (job: Omit<FakeJob, "resolvedAt">) => {
+    const existing = fakeJobsByDedupeKey.get(job.dedupeKey);
+    if (!existing || existing.resolvedAt !== null) {
+      fakeJobsByDedupeKey.set(job.dedupeKey, { ...job, resolvedAt: null });
+      return true;
+    }
+    fakeJobsByDedupeKey.set(job.dedupeKey, { ...existing, title: job.title, body: job.body, path: job.path, sourceRef: job.sourceRef });
+    return false;
   });
-  getLatestNotificationSourceRef.mockReset();
-  getLatestNotificationSourceRef.mockImplementation(async (recipientUserId: string, category: string) => {
-    const matches = fakeJobs.filter((job) => job.recipientUserId === recipientUserId && job.category === category);
-    if (matches.length === 0) return null;
-    return matches[matches.length - 1].sourceRef ?? null;
+
+  resolveAggregateNotificationJob.mockReset();
+  resolveAggregateNotificationJob.mockImplementation(async (dedupeKey: string) => {
+    const existing = fakeJobsByDedupeKey.get(dedupeKey);
+    if (existing && existing.resolvedAt === null) {
+      fakeJobsByDedupeKey.set(dedupeKey, { ...existing, resolvedAt: "2026-08-30T18:00:00.000Z" });
+    }
   });
+}
+
+function fakeJobs(): FakeJob[] {
+  return [...fakeJobsByDedupeKey.values()];
 }
 
 function person(overrides: Partial<Person> = {}): Person {
@@ -122,7 +142,7 @@ function dutyEvent(overrides: Partial<Event> = {}): Event {
   };
 }
 
-/** `2026-09-02` plus `daysAhead` calendar days, via the SAME `dateRange.ts` arithmetic production code uses -- never a second/ad-hoc date implementation. */
+/** `2026-09-02` plus `daysAhead` calendar days, via the SAME `dateRange.ts` arithmetic production code uses -- never a second/ad-hoc `Date`-based implementation. */
 function futureDate(daysAhead: number): string {
   const base = parseCalendarDate("2026-09-02")!;
   return formatCalendarDate(addCalendarDays(base, daysAhead));
@@ -175,10 +195,10 @@ describe("runWeaponQualificationCheck -- aggregate notification (spec: fix produ
     const result = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, MGR_RECIPIENTS);
 
     expect(result.issuesDetected).toBe(39);
-    expect(insertNotificationJobIfAbsent).toHaveBeenCalledTimes(1);
+    expect(upsertAggregateNotificationJob).toHaveBeenCalledTimes(1);
     expect(result.jobsCreated).toBe(1);
 
-    const [job] = fakeJobs;
+    const [job] = fakeJobs();
     expect(job.category).toBe("weapon_qualification_summary");
     expect(job.path).toBe("/manager");
     expect(job.title).toBe("⚠️ בעיות כשירות מטווחים");
@@ -200,9 +220,9 @@ describe("runWeaponQualificationCheck -- aggregate notification (spec: fix produ
     const result = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, MGR_RECIPIENTS);
 
     expect(result.issuesDetected).toBe(3);
-    expect(insertNotificationJobIfAbsent).toHaveBeenCalledTimes(1);
-    expect(fakeJobs[0].body).toContain("אצל אדם אחד"); // singular -- only one affected person
-    expect(JSON.parse(fakeJobs[0].sourceRef!)).toHaveLength(3);
+    expect(upsertAggregateNotificationJob).toHaveBeenCalledTimes(1);
+    expect(fakeJobs()[0].body).toContain("אצל אדם אחד"); // singular -- only one affected person
+    expect(JSON.parse(fakeJobs()[0].sourceRef!)).toHaveLength(3);
   });
 
   it("3. multiple affected people -> one aggregate notification with the correct affected-person count", async () => {
@@ -216,12 +236,12 @@ describe("runWeaponQualificationCheck -- aggregate notification (spec: fix produ
 
     const result = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, MGR_RECIPIENTS);
 
-    expect(insertNotificationJobIfAbsent).toHaveBeenCalledTimes(1);
+    expect(upsertAggregateNotificationJob).toHaveBeenCalledTimes(1);
     expect(result.jobsCreated).toBe(1);
-    expect(fakeJobs[0].body).toContain("אצל 3 אנשים");
+    expect(fakeJobs()[0].body).toContain("אצל 3 אנשים");
   });
 
-  it("4. repeated evaluation with UNCHANGED issues -> no duplicate notification", async () => {
+  it("4. repeated evaluation with UNCHANGED issues -> no duplicate notification row and no additional push", async () => {
     const events = [
       dutyEvent({ personId: "p1", dutyFamily: "oxid", date: futureDate(0) }),
       dutyEvent({ personId: "p2", dutyFamily: "guard", date: futureDate(1) }),
@@ -229,26 +249,32 @@ describe("runWeaponQualificationCheck -- aggregate notification (spec: fix produ
     const people = [...eligiblePeopleFor(events), manager()];
     getCompletionsForPersonIds.mockResolvedValue(["p1", "p2"].map(expiredCompletion));
 
-    await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, MGR_RECIPIENTS);
-    await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, MGR_RECIPIENTS);
+    const first = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, MGR_RECIPIENTS);
+    const second = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, MGR_RECIPIENTS);
 
-    expect(insertNotificationJobIfAbsent).toHaveBeenCalledTimes(1);
-    expect(fakeJobs).toHaveLength(1);
+    // The RPC is still called every eligible tick (it recomputes/refreshes
+    // content unconditionally, same convention as `upsertPendingReminderJob`)
+    // -- but it reports `reopened=false` the second time, so no second push.
+    expect(upsertAggregateNotificationJob).toHaveBeenCalledTimes(2);
+    expect(first.jobsCreated).toBe(1);
+    expect(second.jobsCreated).toBe(0);
+    expect(fakeJobs()).toHaveLength(1); // still ONE row -- never a duplicate
   });
 
-  it("5. issue ORDERING changes -> no duplicate notification", async () => {
+  it("5. issue ORDERING changes -> no duplicate notification, no additional push", async () => {
     const eventA = dutyEvent({ personId: "p1", dutyFamily: "oxid", date: futureDate(0) });
     const eventB = dutyEvent({ personId: "p2", dutyFamily: "guard", date: futureDate(1) });
     const people = [...eligiblePeopleFor([eventA, eventB]), manager()];
     getCompletionsForPersonIds.mockResolvedValue(["p1", "p2"].map(expiredCompletion));
 
     await runWeaponQualificationCheck(people, [eventA, eventB], [], [], "2026-08-30", true, MGR_RECIPIENTS);
-    await runWeaponQualificationCheck(people, [eventB, eventA], [], [], "2026-08-30", true, MGR_RECIPIENTS); // same set, reversed order
+    const second = await runWeaponQualificationCheck(people, [eventB, eventA], [], [], "2026-08-30", true, MGR_RECIPIENTS); // same set, reversed order
 
-    expect(insertNotificationJobIfAbsent).toHaveBeenCalledTimes(1);
+    expect(fakeJobs()).toHaveLength(1);
+    expect(second.jobsCreated).toBe(0);
   });
 
-  it("6. issues being RESOLVED/removed -> no new warning merely because the set shrank", async () => {
+  it("6. the set SHRINKS (but doesn't fully resolve) -> the SAME notification's displayed count is refreshed, no new row, no additional push", async () => {
     const eventA = dutyEvent({ personId: "p1", dutyFamily: "oxid", date: futureDate(0) });
     const eventB = dutyEvent({ personId: "p2", dutyFamily: "guard", date: futureDate(1) });
     const eventC = dutyEvent({ personId: "p3", dutyFamily: "reserve", date: futureDate(2) });
@@ -257,30 +283,82 @@ describe("runWeaponQualificationCheck -- aggregate notification (spec: fix produ
 
     await runWeaponQualificationCheck(people, [eventA, eventB, eventC], [], [], "2026-08-30", true, MGR_RECIPIENTS);
     // p3's issue resolved (e.g. requalified / assignment removed) -- only A and B remain.
-    await runWeaponQualificationCheck(people, [eventA, eventB], [], [], "2026-08-30", true, MGR_RECIPIENTS);
+    const second = await runWeaponQualificationCheck(people, [eventA, eventB], [], [], "2026-08-30", true, MGR_RECIPIENTS);
 
-    expect(insertNotificationJobIfAbsent).toHaveBeenCalledTimes(1);
-    expect(fakeJobs).toHaveLength(1);
+    expect(second.jobsCreated).toBe(0);
+    expect(fakeJobs()).toHaveLength(1);
+    expect(fakeJobs()[0].body).toContain("אצל 2 אנשים"); // content stays honest/current
+    expect(JSON.parse(fakeJobs()[0].sourceRef!)).toHaveLength(2);
   });
 
-  it("7. a genuinely NEW invalid assignment appears later -> a new warning CAN be generated", async () => {
-    const eventA = dutyEvent({ personId: "p1", dutyFamily: "oxid", date: futureDate(0) });
-    const eventB = dutyEvent({ personId: "p2", dutyFamily: "guard", date: futureDate(1) });
-    const eventD = dutyEvent({ personId: "p4", dutyFamily: "reserve", date: futureDate(5) });
-    const people = [...eligiblePeopleFor([eventA, eventB, eventD]), manager()];
-    getCompletionsForPersonIds.mockResolvedValue(["p1", "p2", "p4"].map(expiredCompletion));
+  it("7. the exact production incident: 38 -> 40 -> 44 -> ONE active notification updated in place, ONE push total", async () => {
+    function eventsFor(count: number): Event[] {
+      return Array.from({ length: count }, (_, i) =>
+        dutyEvent({ personId: `p${(i % 10) + 1}`, date: futureDate(i), dutyFamily: (["oxid", "guard", "reserve"] as DutyFamily[])[i % 3] }),
+      );
+    }
+    const allPeople = [...eligiblePeopleFor(eventsFor(44)), manager()];
+    getCompletionsForPersonIds.mockResolvedValue(allPeople.filter((p) => p.id !== "mgr1").map((p) => expiredCompletion(p.id)));
 
-    await runWeaponQualificationCheck(people, [eventA, eventB], [], [], "2026-08-30", true, MGR_RECIPIENTS);
-    // A genuinely new problem (p4/reserve) appears on a later tick.
-    await runWeaponQualificationCheck(people, [eventA, eventB, eventD], [], [], "2026-08-30", true, MGR_RECIPIENTS);
+    const at38 = await runWeaponQualificationCheck(allPeople, eventsFor(38), [], [], "2026-08-30", true, MGR_RECIPIENTS);
+    expect(at38.jobsCreated).toBe(1); // 0 -> 38: one active notification + one push
 
-    expect(insertNotificationJobIfAbsent).toHaveBeenCalledTimes(2);
-    expect(fakeJobs).toHaveLength(2);
-    expect(fakeJobs[0].dedupeKey).not.toBe(fakeJobs[1].dedupeKey);
-    expect(JSON.parse(fakeJobs[1].sourceRef!)).toHaveLength(3);
+    const at40 = await runWeaponQualificationCheck(allPeople, eventsFor(40), [], [], "2026-08-30", true, MGR_RECIPIENTS);
+    expect(at40.jobsCreated).toBe(0); // 38 -> 40: same notification updated, no additional push
+
+    const at44 = await runWeaponQualificationCheck(allPeople, eventsFor(44), [], [], "2026-08-30", true, MGR_RECIPIENTS);
+    expect(at44.jobsCreated).toBe(0); // 40 -> 44: same notification updated, no additional push
+
+    const at44Again = await runWeaponQualificationCheck(allPeople, eventsFor(44), [], [], "2026-08-30", true, MGR_RECIPIENTS);
+    expect(at44Again.jobsCreated).toBe(0); // 44 -> 44: idempotent, no duplicate
+
+    expect(upsertAggregateNotificationJob).toHaveBeenCalledTimes(4); // one call per tick, but only the first ever "reopened"
+    expect(fakeJobs()).toHaveLength(1); // still exactly one active notification row
+    expect(fakeJobs()[0].body).toContain("44 שיבוצים עתידיים");
   });
 
-  it("8. a permanent (קבע) staff member with an expired qualification produces the SAME alert as a regular person -- requiresWeaponQualification is driven by the activity, never a personnel-category special case", async () => {
+  it("8. a fully resolved episode (44 -> 0) closes the notification, and a LATER new problem (0 -> 3) is a genuinely new episode with a new push", async () => {
+    function eventsFor(count: number): Event[] {
+      return Array.from({ length: count }, (_, i) =>
+        dutyEvent({ personId: `p${(i % 10) + 1}`, date: futureDate(i), dutyFamily: (["oxid", "guard", "reserve"] as DutyFamily[])[i % 3] }),
+      );
+    }
+    const allPeople = [...eligiblePeopleFor(eventsFor(44)), manager()];
+    getCompletionsForPersonIds.mockResolvedValue(allPeople.filter((p) => p.id !== "mgr1").map((p) => expiredCompletion(p.id)));
+
+    await runWeaponQualificationCheck(allPeople, eventsFor(44), [], [], "2026-08-30", true, MGR_RECIPIENTS);
+    expect(fakeJobs()[0].resolvedAt).toBeNull();
+
+    // 44 -> 0: fully resolved.
+    const resolved = await runWeaponQualificationCheck(allPeople, [], [], [], "2026-08-30", true, MGR_RECIPIENTS);
+    expect(resolved.jobsCreated).toBe(0);
+    expect(resolveAggregateNotificationJob).toHaveBeenCalledTimes(1);
+    expect(resolveAggregateNotificationJob).toHaveBeenCalledWith("weapon_qualification_summary:u_mgr1");
+    expect(fakeJobs()[0].resolvedAt).not.toBeNull();
+    expect(upsertAggregateNotificationJob).toHaveBeenCalledTimes(1); // never called while there's nothing to report
+
+    // 0 -> 3 later: a genuinely new episode.
+    const reopened = await runWeaponQualificationCheck(allPeople, eventsFor(3), [], [], "2026-08-30", true, MGR_RECIPIENTS);
+    expect(reopened.jobsCreated).toBe(1); // a fresh push
+    expect(fakeJobs()).toHaveLength(1); // the SAME row/dedupe key is reused, never a second one
+    expect(fakeJobs()[0].resolvedAt).toBeNull();
+    expect(JSON.parse(fakeJobs()[0].sourceRef!)).toHaveLength(3);
+  });
+
+  it("9. an issue set that was already empty stays a no-op -- resolving something never opened never throws or creates a row", async () => {
+    getCompletionsForPersonIds.mockResolvedValue([]);
+    const events: Event[] = [dutyEvent({ dutyFamily: null, category: "shift", title: "טכנאי יום" })];
+    const people = [person(), manager()];
+
+    const result = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, MGR_RECIPIENTS);
+
+    expect(result).toEqual({ issuesDetected: 0, jobsCreated: 0 });
+    expect(resolveAggregateNotificationJob).toHaveBeenCalledTimes(1);
+    expect(upsertAggregateNotificationJob).not.toHaveBeenCalled();
+    expect(fakeJobs()).toHaveLength(0);
+  });
+
+  it("10. a permanent (קבע) staff member with an expired qualification produces the SAME alert as a regular person -- requiresWeaponQualification is driven by the activity, never a personnel-category special case", async () => {
     const permanentGuard = person({ id: "p_perm", name: "קבע בדיקה", personnelType: "קבע", isTechnician: true });
     const events = [dutyEvent({ personId: "p_perm", personName: "קבע בדיקה", dutyFamily: "guard", date: futureDate(0) })];
     const people = [permanentGuard, manager()];
@@ -289,13 +367,13 @@ describe("runWeaponQualificationCheck -- aggregate notification (spec: fix produ
     const result = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, MGR_RECIPIENTS);
 
     expect(result.issuesDetected).toBe(1);
-    expect(insertNotificationJobIfAbsent).toHaveBeenCalledTimes(1);
+    expect(upsertAggregateNotificationJob).toHaveBeenCalledTimes(1);
     expect(result.jobsCreated).toBe(1);
     // Completions are fetched for the FULL roster, never pre-filtered by isEligibleForShootingRanges.
     expect(getCompletionsForPersonIds).toHaveBeenCalledWith(expect.arrayContaining(["p_perm", "mgr1"]));
   });
 
-  describe("9. weapon-qualification alert is activity-driven, never scoped by isEligibleForShootingRanges (role/service-category)", () => {
+  describe("11. weapon-qualification alert is activity-driven, never scoped by isEligibleForShootingRanges (role/service-category)", () => {
     it("a permanent (קבע) staff member who is NEITHER אחמ\"ש nor טכנאי, with an expired qualification, still produces the alert", async () => {
       const permanentNonShiftCapable = person({ id: "p_perm_ns", name: "קבע לא כשיר", personnelType: "קבע", isTechnician: false, isSupervisor: false });
       const events = [dutyEvent({ personId: "p_perm_ns", personName: "קבע לא כשיר", dutyFamily: "guard", date: futureDate(0) })];
@@ -344,7 +422,7 @@ describe("runWeaponQualificationCheck -- aggregate notification (spec: fix produ
       const result = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, MGR_RECIPIENTS);
 
       expect(result).toEqual({ issuesDetected: 0, jobsCreated: 0 });
-      expect(insertNotificationJobIfAbsent).not.toHaveBeenCalled();
+      expect(upsertAggregateNotificationJob).not.toHaveBeenCalled();
     });
 
     it("an activity that does NOT require weapon qualification -> no issue even for an expired non-shift-capable permanent person", async () => {
@@ -356,7 +434,7 @@ describe("runWeaponQualificationCheck -- aggregate notification (spec: fix produ
       const result = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, MGR_RECIPIENTS);
 
       expect(result).toEqual({ issuesDetected: 0, jobsCreated: 0 });
-      expect(insertNotificationJobIfAbsent).not.toHaveBeenCalled();
+      expect(upsertAggregateNotificationJob).not.toHaveBeenCalled();
     });
   });
 
@@ -368,10 +446,10 @@ describe("runWeaponQualificationCheck -- aggregate notification (spec: fix produ
     const result = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, MGR_RECIPIENTS);
 
     expect(result).toEqual({ issuesDetected: 0, jobsCreated: 0 });
-    expect(insertNotificationJobIfAbsent).not.toHaveBeenCalled();
+    expect(upsertAggregateNotificationJob).not.toHaveBeenCalled();
   });
 
-  it("dry-run (persist: false) detects issues but never creates or reads back a notification", async () => {
+  it("dry-run (persist: false) detects issues but never creates, reads, or resolves a notification", async () => {
     const events = [dutyEvent({ personId: "p1", date: futureDate(0) })];
     const people = [person({ id: "p1" }), manager()];
     getCompletionsForPersonIds.mockResolvedValue([expiredCompletion("p1")]);
@@ -379,7 +457,8 @@ describe("runWeaponQualificationCheck -- aggregate notification (spec: fix produ
     const result = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", false, MGR_RECIPIENTS);
 
     expect(result).toEqual({ issuesDetected: 1, jobsCreated: 0 });
-    expect(insertNotificationJobIfAbsent).not.toHaveBeenCalled();
+    expect(upsertAggregateNotificationJob).not.toHaveBeenCalled();
+    expect(resolveAggregateNotificationJob).not.toHaveBeenCalled();
   });
 
   it("a past invalid duty (date < today) never reaches detection, and creates no notification -- existing future-only filtering preserved", async () => {
@@ -390,7 +469,7 @@ describe("runWeaponQualificationCheck -- aggregate notification (spec: fix produ
     const result = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, MGR_RECIPIENTS);
 
     expect(result).toEqual({ issuesDetected: 0, jobsCreated: 0 });
-    expect(insertNotificationJobIfAbsent).not.toHaveBeenCalled();
+    expect(upsertAggregateNotificationJob).not.toHaveBeenCalled();
   });
 
   it("no managers resolved -> no notification, but issues are still counted as detected", async () => {
@@ -403,20 +482,25 @@ describe("runWeaponQualificationCheck -- aggregate notification (spec: fix produ
     expect(result).toEqual({ issuesDetected: 1, jobsCreated: 0 });
   });
 
-  it("each manager is notified independently -- a manager who already has a fully-covered set is skipped while a different/newer manager is not", async () => {
+  it("each manager is notified independently -- a manager with an already-open episode is content-refreshed while a different/newer manager opens a fresh one", async () => {
     const events = [dutyEvent({ personId: "p1", date: futureDate(0) })];
     const people = [person({ id: "p1" }), manager(), manager({ id: "mgr2", name: "מנהל שתיים" })];
     getCompletionsForPersonIds.mockResolvedValue([expiredCompletion("p1")]);
     const bothManagers = resolution([recipient("mgr1", "u_mgr1"), recipient("mgr2", "u_mgr2")]);
 
-    // mgr1 already covered on a previous tick; mgr2 has never been notified.
+    // mgr1 already has an open episode from a previous tick; mgr2 has never been notified.
     await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, resolution([recipient("mgr1", "u_mgr1")]));
-    expect(insertNotificationJobIfAbsent).toHaveBeenCalledTimes(1);
+    expect(upsertAggregateNotificationJob).toHaveBeenCalledTimes(1);
 
-    await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, bothManagers);
+    const second = await runWeaponQualificationCheck(people, events, [], [], "2026-08-30", true, bothManagers);
 
-    expect(insertNotificationJobIfAbsent).toHaveBeenCalledTimes(2);
-    const recipientIds = fakeJobs.map((job) => job.recipientUserId).sort();
+    // The RPC is called for EVERY manager on every eligible tick
+    // (unconditionally, by design -- see `upsertAggregateNotificationJob`'s
+    // own docstring): 1 call for mgr1 alone on the first tick, then 2 more
+    // (mgr1 + mgr2) on the second tick -- 3 total.
+    expect(upsertAggregateNotificationJob).toHaveBeenCalledTimes(3);
+    expect(second.jobsCreated).toBe(1); // only mgr2's call reopened/pushed -- mgr1's was a silent content refresh
+    const recipientIds = fakeJobs().map((job) => job.recipientUserId).sort();
     expect(recipientIds).toEqual(["u_mgr1", "u_mgr2"]);
   });
 });

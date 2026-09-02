@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { addCalendarDays, formatCalendarDate, subtractCalendarDays } from "@/lib/domain/dateRange";
+import { parseCalendarDate } from "@/lib/domain/dutyBlocks";
 import type { Event } from "@/lib/domain/event";
 import type { Person } from "@/lib/domain/types";
 import type { CompletionRow } from "@/lib/shootingRanges/store";
+import { getJerusalemLocalNow } from "@/lib/time/jerusalemClock";
 
 /**
  * Regression for the Emergency Mode fix to the weapon-qualification
@@ -34,8 +37,8 @@ const resolveOperationalRoster = vi.fn();
 const peekLastOperationalGeneration = vi.fn();
 const setLastOperationalGeneration = vi.fn();
 const getCompletionsForPersonIds = vi.fn();
-const insertNotificationJobIfAbsent = vi.fn();
-const getLatestNotificationSourceRef = vi.fn();
+const upsertAggregateNotificationJob = vi.fn();
+const resolveAggregateNotificationJob = vi.fn();
 
 vi.mock("./freshRead", () => ({ fetchFreshWorkbookRead: (...args: unknown[]) => fetchFreshWorkbookRead(...args) }));
 // `filterManagerRecipients` (called by the REAL `runWeaponQualificationCheck`)
@@ -60,15 +63,15 @@ vi.mock("./recurringRuleDispatch", () => ({
 }));
 // `./store` backs BOTH pipeline.ts's own due-count/generation bookkeeping
 // AND -- via the SAME resolved module -- the REAL `runWeaponQualificationCheck`'s
-// `insertNotificationJobIfAbsent` write. Stubbing it here (never a real
+// `upsertAggregateNotificationJob` write. Stubbing it here (never a real
 // Supabase client) is what lets this file observe that write directly.
 vi.mock("./store", () => ({
   peekDueJobsCount: (...args: unknown[]) => peekDueJobsCount(...args),
   peekDueManagerScheduledBroadcastsCount: (...args: unknown[]) => peekDueManagerScheduledBroadcastsCount(...args),
   peekLastOperationalGeneration: (...args: unknown[]) => peekLastOperationalGeneration(...args),
   setLastOperationalGeneration: (...args: unknown[]) => setLastOperationalGeneration(...args),
-  insertNotificationJobIfAbsent: (...args: unknown[]) => insertNotificationJobIfAbsent(...args),
-  getLatestNotificationSourceRef: (...args: unknown[]) => getLatestNotificationSourceRef(...args),
+  upsertAggregateNotificationJob: (...args: unknown[]) => upsertAggregateNotificationJob(...args),
+  resolveAggregateNotificationJob: (...args: unknown[]) => resolveAggregateNotificationJob(...args),
 }));
 vi.mock("@/lib/emergencyMode/state", () => ({ resolveOperationalMode: (...args: unknown[]) => resolveOperationalMode(...args) }));
 vi.mock("@/lib/readModels/operationalMode", () => ({ resolveOperationalRoster: (...args: unknown[]) => resolveOperationalRoster(...args) }));
@@ -109,11 +112,32 @@ function nextCell(): string {
   return `C${cellCounter}`;
 }
 
+/**
+ * A calendar date `daysFromToday` days from the REAL current date, via the
+ * SAME `getJerusalemLocalNow()` this test file's real, unmocked
+ * `runWeaponQualificationCheck` (via `pipeline.ts`) uses internally as its
+ * own "today" -- so fixture events stay correctly future/past-of-"today"
+ * no matter which real calendar day this suite happens to run on, instead
+ * of a hardcoded absolute date drifting stale over time (never a second/
+ * ad-hoc `Date`-based implementation, matching `weaponQualification.test.ts`'s
+ * own `futureDate()`).
+ */
+function relativeDate(daysFromToday: number): string {
+  const today = parseCalendarDate(getJerusalemLocalNow().date)!;
+  // `addCalendarDays`/`subtractCalendarDays` each only walk forward -- see
+  // their own implementations in `dateRange.ts` -- so a negative offset
+  // must go through the subtract variant, never `addCalendarDays` with a
+  // negative `n` (a silent no-op there, since its own loop guard is
+  // `while (remaining > 0)`).
+  const shifted = daysFromToday >= 0 ? addCalendarDays(today, daysFromToday) : subtractCalendarDays(today, -daysFromToday);
+  return formatCalendarDate(shifted);
+}
+
 function dutyEvent(overrides: Partial<Event> = {}): Event {
   return {
     personId: "p1",
     personName: "איתי בדיקה",
-    date: "2026-08-31",
+    date: relativeDate(1),
     title: "אוקסיד",
     rawValue: "אוקסיד",
     category: "duty",
@@ -174,33 +198,44 @@ const ZERO_REMINDERS_SUMMARY = {
 };
 
 /**
- * A tiny in-memory stand-in for the relevant slice of `notification_jobs`
- * -- unique-by-dedupeKey insert, plus "most recently inserted `sourceRef`
- * for this recipient+category" read-back -- so the "dedupe remains intact
- * across repeated ticks" test exercises the REAL aggregate/read-back round
- * trip `runWeaponQualificationCheck` now depends on, not just a stateless
- * mock return value. Mirrors the identical fake in `weaponQualification.test.ts`.
+ * A tiny in-memory stand-in for the relevant slice of `notification_jobs`,
+ * mirroring the EXACT episode semantics `upsert_aggregate_notification_job`/
+ * `resolve_aggregate_notification_job` implement in Postgres -- ONE row per
+ * `dedupeKey`, ever: a fresh/reopened episode (no row yet, or the existing
+ * row is resolved) replaces the row and reports `true`; an already-open
+ * episode is content-refreshed in place and reports `false`. So the
+ * "dedupe remains intact across repeated ticks" test exercises the REAL
+ * read-back round trip `runWeaponQualificationCheck` now depends on, not
+ * just a stateless mock return value. Mirrors the identical fake in
+ * `weaponQualification.test.ts`.
  */
 interface FakeJob {
   category: string;
   recipientUserId: string;
   dedupeKey: string;
   sourceRef?: string;
+  resolvedAt: string | null;
 }
-let fakeJobs: FakeJob[] = [];
+let fakeJobsByDedupeKey = new Map<string, FakeJob>();
 
 function resetFakeNotificationStore() {
-  fakeJobs = [];
-  insertNotificationJobIfAbsent.mockReset();
-  insertNotificationJobIfAbsent.mockImplementation(async (job: FakeJob) => {
-    if (fakeJobs.some((existing) => existing.dedupeKey === job.dedupeKey)) return false;
-    fakeJobs.push(job);
-    return true;
+  fakeJobsByDedupeKey = new Map();
+  upsertAggregateNotificationJob.mockReset();
+  upsertAggregateNotificationJob.mockImplementation(async (job: Omit<FakeJob, "resolvedAt">) => {
+    const existing = fakeJobsByDedupeKey.get(job.dedupeKey);
+    if (!existing || existing.resolvedAt !== null) {
+      fakeJobsByDedupeKey.set(job.dedupeKey, { ...job, resolvedAt: null });
+      return true;
+    }
+    fakeJobsByDedupeKey.set(job.dedupeKey, { ...existing, sourceRef: job.sourceRef });
+    return false;
   });
-  getLatestNotificationSourceRef.mockReset();
-  getLatestNotificationSourceRef.mockImplementation(async (recipientUserId: string, category: string) => {
-    const matches = fakeJobs.filter((job) => job.recipientUserId === recipientUserId && job.category === category);
-    return matches.length === 0 ? null : (matches[matches.length - 1].sourceRef ?? null);
+  resolveAggregateNotificationJob.mockReset();
+  resolveAggregateNotificationJob.mockImplementation(async (dedupeKey: string) => {
+    const existing = fakeJobsByDedupeKey.get(dedupeKey);
+    if (existing && existing.resolvedAt === null) {
+      fakeJobsByDedupeKey.set(dedupeKey, { ...existing, resolvedAt: "2026-08-30T18:00:00.000Z" });
+    }
   });
 }
 
@@ -263,47 +298,47 @@ afterEach(() => {
 
 describe("runNotificationWorkerTick -- weapon-qualification stage vs Emergency Mode (regression)", () => {
   it("1. Emergency Mode + regular OXID duty + expired qualification -> no weapon-qualification notification job", async () => {
-    setupCommonDefaults([dutyEvent({ dutyFamily: "oxid", title: "אוקסיד", date: "2026-08-31" })]);
+    setupCommonDefaults([dutyEvent({ dutyFamily: "oxid", title: "אוקסיד", date: relativeDate(1) })]);
     mockEmergencyMode();
     const { runNotificationWorkerTick } = await loadModule();
 
     const result = await runNotificationWorkerTick("send");
 
-    expect(insertNotificationJobIfAbsent).not.toHaveBeenCalled();
+    expect(upsertAggregateNotificationJob).not.toHaveBeenCalled();
     expect(result.status).toBe("ok");
     if (result.status === "ok") expect(result.summary.jobsCreated).toBe(0);
   });
 
   it("2. Emergency Mode + regular guard duty (שמירה) + invalid qualification -> no job", async () => {
-    setupCommonDefaults([dutyEvent({ dutyFamily: "guard", title: "שמירה", date: "2026-08-31" })]);
+    setupCommonDefaults([dutyEvent({ dutyFamily: "guard", title: "שמירה", date: relativeDate(1) })]);
     mockEmergencyMode();
     const { runNotificationWorkerTick } = await loadModule();
 
     await runNotificationWorkerTick("send");
 
-    expect(insertNotificationJobIfAbsent).not.toHaveBeenCalled();
+    expect(upsertAggregateNotificationJob).not.toHaveBeenCalled();
   });
 
   it("3. Emergency Mode + regular reserve duty (עתודה) + invalid qualification -> no job", async () => {
-    setupCommonDefaults([dutyEvent({ dutyFamily: "reserve", title: "עתודה", date: "2026-08-31" })]);
+    setupCommonDefaults([dutyEvent({ dutyFamily: "reserve", title: "עתודה", date: relativeDate(1) })]);
     mockEmergencyMode();
     const { runNotificationWorkerTick } = await loadModule();
 
     await runNotificationWorkerTick("send");
 
-    expect(insertNotificationJobIfAbsent).not.toHaveBeenCalled();
+    expect(upsertAggregateNotificationJob).not.toHaveBeenCalled();
   });
 
   it("4. Regular mode with the SAME invalid duty -> the notification is still generated (existing behavior unchanged)", async () => {
-    setupCommonDefaults([dutyEvent({ dutyFamily: "oxid", title: "אוקסיד", date: "2026-08-31" })]);
+    setupCommonDefaults([dutyEvent({ dutyFamily: "oxid", title: "אוקסיד", date: relativeDate(1) })]);
     resolveOperationalMode.mockResolvedValue({ kind: "regular" });
     const { runNotificationWorkerTick } = await loadModule();
 
     const result = await runNotificationWorkerTick("send");
 
     expect(resolveOperationalRoster).not.toHaveBeenCalled();
-    expect(insertNotificationJobIfAbsent).toHaveBeenCalledTimes(1);
-    const [job] = insertNotificationJobIfAbsent.mock.calls[0];
+    expect(upsertAggregateNotificationJob).toHaveBeenCalledTimes(1);
+    const [job] = upsertAggregateNotificationJob.mock.calls[0];
     expect(job.category).toBe("weapon_qualification_summary");
     expect(job.recipientUserId).toBe("u_mgr1");
     expect(result.status).toBe("ok");
@@ -311,51 +346,56 @@ describe("runNotificationWorkerTick -- weapon-qualification stage vs Emergency M
   });
 
   it("5. Existing past-event filtering remains intact in regular mode -- a historical invalid duty never generates a job", async () => {
-    setupCommonDefaults([dutyEvent({ dutyFamily: "oxid", title: "אוקסיד", date: "2026-08-01" })]); // before "today" (2026-08-30)
+    setupCommonDefaults([dutyEvent({ dutyFamily: "oxid", title: "אוקסיד", date: relativeDate(-5) })]); // well before "today"
     resolveOperationalMode.mockResolvedValue({ kind: "regular" });
     const { runNotificationWorkerTick } = await loadModule();
 
     await runNotificationWorkerTick("send");
 
-    expect(insertNotificationJobIfAbsent).not.toHaveBeenCalled();
+    expect(upsertAggregateNotificationJob).not.toHaveBeenCalled();
   });
 
-  it("6. Existing dedupe behavior remains intact -- a repeated regular-mode tick with the SAME unresolved issue creates zero additional notifications", async () => {
-    setupCommonDefaults([dutyEvent({ dutyFamily: "oxid", title: "אוקסיד", date: "2026-08-31" })]);
+  it("6. Existing dedupe behavior remains intact -- a repeated regular-mode tick with the SAME unresolved issue creates zero additional notifications/pushes", async () => {
+    setupCommonDefaults([dutyEvent({ dutyFamily: "oxid", title: "אוקסיד", date: relativeDate(1) })]);
     resolveOperationalMode.mockResolvedValue({ kind: "regular" });
     const { runNotificationWorkerTick } = await loadModule();
 
     // `loadModule()` re-imports a fresh pipeline module each time
-    // (`vi.resetModules()` in `afterEach`), but `fakeJobs`/the mock
-    // implementations here are module-level in THIS test file and persist
-    // across both calls within one `it()` -- exactly what's needed to
-    // prove the second tick's read-back sees the first tick's own insert.
-    await runNotificationWorkerTick("send");
-    expect(insertNotificationJobIfAbsent).toHaveBeenCalledTimes(1);
+    // (`vi.resetModules()` in `afterEach`), but `fakeJobsByDedupeKey`/the
+    // mock implementations here are module-level in THIS test file and
+    // persist across both calls within one `it()` -- exactly what's needed
+    // to prove the second tick's read-back sees the first tick's own row.
+    const first = await runNotificationWorkerTick("send");
+    expect(upsertAggregateNotificationJob).toHaveBeenCalledTimes(1);
+    if (first.status === "ok") expect(first.summary.jobsCreated).toBe(1);
 
-    await runNotificationWorkerTick("send");
-    expect(insertNotificationJobIfAbsent).toHaveBeenCalledTimes(1); // still 1 -- the second tick found nothing new and never called it again
+    const second = await runNotificationWorkerTick("send");
+    // The RPC is still called every eligible tick (it recomputes/refreshes
+    // content unconditionally), but the SAME still-open episode row is
+    // refreshed in place -- never a second row, never a second push.
+    expect(upsertAggregateNotificationJob).toHaveBeenCalledTimes(2);
+    if (second.status === "ok") expect(second.summary.jobsCreated).toBe(0);
   });
 
   it("Emergency Mode skips the stage regardless of whether the emergency roster itself is readable", async () => {
-    setupCommonDefaults([dutyEvent({ dutyFamily: "oxid", title: "אוקסיד", date: "2026-08-31" })]);
+    setupCommonDefaults([dutyEvent({ dutyFamily: "oxid", title: "אוקסיד", date: relativeDate(1) })]);
     resolveOperationalMode.mockResolvedValue({ kind: "emergency", period: { id: "p1" } });
     resolveOperationalRoster.mockResolvedValue({ mode: "emergency_unavailable", period: { id: "p1" }, message: "boom" });
     const { runNotificationWorkerTick } = await loadModule();
 
     await runNotificationWorkerTick("send");
 
-    expect(insertNotificationJobIfAbsent).not.toHaveBeenCalled();
+    expect(upsertAggregateNotificationJob).not.toHaveBeenCalled();
   });
 
   it("dry_run mode during Emergency Mode still never runs the real check (no completions lookup either)", async () => {
-    setupCommonDefaults([dutyEvent({ dutyFamily: "oxid", title: "אוקסיד", date: "2026-08-31" })]);
+    setupCommonDefaults([dutyEvent({ dutyFamily: "oxid", title: "אוקסיד", date: relativeDate(1) })]);
     mockEmergencyMode();
     const { runNotificationWorkerTick } = await loadModule();
 
     await runNotificationWorkerTick("dry_run");
 
     expect(getCompletionsForPersonIds).not.toHaveBeenCalled();
-    expect(insertNotificationJobIfAbsent).not.toHaveBeenCalled();
+    expect(upsertAggregateNotificationJob).not.toHaveBeenCalled();
   });
 });

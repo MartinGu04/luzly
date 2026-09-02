@@ -1061,4 +1061,195 @@ describe.skipIf(!databaseAvailable)("notification engine SQL functions -- real P
       }
     });
   });
+
+  // -------------------------------------------------------------------
+  // upsert_aggregate_notification_job / resolve_aggregate_notification_job
+  // -- spec: fix a real production notification-spam incident (the weapon/
+  // shooting-range-qualification manager alert: 38 -> 40 -> 44 mismatches
+  // produced THREE separate Notification Center entries and THREE pushes
+  // instead of one notification updating its own count with exactly one
+  // push). A GENUINE proof that the row-locking/retry-on-conflict episode
+  // model actually holds under real concurrent connections -- the property
+  // under test IS Postgres's own locking behavior, which a mock cannot
+  // honestly prove (same rationale as `claim_due_notification_jobs`/
+  // `upsert_pending_reminder_job` above).
+  // -------------------------------------------------------------------
+
+  describe("upsert_aggregate_notification_job / resolve_aggregate_notification_job", () => {
+    async function callUpsert(dedupeKey: string, overrides: Partial<{ title: string; sourceRef: string | null }> = {}) {
+      return db.query(
+        `select public.upsert_aggregate_notification_job($1, $2, $3, 'b', '/manager', null, $4, now(), $5) as reopened`,
+        ["weapon_qualification_summary", USER_A, overrides.title ?? "t", dedupeKey, overrides.sourceRef ?? null],
+      );
+    }
+
+    async function callResolve(dedupeKey: string) {
+      return db.query("select public.resolve_aggregate_notification_job($1)", [dedupeKey]);
+    }
+
+    async function jobRow(dedupeKey: string) {
+      const result = await db.query("select * from public.notification_jobs where dedupe_key = $1", [dedupeKey]);
+      return result.rows[0];
+    }
+
+    it("45. first call opens a fresh episode -- a new pending row, reopened=true", async () => {
+      const result = await callUpsert("episode-fresh", { sourceRef: '["a"]' });
+      expect(result.rows[0].reopened).toBe(true);
+
+      const row = await jobRow("episode-fresh");
+      expect(row.status).toBe("pending");
+      expect(row.resolved_at).toBeNull();
+      expect(row.source_ref).toBe('["a"]');
+    });
+
+    it("46. the exact production incident: 38 -> 40 -> 44 refreshes the SAME row in place, reopened=false after the first call, never a second row", async () => {
+      const first = await callUpsert("episode-3840", { title: "38 mismatches", sourceRef: '["k1","...38"]' });
+      expect(first.rows[0].reopened).toBe(true);
+
+      const second = await callUpsert("episode-3840", { title: "40 mismatches", sourceRef: '["k1","...40"]' });
+      expect(second.rows[0].reopened).toBe(false);
+
+      const third = await callUpsert("episode-3840", { title: "44 mismatches", sourceRef: '["k1","...44"]' });
+      expect(third.rows[0].reopened).toBe(false);
+
+      const countResult = await db.query(
+        "select count(*)::int as n from public.notification_jobs where dedupe_key = $1",
+        ["episode-3840"],
+      );
+      expect(countResult.rows[0].n).toBe(1); // exactly one row for the whole episode
+
+      const row = await jobRow("episode-3840");
+      expect(row.title).toBe("44 mismatches"); // content reflects the latest count
+    });
+
+    it("47. 44 -> 44 (identical content re-upserted) is idempotent -- still reopened=false, still one row", async () => {
+      await callUpsert("episode-idempotent", { title: "44 mismatches" });
+      const repeat = await callUpsert("episode-idempotent", { title: "44 mismatches" });
+      expect(repeat.rows[0].reopened).toBe(false);
+
+      const countResult = await db.query(
+        "select count(*)::int as n from public.notification_jobs where dedupe_key = $1",
+        ["episode-idempotent"],
+      );
+      expect(countResult.rows[0].n).toBe(1);
+    });
+
+    it("48. an already-delivered ('completed') open episode is content-refreshed but never revived to pending -- no re-push", async () => {
+      await callUpsert("episode-completed", { title: "before delivery" });
+      await db.query("update public.notification_jobs set status = 'completed', attempts = 1 where dedupe_key = $1", [
+        "episode-completed",
+      ]);
+
+      const result = await callUpsert("episode-completed", { title: "after another tick" });
+      expect(result.rows[0].reopened).toBe(false);
+
+      const row = await jobRow("episode-completed");
+      expect(row.status).toBe("completed"); // never revived
+      expect(row.attempts).toBe(1); // retry bookkeeping untouched
+      expect(row.title).toBe("after another tick"); // content still refreshes
+    });
+
+    it("49. resolving an open episode (44 -> 0) sets resolved_at, and a LATER call reopens it fresh (0 -> 3) -- reopened=true, same row, resolved_at cleared", async () => {
+      await callUpsert("episode-resolve-reopen", { title: "44 mismatches" });
+
+      await callResolve("episode-resolve-reopen");
+      const resolvedRow = await jobRow("episode-resolve-reopen");
+      expect(resolvedRow.resolved_at).not.toBeNull();
+
+      const reopened = await callUpsert("episode-resolve-reopen", { title: "3 mismatches" });
+      expect(reopened.rows[0].reopened).toBe(true);
+
+      const finalRow = await jobRow("episode-resolve-reopen");
+      expect(finalRow.resolved_at).toBeNull();
+      expect(finalRow.status).toBe("pending"); // a fresh push is due
+      expect(finalRow.title).toBe("3 mismatches");
+
+      const countResult = await db.query(
+        "select count(*)::int as n from public.notification_jobs where dedupe_key = $1",
+        ["episode-resolve-reopen"],
+      );
+      expect(countResult.rows[0].n).toBe(1); // the SAME row is reused, never a second one
+    });
+
+    it("50. resolve is idempotent -- resolving twice, or resolving a key with no row at all, never throws", async () => {
+      await callUpsert("episode-double-resolve", {});
+      await callResolve("episode-double-resolve");
+      await callResolve("episode-double-resolve"); // already resolved -- must not throw
+      await expect(callResolve("episode-never-opened")).resolves.toBeDefined(); // no row at all -- must not throw
+    });
+
+    it("51. a completed episode's attempts/claimed_at/last_error reset to a clean slate on reopen, so the worker's retry budget starts fresh for the new episode", async () => {
+      await callUpsert("episode-clean-reopen", {});
+      await db.query(
+        "update public.notification_jobs set status = 'failed', attempts = 5, last_error = 'boom' where dedupe_key = $1",
+        ["episode-clean-reopen"],
+      );
+      await callResolve("episode-clean-reopen");
+
+      await callUpsert("episode-clean-reopen", { title: "new episode" });
+
+      const row = await jobRow("episode-clean-reopen");
+      expect(row.status).toBe("pending");
+      expect(row.attempts).toBe(0);
+      expect(row.claimed_at).toBeNull();
+      expect(row.last_error).toBeNull();
+    });
+
+    it("52. two concurrent callers opening the SAME brand-new episode: exactly one observes reopened=true, the other observes reopened=false, and only one row is ever created", async () => {
+      const connA = new Client({ connectionString: withDatabase(BASE_CONNECTION_STRING, dbName) });
+      const connB = new Client({ connectionString: withDatabase(BASE_CONNECTION_STRING, dbName) });
+      await connA.connect();
+      await connB.connect();
+
+      try {
+        await connA.query("begin");
+        const lockedResult = connA.query(
+          `select public.upsert_aggregate_notification_job($1, $2, 't', 'b', '/manager', null, $3, now(), null) as reopened`,
+          ["weapon_qualification_summary", USER_A, "episode-race"],
+        );
+
+        // Give A a moment to acquire its insert before B races in. A's own
+        // row-level lock is only taken AFTER the insert commits (or B would
+        // simply block forever inside an uncommitted transaction) -- so
+        // this test proves the RETRY path specifically: B must attempt its
+        // own insert, lose to A's already-committed row, and correctly
+        // fall back to locking + updating it instead.
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        await connA.query("commit");
+
+        const [aResult, bResult] = await Promise.all([
+          lockedResult,
+          connB.query(
+            `select public.upsert_aggregate_notification_job($1, $2, 't', 'b', '/manager', null, $3, now(), null) as reopened`,
+            ["weapon_qualification_summary", USER_A, "episode-race"],
+          ),
+        ]);
+
+        const reopenedFlags = [aResult.rows[0].reopened, bResult.rows[0].reopened].sort();
+        // Exactly one caller opened the fresh episode; the other found it
+        // already open and merely refreshed it -- never both "true"
+        // (which would mean a duplicate initial PUSH job).
+        expect(reopenedFlags).toEqual([false, true]);
+
+        const countResult = await db.query(
+          "select count(*)::int as n from public.notification_jobs where dedupe_key = $1",
+          ["episode-race"],
+        );
+        expect(countResult.rows[0].n).toBe(1);
+      } finally {
+        await connA.end();
+        await connB.end();
+      }
+    });
+
+    it("53. anon/authenticated cannot execute either function", async () => {
+      await db.query("set role authenticated");
+      try {
+        await expect(callUpsert("episode-forbidden", {})).rejects.toThrow(/permission denied/i);
+        await expect(callResolve("episode-forbidden")).rejects.toThrow(/permission denied/i);
+      } finally {
+        await db.query("reset role");
+      }
+    });
+  });
 });

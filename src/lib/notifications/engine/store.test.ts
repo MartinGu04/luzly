@@ -1035,6 +1035,113 @@ describe("upsertPendingReminderJob -- hotfix regression guard", () => {
   });
 });
 
+describe("upsertAggregateNotificationJob / resolveAggregateNotificationJob -- aggregate episode dedupe (spec: fix the 38 -> 40 -> 44 notification-spam incident)", () => {
+  function makeRpcFakeSupabase(rpcResult: { data?: unknown; error?: unknown } = { data: true, error: null }) {
+    const rpcCalls: { name: string; args: unknown }[] = [];
+    const client = {
+      rpc: (name: string, args: unknown) => {
+        rpcCalls.push({ name, args });
+        return Promise.resolve(rpcResult);
+      },
+      from: () => {
+        throw new Error("must never call .from() directly -- it must go through the RPC");
+      },
+    };
+    return { client, rpcCalls };
+  }
+
+  function newAggregateJob(overrides: Partial<import("./store").NewNotificationJob> = {}): import("./store").NewNotificationJob {
+    return {
+      category: "weapon_qualification_summary",
+      recipientUserId: "u_mgr1",
+      title: "⚠️ בעיות כשירות מטווחים",
+      body: "נמצאו 44 שיבוצים עתידיים ללא כשירות מטווחים בתוקף אצל 7 אנשים. האירוע הקרוב: 2.9. נדרש טיפול.",
+      path: "/manager",
+      dedupeKey: "weapon_qualification_summary:u_mgr1",
+      scheduledFor: "2026-08-30T10:00:00.000Z",
+      sourceRef: '["p1:2026-09-02:oxid"]',
+      ...overrides,
+    };
+  }
+
+  describe("upsertAggregateNotificationJob", () => {
+    it("calls the upsert_aggregate_notification_job RPC with the exact job fields -- never a plain client upsert", async () => {
+      const { client, rpcCalls } = makeRpcFakeSupabase();
+      const { upsertAggregateNotificationJob } = await loadModule(client);
+
+      await upsertAggregateNotificationJob(newAggregateJob({ tag: "tag-1" }));
+
+      expect(rpcCalls).toEqual([
+        {
+          name: "upsert_aggregate_notification_job",
+          args: {
+            p_category: "weapon_qualification_summary",
+            p_recipient_user_id: "u_mgr1",
+            p_title: "⚠️ בעיות כשירות מטווחים",
+            p_body: "נמצאו 44 שיבוצים עתידיים ללא כשירות מטווחים בתוקף אצל 7 אנשים. האירוע הקרוב: 2.9. נדרש טיפול.",
+            p_path: "/manager",
+            p_tag: "tag-1",
+            p_dedupe_key: "weapon_qualification_summary:u_mgr1",
+            p_scheduled_for: "2026-08-30T10:00:00.000Z",
+            p_source_ref: '["p1:2026-09-02:oxid"]',
+          },
+        },
+      ]);
+    });
+
+    it("passes null for the omitted optional tag, never undefined (RPC parameter binding)", async () => {
+      const { client, rpcCalls } = makeRpcFakeSupabase();
+      const { upsertAggregateNotificationJob } = await loadModule(client);
+
+      await upsertAggregateNotificationJob(newAggregateJob());
+
+      const args = rpcCalls[0].args as Record<string, unknown>;
+      expect(args.p_tag).toBeNull();
+    });
+
+    it("returns true when the RPC reports a fresh/reopened episode", async () => {
+      const { client } = makeRpcFakeSupabase({ data: true, error: null });
+      const { upsertAggregateNotificationJob } = await loadModule(client);
+
+      expect(await upsertAggregateNotificationJob(newAggregateJob())).toBe(true);
+    });
+
+    it("returns false when the RPC reports an already-open episode was merely content-refreshed", async () => {
+      const { client } = makeRpcFakeSupabase({ data: false, error: null });
+      const { upsertAggregateNotificationJob } = await loadModule(client);
+
+      expect(await upsertAggregateNotificationJob(newAggregateJob())).toBe(false);
+    });
+
+    it("propagates an RPC error rather than swallowing it", async () => {
+      const client = { rpc: () => Promise.resolve({ error: new Error("db down") }) };
+      const { upsertAggregateNotificationJob } = await loadModule(client);
+
+      await expect(upsertAggregateNotificationJob(newAggregateJob())).rejects.toThrow("db down");
+    });
+  });
+
+  describe("resolveAggregateNotificationJob", () => {
+    it("calls the resolve_aggregate_notification_job RPC with the dedupe key", async () => {
+      const { client, rpcCalls } = makeRpcFakeSupabase({ data: null, error: null });
+      const { resolveAggregateNotificationJob } = await loadModule(client);
+
+      await resolveAggregateNotificationJob("weapon_qualification_summary:u_mgr1");
+
+      expect(rpcCalls).toEqual([
+        { name: "resolve_aggregate_notification_job", args: { p_dedupe_key: "weapon_qualification_summary:u_mgr1" } },
+      ]);
+    });
+
+    it("propagates an RPC error rather than swallowing it", async () => {
+      const client = { rpc: () => Promise.resolve({ error: new Error("db down") }) };
+      const { resolveAggregateNotificationJob } = await loadModule(client);
+
+      await expect(resolveAggregateNotificationJob("weapon_qualification_summary:u_mgr1")).rejects.toThrow("db down");
+    });
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Manager manual broadcast batches
 // ---------------------------------------------------------------------------

@@ -1,5 +1,4 @@
 import "server-only";
-import { createHash } from "node:crypto";
 import type { Event } from "@/lib/domain/event";
 import { detectWeaponQualificationIssues, type OperationalIssue } from "@/lib/domain/operationalIssues";
 import type { Person } from "@/lib/domain/types";
@@ -8,18 +7,21 @@ import { formatCompactDate } from "@/lib/presentation/hebrewDate";
 import { getCompletionsForPersonIds } from "@/lib/shootingRanges/store";
 import { buildWeaponQualificationIndex } from "@/lib/readModels/shootingRangeQualification";
 import { filterManagerRecipients, type RecipientResolution } from "./recipients";
-import { getLatestNotificationSourceRef, insertNotificationJobIfAbsent } from "./store";
+import { resolveAggregateNotificationJob, upsertAggregateNotificationJob } from "./store";
 
 /**
- * A SINGLE aggregate manager notification per tick per manager -- never one
- * per underlying issue (spec: production notification-spam incident, 39
- * invalid guard/reserve/oxid assignments produced 39 separate pushes to
- * every manager). Aggregation is a NOTIFICATION-layer concern ONLY:
- * `detectWeaponQualificationIssues` below still returns every individual
- * `OperationalIssue`, completely undeduplicated -- Manager Area's "דורש
- * טיפול" (`buildManagerOverviewReadModel.ts`, a SEPARATE call to the same
- * function) is never touched by anything in this file and stays fully
- * granular.
+ * A SINGLE aggregate manager notification per OPEN EPISODE per manager --
+ * never one per underlying issue (spec: production notification-spam
+ * incident #1, 39 invalid guard/reserve/oxid assignments produced 39
+ * separate pushes to every manager), and never one per TICK either (spec:
+ * production notification-spam incident #2, a recalculated set growing
+ * 38 -> 40 -> 44 produced three separate Notification Center entries and
+ * three pushes for what is, to a manager, the SAME ongoing problem).
+ * Aggregation is a NOTIFICATION-layer concern ONLY: `detectWeaponQualificationIssues`
+ * below still returns every individual `OperationalIssue`, completely
+ * undeduplicated -- Manager Area's "דורש טיפול" (`buildManagerOverviewReadModel.ts`,
+ * a SEPARATE call to the same function) is never touched by anything in
+ * this file and stays fully granular.
  */
 const CATEGORY_WEAPON_QUALIFICATION_SUMMARY = "weapon_qualification_summary";
 /** Lands on Manager Area's own "דורש טיפול" section -- the SAME issues this notification is summarizing, never a shooting-ranges-feature-specific page. */
@@ -34,12 +36,12 @@ export interface WeaponQualificationCheckResult {
  * One stable identity per underlying weapon-qualification PROBLEM --
  * (person, activity date, duty family) -- independent of which manager is
  * being notified, and independent of `issues` array order. This is the
- * unit the aggregate/dedupe strategy below reasons about: "has THIS
- * specific problem already been included in a notification we already
- * sent", never a raw issue-object identity/index. `null` only in the
- * structurally-unreachable case of a `weapon_qualification_invalid` issue
- * with no `targetEvent`/`dutyFamily` (`detectWeaponQualificationIssues`
- * itself never produces one without both).
+ * unit the aggregate content (`sourceRef` below) is built from: "which
+ * individual problems does the CURRENT episode's displayed count cover".
+ * `null` only in the structurally-unreachable case of a
+ * `weapon_qualification_invalid` issue with no `targetEvent`/`dutyFamily`
+ * (`detectWeaponQualificationIssues` itself never produces one without
+ * both).
  */
 function issueKey(issue: OperationalIssue): string | null {
   const dutyFamily = issue.targetEvent?.dutyFamily ?? null;
@@ -47,29 +49,20 @@ function issueKey(issue: OperationalIssue): string | null {
   return `${issue.personId}:${issue.date}:${dutyFamily}`;
 }
 
-/** A short, stable, deterministic key suffix for a given SORTED set of issue keys -- content-derived (never random/timestamp-based, per spec), so the SAME set always produces the SAME dedupe key regardless of which tick computed it. */
-function hashIssueKeys(sortedKeys: readonly string[]): string {
-  return createHash("sha256").update(sortedKeys.join("\n"), "utf8").digest("hex").slice(0, 16);
-}
-
-/** The set of issue keys a PRIOR aggregate notification already covered for one recipient, decoded from that job's own `source_ref` (a JSON array of `issueKey()` strings, written when that job was created). Missing/malformed/never-notified-before all safely resolve to "nothing known yet" -- never thrown, never treated as a reason to skip notifying. */
-function parseCoveredIssueKeys(sourceRef: string | null): ReadonlySet<string> {
-  if (!sourceRef) return new Set();
-  try {
-    const parsed: unknown = JSON.parse(sourceRef);
-    if (!Array.isArray(parsed)) return new Set();
-    return new Set(parsed.filter((entry): entry is string => typeof entry === "string"));
-  } catch {
-    return new Set();
-  }
-}
-
-/** Every key in `candidate` is already present in `coveredKeys` -- i.e. `candidate` has nothing NEW relative to what was already covered. An empty `candidate` is trivially a subset of anything. */
-function isFullyCovered(candidate: ReadonlySet<string>, coveredKeys: ReadonlySet<string>): boolean {
-  for (const key of candidate) {
-    if (!coveredKeys.has(key)) return false;
-  }
-  return true;
+/**
+ * The STABLE per-manager identity of this alert's whole logical episode --
+ * deliberately NEVER derived from the current issue content (that was
+ * incident #2's own root cause, see this file's top-of-file docstring and
+ * the migration `upsertAggregateNotificationJob` goes through). Conceptually
+ * one fixed key per logical issue TYPE (`manager:shooting-range-qualification-mismatch`,
+ * as the spec names it) -- kept per-recipient here, matching every other
+ * dedupe key in this codebase (see `scheduleManagerConfirmationRequiredJob`'s
+ * own docs in `shootingRanges.ts` for the documented Production incident a
+ * dedupe key SHARED across recipients already caused here once: only the
+ * LAST manager in a `Promise.all`/loop would ever get a row).
+ */
+function aggregateDedupeKey(managerUserId: string): string {
+  return `${CATEGORY_WEAPON_QUALIFICATION_SUMMARY}:${managerUserId}`;
 }
 
 function assignmentCountLabel(count: number): string {
@@ -106,38 +99,50 @@ function affectedPeopleLabel(count: number): string {
  *
  * `persist: false` (dry-run) still runs detection (a real, read-only
  * Supabase completions query -- cheap, and needed for an honest
- * `issuesDetected` count) but never creates a job, mirroring every other
- * dry-run phase in this pipeline (spec section 24: "SEND NO PUSH").
+ * `issuesDetected` count) but never creates or touches a job, mirroring
+ * every other dry-run phase in this pipeline (spec section 24: "SEND NO
+ * PUSH").
  *
- * AGGREGATION + DEDUPE (spec: fix production notification spam without a
- * new persisted subsystem): every currently-open issue is collapsed into
- * ONE (person, date, dutyFamily) key per real problem, and each manager
- * gets AT MOST one job per tick summarizing the whole set ("39 שיבוצים
- * ... אצל 7 אנשים ... 2.9"), never one job per key. Idempotency across
- * repeated ticks is decided by comparing the CURRENT key set against the
- * key set covered by that manager's own MOST RECENTLY CREATED
- * `weapon_qualification_summary` job -- read back via the EXISTING
- * `notification_jobs.source_ref` column (`getLatestNotificationSourceRef`),
- * never a new table:
+ * AGGREGATION + EPISODE DEDUPE (spec: fix production notification spam
+ * without a new persisted subsystem -- reuses the existing
+ * `notification_jobs` outbox via `upsertAggregateNotificationJob`/
+ * `resolveAggregateNotificationJob`, see those functions' own docs and
+ * this file's migration for the exact mechanics): every currently-open
+ * issue is collapsed into ONE (person, date, dutyFamily) key per real
+ * problem, and each manager has AT MOST one ROW, EVER, for this whole
+ * logical alert -- `aggregateDedupeKey(manager.userId)`, stable for the
+ * alert's entire lifetime, never re-derived from the current content
+ * (that was this exact spam bug's own root cause: a content-hash-based
+ * key meant a genuinely new problem appearing while OLDER ones were
+ * still open -- 38 growing to 40 -- hashed to a different key and
+ * inserted a brand-new row/push, instead of updating the one already
+ * open).
  *
- *  - current set fully covered by the last-sent set (unchanged, reordered,
- *    or a strict subset because some issues resolved) -> skip entirely,
- *    for THIS manager. A resolved/removed issue can only ever shrink the
- *    set, never introduce an uncovered key, so a shrinking set alone can
- *    never trigger a fresh notification -- exactly the required behavior.
- *  - current set contains at least one key NOT in the last-sent set (a
- *    genuinely new problem appeared) -> send ONE new aggregate job whose
- *    `source_ref` becomes the current full set (the new high-water mark
- *    for next time), keyed by a content hash of the sorted set (never
- *    random/timestamp-based) so a genuine race between overlapping ticks
- *    still can't create two jobs for the identical content.
+ *  - `currentKeys` non-empty -> every manager gets an
+ *    `upsertAggregateNotificationJob` call EVERY eligible tick,
+ *    unconditionally (the same "recompute and re-upsert on every tick,
+ *    by design" convention `upsertPendingReminderJob` already
+ *    establishes for reminders) with the CURRENT full count/body. If no
+ *    episode is open yet (first appearance, or a prior episode was
+ *    resolved), this opens a fresh one: the row is `pending`, so the
+ *    worker's next delivery tick pushes it exactly once. If an episode
+ *    is already open, this only refreshes the row's displayed title/body
+ *    in place -- no new row, no re-push, whether the count grew,
+ *    shrank, or is unchanged.
+ *  - `currentKeys` empty -> the issue is fully resolved. Every manager's
+ *    open episode (if any) is closed via `resolveAggregateNotificationJob`,
+ *    so a LATER genuinely new problem is treated as a fresh episode (a
+ *    new push), never silently folded into the old, now-irrelevant one.
  *
- * This decision is made INDEPENDENTLY per manager (each reads back their
- * own last-sent set), so a manager added after an aggregate was already
- * sent to everyone else still gets caught up on their own next eligible
- * tick, and never shares a dedupe key with another recipient (the
- * documented past-incident class this codebase already guards against
- * everywhere else, see `shootingRanges.ts`'s own docs).
+ * This decision is made INDEPENDENTLY per manager (each has their own
+ * dedupe key/row), so a manager added after an episode was already
+ * opened for everyone else still gets caught up on their own next
+ * eligible tick, and never shares a dedupe key with another recipient
+ * (the documented past-incident class this codebase already guards
+ * against everywhere else, see `shootingRanges.ts`'s own docs).
+ * Concurrency across repeated/overlapping worker ticks is guaranteed by
+ * the underlying RPC's own row locking, never by anything in this
+ * function -- see `upsertAggregateNotificationJob`'s docstring.
  */
 export async function runWeaponQualificationCheck(
   people: readonly Person[],
@@ -172,7 +177,7 @@ export async function runWeaponQualificationCheck(
   // see for this same input (never collapsed/altered here). Aggregation
   // below only affects what gets WRITTEN to `notification_jobs`.
   const issues = detectWeaponQualificationIssues(upcomingEvents, qualificationByPersonId);
-  if (issues.length === 0 || !persist) return { issuesDetected: issues.length, jobsCreated: 0 };
+  if (!persist) return { issuesDetected: issues.length, jobsCreated: 0 };
 
   const managers = filterManagerRecipients(people, recipientResolution);
   if (managers.length === 0) return { issuesDetected: issues.length, jobsCreated: 0 };
@@ -182,7 +187,17 @@ export async function runWeaponQualificationCheck(
     const key = issueKey(issue);
     if (key) currentKeys.add(key);
   }
-  if (currentKeys.size === 0) return { issuesDetected: issues.length, jobsCreated: 0 };
+
+  if (currentKeys.size === 0) {
+    // Fully resolved (or never had an open episode to begin with) --
+    // close out every manager's open episode, if any, so a LATER
+    // genuinely new problem starts a fresh one instead of being folded
+    // into stale, already-irrelevant content.
+    for (const manager of managers) {
+      await resolveAggregateNotificationJob(aggregateDedupeKey(manager.userId));
+    }
+    return { issuesDetected: issues.length, jobsCreated: 0 };
+  }
 
   const sortedKeys = [...currentKeys].sort();
   const affectedPersonCount = new Set(issues.map((issue) => issue.personId)).size;
@@ -192,26 +207,21 @@ export async function runWeaponQualificationCheck(
   const title = "⚠️ בעיות כשירות מטווחים";
   const body = `נמצאו ${assignmentCountLabel(sortedKeys.length)} ללא כשירות מטווחים בתוקף ${affectedPeopleLabel(affectedPersonCount)}. האירוע הקרוב: ${dateLabel}. נדרש טיפול.`;
   const sourceRef = JSON.stringify(sortedKeys);
-  const dedupeSuffix = hashIssueKeys(sortedKeys);
   const now = new Date().toISOString();
 
   let jobsCreated = 0;
   for (const manager of managers) {
-    const previousSourceRef = await getLatestNotificationSourceRef(manager.userId, CATEGORY_WEAPON_QUALIFICATION_SUMMARY);
-    const coveredKeys = parseCoveredIssueKeys(previousSourceRef);
-    if (isFullyCovered(currentKeys, coveredKeys)) continue; // nothing new for this manager since their last aggregate -- never re-notify on an unchanged or shrunken set
-
-    const created = await insertNotificationJobIfAbsent({
+    const reopened = await upsertAggregateNotificationJob({
       category: CATEGORY_WEAPON_QUALIFICATION_SUMMARY,
       recipientUserId: manager.userId,
       title,
       body,
       path: MANAGER_PATH,
-      dedupeKey: `${CATEGORY_WEAPON_QUALIFICATION_SUMMARY}:${manager.userId}:${dedupeSuffix}`,
+      dedupeKey: aggregateDedupeKey(manager.userId),
       scheduledFor: now,
       sourceRef,
     });
-    if (created) jobsCreated++;
+    if (reopened) jobsCreated++;
   }
 
   return { issuesDetected: issues.length, jobsCreated };
