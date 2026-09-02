@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import type { CalendarGridCell } from "@/lib/domain/calendarMonth";
 import type { CoverageStatus } from "@/lib/domain/shiftCoverage";
 import { CALENDAR_CELL_HEIGHT_CLASSES } from "./CalendarSurface";
@@ -570,8 +570,8 @@ describe("EveryoneMonthGrid", () => {
     });
   });
 
-  describe('regression: a generic (period-unspecified) אחמ"ש assignment renders as covered, never "חסר אחמ״ש" on either period, and never as a duplicated name on both period lines', () => {
-    it("through the REAL production pipeline (Event[] -> buildShiftStaffingOverview -> buildScheduleEveryoneDayViews), a date staffed with real technicians and only a generic supervisor shows full coverage on both day and night cells", async () => {
+  describe('regression: a generic (period-unspecified) אחמ"ש assignment renders once in the compact calendar cell, never omitted, never duplicated onto both period lines', () => {
+    it("through the REAL production pipeline (Event[] -> buildShiftStaffingOverview -> buildScheduleEveryoneDayViews), a date staffed with real technicians and only a generic supervisor shows full coverage on both day and night cells, with the generic supervisor's name shown EXACTLY ONCE", async () => {
       const { buildShiftSchedule } = await import("@/lib/domain/shiftSchedule");
       const { buildShiftStaffingOverview } = await import("@/lib/readModels/managerEventProjections");
       const { buildScheduleEveryoneDayViews } = await import("@/lib/presentation/scheduleEveryone");
@@ -614,20 +614,66 @@ describe("EveryoneMonthGrid", () => {
         <EveryoneMonthGrid grid={WEEK_GRID} days={weekDays()} dayViews={views} selectedDate={null} onSelectDate={noop} />,
       );
       const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
-      // The compact cell never lists a generic assignment's name at all
-      // (the shared per-period `supervisors`/`technicians` roster this
-      // cell reads from deliberately never includes it, to avoid printing
-      // it once on the "☀️" line and again on the "🌙" line as if it were
-      // two separate shifts) -- the full, correctly single-shown detail
-      // lives in the selected-day panel (see
-      // `EveryoneSelectedDayPanel.test.tsx`'s own regression test). This
-      // cell's job is just an accurate coverage verdict: full, never
-      // "missing", on both periods.
+      // עילאי שפירא is rendered EXACTLY ONCE in the cell -- the dedicated
+      // generic-assignment line, shown once above the day/night lines --
+      // never omitted, and never duplicated once on the "☀️" line and
+      // again on the "🌙" line as if it were two separate shifts.
+      expect(within(cell).getAllByText("עילאי שפירא")).toHaveLength(1);
       expect(cell.textContent).not.toContain("חסר אחמ");
       expect(cell.querySelector(".bg-critical")).toBeNull();
       // Technician staffing (unaffected by this change) still shows.
       expect(cell.textContent).toContain("טכנאי יום");
       expect(cell.textContent).toContain("טכנאי לילה");
+    });
+
+    it("a date staffed ONLY by a generic supervisor (no other shift Events at all) still shows the name once, with no missing-SUPERVISOR warning on either period (technician is still genuinely missing -- the generic supervisor never spills over into covering that different role)", async () => {
+      const { buildShiftSchedule } = await import("@/lib/domain/shiftSchedule");
+      const { buildShiftStaffingOverview } = await import("@/lib/readModels/managerEventProjections");
+      const { buildScheduleEveryoneDayViews } = await import("@/lib/presentation/scheduleEveryone");
+      const schedule = buildShiftSchedule("07:30");
+
+      function event(overrides: Partial<import("@/lib/domain/event").Event>): import("@/lib/domain/event").Event {
+        return {
+          personId: "p_default",
+          personName: "ברירת מחדל",
+          date: "2026-08-12",
+          title: "",
+          rawValue: "",
+          category: "shift",
+          certainty: "confirmed",
+          role: null,
+          period: "unspecified",
+          sourceSheet: "משמרות + תורנויות",
+          sourceCell: "C2",
+          slot: null,
+          shadow: false,
+          startTimeOverride: null,
+          endTimeOverride: null,
+          changeNote: null,
+          dutyFamily: null,
+          absenceKind: null,
+          ...overrides,
+        };
+      }
+
+      const events = [event({ personId: "p_ilay", personName: "עילאי שפירא", role: "supervisor", period: "unspecified" })];
+      const overview = buildShiftStaffingOverview(events, schedule, new Set(["2026-08-12"]));
+      const views = buildScheduleEveryoneDayViews(["2026-08-12"], overview, [], []);
+
+      render(
+        <EveryoneMonthGrid grid={WEEK_GRID} days={weekDays()} dayViews={views} selectedDate={null} onSelectDate={noop} />,
+      );
+      const cell = screen.getByRole("button", { name: /12 באוגוסט/ });
+      expect(cell.textContent).toContain("עילאי שפירא");
+      expect(within(cell).getAllByText("עילאי שפירא")).toHaveLength(1);
+      // No missing-SUPERVISOR message anywhere -- the generic assignment
+      // covers that role fully on both periods.
+      expect(cell.textContent).not.toContain("חסר אחמ");
+      // Technician is still genuinely missing on both periods (there are
+      // no technician Events at all in this scenario) -- that's correct,
+      // unaffected behavior, not something the generic supervisor should
+      // paper over.
+      expect(cell.textContent).toContain("חסר טכנאי");
     });
   });
 });
