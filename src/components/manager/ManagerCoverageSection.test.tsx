@@ -60,6 +60,90 @@ describe("ManagerCoverageSection", () => {
     expect(screen.getByText(/צל טכנאי/)).toBeInTheDocument();
   });
 
+  describe('role presentation order: אחמ"ש before טכנאי (shared with the calendar/selected-day views via inRoleDisplayOrder)', () => {
+    it("renders the אחמ״שים coverage line before the טכנאים line, for a period staffed with both", () => {
+      const { container } = render(
+        <ManagerCoverageSection
+          days={[dayView({ day: group({ technicianNames: ["גדעון פולין"], supervisorNames: ["איתי אוליר"] }) })]}
+        />,
+      );
+      const supervisorLine = screen.getByText(/אחמ״שים/).closest("p")!;
+      const technicianLine = screen.getByText(/טכנאים/).closest("p")!;
+      expect(
+        supervisorLine.compareDocumentPosition(technicianLine) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      // Both names are still present, each attributed to their own real role.
+      expect(container.textContent).toContain("איתי אוליר");
+      expect(container.textContent).toContain("גדעון פולין");
+    });
+
+    it("renders the shadow אחמ״ש line before the shadow טכנאי line", () => {
+      render(
+        <ManagerCoverageSection
+          days={[
+            dayView({
+              day: group({ shadowSupervisorNames: ["נועה דוגמה"], shadowTechnicianNames: ["דני בדיקה"] }),
+            }),
+          ]}
+        />,
+      );
+      const shadowSupervisorLine = screen.getByText(/צל אחמ״ש/).closest("p")!;
+      const shadowTechnicianLine = screen.getByText(/צל טכנאי/).closest("p")!;
+      expect(
+        shadowSupervisorLine.compareDocumentPosition(shadowTechnicianLine) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    });
+
+    it("applies the same order to a missing/partial role's message line too, not just the full-coverage name line", () => {
+      render(
+        <ManagerCoverageSection
+          days={[
+            dayView({
+              day: group({
+                coverageStatus: "missing",
+                technicianCoverage: coverage({ status: "missing", message: "חסר טכנאי" }),
+                supervisorCoverage: coverage({ status: "missing", message: 'חסר אחמ"ש' }),
+              }),
+            }),
+          ]}
+        />,
+      );
+      const supervisorLine = screen.getByText(/חסר אחמ"ש/).closest("p")!;
+      const technicianLine = screen.getByText(/חסר טכנאי/).closest("p")!;
+      expect(
+        supervisorLine.compareDocumentPosition(technicianLine) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    });
+
+    it("applies the same order independently to BOTH the day and night columns", () => {
+      render(
+        <ManagerCoverageSection
+          days={[
+            dayView({
+              day: group({ key: "day", technicianNames: ["טכנאי יום"], supervisorNames: ['אחמ"ש יום'] }),
+              night: group({
+                key: "night",
+                periodLabel: "לילה",
+                emoji: "🌙",
+                technicianNames: ["טכנאי לילה"],
+                supervisorNames: ['אחמ"ש לילה'],
+              }),
+            }),
+          ]}
+        />,
+      );
+      const [dayLine, nightLine] = screen.getAllByText(/אחמ״שים/).map((el) => el.closest("p")!);
+      const dayNames = dayLine.textContent ?? "";
+      const nightNames = nightLine.textContent ?? "";
+      expect(dayNames).toContain('אחמ"ש יום');
+      expect(nightNames).toContain('אחמ"ש לילה');
+      const dayTechLine = screen.getByText("טכנאי יום").closest("p")!;
+      const nightTechLine = screen.getByText("טכנאי לילה").closest("p")!;
+      expect(dayLine.compareDocumentPosition(dayTechLine) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(nightLine.compareDocumentPosition(nightTechLine) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+  });
+
   it('explicitly states "חסר טכנאי" for a fully missing technician role, never inferred from an empty name list', () => {
     render(
       <ManagerCoverageSection

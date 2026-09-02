@@ -1,6 +1,7 @@
 import { Badge } from "@/components/ui/Badge";
 import { CoverageBadge } from "@/components/ui/CoverageBadge";
 import { Panel } from "@/components/ui/Panel";
+import { inRoleDisplayOrder } from "@/lib/presentation/roleCoverage";
 import type { ScheduleEveryoneDayView, ScheduleRoleStaffingView } from "@/lib/presentation/scheduleEveryone";
 import { SELECTED_DAY_PANEL_MIN_HEIGHT_CLASS } from "./CalendarSurface";
 import type { DayMeta } from "./types";
@@ -55,6 +56,11 @@ function PeriodDetail({
   emoji: string;
   view: ScheduleEveryoneDayView["day"];
 }) {
+  const [supervisors, technicians] = view ? inRoleDisplayOrder(view) : [null, null];
+  const [shadowSupervisorNames, shadowTechnicianNames] = view
+    ? inRoleDisplayOrder({ supervisors: view.shadowSupervisorNames, technicians: view.shadowTechnicianNames })
+    : [[], []];
+
   return (
     <div>
       <div className="flex items-center justify-between">
@@ -65,12 +71,12 @@ function PeriodDetail({
         {view ? <CoverageBadge status={view.coverageStatus} /> : null}
       </div>
 
-      {view ? (
+      {view && supervisors && technicians ? (
         <div className="mt-2 space-y-2">
-          <RoleDetail label="טכנאים" role={view.technicians} />
-          <RoleDetail label='אחמ"שים' role={view.supervisors} />
-          <ShadowLine label="צל טכנאי" names={view.shadowTechnicianNames} />
-          <ShadowLine label='צל אחמ"ש' names={view.shadowSupervisorNames} />
+          <RoleDetail label='אחמ"שים' role={supervisors} />
+          <RoleDetail label="טכנאים" role={technicians} />
+          <ShadowLine label='צל אחמ"ש' names={shadowSupervisorNames} />
+          <ShadowLine label="צל טכנאי" names={shadowTechnicianNames} />
         </div>
       ) : (
         <p className="mt-2 text-sm text-muted">אין נתוני שיבוץ לתקופה זו.</p>

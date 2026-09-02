@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Panel } from "@/components/ui/Panel";
 import { CoverageBadge } from "@/components/ui/CoverageBadge";
 import type { CoverageStatus } from "@/lib/domain/shiftCoverage";
+import { inRoleDisplayOrder } from "@/lib/presentation/roleCoverage";
 import { scheduleEveryoneHref } from "@/lib/presentation/scheduleUrl";
 import type { ManagerRoleCoverageRowView, ManagerShiftDayView, ManagerShiftGroupView } from "./types";
 
@@ -74,6 +75,16 @@ function RoleCoverageLine({
 }
 
 function PeriodColumn({ emoji, periodLabel, group }: { emoji: string; periodLabel: string; group: ManagerShiftGroupView | null }) {
+  const [supervisorRole, technicianRole] = group
+    ? inRoleDisplayOrder({
+        supervisors: { label: "אחמ״שים", names: group.supervisorNames, coverage: group.supervisorCoverage },
+        technicians: { label: "טכנאים", names: group.technicianNames, coverage: group.technicianCoverage },
+      })
+    : [null, null];
+  const [shadowSupervisorNames, shadowTechnicianNames] = group
+    ? inRoleDisplayOrder({ supervisors: group.shadowSupervisorNames, technicians: group.shadowTechnicianNames })
+    : [[], []];
+
   return (
     <div className="min-w-0 flex-1">
       <div className="flex items-center justify-between gap-2">
@@ -83,12 +94,12 @@ function PeriodColumn({ emoji, periodLabel, group }: { emoji: string; periodLabe
         </p>
         {group ? <CoverageBadge status={group.coverageStatus} /> : null}
       </div>
-      {group ? (
+      {group && supervisorRole && technicianRole ? (
         <div className="mt-1.5 space-y-1">
-          <RoleCoverageLine roleLabel="טכנאים" names={group.technicianNames} coverage={group.technicianCoverage} />
-          <RoleCoverageLine roleLabel="אחמ״שים" names={group.supervisorNames} coverage={group.supervisorCoverage} />
-          <ShadowList label="צל טכנאי" names={group.shadowTechnicianNames} />
-          <ShadowList label='צל אחמ״ש' names={group.shadowSupervisorNames} />
+          <RoleCoverageLine roleLabel={supervisorRole.label} names={supervisorRole.names} coverage={supervisorRole.coverage} />
+          <RoleCoverageLine roleLabel={technicianRole.label} names={technicianRole.names} coverage={technicianRole.coverage} />
+          <ShadowList label='צל אחמ״ש' names={shadowSupervisorNames} />
+          <ShadowList label="צל טכנאי" names={shadowTechnicianNames} />
         </div>
       ) : (
         <p className="mt-1.5 text-[11px] text-muted-2">אין נתוני שיבוץ</p>
