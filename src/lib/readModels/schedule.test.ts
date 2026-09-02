@@ -164,7 +164,7 @@ describe("loadScheduleReadModel — normal (non-manager) user (PR #24 §3)", () 
 });
 
 describe("loadScheduleReadModel — manager authorization / fetch scope (PR #24 §25/§26)", () => {
-  it("manager: fetches personnel+schedule+settings+potentialH1+potentialH2 -- Potential is now needed for duty-source completeness on self/person calendars", async () => {
+  it("manager: fetches personnel+schedule+settings+potentialH1+potentialH2+shootingRanges -- Potential is now needed for duty-source completeness on self/person calendars, and shootingRanges is requested (unused by this loader) purely to land on the SAME canonical getWorkbookSnapshot cache key as MANAGER_WORKBOOK_SOURCES (Manager Overview/Home/Report 1), so this page never observes a different point-in-time read of the schedule sheet than they do", async () => {
     getRequestPersonalSchedule.mockResolvedValue(okPersonalResult(true));
     await loadScheduleReadModel(DEFAULT_PARAMS);
     expect(getWorkbookSnapshot).toHaveBeenCalledTimes(1);
@@ -174,6 +174,7 @@ describe("loadScheduleReadModel — manager authorization / fetch scope (PR #24 
       "settings",
       "potentialH1",
       "potentialH2",
+      "shootingRanges",
     ]);
   });
 
