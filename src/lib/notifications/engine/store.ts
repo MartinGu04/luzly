@@ -487,6 +487,78 @@ export async function upsertPendingReminderJob(job: NewNotificationJob): Promise
   if (error) throw error;
 }
 
+/**
+ * Upsert semantics for an AGGREGATE/SUMMARY notification category whose
+ * `dedupeKey` identifies a whole logical EPISODE of an ongoing problem
+ * (e.g. `weapon_qualification_summary:<managerUserId>`), never one tick's
+ * content -- see `weaponQualification.ts`'s own docs and this function's
+ * migration (`20260902130000_add_aggregate_notification_episode_dedupe.sql`)
+ * for the exact "episode" semantics this exists to serve (spec: fix a
+ * production notification-spam incident where 38 -> 40 -> 44 mismatches
+ * produced three separate Notification Center entries and three pushes
+ * instead of one notification that simply updates its own count, with
+ * exactly one push for the whole episode).
+ *
+ * ALWAYS goes through the `upsert_aggregate_notification_job` RPC --
+ * never a plain client upsert -- for the same reason
+ * `upsertPendingReminderJob` above does: a PostgREST request-level filter
+ * is not a real `ON CONFLICT ... DO UPDATE` guard. Here the guard is a
+ * genuine branch on the EXISTING row's `resolved_at`, decided under a
+ * real row lock, which only SQL can express atomically:
+ *
+ *  - no row yet for this `dedupeKey`, or the existing row's episode was
+ *    already resolved (`resolveAggregateNotificationJob` below) -> a
+ *    fresh episode: (re)inserted/reset to `status = 'pending'`, ready for
+ *    the worker's next delivery tick to push it. Returns `true`.
+ *  - an episode is already open (unresolved) for this key -> only the
+ *    displayed content (`title`/`body`/`path`/`tag`/`sourceRef`) is
+ *    refreshed in place; delivery state is left completely untouched, so
+ *    an already-delivered job is never revived/re-pushed. Returns
+ *    `false`.
+ *
+ * Callers are expected to call this UNCONDITIONALLY on every tick the
+ * underlying issue set is non-empty (never only when content changed) --
+ * the exact same "recompute and re-upsert every eligible tick, by
+ * design" convention `upsertPendingReminderJob`'s own docstring already
+ * establishes for reminders; the RPC's own row lock is what keeps that
+ * safe under concurrent/repeated worker executions (see the migration's
+ * own doc comment for the retry-on-conflict mechanics).
+ */
+export async function upsertAggregateNotificationJob(job: NewNotificationJob): Promise<boolean> {
+  const supabase = getNotificationServiceClient();
+  const { data, error } = await supabase.rpc("upsert_aggregate_notification_job", {
+    p_category: job.category,
+    p_recipient_user_id: job.recipientUserId,
+    p_title: job.title,
+    p_body: job.body,
+    p_path: job.path,
+    p_tag: job.tag ?? null,
+    p_dedupe_key: job.dedupeKey,
+    p_scheduled_for: job.scheduledFor,
+    p_source_ref: job.sourceRef ?? null,
+  });
+  if (error) throw error;
+  return data === true;
+}
+
+/**
+ * Closes an aggregate notification's currently open episode (`resolved_at
+ * = now()`) so the NEXT `upsertAggregateNotificationJob` call against the
+ * SAME `dedupeKey` is treated as a genuinely NEW episode -- a fresh push,
+ * never a silent content update of the old (now-irrelevant) one. Called
+ * once the underlying issue set for this recipient/category is fully
+ * empty (spec: "44 -> 0" must close the episode; a later "0 -> 3" must
+ * read as new). A no-op (never throws) when no open episode exists yet
+ * for this key -- resolving something never opened, or already resolved,
+ * is exactly as safe as `cancelPendingReminderJob`'s own "cancelling an
+ * already-terminal job" no-op.
+ */
+export async function resolveAggregateNotificationJob(dedupeKey: string): Promise<void> {
+  const supabase = getNotificationServiceClient();
+  const { error } = await supabase.rpc("resolve_aggregate_notification_job", { p_dedupe_key: dedupeKey });
+  if (error) throw error;
+}
+
 export interface SystemReminderRuleGuard {
   /** The `notification_rules.id` this job's category is materialized from. */
   ruleId: string;
