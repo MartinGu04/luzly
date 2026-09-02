@@ -109,6 +109,42 @@ describe("parseEvent — shift", () => {
     const masculine = parseEvent(rawAssignment("טכנאי יום - צל"));
     expect(masculine).toMatchObject({ category: "shift", role: "technician", period: "day", shadow: true });
   });
+
+  // Shadow ("צל") is a modifier of the underlying shift ROLE, never a
+  // technician-specific concept -- `parseShift` derives `role` from
+  // whichever leading token matched (`SUPERVISOR_TOKEN`/`TECHNICIAN_TOKENS`)
+  // and `shadow` from the trailing `SHADOW_SUFFIX` completely independently
+  // of that role, so אחמ"ש must support the SAME "- צל" modifier a
+  // technician shift does. These four cases are the full role × period
+  // matrix the shadow modifier must generalize across.
+  it('10b. אחמ"ש day shadow shift -- role stays "supervisor", never falls back to "technician"', () => {
+    const event = parseEvent(rawAssignment('אחמ"ש יום - צל'));
+    expect(event).toMatchObject({ category: "shift", role: "supervisor", period: "day", shadow: true });
+    expect(event.role).not.toBe("technician");
+  });
+
+  it('10c. אחמ"ש night shadow shift -- role stays "supervisor", never falls back to "technician"', () => {
+    const event = parseEvent(rawAssignment('אחמ"ש לילה - צל'));
+    expect(event).toMatchObject({ category: "shift", role: "supervisor", period: "night", shadow: true });
+    expect(event.role).not.toBe("technician");
+  });
+
+  it('10d. all four role×period shadow combinations stay distinct from one another', () => {
+    const supervisorDay = parseEvent(rawAssignment('אחמ"ש יום - צל'));
+    const supervisorNight = parseEvent(rawAssignment('אחמ"ש לילה - צל'));
+    const technicianDay = parseEvent(rawAssignment("טכנאי יום - צל"));
+    const technicianNight = parseEvent(rawAssignment("טכנאי לילה - צל"));
+
+    expect(supervisorDay).toMatchObject({ role: "supervisor", period: "day", shadow: true });
+    expect(supervisorNight).toMatchObject({ role: "supervisor", period: "night", shadow: true });
+    expect(technicianDay).toMatchObject({ role: "technician", period: "day", shadow: true });
+    expect(technicianNight).toMatchObject({ role: "technician", period: "night", shadow: true });
+
+    const combos = [supervisorDay, supervisorNight, technicianDay, technicianNight].map(
+      (event) => `${event.role}:${event.period}`,
+    );
+    expect(new Set(combos).size).toBe(4); // every combination is genuinely distinguishable
+  });
 });
 
 describe("parseEvent — absence / constraint", () => {
