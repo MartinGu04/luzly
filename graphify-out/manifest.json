@@ -2208,8 +2208,8 @@
     "semantic_hash": ""
   },
   "src/lib/domain/operationalIssues.ts": {
-    "mtime": 1788379591.641811,
-    "seen": 1788381087.368966,
+    "mtime": 1788381351.9659154,
+    "seen": 1788381964.1310515,
     "ast_hash": "86de5c2449c5dd335e68d606df0a65d2",
     "semantic_hash": ""
   },
@@ -2280,9 +2280,9 @@
     "semantic_hash": "d2e6b4bc53fdbbaad209b46fe1777d27"
   },
   "src/lib/domain/reportOne.test.ts": {
-    "mtime": 1788167245.2723546,
-    "seen": 1788168216.9335759,
-    "ast_hash": "6ccf9c42150b01c1bb3cbd30de23ca9e",
+    "mtime": 1788381842.7379446,
+    "seen": 1788381964.1310692,
+    "ast_hash": "b14cdd5c6832a2dfafe41b8046410ff0",
     "semantic_hash": ""
   },
   "src/lib/domain/reportOne.ts": {
@@ -2568,8 +2568,8 @@
     "semantic_hash": "d232a9b0a60f28ec29e5e0492a15d155"
   },
   "src/lib/notifications/engine/notificationEngineFunctions.integration.test.ts": {
-    "mtime": 1788380668.3543344,
-    "seen": 1788381087.3690393,
+    "mtime": 1788381351.9659154,
+    "seen": 1788381964.1311467,
     "ast_hash": "0d34a3fd8ddf6caf6355142fb7b05056",
     "semantic_hash": ""
   },
@@ -2724,14 +2724,14 @@
     "semantic_hash": "3e3abd044ab99d3b534cf72c72c52b1c"
   },
   "src/lib/notifications/engine/store.test.ts": {
-    "mtime": 1788380668.3543344,
-    "seen": 1788381087.3690689,
+    "mtime": 1788381351.9659154,
+    "seen": 1788381964.1311753,
     "ast_hash": "4468a6a94a21d9d2aadfa6a55bf2d223",
     "semantic_hash": ""
   },
   "src/lib/notifications/engine/store.ts": {
-    "mtime": 1788380668.3543344,
-    "seen": 1788381087.3690696,
+    "mtime": 1788381351.9659154,
+    "seen": 1788381964.131176,
     "ast_hash": "44b70f119cafd36f17362d3f994cbbef",
     "semantic_hash": ""
   },
@@ -2868,10 +2868,10 @@
     "semantic_hash": ""
   },
   "src/lib/parsers/event.test.ts": {
-    "mtime": 1788167245.3400562,
-    "seen": 1788168216.9337492,
-    "ast_hash": "b1f249f5f7b941bae133b535ff41e94a",
-    "semantic_hash": "b1f249f5f7b941bae133b535ff41e94a"
+    "mtime": 1788381821.8379436,
+    "seen": 1788381964.1312027,
+    "ast_hash": "30e030cc6d77d059f36190443a4d66a9",
+    "semantic_hash": ""
   },
   "src/lib/parsers/event.ts": {
     "mtime": 1788167245.3400562,
@@ -3564,8 +3564,8 @@
     "semantic_hash": ""
   },
   "src/lib/readModels/buildManagerOverviewReadModel.ts": {
-    "mtime": 1788379591.6458108,
-    "seen": 1788381087.3692076,
+    "mtime": 1788381351.9659154,
+    "seen": 1788381964.1313229,
     "ast_hash": "189aea7e218fd587a652b003502ae37c",
     "semantic_hash": ""
   },
@@ -3762,8 +3762,8 @@
     "semantic_hash": ""
   },
   "src/lib/readModels/managerOverview.ts": {
-    "mtime": 1788379591.6458108,
-    "seen": 1788381087.3692498,
+    "mtime": 1788381351.9659154,
+    "seen": 1788381964.131362,
     "ast_hash": "c0e767ba4f513159f683eef5993c4e32",
     "semantic_hash": ""
   },
@@ -3906,15 +3906,15 @@
     "semantic_hash": ""
   },
   "src/lib/readModels/schedule.test.ts": {
-    "mtime": 1788167245.4323545,
-    "seen": 1788168216.934078,
-    "ast_hash": "1ba5698564dc096ef2c3c0c0523143b0",
+    "mtime": 1788382461.5859816,
+    "seen": 1788382738.400213,
+    "ast_hash": "0b68338a3f2ea44239248a4638a0f1d6",
     "semantic_hash": ""
   },
   "src/lib/readModels/schedule.ts": {
-    "mtime": 1788167245.4363546,
-    "seen": 1788168216.9340808,
-    "ast_hash": "7681ee8d5250a0e880fa21aa9e6c61e8",
+    "mtime": 1788382447.5419807,
+    "seen": 1788382738.4002142,
+    "ast_hash": "9de60b0f9772f278c2b845c36488e9f2",
     "semantic_hash": ""
   },
   "src/lib/readModels/scheduleTypes.ts": {
@@ -4620,8 +4620,8 @@
     "semantic_hash": ""
   },
   "src/components/shootingRanges/ShootingRangeManagerPanel.tsx": {
-    "mtime": 1788379591.641811,
-    "seen": 1788381087.3688524,
+    "mtime": 1788381351.9659154,
+    "seen": 1788381964.130915,
     "ast_hash": "ea64c7f7ef3ac8d4ccc94227f61872f0",
     "semantic_hash": ""
   },
@@ -4656,14 +4656,14 @@
     "semantic_hash": ""
   },
   "src/lib/domain/shootingRangeQualification.test.ts": {
-    "mtime": 1788379591.641811,
-    "seen": 1788381087.3689878,
+    "mtime": 1788381351.9659154,
+    "seen": 1788381964.1310866,
     "ast_hash": "5d294dfd63f8295a0af6538eaf1670b3",
     "semantic_hash": ""
   },
   "src/lib/domain/shootingRangeQualification.ts": {
-    "mtime": 1788379591.641811,
-    "seen": 1788381087.3689892,
+    "mtime": 1788381351.9659154,
+    "seen": 1788381964.131088,
     "ast_hash": "8b007c32ffa9485ed72b173c0b2e6a89",
     "semantic_hash": ""
   },
@@ -4710,14 +4710,14 @@
     "semantic_hash": ""
   },
   "src/lib/readModels/buildShootingRangeManagerReadModel.test.ts": {
-    "mtime": 1788379591.6458108,
-    "seen": 1788381087.3692179,
+    "mtime": 1788381351.9659154,
+    "seen": 1788381964.1313317,
     "ast_hash": "309e504a819ad5f9e0772d22987d5128",
     "semantic_hash": ""
   },
   "src/lib/readModels/buildShootingRangeManagerReadModel.ts": {
-    "mtime": 1788379591.6458108,
-    "seen": 1788381087.3692188,
+    "mtime": 1788381351.9659154,
+    "seen": 1788381964.1313324,
     "ast_hash": "82f82227a4f52401dc04eb58ae250946",
     "semantic_hash": ""
   },
@@ -4746,38 +4746,38 @@
     "semantic_hash": ""
   },
   "src/lib/readModels/shootingRangeManagerOverview.test.ts": {
-    "mtime": 1788379591.6458108,
-    "seen": 1788381087.369312,
+    "mtime": 1788381351.9659154,
+    "seen": 1788381964.1314209,
     "ast_hash": "aabc4dc4a8ca059751d86b39b4882278",
     "semantic_hash": ""
   },
   "src/lib/readModels/shootingRangeManagerOverview.ts": {
-    "mtime": 1788379591.6498108,
-    "seen": 1788381087.3693128,
+    "mtime": 1788381351.9659154,
+    "seen": 1788381964.1314218,
     "ast_hash": "09939f5a7dfebb4919ed2b2b54ebd916",
     "semantic_hash": ""
   },
   "src/lib/readModels/shootingRangeQualification.test.ts": {
-    "mtime": 1788379591.6498108,
-    "seen": 1788381087.3693135,
+    "mtime": 1788381351.9659154,
+    "seen": 1788381964.1314228,
     "ast_hash": "ec37ce54a8034ad34ad9bfa752889a1b",
     "semantic_hash": ""
   },
   "src/lib/readModels/shootingRangeQualification.ts": {
-    "mtime": 1788379591.6498108,
-    "seen": 1788381087.3693142,
+    "mtime": 1788381351.9659154,
+    "seen": 1788381964.1314235,
     "ast_hash": "439a49cb546cab45f989f646939a3718",
     "semantic_hash": ""
   },
   "src/lib/shootingRanges/actions.test.ts": {
-    "mtime": 1788379591.653811,
-    "seen": 1788381087.3693285,
+    "mtime": 1788381351.9699156,
+    "seen": 1788381964.1314368,
     "ast_hash": "20a0500a98b0f5510b049182997894ba",
     "semantic_hash": ""
   },
   "src/lib/shootingRanges/actions.ts": {
-    "mtime": 1788379591.653811,
-    "seen": 1788381087.3693295,
+    "mtime": 1788381351.9699156,
+    "seen": 1788381964.131438,
     "ast_hash": "cf20186166d76252d4e88d5f95e685b5",
     "semantic_hash": ""
   },
@@ -4830,8 +4830,8 @@
     "semantic_hash": ""
   },
   "src/lib/shootingRanges/README.md": {
-    "mtime": 1788379591.6498108,
-    "seen": 1788381087.3693972,
+    "mtime": 1788381351.9699156,
+    "seen": 1788381964.1315093,
     "ast_hash": "d30061f92d97e9ce49006b749f9cc6ae",
     "semantic_hash": ""
   },
@@ -5376,39 +5376,51 @@
     "semantic_hash": ""
   },
   "src/lib/notifications/engine/weaponQualification.test.ts": {
-    "mtime": 1788380793.8698823,
-    "seen": 1788381087.369073,
+    "mtime": 1788381351.9659154,
+    "seen": 1788381964.13118,
     "ast_hash": "73bd3718961291166a0908de2ba3b6be",
     "semantic_hash": ""
   },
   "src/lib/notifications/engine/weaponQualification.ts": {
-    "mtime": 1788380668.3543344,
-    "seen": 1788381087.3690736,
+    "mtime": 1788381351.9659154,
+    "seen": 1788381964.1311808,
     "ast_hash": "126bd277eaeb0c8cc8e813d1c7d2ce3f",
     "semantic_hash": ""
   },
   "src/lib/notifications/engine/pipeline.weaponQualificationEmergencyMode.test.ts": {
-    "mtime": 1788380782.3018818,
-    "seen": 1788381087.369047,
+    "mtime": 1788381351.9659154,
+    "seen": 1788381964.1311545,
     "ast_hash": "d125c732da356eaacc604e134c6ee308",
     "semantic_hash": ""
   },
   "src/components/shootingRanges/ShootingRangeManagerPanel.test.tsx": {
-    "mtime": 1788379591.641811,
-    "seen": 1788381087.3688507,
+    "mtime": 1788381351.9659154,
+    "seen": 1788381964.1309123,
     "ast_hash": "22379fc91e418a36fa18bc84fa4e5a34",
     "semantic_hash": ""
   },
   "src/lib/notifications/engine/aggregateNotificationEpisodeMigration.test.ts": {
-    "mtime": 1788380807.9138832,
-    "seen": 1788381087.3690195,
+    "mtime": 1788381351.9659154,
+    "seen": 1788381964.1311245,
     "ast_hash": "c5020c895bd905f94d8418b4e20824fe",
     "semantic_hash": ""
   },
   "supabase/migrations/20260902130000_add_aggregate_notification_episode_dedupe.sql": {
-    "mtime": 1788380031.193837,
-    "seen": 1788381087.3693695,
+    "mtime": 1788381351.9699156,
+    "seen": 1788381964.1314795,
     "ast_hash": "41632854bba57d10720f4192e4339fe4",
+    "semantic_hash": ""
+  },
+  "src/lib/domain/reportOneShadowRoleRawPipelineRegression.test.ts": {
+    "mtime": 1788382350.141975,
+    "seen": 1788382738.3997087,
+    "ast_hash": "86850ca81efcf250c37049610247c098",
+    "semantic_hash": ""
+  },
+  "src/lib/sync/scheduleReportOneCacheKeyDivergence.test.ts": {
+    "mtime": 1788383120.9780207,
+    "seen": 1788383235.0637317,
+    "ast_hash": "3db0bad4bdbe74123f52adfaba0b7a46",
     "semantic_hash": ""
   }
 }

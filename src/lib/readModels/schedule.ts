@@ -40,6 +40,28 @@ export type ScheduleLoadResult =
  * data for the "self"/"person" perspectives (never "all" -- unit-wide
  * staffing/coverage stays out of scope for this source), so it's fetched
  * here too now.
+ *
+ * ALSO includes `shootingRanges` -- unused by anything in this file, kept
+ * ONLY so `getWorkbookSnapshot`'s canonical (sorted+deduped) source-set
+ * cache key resolves to the EXACT SAME entry `MANAGER_WORKBOOK_SOURCES`
+ * does (Manager Overview, Home, Report 1 -- see
+ * `managerWorkbookContext.ts`'s own constant). Before this, the Schedule
+ * page's own `getWorkbookSnapshot` call was keyed on a genuinely DIFFERENT
+ * canonical string (missing `shootingRanges`), so it landed in its own,
+ * independently-`unstable_cache`d 30s window -- meaning this page and
+ * every `MANAGER_WORKBOOK_SOURCES` caller could each be serving a
+ * DIFFERENT point-in-time read of the identical "schedule" sheet
+ * (whichever one last happened to revalidate), even though both requests
+ * fetch the exact same underlying Google Sheets tab. A manager who just
+ * edited an assignment and immediately compared this page against, say,
+ * Report 1 could see the edit on one and not (yet) on the other purely
+ * from that cache-key mismatch -- never from any actual parsing/
+ * classification difference between the two features (see
+ * `reportOneShadowRoleRawPipelineRegression.test.ts` for the proof that
+ * layer is correct). Matching the key here removes that class of
+ * cross-feature staleness entirely, the same "deliberately over-request
+ * to land on a shared cache entry" convention `reportOneTomorrow.ts`
+ * already documents for its own relationship to the Home page.
  */
 const SCHEDULE_MANAGER_SOURCES: SheetSourceKey[] = [
   "personnel",
@@ -47,6 +69,7 @@ const SCHEDULE_MANAGER_SOURCES: SheetSourceKey[] = [
   "settings",
   "potentialH1",
   "potentialH2",
+  "shootingRanges",
 ];
 
 export interface ScheduleParams {

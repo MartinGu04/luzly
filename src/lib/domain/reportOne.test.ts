@@ -169,6 +169,37 @@ describe("resolveRegularOrReserveStatus", () => {
     expect(resolveRegularOrReserveStatus([shiftEvent("technician", "night")], [])).toBe("נוכח, טכנאי לילה");
   });
 
+  // --- Shadow ("צל") is a role-independent modifier -- see event.ts's own
+  // `shadow: boolean` field docs. `shiftStatusWording` derives wording from
+  // `event.role`/`event.period` ONLY (never `event.shadow`), so a shadow
+  // shift's wording must be IDENTICAL to its non-shadow counterpart --
+  // never silently reclassified to a different role. The report (spec:
+  // shadow support must generalize to אחמ"ש, not stay technician-only)
+  // asks specifically that אחמ"ש יום -- shadow or not -- can never render
+  // as טכנאי יום; these four combinations plus the explicit negative
+  // assertion below are that regression guard.
+  it('11b. אחמ"ש day shadow shift resolves to the SAME wording as a non-shadow אחמ"ש day shift -- never טכנאי', () => {
+    const status = resolveRegularOrReserveStatus([shiftEvent("supervisor", "day", { shadow: true })], []);
+    expect(status).toBe('נוכח, אחמ"ש יום');
+    expect(status).not.toContain("טכנאי");
+  });
+
+  it('11c. אחמ"ש night shadow shift resolves to the SAME wording as a non-shadow אחמ"ש night shift -- never טכנאי', () => {
+    const status = resolveRegularOrReserveStatus([shiftEvent("supervisor", "night", { shadow: true })], []);
+    expect(status).toBe('נוכח, אחמ"ש לילה');
+    expect(status).not.toContain("טכנאי");
+  });
+
+  it("11d. technician day shadow shift resolves to the SAME wording as a non-shadow technician day shift", () => {
+    const status = resolveRegularOrReserveStatus([shiftEvent("technician", "day", { shadow: true })], []);
+    expect(status).toBe("נוכח, טכנאי יום");
+  });
+
+  it("11e. technician night shadow shift resolves to the SAME wording as a non-shadow technician night shift", () => {
+    const status = resolveRegularOrReserveStatus([shiftEvent("technician", "night", { shadow: true })], []);
+    expect(status).toBe("נוכח, טכנאי לילה");
+  });
+
   it("12. vacation", () => {
     expect(resolveRegularOrReserveStatus([absenceEvent("vacation")], [])).toBe("חופש");
   });
@@ -423,6 +454,34 @@ describe("buildReportOneDraft — structural invariants (19, 21)", () => {
     expect(allNames).not.toContain("מרטין בדיקות");
     expect(allNames).not.toContain("נדב וקנין");
   });
+
+  it(
+    "regression: a shift manager shadowing (אחמ\"ש יום - צל) alongside a real technician on the SAME day never renders as " +
+      "two טכנאי יום lines -- the shadow assignment's own status must stay אחמ\"ש",
+    () => {
+      const manager = person({ id: "p_mgr", name: "עילאי שפירא", personnelType: "חובה", isSupervisor: true });
+      const technician = person({ id: "p_tech", name: "איתי אוליר", personnelType: "חובה", isTechnician: true });
+      const events = [
+        shiftEvent("supervisor", "day", { personId: manager.id, date: "2026-08-26", shadow: true }),
+        shiftEvent("technician", "day", { personId: technician.id, date: "2026-08-26" }),
+      ];
+      const draft = buildReportOneDraft({ people: [manager, technician], events, targetDate: "2026-08-26", prevDate: "2026-08-25" });
+
+      const managerSection = draft.sections.find((section) => section.section === "regular_manager")!;
+      const technicianSection = draft.sections.find((section) => section.section === "regular_technician")!;
+
+      expect(managerSection.people).toHaveLength(1);
+      expect(managerSection.people[0].generatedStatus).toBe('נוכח, אחמ"ש יום');
+
+      expect(technicianSection.people).toHaveLength(1);
+      expect(technicianSection.people[0].generatedStatus).toBe("נוכח, טכנאי יום");
+
+      // Exactly one טכנאי יום line in the whole draft -- the shift manager's
+      // shadow assignment must never contribute a second one.
+      const allStatuses = draft.sections.flatMap((section) => section.people).map((p) => p.generatedStatus);
+      expect(allStatuses.filter((status) => status === "נוכח, טכנאי יום")).toHaveLength(1);
+    },
+  );
 });
 
 // --- reportOnePersonHasMeaningfulTomorrowEvent (reserve-inclusion warning/confirm gate) --
