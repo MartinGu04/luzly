@@ -76,6 +76,16 @@ export interface ManagerShiftDayView {
   dateLabel: string;
   day: ManagerShiftGroupView | null;
   night: ManagerShiftGroupView | null;
+  /**
+   * People with a GENERIC (period-unspecified) role assignment for this
+   * date -- e.g. a weekend cell that just says `אחמ"ש`, with no יום/לילה
+   * split. Date-scoped, not nested inside `day`/`night`: such an
+   * assignment covers both periods' coverage internally, but is still ONE
+   * assignment -- surfaced here once so `ManagerCoverageSection` never
+   * renders it as if the person worked two independent shifts.
+   */
+  genericSupervisorNames: string[];
+  genericTechnicianNames: string[];
 }
 
 /** Presentation-ready view of one `ManagerDutyEntry`. `dutyFamily` is carried through (a typed domain enum, not raw sheet text) so the section can group by it -- same family, different slots, group together (Design Pass PR #21 §15). */

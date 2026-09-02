@@ -39,6 +39,63 @@ function toShiftGroupPerson(event: Event): ManagerShiftGroupPerson {
 }
 
 /**
+ * A GENERIC role assignment -- `period: "unspecified"` (e.g. a weekend
+ * schedule cell that just says `אחמ"ש`, with no יום/לילה split) -- is, by
+ * domain rule, that person's supervisor (or technician) coverage for the
+ * WHOLE date: both the day AND the night canonical window, never merely
+ * one or the other, and never converted/normalized into a day- or
+ * night-specific Event.
+ *
+ * Two DIFFERENT things follow from that, and this module deliberately
+ * keeps them apart:
+ *  1. COVERAGE (`roleCoverage`/`coverageStatus`) -- a generic Event is fed
+ *     into BOTH the "day" and "night" `analyzeUnitShiftCoverage` call's
+ *     input group, so `analyzeRoleCoverage` (`lib/domain/shiftCoverage.ts`)
+ *     can correctly resolve it as covering each period's entire canonical
+ *     window. See `coverageGroupFor` below.
+ *  2. ROSTER/DISPLAY (`technicians`/`supervisors`/shadow lists) -- the
+ *     SAME Event is never added to both the "day" and "night" entry's own
+ *     people lists. Doing so would make a single generic assignment LOOK
+ *     like two independent shift assignments to any consumer (Manager
+ *     Coverage, the calendar, the selected-day panel) that renders a
+ *     period's `supervisors` as "who is actually assigned this shift".
+ *     Its one true roster home is its own native `${date}|unspecified`
+ *     entry (still produced by the native per-key grouping below,
+ *     unchanged) -- callers that want to surface "who's covering
+ *     generically today" read THAT entry once per date, never per period.
+ *
+ * Deliberately INCLUDES a shadow generic assignment (`- צל` with no
+ * period) in its native "unspecified" entry too -- shadow context (who's
+ * shadowing today) belongs there exactly like every other shadow Event;
+ * `analyzeRoleCoverage` filters `!event.shadow` before computing coverage,
+ * so a shadow generic Event still never counts toward the coverage verdict
+ * even though it's included in the coverage-input group.
+ */
+function isGenericCoverageEvent(event: Event): boolean {
+  return event.period === "unspecified" && event.role !== null;
+}
+
+/**
+ * The `Event[]` to feed `analyzeUnitShiftCoverage` for one date+period
+ * entry -- the native roster group PLUS (for "day"/"night" only) every
+ * generic role Event for that date, so the coverage verdict correctly
+ * accounts for a generic assignment without that Event ever joining the
+ * period's own ROSTER (`rosterEvents`, used for `technicians`/
+ * `supervisors`/shadow lists -- see `isGenericCoverageEvent` above).
+ */
+function coverageGroupFor(
+  period: Event["period"],
+  rosterEvents: readonly Event[],
+  genericEventsByDate: ReadonlyMap<string, Event[]>,
+  date: string,
+): readonly Event[] {
+  if (period !== "day" && period !== "night") return rosterEvents;
+  const generic = genericEventsByDate.get(date);
+  if (!generic || generic.length === 0) return rosterEvents;
+  return [...rosterEvents, ...generic];
+}
+
+/**
  * Groups every shift Event within `dates` by date+period, preserving EVERY
  * assigned person (never collapsed to one). `coverageStatus`/
  * `missingIntervals` reuse `analyzeUnitShiftCoverage` -- a PURE,
@@ -52,7 +109,12 @@ function toShiftGroupPerson(event: Event): ManagerShiftGroupPerson {
  * Event -- a date+period with zero shift Events at all produces no entry,
  * same convention `ManagerCoverageSection` already relies on (never a
  * fabricated "missing" verdict for a date that simply has no shift data
- * yet).
+ * yet). A date whose only shift Event is a generic (period-unspecified)
+ * role assignment is the one exception: it DOES get real "day"/"night"
+ * entries (their `roleCoverage`/`coverageStatus` reflect the generic
+ * assignment covering both), plus its own native "unspecified" entry
+ * (where that assignment's actual roster/name lives) -- see
+ * `isGenericCoverageEvent` above for why those are two separate concerns.
  */
 export function buildShiftStaffingOverview(
   events: readonly Event[],
@@ -69,18 +131,34 @@ export function buildShiftStaffingOverview(
     else groups.set(key, [event]);
   }
 
+  const genericEventsByDate = new Map<string, Event[]>();
+  for (const event of shiftEvents) {
+    if (!isGenericCoverageEvent(event)) continue;
+    const bucket = genericEventsByDate.get(event.date);
+    if (bucket) bucket.push(event);
+    else genericEventsByDate.set(event.date, [event]);
+  }
+
+  const entryKeys = new Set(groups.keys());
+  for (const date of genericEventsByDate.keys()) {
+    entryKeys.add(`${date}|day`);
+    entryKeys.add(`${date}|night`);
+  }
+
   const entries: ManagerShiftOverviewEntry[] = [];
 
-  for (const [key, groupEvents] of groups) {
+  for (const key of entryKeys) {
     const [date, period] = key.split("|") as [string, Event["period"]];
-    const sortedGroup = [...groupEvents].sort(compareEventsStable);
+    const rosterEvents = groups.get(key) ?? [];
+    const sortedRoster = [...rosterEvents].sort(compareEventsStable);
 
-    const technicians = sortedGroup.filter((e) => e.role === "technician" && !e.shadow).map(toShiftGroupPerson);
-    const supervisors = sortedGroup.filter((e) => e.role === "supervisor" && !e.shadow).map(toShiftGroupPerson);
-    const shadowTechnicians = sortedGroup.filter((e) => e.role === "technician" && e.shadow).map(toShiftGroupPerson);
-    const shadowSupervisors = sortedGroup.filter((e) => e.role === "supervisor" && e.shadow).map(toShiftGroupPerson);
+    const technicians = sortedRoster.filter((e) => e.role === "technician" && !e.shadow).map(toShiftGroupPerson);
+    const supervisors = sortedRoster.filter((e) => e.role === "supervisor" && !e.shadow).map(toShiftGroupPerson);
+    const shadowTechnicians = sortedRoster.filter((e) => e.role === "technician" && e.shadow).map(toShiftGroupPerson);
+    const shadowSupervisors = sortedRoster.filter((e) => e.role === "supervisor" && e.shadow).map(toShiftGroupPerson);
 
-    const analysis = analyzeUnitShiftCoverage(period, sortedGroup, shiftSchedule);
+    const coverageEvents = coverageGroupFor(period, rosterEvents, genericEventsByDate, date);
+    const analysis = analyzeUnitShiftCoverage(period, coverageEvents, shiftSchedule);
 
     entries.push({
       date,

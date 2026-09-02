@@ -68,6 +68,25 @@ function summarizePeriod(view: SchedulePeriodStaffingView | null): PeriodSummary
   return { text: names.length > 0 ? names.join(", ") : "—", toneClassName: "text-muted" };
 }
 
+/**
+ * A single line for a date's GENERIC (period-unspecified) role
+ * assignments, e.g. a weekend cell that just says `אחמ"ש` -- shown ONCE,
+ * outside/above the day and night `IndicatorChip` lines, never folded
+ * into either of them. `ScheduleEveryoneDayView.genericSupervisorNames`/
+ * `genericTechnicianNames` are already date-scoped (not nested inside
+ * `day`/`night`) for exactly this reason -- see that field's own doc
+ * comment: showing the same generic assignment once on the "☀️" line and
+ * again on the "🌙" line would misrepresent it as two independent
+ * shifts, which day/night coverage already correctly treats as fully
+ * satisfied without ever needing the name repeated. `null` when there is
+ * no generic assignment for the date, so callers render nothing.
+ */
+function summarizeGeneric(dayView: ScheduleEveryoneDayView | undefined): PeriodSummary | null {
+  const names = [...(dayView?.genericSupervisorNames ?? []), ...(dayView?.genericTechnicianNames ?? [])];
+  if (names.length === 0) return null;
+  return { text: names.join(", "), toneClassName: "text-muted" };
+}
+
 /** The Hebrew accessible name for a period's coverage status, e.g. "יום: חסר" -- never color-only. `null` (no staffing data at all for that period) reads the same "אין נתונים" text `summarizePeriod` already shows visually. */
 function statusAccessibleLabel(periodLabel: string, status: CoverageStatus | null): string {
   return `${periodLabel}: ${status === null ? "אין נתונים" : coverageStatusLabel(status)}`;
@@ -115,11 +134,17 @@ function MobileStaffingSummary({
 
 /**
  * The day/night staffing summary content for one in-month cell. On `sm:`+,
- * exactly two `IndicatorChip`s (day, night) -- the SAME shared component
- * and 2-line budget `CalendarGrid` uses for its own personal-event
- * indicators -- plus a duties/absences "+N" overflow when there's anything
- * beyond that (PR #38 shell-unification round, §15/§16 of the brief: date,
- * day status, night status, then an overflow -- never a taller cell). Below
+ * normally exactly two `IndicatorChip`s (day, night) -- the SAME shared
+ * component and 2-line budget `CalendarGrid` uses for its own
+ * personal-event indicators -- plus a duties/absences "+N" overflow when
+ * there's anything beyond that (PR #38 shell-unification round, §15/§16
+ * of the brief: date, day status, night status, then an overflow -- never
+ * a taller cell). A THIRD, conditional chip precedes those two only on a
+ * date carrying a GENERIC (period-unspecified) role assignment (see
+ * `summarizeGeneric`) -- rare in practice (a weekend cell with no
+ * day/night split), and deliberately its own single line rather than
+ * folded into the day/night chips, so a generic assignment is never shown
+ * once under "☀️" and again under "🌙" as if it were two shifts. Below
  * `sm:`, `MobileStaffingSummary` replaces both text lines with one compact
  * labeled-dot row so day AND night coverage both stay visible at every
  * width -- see its own doc comment for why a bare `hidden sm:flex` on the
@@ -130,6 +155,7 @@ function MobileStaffingSummary({
 function StaffingIndicators({ dayView }: { dayView: ScheduleEveryoneDayView | undefined }) {
   const day = summarizePeriod(dayView?.day ?? null);
   const night = summarizePeriod(dayView?.night ?? null);
+  const generic = summarizeGeneric(dayView);
   const dayStatus = dayView?.day?.coverageStatus ?? null;
   const nightStatus = dayView?.night?.coverageStatus ?? null;
   const extraCount = (dayView?.duties.length ?? 0) + (dayView?.absences.length ?? 0);
@@ -138,6 +164,9 @@ function StaffingIndicators({ dayView }: { dayView: ScheduleEveryoneDayView | un
     <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-hidden">
       <MobileStaffingSummary dayStatus={dayStatus} nightStatus={nightStatus} extraCount={extraCount} />
 
+      {generic ? (
+        <IndicatorChip emoji={null} label={generic.text} toneClassName={generic.toneClassName} className="hidden sm:flex" />
+      ) : null}
       <IndicatorChip emoji="☀️" label={day.text} toneClassName={day.toneClassName} className="hidden sm:flex" />
       <IndicatorChip emoji="🌙" label={night.text} toneClassName={night.toneClassName} className="hidden sm:flex" />
       {extraCount > 0 ? <OverflowChip count={extraCount} className="hidden sm:block" /> : null}

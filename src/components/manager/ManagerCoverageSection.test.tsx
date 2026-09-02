@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
+import type { Event } from "@/lib/domain/event";
+import { buildShiftSchedule } from "@/lib/domain/shiftSchedule";
+import type { ManagerShiftOverviewEntry } from "@/lib/readModels/managerTypes";
+import { buildShiftStaffingOverview } from "@/lib/readModels/managerEventProjections";
+import { roleCoverageMessage } from "@/lib/presentation/roleCoverage";
 import { ManagerCoverageSection } from "./ManagerCoverageSection";
 import type { ManagerRoleCoverageRowView, ManagerShiftDayView, ManagerShiftGroupView } from "./types";
 
@@ -36,6 +41,8 @@ function dayView(overrides: Partial<ManagerShiftDayView> = {}): ManagerShiftDayV
     dateLabel: "היום",
     day: group(),
     night: null,
+    genericSupervisorNames: [],
+    genericTechnicianNames: [],
     ...overrides,
   };
 }
@@ -251,5 +258,149 @@ describe("ManagerCoverageSection", () => {
     const cards = container.querySelectorAll(".rounded-xl.bg-surface-1");
     const withAccent = [...cards].filter((card) => card.className.includes("border-s-critical"));
     expect(withAccent.length).toBe(1);
+  });
+
+  describe('regression: a generic (period-unspecified) אחמ"ש assignment renders as covered, once, never as two separate shifts', () => {
+    function toGroupView(entry: ManagerShiftOverviewEntry): ManagerShiftGroupView {
+      // Trivial field rename, mirroring app/(app)/manager/page.tsx's private
+      // buildManagerShiftGroupView -- deliberately NOT re-implementing any
+      // coverage logic here, just reshaping the REAL analyzeUnitShiftCoverage
+      // output (via buildShiftStaffingOverview) into this component's props,
+      // exactly like the real page does.
+      return {
+        key: `${entry.date}-${entry.period}`,
+        dateLabel: entry.date,
+        periodLabel: entry.period === "day" ? "יום" : "לילה",
+        emoji: entry.period === "day" ? "☀️" : "🌙",
+        technicianNames: entry.technicians.map((p) => p.personName),
+        supervisorNames: entry.supervisors.map((p) => p.personName),
+        shadowTechnicianNames: entry.shadowTechnicians.map((p) => p.personName),
+        shadowSupervisorNames: entry.shadowSupervisors.map((p) => p.personName),
+        coverageStatus: entry.coverageStatus,
+        missingIntervalLabels: [],
+        technicianCoverage: {
+          status: entry.roleCoverage.technician.status,
+          message: roleCoverageMessage("technician", entry.roleCoverage.technician),
+        },
+        supervisorCoverage: {
+          status: entry.roleCoverage.supervisor.status,
+          message: roleCoverageMessage("supervisor", entry.roleCoverage.supervisor),
+        },
+      };
+    }
+
+    function event(overrides: Partial<Event>): Event {
+      return {
+        personId: "p_default",
+        personName: "ברירת מחדל",
+        date: "2026-08-12",
+        title: "",
+        rawValue: "",
+        category: "shift",
+        certainty: "confirmed",
+        role: null,
+        period: "unspecified",
+        sourceSheet: "משמרות + תורנויות",
+        sourceCell: "C2",
+        slot: null,
+        shadow: false,
+        startTimeOverride: null,
+        endTimeOverride: null,
+        changeNote: null,
+        dutyFamily: null,
+        absenceKind: null,
+        ...overrides,
+      };
+    }
+
+    it("through the REAL production pipeline (Event[] -> buildShiftStaffingOverview), a date staffed with real technicians and only a generic supervisor shows full coverage on both day and night, and the generic supervisor's name appears EXACTLY ONCE -- never inside both the day and night role lists", () => {
+      const schedule = buildShiftSchedule("07:30");
+
+      const events = [
+        event({ personId: "p_tech_day", personName: "טכנאי יום", role: "technician", period: "day" }),
+        event({ personId: "p_tech_night", personName: "טכנאי לילה", role: "technician", period: "night" }),
+        event({ personId: "p_ilay", personName: "עילאי שפירא", role: "supervisor", period: "unspecified" }),
+      ];
+
+      const entries = buildShiftStaffingOverview(events, schedule, new Set(["2026-08-12"]));
+      const day = entries.find((e) => e.period === "day")!;
+      const night = entries.find((e) => e.period === "night")!;
+      const generic = entries.find((e) => e.period === "unspecified")!;
+
+      // Data-structure-level guarantee, independent of rendering: the
+      // generic supervisor is NEVER a member of either period's own
+      // roster list (that would be "duplicated into both day and night
+      // assignment lists") -- both stay empty -- while roleCoverage still
+      // reports "full" on both, because the coverage computation (not the
+      // roster) is what folds the generic Event into each period's group.
+      expect(day.supervisors).toHaveLength(0);
+      expect(night.supervisors).toHaveLength(0);
+      expect(day.roleCoverage.supervisor.status).toBe("full");
+      expect(night.roleCoverage.supervisor.status).toBe("full");
+      expect(day.coverageStatus).toBe("full");
+      expect(night.coverageStatus).toBe("full");
+      // The assignment's one true roster home: its own native
+      // "unspecified" entry, exactly one supervisor, the same personId --
+      // never a cloned/second Event.
+      expect(generic.supervisors).toHaveLength(1);
+      expect(generic.supervisors[0].personId).toBe("p_ilay");
+
+      render(
+        <ManagerCoverageSection
+          days={[
+            {
+              key: "2026-08-12",
+              date: "2026-08-12",
+              dateLabel: "2026-08-12",
+              day: toGroupView(day),
+              night: toGroupView(night),
+              genericSupervisorNames: generic.supervisors.map((p) => p.personName),
+              genericTechnicianNames: generic.technicians.map((p) => p.personName),
+            },
+          ]}
+        />,
+      );
+
+      // עילאי שפירא is rendered EXACTLY ONCE on the whole card -- the
+      // single shared generic-assignment line -- never once under "יום"
+      // and again under "לילה" as if it were two independent shifts.
+      expect(screen.getAllByText(/עילאי שפירא/)).toHaveLength(1);
+      expect(screen.queryByText(/חסר אחמ/)).toBeNull();
+      expect(screen.getByText(/טכנאי יום/)).toBeInTheDocument();
+      expect(screen.getByText(/טכנאי לילה/)).toBeInTheDocument();
+    });
+
+    it("a date staffed ONLY by a generic supervisor (no other shift Events at all) still shows full day+night coverage on the card, with the person's name attributed to neither period's own role list", () => {
+      const schedule = buildShiftSchedule("07:30");
+      const events = [event({ personId: "p_ilay", personName: "עילאי שפירא", role: "supervisor", period: "unspecified" })];
+
+      const entries = buildShiftStaffingOverview(events, schedule, new Set(["2026-08-12"]));
+      const day = entries.find((e) => e.period === "day")!;
+      const night = entries.find((e) => e.period === "night")!;
+      const generic = entries.find((e) => e.period === "unspecified")!;
+
+      render(
+        <ManagerCoverageSection
+          days={[
+            {
+              key: "2026-08-12",
+              date: "2026-08-12",
+              dateLabel: "2026-08-12",
+              day: toGroupView(day),
+              night: toGroupView(night),
+              genericSupervisorNames: generic.supervisors.map((p) => p.personName),
+              genericTechnicianNames: generic.technicians.map((p) => p.personName),
+            },
+          ]}
+        />,
+      );
+
+      expect(screen.getAllByText(/עילאי שפירא/)).toHaveLength(1);
+      expect(screen.queryByText(/חסר אחמ/)).toBeNull();
+      // Technician is still genuinely missing on both -- the generic
+      // supervisor assignment never spills over into covering a
+      // DIFFERENT role.
+      expect(screen.getAllByText("חסר טכנאי")).toHaveLength(2);
+    });
   });
 });

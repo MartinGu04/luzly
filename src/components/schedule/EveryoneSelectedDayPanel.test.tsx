@@ -35,7 +35,7 @@ function periodView(overrides: Partial<SchedulePeriodStaffingView> = {}): Schedu
 }
 
 function dayView(overrides: Partial<ScheduleEveryoneDayView> = {}): ScheduleEveryoneDayView {
-  return { date: "2026-08-12", day: null, night: null, duties: [], absences: [], ...overrides };
+  return { date: "2026-08-12", day: null, night: null, genericSupervisorNames: [], genericTechnicianNames: [], duties: [], absences: [], ...overrides };
 }
 
 describe("EveryoneSelectedDayPanel", () => {
@@ -158,6 +158,64 @@ describe("EveryoneSelectedDayPanel", () => {
       expect(screen.getAllByText('אחמ"ש אמיתי')).toHaveLength(1);
       expect(screen.getByText(/צל טכנאי אמיתי/)).toBeTruthy();
       expect(screen.getByText(/צל אחמ"ש אמיתי/)).toBeTruthy();
+    });
+  });
+
+  describe('regression: a generic (period-unspecified) אחמ"ש assignment renders as covered, once, never "חסר אחמ״ש" and never as if the person worked two separate shifts', () => {
+    it("through the REAL production pipeline (Event[] -> buildShiftStaffingOverview -> buildScheduleEveryoneDayViews), a date staffed with real technicians and only a generic supervisor shows full coverage on both day and night, with the generic supervisor's name shown EXACTLY ONCE -- via the shared generic-assignment line, never duplicated into both the day and night role lists", async () => {
+      const { buildShiftSchedule } = await import("@/lib/domain/shiftSchedule");
+      const { buildShiftStaffingOverview } = await import("@/lib/readModels/managerEventProjections");
+      const { buildScheduleEveryoneDayViews } = await import("@/lib/presentation/scheduleEveryone");
+      const schedule = buildShiftSchedule("07:30");
+
+      function event(overrides: Partial<import("@/lib/domain/event").Event>): import("@/lib/domain/event").Event {
+        return {
+          personId: "p_default",
+          personName: "ברירת מחדל",
+          date: "2026-08-12",
+          title: "",
+          rawValue: "",
+          category: "shift",
+          certainty: "confirmed",
+          role: null,
+          period: "unspecified",
+          sourceSheet: "משמרות + תורנויות",
+          sourceCell: "C2",
+          slot: null,
+          shadow: false,
+          startTimeOverride: null,
+          endTimeOverride: null,
+          changeNote: null,
+          dutyFamily: null,
+          absenceKind: null,
+          ...overrides,
+        };
+      }
+
+      const events = [
+        event({ personId: "p_tech_day", personName: "טכנאי יום", role: "technician", period: "day" }),
+        event({ personId: "p_tech_night", personName: "טכנאי לילה", role: "technician", period: "night" }),
+        event({ personId: "p_ilay", personName: "עילאי שפירא", role: "supervisor", period: "unspecified" }),
+      ];
+
+      const overview = buildShiftStaffingOverview(events, schedule, new Set(["2026-08-12"]));
+      const views = buildScheduleEveryoneDayViews(["2026-08-12"], overview, [], []);
+
+      render(<EveryoneSelectedDayPanel dayMeta={dayMeta({ date: "2026-08-12" })} dayView={views["2026-08-12"]} />);
+
+      // עילאי שפירא appears EXACTLY ONCE on the whole panel -- via the
+      // single shared generic-assignment line -- never once under "יום"
+      // and again under "לילה" as if it were two separate assignments,
+      // and the missing-supervisor message never appears anywhere.
+      const occurrences = screen.getAllByText(/עילאי שפירא/);
+      expect(occurrences).toHaveLength(1);
+      // The single occurrence is the shared generic-assignment line, not
+      // an entry in either period's own "אחמ"שים" `<li>` roster -- that
+      // roster only ever holds NATIVE day/night-specific supervisors.
+      expect(occurrences[0].closest("li")).toBeNull();
+      expect(screen.queryByText(/חסר אחמ/)).toBeNull();
+      expect(screen.getByText("טכנאי יום")).toBeTruthy();
+      expect(screen.getByText("טכנאי לילה")).toBeTruthy();
     });
   });
 });
