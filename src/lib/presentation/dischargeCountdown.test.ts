@@ -50,16 +50,20 @@ describe("resolveDischargeCountdownState — counting_down phase", () => {
     [200, "none"],
     [101, "none"],
     [100, "hundred"],
-    [51, "hundred"],
+    [99, "none"],
+    [51, "none"],
     [50, "fifty"],
-    [31, "fifty"],
+    [49, "none"],
+    [31, "none"],
     [30, "thirty"],
-    [8, "thirty"],
+    [29, "none"],
+    [8, "none"],
     [7, "week"],
-    [2, "week"],
+    [6, "none"],
+    [2, "none"],
     [1, "tomorrow"],
-    [0, "tomorrow"],
-  ] as const)("day %i remaining resolves to milestone %s", (daysRemaining, expected) => {
+    [0, "none"],
+  ] as const)("day %i remaining resolves to milestone %s -- an exact match only, never a range", (daysRemaining, expected) => {
     const nowMs = dischargeInstantMs - daysRemaining * DAY_MS - 1000;
     const state = resolveDischargeCountdownState(nowMs, dischargeInstantMs, dischargeDayEndInstantMs, null);
 
@@ -129,6 +133,10 @@ describe("resolveDischargeMilestoneCopy", () => {
       expect(copy.badge).toBeTruthy();
       expect(copy.accentColor).toMatch(/^#[0-9a-f]{6}$/i);
     }
+  });
+
+  it("never phrases the 50-day badge as 'חצי דרך' -- 50 days remaining isn't necessarily halfway through this person's service", () => {
+    expect(resolveDischargeMilestoneCopy("fifty").badge).not.toMatch(/חצי דרך/);
   });
 });
 

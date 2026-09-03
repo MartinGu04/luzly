@@ -62,7 +62,9 @@ export function DischargeCountdownScreen({
 
       <div className="relative flex flex-col items-center gap-2">
         <h1 className="text-4xl font-black tracking-tight sm:text-6xl">עד מתי???</h1>
-        <p className="text-sm text-white/60 sm:text-base">עד השחרור נשארו</p>
+        {state?.phase === "counting_down" ? (
+          <p className="text-sm text-white/60 sm:text-base">עד השחרור נשארו</p>
+        ) : null}
       </div>
 
       <div className="relative mt-10 flex min-h-[10rem] flex-col items-center justify-center gap-3 sm:mt-14 sm:min-h-[14rem]">
@@ -76,6 +78,19 @@ export function DischargeCountdownScreen({
             {serviceProgress ? (
               <>
                 <p className="font-semibold text-white">{serviceProgress.percentServed}% מאחוריך</p>
+                <div
+                  role="progressbar"
+                  aria-label="התקדמות השירות מגיוס ועד שחרור"
+                  aria-valuenow={serviceProgress.percentServed}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  className="mt-1 h-2.5 w-56 max-w-[70vw] overflow-hidden rounded-full bg-white/15 sm:w-72"
+                >
+                  <div
+                    className="h-full rounded-full transition-[width] duration-500 ease-out"
+                    style={{ width: `${serviceProgress.percentServed}%`, backgroundColor: "#4fc3e8" }}
+                  />
+                </div>
                 <p className="tabular-nums">{serviceProgress.daysServed} ימים בשירות</p>
               </>
             ) : null}

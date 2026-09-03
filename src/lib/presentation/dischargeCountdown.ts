@@ -16,7 +16,7 @@ export function formatDischargeDateLabel(dateStr: string): string | null {
   return `${pad2(parsed.day)}.${pad2(parsed.month)}.${parsed.year}`;
 }
 
-/** The five discrete "special" phases the spec calls out, plus "none" for anything more than 100 days out. Only meaningful while `phase: "counting_down"` -- the discharge-day/post-discharge phases are their own distinct states, not milestones of this countdown. */
+/** The five discrete "special" days the spec calls out, plus "none" for every other day. Only meaningful while `phase: "counting_down"` -- the discharge-day/post-discharge phases are their own distinct states, not milestones of this countdown. */
 export type DischargeMilestone = "none" | "hundred" | "fifty" | "thirty" | "week" | "tomorrow";
 
 export interface DischargeClockParts {
@@ -46,21 +46,19 @@ export type DischargeCountdownState =
   | { phase: "post_discharge"; daysSinceDischarge: number };
 
 /**
- * The LARGEST threshold not exceeded, so e.g. day 45 reads as "fifty" (the
- * phase spans 31..50) rather than flashing for a single day at exactly 50 --
- * a persistent themed phase the UI can style distinctly, not a one-day
- * banner. `daysRemaining` here is always `>= 0` (see
- * `resolveDischargeCountdownState`'s "counting_down" branch) -- 0 and 1
- * both read as "tomorrow" (spec: "1 day remaining / מחר" is one state, and
- * the same excitement applies to "less than a day left" as much as to
- * exactly one full day left).
+ * An EXACT match against the five called-out days -- never a range. A badge
+ * carries a specific number (or implies one, like "השבוע האחרון"), so
+ * showing it on a day that doesn't actually match would be a lie (e.g.
+ * "100 ימים!" while 51 actually remain). Every other day -- including the
+ * days between two milestones -- resolves to "none": the plain countdown
+ * with no badge.
  */
 function resolveMilestone(daysRemaining: number): DischargeMilestone {
-  if (daysRemaining <= 1) return "tomorrow";
-  if (daysRemaining <= 7) return "week";
-  if (daysRemaining <= 30) return "thirty";
-  if (daysRemaining <= 50) return "fifty";
-  if (daysRemaining <= 100) return "hundred";
+  if (daysRemaining === 100) return "hundred";
+  if (daysRemaining === 50) return "fifty";
+  if (daysRemaining === 30) return "thirty";
+  if (daysRemaining === 7) return "week";
+  if (daysRemaining === 1) return "tomorrow";
   return "none";
 }
 
@@ -154,7 +152,7 @@ export interface DischargeMilestoneCopy {
 const MILESTONE_COPY: Record<DischargeMilestone, DischargeMilestoneCopy> = {
   none: { badge: null, accentColor: "#edf1f4" },
   hundred: { badge: "100 ימים!", accentColor: "#4fc3e8" },
-  fifty: { badge: "חצי דרך – 50 ימים!", accentColor: "#78a9cc" },
+  fifty: { badge: "50 ימים!", accentColor: "#78a9cc" },
   thirty: { badge: "30 הימים האחרונים!", accentColor: "#f5b84e" },
   week: { badge: "השבוע האחרון!", accentColor: "#3ecf8e" },
   tomorrow: { badge: "מחר!", accentColor: "#3ecf8e" },
