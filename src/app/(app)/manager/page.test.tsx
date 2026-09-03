@@ -135,6 +135,8 @@ function shiftSnapshotShift(overrides: Partial<ShiftSnapshotTriad["previousShift
     endLocalTime: "19:30",
     supervisors: [],
     technicians: [],
+    genericSupervisors: [],
+    genericTechnicians: [],
     coverageStatus: "full",
     missingIntervals: [],
     roleCoverage: {

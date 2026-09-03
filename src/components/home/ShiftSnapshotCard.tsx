@@ -28,6 +28,27 @@ function RoleGroup({ label, people }: { label: string; people: ManagerShiftGroup
   );
 }
 
+/**
+ * A GENERIC (period-unspecified) role assignment for this shift's date --
+ * e.g. a weekend cell that just says `אחמ"ש` -- rendered under its own
+ * "(כל היום)" label, never merged into the plain `RoleGroup` above. The
+ * SAME generic assignment can legitimately appear on two ADJACENT cards
+ * in the previous/current/next triad (this shift's date can be both a
+ * day shift and a night shift among the three) -- this distinct label is
+ * what keeps that from reading as two independent, coincidentally-
+ * identical assignments: it's visibly one shared/generic assignment on
+ * each card it appears on, not a period-specific one.
+ */
+function GenericRoleGroup({ label, people }: { label: string; people: ManagerShiftGroupPerson[] }) {
+  if (people.length === 0) return null;
+  return (
+    <div>
+      <h4 className="text-xs font-semibold text-muted-2">{label} (כל היום)</h4>
+      <p className="mt-0.5 text-sm font-medium text-foreground">{people.map((p) => p.personName).join(" · ")}</p>
+    </div>
+  );
+}
+
 const ROLE_MESSAGE_TONE_CLASS: Record<CoverageStatus, string> = {
   full: "",
   partial: "text-warning",
@@ -99,7 +120,9 @@ export function ShiftSnapshotCard({ label, shift, todayDate, current }: ShiftSna
 
       <div className={`relative ${isCurrent ? "mt-6" : "mt-4"} space-y-3 border-t border-border pt-4`}>
         <RoleGroup label='אחמ״ש' people={shift.supervisors} />
+        <GenericRoleGroup label='אחמ״ש' people={shift.genericSupervisors} />
         <RoleGroup label="טכנאים" people={shift.technicians} />
+        <GenericRoleGroup label="טכנאים" people={shift.genericTechnicians} />
         <RoleCoverageMessage role="supervisor" diagnostic={shift.roleCoverage.supervisor} />
         <RoleCoverageMessage role="technician" diagnostic={shift.roleCoverage.technician} />
       </div>

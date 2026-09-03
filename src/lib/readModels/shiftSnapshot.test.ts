@@ -139,3 +139,120 @@ describe("resolveShiftSnapshotTriad — staffing + coverage", () => {
     expect(triad.nextShift.coverageStatus).toBe("missing");
   });
 });
+
+describe('resolveShiftSnapshotTriad — a generic (period-unspecified) אחמ"ש assignment (reusing PR #123\'s buildShiftStaffingOverview fields, no separate interpretation)', () => {
+  function genericSupervisor(overrides: Partial<Event> = {}): Event {
+    return shiftEvent({
+      personId: "p_ilay",
+      personName: "עילאי שפירא",
+      title: 'אחמ"ש',
+      rawValue: 'אחמ"ש',
+      role: "supervisor",
+      period: "unspecified",
+      ...overrides,
+    });
+  }
+
+  it('renders the generic אחמ"ש under `genericSupervisors` (never merged into the plain `supervisors` list) for the current shift, alongside the period-specific technician', () => {
+    const events = [
+      shiftEvent({ personId: "p_tech", personName: "איתי אולר", role: "technician", period: "day" }),
+      genericSupervisor(),
+    ];
+    const triad = resolveShiftSnapshotTriad(events, schedule, localNow());
+
+    expect(triad.currentShift.genericSupervisors.map((p) => p.personName)).toEqual(["עילאי שפירא"]);
+    expect(triad.currentShift.supervisors).toEqual([]); // native list stays strictly period-specific
+    expect(triad.currentShift.technicians.map((p) => p.personName)).toEqual(["איתי אולר"]);
+    // Coverage was already correct before this change (PR #123) -- unaffected.
+    expect(triad.currentShift.coverageStatus).toBe("full");
+    expect(triad.currentShift.roleCoverage.supervisor.status).toBe("full");
+  });
+
+  it("the SAME generic assignment also covers the adjacent shift on the same date (previous/current are the day+night of one date) -- via genericSupervisors on BOTH, never the plain supervisors list", () => {
+    // localNow() defaults to 2026-08-12 day; previousShift is 2026-08-11 night --
+    // a DIFFERENT date, so it must NOT see this date's generic assignment.
+    // Use a midday `now` where current=day and next=night of the SAME date instead.
+    const events = [genericSupervisor({ date: "2026-08-12" })];
+    const triad = resolveShiftSnapshotTriad(events, schedule, localNow({ minuteOfDay: 8 * 60 }));
+
+    expect(triad.currentShift.date).toBe("2026-08-12");
+    expect(triad.currentShift.period).toBe("day");
+    expect(triad.nextShift.date).toBe("2026-08-12");
+    expect(triad.nextShift.period).toBe("night");
+    expect(triad.currentShift.genericSupervisors.map((p) => p.personName)).toEqual(["עילאי שפירא"]);
+    expect(triad.nextShift.genericSupervisors.map((p) => p.personName)).toEqual(["עילאי שפירא"]);
+    // Neither card's plain `supervisors` list ever gets it -- that's the
+    // whole point: a card-level consumer can tell "generic, shared" apart
+    // from "an explicit assignment for THIS exact period" just by which
+    // field it's in.
+    expect(triad.currentShift.supervisors).toEqual([]);
+    expect(triad.nextShift.supervisors).toEqual([]);
+    // A different date's shift (previous, 2026-08-11) never sees it, in either field.
+    expect(triad.previousShift.date).toBe("2026-08-11");
+    expect(triad.previousShift.supervisors).toEqual([]);
+    expect(triad.previousShift.genericSupervisors).toEqual([]);
+  });
+
+  it("never converts the generic assignment into a day/night Event -- the underlying source Event array is never mutated, and the entry's own coverage math still treats it as period-unspecified", () => {
+    const generic = genericSupervisor();
+    const events = [shiftEvent({ personId: "p_tech", role: "technician", period: "day" }), generic];
+    const eventsBefore = [...events];
+    resolveShiftSnapshotTriad(events, schedule, localNow());
+    expect(events).toEqual(eventsBefore);
+    expect(events).toHaveLength(2); // never grew a synthetic day/night clone
+  });
+
+  it("does not duplicate the person when they ALSO hold an explicit period-specific assignment the same date -- they appear in `supervisors`, and are excluded from `genericSupervisors`", () => {
+    const events = [
+      shiftEvent({ personId: "p_ilay", personName: "עילאי שפירא", role: "supervisor", period: "day" }),
+      genericSupervisor({ personId: "p_ilay", personName: "עילאי שפירא" }),
+    ];
+    const triad = resolveShiftSnapshotTriad(events, schedule, localNow());
+
+    expect(triad.currentShift.supervisors).toHaveLength(1);
+    expect(triad.currentShift.supervisors[0].personId).toBe("p_ilay");
+    expect(triad.currentShift.genericSupervisors).toEqual([]);
+  });
+
+  it("an explicit day-specific אחמ״ש is unaffected -- still resolves normally with no generic entry involved", () => {
+    const events = [shiftEvent({ personId: "p_sup", personName: 'אחמ"ש יום', role: "supervisor", period: "day" })];
+    const triad = resolveShiftSnapshotTriad(events, schedule, localNow());
+
+    expect(triad.currentShift.supervisors.map((p) => p.personName)).toEqual(['אחמ"ש יום']);
+    expect(triad.currentShift.genericSupervisors).toEqual([]);
+    expect(triad.currentShift.coverageStatus).toBe("missing"); // technician still missing, unaffected
+  });
+
+  it("scenario: a date with a real day shift, a real night shift, AND one generic אחמ״ש -- both the day card and the night card carry the person under genericSupervisors, satisfying coverage on both without appearing in either's plain supervisors list", () => {
+    const events = [
+      shiftEvent({ personId: "p_tech_day", personName: "טכנאי יום", role: "technician", period: "day", date: "2026-08-12" }),
+      shiftEvent({ personId: "p_tech_night", personName: "טכנאי לילה", role: "technician", period: "night", date: "2026-08-12" }),
+      genericSupervisor({ date: "2026-08-12" }),
+    ];
+    // Midday `now` puts current=day(2026-08-12), next=night(2026-08-12) --
+    // both periods of the SAME date land in the previous/current/next triad.
+    const triad = resolveShiftSnapshotTriad(events, schedule, localNow({ minuteOfDay: 8 * 60 }));
+
+    expect(triad.currentShift.period).toBe("day");
+    expect(triad.nextShift.period).toBe("night");
+
+    // Coverage: the generic assignment satisfies BOTH periods' supervisor requirement.
+    expect(triad.currentShift.roleCoverage.supervisor.status).toBe("full");
+    expect(triad.nextShift.roleCoverage.supervisor.status).toBe("full");
+    expect(triad.currentShift.coverageStatus).toBe("full");
+    expect(triad.nextShift.coverageStatus).toBe("full");
+
+    // Presentation: the person is reachable on both cards, but ONLY via
+    // the dedicated generic field -- never planted in the ordinary
+    // per-period roster, which is what would make it look like two
+    // independently-staffed shifts rather than one shared assignment.
+    expect(triad.currentShift.genericSupervisors.map((p) => p.personName)).toEqual(["עילאי שפירא"]);
+    expect(triad.nextShift.genericSupervisors.map((p) => p.personName)).toEqual(["עילאי שפירא"]);
+    expect(triad.currentShift.supervisors).toEqual([]);
+    expect(triad.nextShift.supervisors).toEqual([]);
+
+    // Each period's own real technician stays exactly where it belongs.
+    expect(triad.currentShift.technicians.map((p) => p.personName)).toEqual(["טכנאי יום"]);
+    expect(triad.nextShift.technicians.map((p) => p.personName)).toEqual(["טכנאי לילה"]);
+  });
+});

@@ -25,6 +25,8 @@ function baseShift(overrides: Partial<PermanentManagerHomeShift> = {}): Permanen
     endLocalTime: "19:30",
     supervisors: [],
     technicians: [],
+    genericSupervisors: [],
+    genericTechnicians: [],
     coverageStatus: "full",
     missingIntervals: [],
     roleCoverage: {

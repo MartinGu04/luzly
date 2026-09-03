@@ -40,6 +40,8 @@ function shift(overrides: Partial<PermanentManagerHomeReadModel["previousShift"]
     endLocalTime: "19:30",
     supervisors: [],
     technicians: [],
+    genericSupervisors: [],
+    genericTechnicians: [],
     coverageStatus: "full",
     missingIntervals: [],
     roleCoverage: {
