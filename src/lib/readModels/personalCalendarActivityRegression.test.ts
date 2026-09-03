@@ -35,6 +35,8 @@ describe("real-shaped 'סוגר' status cell reaches the personal month calendar
       isTechnician: true,
       isSupervisor: false,
       personnelType: null,
+      dischargeDate: null,
+      enlistmentDate: null,
     };
   }
 

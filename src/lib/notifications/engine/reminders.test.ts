@@ -1009,6 +1009,8 @@ function person(id: string, overrides: Partial<import("@/lib/domain/types").Pers
     isTechnician: false,
     isSupervisor: false,
     personnelType: null,
+    dischargeDate: null,
+    enlistmentDate: null,
     ...overrides,
   };
 }
@@ -2309,7 +2311,19 @@ describe("audience filtering -- system_target_person_ids FILTERS domain eligibil
     const { runReminders } = await loadModule();
     const summary = await runReminders({
       events: [],
-      people: [{ id: "p_a", name: "a", email: "a@x.com", isManager: false, isTechnician: false, isSupervisor: false, personnelType: "חובה" }],
+      people: [
+        {
+          id: "p_a",
+          name: "a",
+          email: "a@x.com",
+          isManager: false,
+          isTechnician: false,
+          isSupervisor: false,
+          personnelType: "חובה",
+          dischargeDate: null,
+          enlistmentDate: null,
+        },
+      ],
       shiftSchedule: schedule,
       week,
       now,
@@ -2579,8 +2593,8 @@ describe("runReminders -- Emergency Mode (spec section 24/25)", () => {
         event({ personId: "tech1", date: "2026-08-18", category: "shift", period: "day", role: "technician" }),
       ],
       people: [
-        { id: "sup1", name: "מפקד", email: null, isManager: false, isTechnician: false, isSupervisor: true, personnelType: null },
-        { id: "tech1", name: "טכנאי", email: null, isManager: false, isTechnician: true, isSupervisor: false, personnelType: null },
+        { id: "sup1", name: "מפקד", email: null, isManager: false, isTechnician: false, isSupervisor: true, personnelType: null, dischargeDate: null, enlistmentDate: null },
+        { id: "tech1", name: "טכנאי", email: null, isManager: false, isTechnician: true, isSupervisor: false, personnelType: null, dischargeDate: null, enlistmentDate: null },
       ],
       shiftSchedule: schedule,
       week,

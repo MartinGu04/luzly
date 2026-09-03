@@ -17,6 +17,8 @@ const MANAGER: Person = {
   isTechnician: false,
   isSupervisor: false,
   personnelType: "קבע",
+  dischargeDate: null,
+  enlistmentDate: null,
 };
 
 const RESERVE_PERSON: Person = {
@@ -27,6 +29,8 @@ const RESERVE_PERSON: Person = {
   isTechnician: false,
   isSupervisor: true,
   personnelType: "מילואים",
+  dischargeDate: null,
+  enlistmentDate: null,
 };
 
 const REGULAR_TECHNICIAN: Person = {
@@ -37,6 +41,8 @@ const REGULAR_TECHNICIAN: Person = {
   isTechnician: true,
   isSupervisor: false,
   personnelType: "חובה",
+  dischargeDate: null,
+  enlistmentDate: null,
 };
 
 beforeEach(() => {

@@ -39,6 +39,8 @@ describe("Potential/תקשא\"ס allocations stay out of the personal calendar w
       isTechnician: true,
       isSupervisor: false,
       personnelType: null,
+      dischargeDate: null,
+      enlistmentDate: null,
     };
   }
 
@@ -215,6 +217,8 @@ describe("Potential never surfaces a stale same-week guard/reserve entry once th
       isTechnician: true,
       isSupervisor: false,
       personnelType: null,
+      dischargeDate: null,
+      enlistmentDate: null,
     };
   }
 

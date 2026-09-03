@@ -18,6 +18,8 @@ function person(overrides: Partial<Person> = {}): Person {
     isTechnician: false,
     isSupervisor: false,
     personnelType: "חובה",
+    dischargeDate: null,
+    enlistmentDate: null,
     ...overrides,
   };
 }
@@ -86,6 +88,8 @@ describe("buildFairnessComparisonGroups", () => {
     const razatzhWhoWorksSupervisorRotation = person({
       id: "p_razatzh",
       personnelType: "קבע",
+      dischargeDate: null,
+      enlistmentDate: null,
       isSupervisor: true,
       isTechnician: false,
     });

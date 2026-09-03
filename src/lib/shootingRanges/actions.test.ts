@@ -50,6 +50,8 @@ function person(overrides: Partial<Person> = {}): Person {
     isTechnician: true,
     isSupervisor: false,
     personnelType: "חובה",
+    dischargeDate: null,
+    enlistmentDate: null,
     ...overrides,
   };
 }

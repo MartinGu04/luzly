@@ -21,7 +21,7 @@ vi.mock("@/lib/emergencyMode/state", () => ({ getEmergencyDateSet }));
 const { loadShiftFairnessReadModel } = await import("./shiftFairness");
 
 function person(overrides: Partial<Person> = {}): Person {
-  return { id: "p_tech", name: "טל טכנאי", email: null, isManager: false, isTechnician: true, isSupervisor: false, personnelType: null, ...overrides };
+  return { id: "p_tech", name: "טל טכנאי", email: null, isManager: false, isTechnician: true, isSupervisor: false, personnelType: null, dischargeDate: null, enlistmentDate: null, ...overrides };
 }
 
 function shiftEvent(overrides: Partial<Event> & { personId: string; date: string }): Event {

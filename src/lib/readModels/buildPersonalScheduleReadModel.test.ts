@@ -32,6 +32,8 @@ function me(overrides: Partial<Person> = {}): Person {
     isTechnician: true,
     isSupervisor: false,
     personnelType: null,
+    dischargeDate: null,
+    enlistmentDate: null,
     ...overrides,
   };
 }
@@ -45,6 +47,8 @@ function colleague(overrides: Partial<Person> = {}): Person {
     isTechnician: false,
     isSupervisor: true,
     personnelType: null,
+    dischargeDate: null,
+    enlistmentDate: null,
     ...overrides,
   };
 }

@@ -22,6 +22,8 @@ const MANAGER: Person = {
   isTechnician: false,
   isSupervisor: false,
   personnelType: "קבע",
+  dischargeDate: null,
+  enlistmentDate: null,
 };
 
 afterEach(() => {

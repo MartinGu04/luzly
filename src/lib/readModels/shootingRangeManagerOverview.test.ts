@@ -32,10 +32,31 @@ function shootingRangesSheet(rows: (string | number)[][]): RawSheet {
 // "eligibility" describe block below), so every pre-existing test needs
 // an explicit eligible person.
 function person(overrides: Partial<Person> = {}): Person {
-  return { id: "p1", name: "דני עובד", email: "dani@example.invalid", isManager: false, isTechnician: true, isSupervisor: false, personnelType: "חובה", ...overrides };
+  return {
+    id: "p1",
+    name: "דני עובד",
+    email: "dani@example.invalid",
+    isManager: false,
+    isTechnician: true,
+    isSupervisor: false,
+    personnelType: "חובה",
+    dischargeDate: null,
+    enlistmentDate: null,
+    ...overrides,
+  };
 }
 
-const MANAGER: Person = { id: "mgr1", name: "מנהל בדיקה", email: "mgr@example.invalid", isManager: true, isTechnician: false, isSupervisor: false, personnelType: null };
+const MANAGER: Person = {
+  id: "mgr1",
+  name: "מנהל בדיקה",
+  email: "mgr@example.invalid",
+  isManager: true,
+  isTechnician: false,
+  isSupervisor: false,
+  personnelType: null,
+  dischargeDate: null,
+  enlistmentDate: null,
+};
 
 function okContext(people: Person[], shootingRangesRows: (string | number)[][] = []) {
   return {

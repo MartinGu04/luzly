@@ -21,7 +21,7 @@ beforeEach(() => {
 });
 
 function manager(): Person {
-  return { id: "m1", name: "מנהל בדיקה", email: "m@example.com", isManager: true, isTechnician: false, isSupervisor: false, personnelType: null };
+  return { id: "m1", name: "מנהל בדיקה", email: "m@example.com", isManager: true, isTechnician: false, isSupervisor: false, personnelType: null, dischargeDate: null, enlistmentDate: null };
 }
 
 function emptyModel(): ShootingRangeManagerReadModel {

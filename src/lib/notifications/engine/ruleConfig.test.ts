@@ -28,6 +28,8 @@ function person(overrides: Partial<Person> & { id: string }): Person {
     isTechnician: false,
     isSupervisor: false,
     personnelType: null,
+    dischargeDate: null,
+    enlistmentDate: null,
     ...overrides,
   };
 }

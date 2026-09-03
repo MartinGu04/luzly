@@ -12,6 +12,8 @@ function syntheticPerson(name: string): Person {
     isTechnician: false,
     isSupervisor: false,
     personnelType: null,
+    dischargeDate: null,
+    enlistmentDate: null,
   };
 }
 

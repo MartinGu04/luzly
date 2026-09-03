@@ -95,6 +95,27 @@ describe("navItems — \"מטווחים\" placeholder page", () => {
   });
 });
 
+describe('navItems — "עד מתי???" discharge countdown page', () => {
+  it('"עד מתי???" is a real, enabled, non-manager-only nav item pointing at /countdown', () => {
+    const countdown = navItems.find((item) => item.href === "/countdown");
+    expect(countdown).toBeDefined();
+    expect(countdown?.enabled).toBe(true);
+    expect(countdown?.managerOnly).toBeUndefined();
+    expect(countdown?.label).toBe("עד מתי???");
+  });
+
+  it("is not part of the curated bottom-nav set", () => {
+    const countdown = navItems.find((item) => item.href === "/countdown");
+    expect(countdown?.inBottomNav).toBe(false);
+  });
+
+  it("every authenticated user sees /countdown, manager or not", () => {
+    for (const isManager of [true, false]) {
+      expect(visibleNavItems(isManager).map((item) => item.href)).toContain("/countdown");
+    }
+  });
+});
+
 describe("navItems — obsolete sync placeholder removed (PR #18)", () => {
   it('"סנכרון" is not in navItems anymore', () => {
     expect(navItems.some((item) => item.label === "סנכרון" || item.shortLabel === "סנכרון")).toBe(false);
@@ -104,7 +125,7 @@ describe("navItems — obsolete sync placeholder removed (PR #18)", () => {
     expect(navItems.some((item) => item.href === "/sync")).toBe(false);
   });
 
-  it("every other enabled route is unchanged (PR #4 adds /fairness; /shooting-ranges joins before /manager; /notifications is added after /manager)", () => {
+  it("every other enabled route is unchanged (PR #4 adds /fairness; /shooting-ranges joins before /manager; /notifications is added after /manager; /countdown joins after /shooting-ranges)", () => {
     const enabledHrefs = navItems.filter((item) => item.enabled).map((item) => item.href);
     expect(enabledHrefs).toEqual([
       "/",
@@ -112,6 +133,7 @@ describe("navItems — obsolete sync placeholder removed (PR #18)", () => {
       "/duties",
       "/fairness",
       "/shooting-ranges",
+      "/countdown",
       "/manager",
       "/notifications",
     ]);

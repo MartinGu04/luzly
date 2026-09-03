@@ -25,6 +25,8 @@ const PERSON: Person = {
   isTechnician: false,
   isSupervisor: false,
   personnelType: null,
+  dischargeDate: null,
+  enlistmentDate: null,
 };
 
 function personnelSheet(): RawSheet {

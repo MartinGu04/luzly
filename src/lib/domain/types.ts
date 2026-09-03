@@ -11,4 +11,8 @@ export interface Person {
   isTechnician: boolean;
   isSupervisor: boolean;
   personnelType: string | null;
+  /** "YYYY-MM-DD", from כ"א -- null when the sheet has no discharge date for this person. */
+  dischargeDate: string | null;
+  /** "YYYY-MM-DD", from כ"א -- null when the sheet has no enlistment date for this person. */
+  enlistmentDate: string | null;
 }

@@ -1,5 +1,6 @@
 import type { RawCellValue, RawSheet } from "@/lib/google";
 import type { Person } from "@/lib/domain/types";
+import { parseLocalDate } from "./date";
 import { cellToBoolean, cellToTrimmedString, findColumnIndexByHeader } from "./sheetGrid";
 
 const NAME_HEADERS = ["שם", "שם מלא", "שם עובד"];
@@ -8,6 +9,8 @@ const MANAGER_HEADERS = ["מנהל"];
 const TECHNICIAN_HEADERS = ["טכנאי"];
 const SUPERVISOR_HEADERS = ['אחמ"ש'];
 const PERSONNEL_TYPE_HEADERS = ['סוג כ"א'];
+const DISCHARGE_DATE_HEADERS = ["תאריך שחרור", "צפי שחרור", "תאריך סיום סדיר"];
+const ENLISTMENT_DATE_HEADERS = ["תאריך גיוס"];
 
 /** Any one of these being present is enough to recognize the personnel header row. */
 const RECOGNIZED_LABEL_GROUPS = [
@@ -17,6 +20,8 @@ const RECOGNIZED_LABEL_GROUPS = [
   TECHNICIAN_HEADERS,
   SUPERVISOR_HEADERS,
   PERSONNEL_TYPE_HEADERS,
+  DISCHARGE_DATE_HEADERS,
+  ENLISTMENT_DATE_HEADERS,
 ];
 
 /**
@@ -60,12 +65,20 @@ export function parsePersonnelSheet(sheet: RawSheet): Person[] {
   const technicianCol = findColumnIndexByHeader(headerRow, TECHNICIAN_HEADERS);
   const supervisorCol = findColumnIndexByHeader(headerRow, SUPERVISOR_HEADERS);
   const typeCol = findColumnIndexByHeader(headerRow, PERSONNEL_TYPE_HEADERS);
+  const dischargeDateCol = findColumnIndexByHeader(headerRow, DISCHARGE_DATE_HEADERS);
+  const enlistmentDateCol = findColumnIndexByHeader(headerRow, ENLISTMENT_DATE_HEADERS);
 
   let nameCol = findColumnIndexByHeader(headerRow, NAME_HEADERS);
   if (nameCol === -1) {
-    const recognizedCols = [emailCol, managerCol, technicianCol, supervisorCol, typeCol].filter(
-      (col) => col !== -1,
-    );
+    const recognizedCols = [
+      emailCol,
+      managerCol,
+      technicianCol,
+      supervisorCol,
+      typeCol,
+      dischargeDateCol,
+      enlistmentDateCol,
+    ].filter((col) => col !== -1);
     nameCol = inferUnlabeledNameColumn(sheet.values, headerRowIndex, headerRow, recognizedCols);
   }
   if (nameCol === -1) return [];
@@ -79,6 +92,8 @@ export function parsePersonnelSheet(sheet: RawSheet): Person[] {
 
     const email = emailCol !== -1 ? cellToTrimmedString(cells[emailCol]) : "";
     const personnelType = typeCol !== -1 ? cellToTrimmedString(cells[typeCol]) : "";
+    const dischargeDate = dischargeDateCol !== -1 ? parseLocalDate(cellToTrimmedString(cells[dischargeDateCol])) : null;
+    const enlistmentDate = enlistmentDateCol !== -1 ? parseLocalDate(cellToTrimmedString(cells[enlistmentDateCol])) : null;
 
     people.push({
       id: stableIdFromName(name),
@@ -88,6 +103,8 @@ export function parsePersonnelSheet(sheet: RawSheet): Person[] {
       isTechnician: technicianCol !== -1 && cellToBoolean(cells[technicianCol]),
       isSupervisor: supervisorCol !== -1 && cellToBoolean(cells[supervisorCol]),
       personnelType: personnelType || null,
+      dischargeDate,
+      enlistmentDate,
     });
   }
 

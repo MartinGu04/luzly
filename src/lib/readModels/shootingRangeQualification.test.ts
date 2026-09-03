@@ -483,6 +483,8 @@ describe("buildWeaponQualificationIndex -- activity-driven, deliberately NOT sco
       isTechnician: false,
       isSupervisor: false,
       personnelType: "קבע",
+      dischargeDate: null,
+      enlistmentDate: null,
       ...overrides,
     };
   }
