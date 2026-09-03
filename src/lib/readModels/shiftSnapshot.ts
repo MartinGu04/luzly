@@ -11,7 +11,7 @@ import {
   type ShiftSchedule,
 } from "@/lib/domain/shiftSchedule";
 import { buildShiftStaffingOverview } from "./managerEventProjections";
-import type { ManagerShiftOverviewEntry } from "./managerTypes";
+import type { ManagerShiftGroupPerson, ManagerShiftOverviewEntry } from "./managerTypes";
 import type { PermanentManagerHomeCurrentShift, PermanentManagerHomeShift } from "./permanentManagerHomeTypes";
 
 /**
@@ -71,9 +71,42 @@ function resolveShiftOverviewEntry(
   };
 }
 
+/**
+ * `entry`'s own roster (native day/night-specific assignments only, per
+ * `buildShiftStaffingOverview`'s presentation/data-model split) PLUS
+ * whoever holds a GENERIC (period-unspecified) role assignment for the
+ * same date -- e.g. a weekend cell that just says `אחמ"ש` -- read from
+ * that date's own native `${date}|unspecified` entry (`genericEntry`,
+ * already produced by `buildShiftStaffingOverview` and already looked up
+ * in `overviewByKey` exactly like every other entry -- no separate
+ * interpretation of "generic" here). That entry's roleCoverage/
+ * coverageStatus are irrelevant to a shift CARD (it's `not_evaluable`,
+ * since "unspecified" has no canonical window) -- only its roster is
+ * reused; `entry.coverageStatus`/`roleCoverage` (already correctly "full"
+ * from `analyzeUnitShiftCoverage` folding the generic Event into this
+ * period's coverage) are untouched.
+ *
+ * Unlike the calendar/Manager Coverage views, one `ShiftSnapshotCard`
+ * shows exactly ONE period at a time (previous/current/next are three
+ * separate cards) -- so folding the generic roster into this single
+ * period's list can never reproduce the "shown under both day and night"
+ * duplication those views had to guard against structurally. Dedupes by
+ * `personId` regardless, so a person who happens to ALSO hold an explicit
+ * period-specific assignment the same date is never listed twice.
+ */
+function mergeGenericRoster(
+  people: readonly ManagerShiftGroupPerson[],
+  genericPeople: readonly ManagerShiftGroupPerson[] | undefined,
+): ManagerShiftGroupPerson[] {
+  if (!genericPeople || genericPeople.length === 0) return [...people];
+  const existingIds = new Set(people.map((person) => person.personId));
+  return [...people, ...genericPeople.filter((person) => !existingIds.has(person.personId))];
+}
+
 function toShift(
   ref: AdjacentShiftPeriod,
   entry: ManagerShiftOverviewEntry,
+  genericEntry: ManagerShiftOverviewEntry | undefined,
   timing: Extract<AssignmentTiming, { status: "resolved" }>,
 ): PermanentManagerHomeShift {
   return {
@@ -81,8 +114,8 @@ function toShift(
     period: ref.period,
     startLocalTime: timing.startLocalTime,
     endLocalTime: timing.endLocalTime,
-    supervisors: entry.supervisors,
-    technicians: entry.technicians,
+    supervisors: mergeGenericRoster(entry.supervisors, genericEntry?.supervisors),
+    technicians: mergeGenericRoster(entry.technicians, genericEntry?.technicians),
     coverageStatus: entry.coverageStatus,
     missingIntervals: entry.missingIntervals,
     roleCoverage: entry.roleCoverage,
@@ -137,6 +170,10 @@ export function resolveShiftSnapshotTriad(
   const currentEntry = resolveShiftOverviewEntry(currentRef, overviewByKey, shiftSchedule);
   const nextEntry = resolveShiftOverviewEntry(nextRef, overviewByKey, shiftSchedule);
 
+  const previousGeneric = overviewByKey.get(`${previousRef.date}|unspecified`);
+  const currentGeneric = overviewByKey.get(`${currentRef.date}|unspecified`);
+  const nextGeneric = overviewByKey.get(`${nextRef.date}|unspecified`);
+
   const previousTiming = computeIntervalTiming(canonicalInterval(previousRef.period, shiftSchedule), previousRef.date, now);
   const currentTiming = computeIntervalTiming(canonicalInterval(currentRef.period, shiftSchedule), currentRef.date, now);
   const nextTiming = computeIntervalTiming(canonicalInterval(nextRef.period, shiftSchedule), nextRef.date, now);
@@ -147,13 +184,13 @@ export function resolveShiftSnapshotTriad(
   }
 
   const currentShift: PermanentManagerHomeCurrentShift = {
-    ...toShift(currentRef, currentEntry, currentTiming),
+    ...toShift(currentRef, currentEntry, currentGeneric, currentTiming),
     timing: currentTiming,
   };
 
   return {
-    previousShift: toShift(previousRef, previousEntry, previousTiming),
+    previousShift: toShift(previousRef, previousEntry, previousGeneric, previousTiming),
     currentShift,
-    nextShift: toShift(nextRef, nextEntry, nextTiming),
+    nextShift: toShift(nextRef, nextEntry, nextGeneric, nextTiming),
   };
 }

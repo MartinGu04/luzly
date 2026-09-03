@@ -139,3 +139,77 @@ describe("resolveShiftSnapshotTriad — staffing + coverage", () => {
     expect(triad.nextShift.coverageStatus).toBe("missing");
   });
 });
+
+describe('resolveShiftSnapshotTriad — a generic (period-unspecified) אחמ"ש assignment (reusing PR #123\'s buildShiftStaffingOverview fields, no separate interpretation)', () => {
+  function genericSupervisor(overrides: Partial<Event> = {}): Event {
+    return shiftEvent({
+      personId: "p_ilay",
+      personName: "עילאי שפירא",
+      title: 'אחמ"ש',
+      rawValue: 'אחמ"ש',
+      role: "supervisor",
+      period: "unspecified",
+      ...overrides,
+    });
+  }
+
+  it('renders the generic אחמ"ש as the current shift\'s supervisor, alongside the period-specific technician', () => {
+    const events = [
+      shiftEvent({ personId: "p_tech", personName: "איתי אולר", role: "technician", period: "day" }),
+      genericSupervisor(),
+    ];
+    const triad = resolveShiftSnapshotTriad(events, schedule, localNow());
+
+    expect(triad.currentShift.supervisors.map((p) => p.personName)).toEqual(["עילאי שפירא"]);
+    expect(triad.currentShift.technicians.map((p) => p.personName)).toEqual(["איתי אולר"]);
+    // Coverage was already correct before this change (PR #123) -- unaffected.
+    expect(triad.currentShift.coverageStatus).toBe("full");
+    expect(triad.currentShift.roleCoverage.supervisor.status).toBe("full");
+  });
+
+  it("the SAME generic assignment also covers the adjacent shift on the same date (previous/current are the day+night of one date)", () => {
+    // localNow() defaults to 2026-08-12 day; previousShift is 2026-08-11 night --
+    // a DIFFERENT date, so it must NOT see this date's generic assignment.
+    // Use a midday `now` where current=day and next=night of the SAME date instead.
+    const events = [genericSupervisor({ date: "2026-08-12" })];
+    const triad = resolveShiftSnapshotTriad(events, schedule, localNow({ minuteOfDay: 8 * 60 }));
+
+    expect(triad.currentShift.date).toBe("2026-08-12");
+    expect(triad.currentShift.period).toBe("day");
+    expect(triad.nextShift.date).toBe("2026-08-12");
+    expect(triad.nextShift.period).toBe("night");
+    expect(triad.currentShift.supervisors.map((p) => p.personName)).toEqual(["עילאי שפירא"]);
+    expect(triad.nextShift.supervisors.map((p) => p.personName)).toEqual(["עילאי שפירא"]);
+    // A different date's shift (previous, 2026-08-11) never sees it.
+    expect(triad.previousShift.date).toBe("2026-08-11");
+    expect(triad.previousShift.supervisors).toEqual([]);
+  });
+
+  it("never converts the generic assignment into a day/night Event -- the underlying source Event array is never mutated, and the entry's own coverage math still treats it as period-unspecified", () => {
+    const generic = genericSupervisor();
+    const events = [shiftEvent({ personId: "p_tech", role: "technician", period: "day" }), generic];
+    const eventsBefore = [...events];
+    resolveShiftSnapshotTriad(events, schedule, localNow());
+    expect(events).toEqual(eventsBefore);
+    expect(events).toHaveLength(2); // never grew a synthetic day/night clone
+  });
+
+  it("does not duplicate the person when they ALSO hold an explicit period-specific assignment the same date", () => {
+    const events = [
+      shiftEvent({ personId: "p_ilay", personName: "עילאי שפירא", role: "supervisor", period: "day" }),
+      genericSupervisor({ personId: "p_ilay", personName: "עילאי שפירא" }),
+    ];
+    const triad = resolveShiftSnapshotTriad(events, schedule, localNow());
+
+    expect(triad.currentShift.supervisors).toHaveLength(1);
+    expect(triad.currentShift.supervisors[0].personId).toBe("p_ilay");
+  });
+
+  it("an explicit day-specific אחמ״ש is unaffected -- still resolves normally with no generic entry involved", () => {
+    const events = [shiftEvent({ personId: "p_sup", personName: 'אחמ"ש יום', role: "supervisor", period: "day" })];
+    const triad = resolveShiftSnapshotTriad(events, schedule, localNow());
+
+    expect(triad.currentShift.supervisors.map((p) => p.personName)).toEqual(['אחמ"ש יום']);
+    expect(triad.currentShift.coverageStatus).toBe("missing"); // technician still missing, unaffected
+  });
+});
