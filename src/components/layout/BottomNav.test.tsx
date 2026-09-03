@@ -150,6 +150,16 @@ describe("BottomNav — עוד (More) sheet", () => {
     expect(screen.queryByRole("link", { name: "מרכז התראות" })).toBeNull();
   });
 
+  it('contains "עד מתי???" for every viewer, manager or not -- same non-manager-only visibility as the desktop nav item', () => {
+    for (const isManager of [false, true]) {
+      const { unmount } = render(<BottomNav isManager={isManager} />);
+      fireEvent.click(screen.getByRole("button", { name: "עוד" }));
+
+      expect(screen.getByRole("link", { name: "עד מתי???" })).toHaveAttribute("href", "/countdown");
+      unmount();
+    }
+  });
+
   it("a manager sees אזור מנהל and מרכז התראות inside the sheet too", () => {
     render(<BottomNav isManager={true} />);
     fireEvent.click(screen.getByRole("button", { name: "עוד" }));
