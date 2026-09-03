@@ -3,7 +3,7 @@ import type { Person } from "@/lib/domain/types";
 import { jerusalemLocalTimeToInstant } from "@/lib/time/jerusalemClock";
 
 function person(overrides: Partial<Person> & Pick<Person, "id" | "name">): Person {
-  return { email: null, isManager: false, isTechnician: false, isSupervisor: false, personnelType: null, ...overrides };
+  return { email: null, isManager: false, isTechnician: false, isSupervisor: false, personnelType: null, dischargeDate: null, enlistmentDate: null, ...overrides };
 }
 
 const insertManagerScheduledBroadcastIfAbsent = vi.fn();

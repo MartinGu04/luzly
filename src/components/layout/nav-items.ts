@@ -1,4 +1,14 @@
-import { BellRing, CalendarDays, LayoutDashboard, Scale, ShieldCheck, Target, UserCog, type LucideIcon } from "lucide-react";
+import {
+  BellRing,
+  CalendarDays,
+  Hourglass,
+  LayoutDashboard,
+  Scale,
+  ShieldCheck,
+  Target,
+  UserCog,
+  type LucideIcon,
+} from "lucide-react";
 
 export interface NavItem {
   label: string;
@@ -69,6 +79,7 @@ export const navItems: NavItem[] = [
   { label: "תורנויות", shortLabel: "תורנויות", href: "/duties", enabled: true, icon: ShieldCheck, inBottomNav: true },
   { label: "טבלת צדק", shortLabel: "צדק", href: "/fairness", enabled: true, icon: Scale, inBottomNav: true },
   { label: "מטווחים", shortLabel: "מטווחים", href: "/shooting-ranges", enabled: true, icon: Target, inBottomNav: false },
+  { label: "עד מתי???", shortLabel: "עד מתי", href: "/countdown", enabled: true, icon: Hourglass, inBottomNav: false },
   { label: "אזור מנהל", shortLabel: "מנהל", href: "/manager", enabled: true, icon: UserCog, inBottomNav: false, managerOnly: true },
   { label: "מרכז התראות", shortLabel: "התראות", href: "/notifications", enabled: true, icon: BellRing, inBottomNav: false, managerOnly: true },
 ];

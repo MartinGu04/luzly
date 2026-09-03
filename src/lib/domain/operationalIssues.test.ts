@@ -147,6 +147,8 @@ function makePerson(overrides: Partial<Person> = {}): Person {
     isTechnician: true,
     isSupervisor: false,
     personnelType: null,
+    dischargeDate: null,
+    enlistmentDate: null,
     ...overrides,
   };
 }

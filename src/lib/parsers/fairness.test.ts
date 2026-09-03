@@ -12,6 +12,8 @@ function syntheticPerson(name: string, overrides: Partial<Person> = {}): Person 
     isTechnician: false,
     isSupervisor: false,
     personnelType: null,
+    dischargeDate: null,
+    enlistmentDate: null,
     ...overrides,
   };
 }

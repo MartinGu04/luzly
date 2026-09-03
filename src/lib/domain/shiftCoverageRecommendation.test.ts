@@ -39,6 +39,8 @@ function person(overrides: Partial<Person> = {}): Person {
     isTechnician: false,
     isSupervisor: false,
     personnelType: "חובה",
+    dischargeDate: null,
+    enlistmentDate: null,
     ...overrides,
   };
 }
@@ -835,6 +837,8 @@ describe("buildShiftCoverageRecommendation — PR #39 participation eligibility"
         id: "p_perm_dual",
         name: "קבוע כפול",
         personnelType: "קבע",
+        dischargeDate: null,
+        enlistmentDate: null,
         isTechnician: true,
         isSupervisor: true,
       });
@@ -892,6 +896,8 @@ describe("buildShiftCoverageRecommendation — PR #39 participation eligibility"
         id: "p_reserve",
         name: "מילואימניק",
         personnelType: "מילואים",
+        dischargeDate: null,
+        enlistmentDate: null,
         isTechnician: role === "technician",
         isSupervisor: role === "supervisor",
       });
@@ -1048,6 +1054,8 @@ describe("buildShiftCoverageRecommendation — PR #39 participation eligibility"
         id: "p_reserve_dual",
         name: "מילואים כפול",
         personnelType: "מילואים",
+        dischargeDate: null,
+        enlistmentDate: null,
         isTechnician: true,
         isSupervisor: true,
       });

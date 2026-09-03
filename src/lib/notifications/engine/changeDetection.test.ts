@@ -7,7 +7,7 @@ import type { LocalNow } from "@/lib/domain/localNow";
 import type { RecipientResolution } from "./recipients";
 
 function person(overrides: Partial<Person> & Pick<Person, "id" | "name">): Person {
-  return { email: null, isManager: false, isTechnician: false, isSupervisor: false, personnelType: null, ...overrides };
+  return { email: null, isManager: false, isTechnician: false, isSupervisor: false, personnelType: null, dischargeDate: null, enlistmentDate: null, ...overrides };
 }
 
 function event(overrides: Partial<Event> & Pick<Event, "personId" | "date" | "category">): Event {

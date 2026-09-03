@@ -25,6 +25,8 @@ function manager(overrides: Partial<Person> = {}): Person {
     isTechnician: false,
     isSupervisor: false,
     personnelType: "קבע",
+    dischargeDate: null,
+    enlistmentDate: null,
     ...overrides,
   };
 }
@@ -38,6 +40,8 @@ function person(id: string, name: string, overrides: Partial<Person> = {}): Pers
     isTechnician: true,
     isSupervisor: false,
     personnelType: "קבע",
+    dischargeDate: null,
+    enlistmentDate: null,
     ...overrides,
   };
 }

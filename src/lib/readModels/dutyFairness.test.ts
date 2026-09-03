@@ -23,7 +23,7 @@ function fairnessSheet(name: string, rows: string[][]): RawSheet {
 }
 
 function person(overrides: Partial<Person> = {}): Person {
-  return { id: "p_tech", name: "טל טכנאי", email: null, isManager: false, isTechnician: true, isSupervisor: false, personnelType: null, ...overrides };
+  return { id: "p_tech", name: "טל טכנאי", email: null, isManager: false, isTechnician: true, isSupervisor: false, personnelType: null, dischargeDate: null, enlistmentDate: null, ...overrides };
 }
 
 function okContext(

@@ -88,6 +88,78 @@ describe("parsePersonnelSheet", () => {
   });
 });
 
+describe("parsePersonnelSheet — discharge/enlistment dates", () => {
+  it("parses discharge and enlistment date columns into stable YYYY-MM-DD", () => {
+    const sheet: RawSheet = {
+      name: 'כ"א',
+      values: [
+        ["שם", "תאריך גיוס", "תאריך שחרור"],
+        ["דני בדיקה", "01/02/2024", "24/01/2027"],
+      ],
+    };
+
+    const [person] = parsePersonnelSheet(sheet);
+
+    expect(person.enlistmentDate).toBe("2024-02-01");
+    expect(person.dischargeDate).toBe("2027-01-24");
+  });
+
+  it("also recognizes 'צפי שחרור' as the discharge date header", () => {
+    const sheet: RawSheet = {
+      name: 'כ"א',
+      values: [
+        ["שם", "צפי שחרור"],
+        ["דני בדיקה", "2027-01-24"],
+      ],
+    };
+
+    const [person] = parsePersonnelSheet(sheet);
+
+    expect(person.dischargeDate).toBe("2027-01-24");
+  });
+
+  it("defaults to null when the columns are absent", () => {
+    const sheet: RawSheet = { name: 'כ"א', values: [["שם"], ["דני בדיקה"]] };
+
+    const [person] = parsePersonnelSheet(sheet);
+
+    expect(person.dischargeDate).toBeNull();
+    expect(person.enlistmentDate).toBeNull();
+  });
+
+  it("defaults to null for a blank or unparsable cell rather than throwing", () => {
+    const sheet: RawSheet = {
+      name: 'כ"א',
+      values: [
+        ["שם", "תאריך שחרור"],
+        ["דני בדיקה", ""],
+        ["נועה דוגמה", "not a date"],
+      ],
+    };
+
+    const people = parsePersonnelSheet(sheet);
+
+    expect(people[0].dischargeDate).toBeNull();
+    expect(people[1].dischargeDate).toBeNull();
+  });
+
+  it("works when the date columns are reordered alongside the rest", () => {
+    const sheet: RawSheet = {
+      name: 'כ"א',
+      values: [
+        ["תאריך שחרור", "מייל", "שם", "תאריך גיוס"],
+        ["24/01/2027", "dani@example.com", "דני בדיקה", "01/02/2024"],
+      ],
+    };
+
+    const [person] = parsePersonnelSheet(sheet);
+
+    expect(person.name).toBe("דני בדיקה");
+    expect(person.dischargeDate).toBe("2027-01-24");
+    expect(person.enlistmentDate).toBe("2024-02-01");
+  });
+});
+
 // Regression: the real כ"א sheet currently has no header at all above the
 // name column — only the other labels (מייל/מנהל/טכנאי/אחמ"ש/סוג כ"א) are
 // present, and the name column's header cell is blank.

@@ -44,7 +44,7 @@ vi.mock("@/lib/notifications/engine/recipients", async (importOriginal) => {
 const { fetchEmailToAvatarUrl, resolveAvatarUrlsByPersonId } = await import("./personAvatarLookup");
 
 function person(overrides: Partial<Person> & Pick<Person, "id" | "name">): Person {
-  return { email: null, isManager: false, isTechnician: false, isSupervisor: false, personnelType: null, ...overrides };
+  return { email: null, isManager: false, isTechnician: false, isSupervisor: false, personnelType: null, dischargeDate: null, enlistmentDate: null, ...overrides };
 }
 
 beforeEach(() => {

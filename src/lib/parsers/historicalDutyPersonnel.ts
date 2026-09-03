@@ -60,6 +60,8 @@ export function resolveHistoricalDutyPersonnel(
       isTechnician: false,
       isSupervisor: false,
       personnelType: null,
+      dischargeDate: null,
+      enlistmentDate: null,
     });
   }
 
