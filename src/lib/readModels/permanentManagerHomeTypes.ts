@@ -21,6 +21,25 @@ export interface PermanentManagerHomeShift {
   endLocalTime: string;
   supervisors: ManagerShiftGroupPerson[];
   technicians: ManagerShiftGroupPerson[];
+  /**
+   * People with a GENERIC (period-unspecified) role assignment for this
+   * shift's date -- e.g. a weekend cell that just says `אחמ"ש`, with no
+   * יום/לילה split -- kept SEPARATE from `supervisors`/`technicians`
+   * (which stay strictly period-native) rather than merged in, so
+   * `ShiftSnapshotCard` can render them under their own clearly-labeled
+   * line. That distinction matters here specifically because the SAME
+   * generic assignment can legitimately appear on two ADJACENT cards in
+   * the previous/current/next triad (its date's day shift and night
+   * shift can each be one of the three) -- rendering it as a plain,
+   * unlabeled `supervisors`/`technicians` entry on both would look like
+   * two independent, coincidentally-identical assignments rather than the
+   * one shared/generic assignment it actually is. Excludes anyone who
+   * ALSO already appears in `supervisors`/`technicians` for this SAME
+   * shift (see `shiftSnapshot.ts`), so nobody is ever listed twice on one
+   * card.
+   */
+  genericSupervisors: ManagerShiftGroupPerson[];
+  genericTechnicians: ManagerShiftGroupPerson[];
   coverageStatus: CoverageStatus;
   missingIntervals: MinuteInterval[];
   roleCoverage: { technician: ManagerRoleCoverageView; supervisor: ManagerRoleCoverageView };

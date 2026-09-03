@@ -17,6 +17,8 @@ function shift(overrides: Partial<ShiftSnapshotTriad["previousShift"]> = {}): Sh
     endLocalTime: "19:30",
     supervisors: [],
     technicians: [],
+    genericSupervisors: [],
+    genericTechnicians: [],
     coverageStatus: "full",
     missingIntervals: [],
     roleCoverage: {
@@ -129,14 +131,94 @@ describe('ManagerShiftSnapshotSection — regression: a generic (period-unspecif
     // Scope to the "עכשיו" (current) card specifically -- the hero-variant
     // Panel is the only one with `bg-surface-2`. The SAME generic
     // assignment also, correctly, covers "הבאה" (next: tonight, same
-    // date) -- see shiftSnapshot.test.ts for that behavior on its own; this
-    // test only asserts the reported card (current) is fixed.
+    // date) -- see the dedicated scenario test below for that.
     const currentCard = screen.getByText("עכשיו").closest(".bg-surface-2") as HTMLElement;
     expect(currentCard).toBeTruthy();
     expect(within(currentCard).getByText("איתי אולר")).toBeInTheDocument();
     expect(within(currentCard).getByText("עילאי שפירא")).toBeInTheDocument();
-    expect(within(currentCard).getByText('אחמ״ש')).toBeInTheDocument();
+    // Under the distinct "(כל היום)" label, not the plain "אחמ״ש" one --
+    // the plain label is only ever rendered for an explicit, period-specific
+    // assignment (there is none here).
+    expect(within(currentCard).getByText(/אחמ״ש \(כל היום\)/)).toBeInTheDocument();
+    expect(within(currentCard).queryByText("אחמ״ש")).toBeNull();
     // Never a missing-supervisor message on the current shift.
     expect(within(currentCard).queryByText(/חסר אחמ/)).toBeNull();
+  });
+
+  it("scenario: the same date's day shift and night shift both land in the previous/current/next triad, with one generic אחמ״ש for the date -- both cards satisfy coverage, and the person shows on both, but ALWAYS under the distinct generic label, never as if they held two separate period-specific assignments", async () => {
+    const { buildShiftSchedule } = await import("@/lib/domain/shiftSchedule");
+    const { resolveShiftSnapshotTriad } = await import("@/lib/readModels/shiftSnapshot");
+    const schedule = buildShiftSchedule("07:30");
+
+    function event(overrides: Partial<import("@/lib/domain/event").Event>): import("@/lib/domain/event").Event {
+      return {
+        personId: "p_default",
+        personName: "ברירת מחדל",
+        date: "2026-08-12",
+        title: "",
+        rawValue: "",
+        category: "shift",
+        certainty: "confirmed",
+        role: null,
+        period: "unspecified",
+        sourceSheet: "משמרות + תורנויות",
+        sourceCell: "C2",
+        slot: null,
+        shadow: false,
+        startTimeOverride: null,
+        endTimeOverride: null,
+        changeNote: null,
+        dutyFamily: null,
+        absenceKind: null,
+        ...overrides,
+      };
+    }
+
+    const events = [
+      event({ personId: "p_tech_day", personName: "טכנאי יום", role: "technician", period: "day" }),
+      event({ personId: "p_tech_night", personName: "טכנאי לילה", role: "technician", period: "night" }),
+      event({ personId: "p_ilay", personName: "עילאי שפירא", role: "supervisor", period: "unspecified" }),
+    ];
+
+    // Midday `now` -> current = day (2026-08-12), next = night (2026-08-12):
+    // both periods of the SAME date, on two ADJACENT cards.
+    const snapshot = resolveShiftSnapshotTriad(events, schedule, { date: "2026-08-12", minuteOfDay: 8 * 60 });
+
+    render(
+      <ManagerShiftSnapshotSection snapshot={snapshot} todayDate="2026-08-12" fetchedAt="2026-08-12T08:00:00.000Z" />,
+    );
+
+    const currentCard = screen.getByText("עכשיו").closest(".bg-surface-2") as HTMLElement;
+    const nextCard = screen.getByText("הבאה").closest(".rounded-xl") as HTMLElement;
+    expect(currentCard).toBeTruthy();
+    expect(nextCard).toBeTruthy();
+    expect(currentCard).not.toBe(nextCard);
+
+    // Both the current (day) and next (night) shifts of this date are
+    // fully covered by the generic assignment -- the previous shift
+    // (last night, a genuinely different, unstaffed date) legitimately
+    // still shows "חסר אחמ"ש" and is deliberately out of scope here.
+    expect(within(currentCard).queryByText(/חסר אחמ/)).toBeNull();
+    expect(within(nextCard).queryByText(/חסר אחמ/)).toBeNull();
+
+    // The generic supervisor appears on BOTH cards (operationally correct
+    // and useful -- they genuinely do cover both the day and the night of
+    // this date) -- but on EACH card, only under the distinct "(כל היום)"
+    // label, never the plain "אחמ״ש" label a real period-specific
+    // assignment would use. That distinction is exactly what keeps this
+    // from reading as two coincidentally-identical, independent
+    // assignments rather than the one shared/generic assignment it is.
+    for (const card of [currentCard, nextCard]) {
+      expect(within(card).getByText("עילאי שפירא")).toBeInTheDocument();
+      expect(within(card).getByText(/אחמ״ש \(כל היום\)/)).toBeInTheDocument();
+      expect(within(card).queryByText("אחמ״ש")).toBeNull();
+    }
+
+    // Each card's own real technician is unaffected and stays exactly
+    // where it belongs -- never duplicated onto the other card.
+    expect(within(currentCard).getByText("טכנאי יום")).toBeInTheDocument();
+    expect(within(currentCard).queryByText("טכנאי לילה")).toBeNull();
+    expect(within(nextCard).getByText("טכנאי לילה")).toBeInTheDocument();
+    expect(within(nextCard).queryByText("טכנאי יום")).toBeNull();
   });
 });

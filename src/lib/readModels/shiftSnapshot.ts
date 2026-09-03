@@ -72,35 +72,37 @@ function resolveShiftOverviewEntry(
 }
 
 /**
- * `entry`'s own roster (native day/night-specific assignments only, per
- * `buildShiftStaffingOverview`'s presentation/data-model split) PLUS
- * whoever holds a GENERIC (period-unspecified) role assignment for the
- * same date -- e.g. a weekend cell that just says `אחמ"ש` -- read from
- * that date's own native `${date}|unspecified` entry (`genericEntry`,
+ * Whoever holds a GENERIC (period-unspecified) role assignment for
+ * `entry`'s date -- e.g. a weekend cell that just says `אחמ"ש` -- read
+ * from that date's own native `${date}|unspecified` entry (`genericEntry`,
  * already produced by `buildShiftStaffingOverview` and already looked up
  * in `overviewByKey` exactly like every other entry -- no separate
- * interpretation of "generic" here). That entry's roleCoverage/
- * coverageStatus are irrelevant to a shift CARD (it's `not_evaluable`,
- * since "unspecified" has no canonical window) -- only its roster is
- * reused; `entry.coverageStatus`/`roleCoverage` (already correctly "full"
- * from `analyzeUnitShiftCoverage` folding the generic Event into this
- * period's coverage) are untouched.
+ * interpretation of "generic" here), MINUS anyone already present in
+ * `entry`'s own native roster for this exact period (so nobody who
+ * already has an explicit period-specific assignment is ever listed
+ * twice on the same card).
  *
- * Unlike the calendar/Manager Coverage views, one `ShiftSnapshotCard`
- * shows exactly ONE period at a time (previous/current/next are three
- * separate cards) -- so folding the generic roster into this single
- * period's list can never reproduce the "shown under both day and night"
- * duplication those views had to guard against structurally. Dedupes by
- * `personId` regardless, so a person who happens to ALSO hold an explicit
- * period-specific assignment the same date is never listed twice.
+ * Deliberately kept OUT of `entry.supervisors`/`technicians` -- i.e.
+ * never merged into the plain roster -- and returned as its own list
+ * instead (see `PermanentManagerHomeShift.genericSupervisors`/
+ * `genericTechnicians`'s own doc comment for why): the previous/current/
+ * next triad can legitimately put the SAME date's day shift and night
+ * shift on two adjacent cards (e.g. current=day, next=night of the same
+ * date), and a generic assignment covers both -- so the same person can
+ * appear on both cards. Presenting that as an ordinary, unlabeled
+ * `supervisors`/`technicians` entry on each would look like two
+ * independent assignments rather than the one shared/generic assignment
+ * it actually is; `ShiftSnapshotCard` renders this list under its own
+ * distinct "(כל היום)" label so it's never confused with a real
+ * period-specific roster member.
  */
-function mergeGenericRoster(
-  people: readonly ManagerShiftGroupPerson[],
+function genericRosterFor(
+  entryPeople: readonly ManagerShiftGroupPerson[],
   genericPeople: readonly ManagerShiftGroupPerson[] | undefined,
 ): ManagerShiftGroupPerson[] {
-  if (!genericPeople || genericPeople.length === 0) return [...people];
-  const existingIds = new Set(people.map((person) => person.personId));
-  return [...people, ...genericPeople.filter((person) => !existingIds.has(person.personId))];
+  if (!genericPeople || genericPeople.length === 0) return [];
+  const existingIds = new Set(entryPeople.map((person) => person.personId));
+  return genericPeople.filter((person) => !existingIds.has(person.personId));
 }
 
 function toShift(
@@ -114,8 +116,10 @@ function toShift(
     period: ref.period,
     startLocalTime: timing.startLocalTime,
     endLocalTime: timing.endLocalTime,
-    supervisors: mergeGenericRoster(entry.supervisors, genericEntry?.supervisors),
-    technicians: mergeGenericRoster(entry.technicians, genericEntry?.technicians),
+    supervisors: entry.supervisors,
+    technicians: entry.technicians,
+    genericSupervisors: genericRosterFor(entry.supervisors, genericEntry?.supervisors),
+    genericTechnicians: genericRosterFor(entry.technicians, genericEntry?.technicians),
     coverageStatus: entry.coverageStatus,
     missingIntervals: entry.missingIntervals,
     roleCoverage: entry.roleCoverage,
