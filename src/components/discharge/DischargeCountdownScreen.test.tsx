@@ -20,13 +20,55 @@ describe("DischargeCountdownScreen — counting down", () => {
       />,
     );
 
-    const before = screen.getByText(/^\d{2} : \d{2} : \d{2}$/).textContent;
+    const before = screen.getByTestId("discharge-clock").textContent;
     act(() => {
       vi.advanceTimersByTime(1000);
     });
-    const after = screen.getByText(/^\d{2} : \d{2} : \d{2}$/).textContent;
+    const after = screen.getByTestId("discharge-clock").textContent;
 
     expect(after).not.toBe(before);
+  });
+
+  it("renders the clock explicitly LTR so RTL page layout can never reorder H : M : S", () => {
+    vi.useFakeTimers();
+    // 15:34:32 remaining until discharge.
+    vi.setSystemTime(
+      new Date(Date.parse("2027-01-24T00:00:00.000Z") - (15 * 60 * 60 * 1000 + 34 * 60 * 1000 + 32 * 1000)),
+    );
+    render(
+      <DischargeCountdownScreen
+        dischargeDateLabel="24.01.2027"
+        dischargeInstantIso="2027-01-24T00:00:00.000Z"
+        dischargeDayEndInstantIso="2027-01-24T23:59:59.999Z"
+        enlistmentInstantIso={null}
+      />,
+    );
+
+    const clock = screen.getByTestId("discharge-clock");
+    expect(clock).toHaveAttribute("dir", "ltr");
+    expect(clock.style.unicodeBidi).toBe("isolate");
+    // The DOM order (which the grid then lays out left-to-right under
+    // dir="ltr") must itself be H, M, S -- never reversed to compensate
+    // for the surrounding RTL page.
+    expect(clock.textContent?.replace(/\s+/g, "")).toBe("15:34:32שעותדקותשניות");
+  });
+
+  it("labels the three time groups שעות / דקות / שניות, aligned under the live clock", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-03T00:00:00.000Z"));
+    render(
+      <DischargeCountdownScreen
+        dischargeDateLabel="24.01.2027"
+        dischargeInstantIso="2027-01-24T00:00:00.000Z"
+        dischargeDayEndInstantIso="2027-01-24T23:59:59.999Z"
+        enlistmentInstantIso={null}
+      />,
+    );
+
+    const clock = screen.getByTestId("discharge-clock");
+    expect(clock).toHaveTextContent("שעות");
+    expect(clock).toHaveTextContent("דקות");
+    expect(clock).toHaveTextContent("שניות");
   });
 
   it("shows the huge title, subtitle, day count, and formatted date label", () => {

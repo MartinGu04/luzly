@@ -129,11 +129,6 @@ export function resolveDischargeCountdownState(
   };
 }
 
-/** "08 : 17 : 42" -- zero-padded, spaced colons, the exact form the spec calls for (deliberately not a bare "08:17:42" time-of-day look). */
-export function formatDischargeClock(parts: DischargeClockParts): string {
-  return `${pad2(parts.hours)} : ${pad2(parts.minutes)} : ${pad2(parts.seconds)}`;
-}
-
 export interface DischargeMilestoneCopy {
   /** null for "none" -- the default state gets no badge at all, only the plain countdown. */
   badge: string | null;

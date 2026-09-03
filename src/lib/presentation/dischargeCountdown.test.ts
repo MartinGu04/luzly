@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  formatDischargeClock,
   formatDischargeDateLabel,
   resolveDischargeCountdownState,
   resolveDischargeMilestoneCopy,
@@ -17,16 +16,6 @@ describe("formatDischargeDateLabel", () => {
   it("returns null for an unparseable date", () => {
     expect(formatDischargeDateLabel("not-a-date")).toBeNull();
     expect(formatDischargeDateLabel("2027-13-40")).toBeNull();
-  });
-});
-
-describe("formatDischargeClock", () => {
-  it("zero-pads and separates with spaced colons", () => {
-    expect(formatDischargeClock({ hours: 8, minutes: 17, seconds: 42 })).toBe("08 : 17 : 42");
-  });
-
-  it("pads single-digit components", () => {
-    expect(formatDischargeClock({ hours: 0, minutes: 0, seconds: 5 })).toBe("00 : 00 : 05");
   });
 });
 

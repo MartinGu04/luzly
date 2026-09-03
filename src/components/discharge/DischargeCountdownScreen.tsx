@@ -1,9 +1,9 @@
 "use client";
 
 import {
-  formatDischargeClock,
   resolveDischargeCountdownState,
   resolveDischargeMilestoneCopy,
+  type DischargeClockParts,
   type DischargeCountdownState,
 } from "@/lib/presentation/dischargeCountdown";
 import { useLiveClock } from "./useLiveClock";
@@ -108,9 +108,7 @@ function renderMainState(state: DischargeCountdownState | null) {
       <>
         <span className="text-7xl font-black tabular-nums leading-none sm:text-9xl">--</span>
         <span className="text-2xl font-semibold text-white/80 sm:text-4xl">ימים</span>
-        <span className="mt-2 font-mono text-3xl font-bold tabular-nums tracking-widest text-white/50 sm:text-5xl">
-          -- : -- : --
-        </span>
+        <ClockGrid clock={null} />
       </>
     );
   }
@@ -144,9 +142,57 @@ function renderMainState(state: DischargeCountdownState | null) {
         {state.daysRemaining}
       </span>
       <span className="text-2xl font-semibold text-white/80 sm:text-4xl">ימים</span>
-      <span className="mt-2 font-mono text-3xl font-bold tabular-nums tracking-widest text-white/90 sm:text-5xl">
-        {formatDischargeClock(state.clock)}
-      </span>
+      <ClockGrid clock={state.clock} />
     </>
+  );
+}
+
+/**
+ * The `HH : MM : SS` row, plus a small "שעות / דקות / שניות" label under each
+ * group. Forced `dir="ltr"` (the HTML UA stylesheet applies `unicode-bidi:
+ * isolate` to any element with an explicit `dir`, and the inline style below
+ * makes that explicit rather than relying on it implicitly) so the digit
+ * groups and separators can never be bidi-reordered by the page's own
+ * `dir="rtl"` -- without this, "15 : 34 : 32" could visually read out of
+ * order inside an RTL context. Rendered as a CSS grid (not three
+ * independently-flexed columns) so the label row's three words line up
+ * under their matching number group by construction, not by manually
+ * matched widths -- the colon columns simply get no label underneath them.
+ * `clock: null` renders the same layout with "--" placeholders, so the
+ * pre-mount placeholder never lays out differently from the live clock.
+ */
+function ClockGrid({ clock }: { clock: DischargeClockParts | null }) {
+  const pad2 = (n: number) => String(n).padStart(2, "0");
+  const hours = clock ? pad2(clock.hours) : "--";
+  const minutes = clock ? pad2(clock.minutes) : "--";
+  const seconds = clock ? pad2(clock.seconds) : "--";
+  const numberClassName = clock
+    ? "font-mono text-3xl font-bold tabular-nums tracking-widest text-white/90 sm:text-5xl"
+    : "font-mono text-3xl font-bold tabular-nums tracking-widest text-white/50 sm:text-5xl";
+  const labelClassName = "text-center text-[10px] font-medium text-white/40 sm:text-xs";
+
+  return (
+    <div
+      dir="ltr"
+      data-testid="discharge-clock"
+      style={{ unicodeBidi: "isolate" }}
+      className="mt-2 grid grid-cols-[auto_auto_auto_auto_auto] items-end justify-center gap-x-1.5 gap-y-1 sm:gap-x-2.5"
+    >
+      <span className={numberClassName}>{hours}</span>
+      <span aria-hidden className={numberClassName}>
+        :
+      </span>
+      <span className={numberClassName}>{minutes}</span>
+      <span aria-hidden className={numberClassName}>
+        :
+      </span>
+      <span className={numberClassName}>{seconds}</span>
+
+      <span className={labelClassName}>שעות</span>
+      <span aria-hidden />
+      <span className={labelClassName}>דקות</span>
+      <span aria-hidden />
+      <span className={labelClassName}>שניות</span>
+    </div>
   );
 }

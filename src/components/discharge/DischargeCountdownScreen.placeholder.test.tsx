@@ -25,7 +25,9 @@ describe("DischargeCountdownScreen — before the live clock has ticked", () => 
       />,
     );
 
-    expect(screen.getByText("--")).toBeInTheDocument();
-    expect(screen.getByText("-- : -- : --")).toBeInTheDocument();
+    expect(screen.getAllByText("--").length).toBeGreaterThan(0);
+    const clock = screen.getByTestId("discharge-clock");
+    expect(clock).toHaveAttribute("dir", "ltr");
+    expect(clock.textContent?.replace(/\s+/g, "")).toBe("--:--:--שעותדקותשניות");
   });
 });
