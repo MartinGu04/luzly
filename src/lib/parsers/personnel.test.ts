@@ -118,6 +118,22 @@ describe("parsePersonnelSheet — discharge/enlistment dates", () => {
     expect(person.dischargeDate).toBe("2027-01-24");
   });
 
+  // Regression: the real כ"א sheet's discharge-date column is headed
+  // "תאריך סיום סדיר" (end of regular service), not "תאריך שחרור"/"צפי שחרור".
+  it("also recognizes 'תאריך סיום סדיר' as the discharge date header (the real workbook's actual header)", () => {
+    const sheet: RawSheet = {
+      name: 'כ"א',
+      values: [
+        ["שם", "תאריך סיום סדיר"],
+        ["דני בדיקה", "24/01/2027"],
+      ],
+    };
+
+    const [person] = parsePersonnelSheet(sheet);
+
+    expect(person.dischargeDate).toBe("2027-01-24");
+  });
+
   it("defaults to null when the columns are absent", () => {
     const sheet: RawSheet = { name: 'כ"א', values: [["שם"], ["דני בדיקה"]] };
 

@@ -9,7 +9,7 @@ const MANAGER_HEADERS = ["מנהל"];
 const TECHNICIAN_HEADERS = ["טכנאי"];
 const SUPERVISOR_HEADERS = ['אחמ"ש'];
 const PERSONNEL_TYPE_HEADERS = ['סוג כ"א'];
-const DISCHARGE_DATE_HEADERS = ["תאריך שחרור", "צפי שחרור"];
+const DISCHARGE_DATE_HEADERS = ["תאריך שחרור", "צפי שחרור", "תאריך סיום סדיר"];
 const ENLISTMENT_DATE_HEADERS = ["תאריך גיוס"];
 
 /** Any one of these being present is enough to recognize the personnel header row. */
