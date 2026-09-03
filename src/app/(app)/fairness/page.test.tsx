@@ -33,7 +33,39 @@ async function renderFairnessPage(params: Record<string, string> = {}) {
   return render(element as React.ReactElement);
 }
 
+/**
+ * The Shift-mode view (`renderShiftFairnessView`, `page.tsx`) calls
+ * `getJerusalemLocalNow()` with NO argument -- i.e. the REAL system clock
+ * -- to decide `isOnCurrentMonth` (whether `model.month`, the loader's
+ * OWN resolved month, is the actual real-world current Asia/Jerusalem
+ * month). That's correct production behavior: it's what lets the page
+ * tell a genuinely-current month apart from a merely-not-yet-closed
+ * future one (`periodStatus: "current"` alone can't, see the "FUTURE
+ * month" test below). But every fixture in this file (`shiftModel`'s
+ * `month: "2026-08"`/`fetchedAt: "2026-08-15T10:00:00.000Z"`, `dutyModel`
+ * likewise) was written assuming "now" IS mid-August 2026 -- so this
+ * suite must freeze the real clock there too, or `isOnCurrentMonth`
+ * silently flips to `false` the moment the real calendar moves past
+ * August 2026, and every test whose behavior depends on it (the "עד
+ * היום" label, and the SAME `isOnCurrentMonth` signal `buildTargetPeriodLabel`/
+ * `buildShiftStatusExplanationLabel` in `fairnessCards.ts` use for their
+ * own "עד היום"/"בתקופה זו" wording) starts exercising the wrong branch.
+ *
+ * `getJerusalemLocalNow` (`lib/time/jerusalemClock.ts`) converts an
+ * instant to Asia/Jerusalem civil time via `Intl.DateTimeFormat` with an
+ * explicit `timeZone` -- independent of the *host* machine's own TZ, so
+ * freezing `Date` via `vi.setSystemTime` here is the only piece that
+ * needs pinning; no `process.env.TZ` juggling. The frozen instant
+ * (10:00 UTC = 13:00 Asia/Jerusalem in August's DST) sits mid-day,
+ * mid-month -- nowhere near a day/month boundary in Jerusalem local
+ * time, so this can never flip to a different calendar date depending on
+ * which TZ the test runner's own OS happens to use.
+ */
+const FROZEN_NOW = "2026-08-15T10:00:00.000Z";
+
 beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date(FROZEN_NOW));
   getRequestShiftFairness.mockReset();
   getRequestDutyFairness.mockReset();
   getRequestEmergencyFairness.mockReset();
@@ -47,6 +79,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
 });
 
 function shiftRow(overrides: Partial<ShiftFairnessPersonRowView> = {}): ShiftFairnessPersonRowView {
