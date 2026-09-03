@@ -3,7 +3,7 @@
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
-import { BellRing, Target, UserCog, X } from "lucide-react";
+import { BellRing, Hourglass, Target, UserCog, X } from "lucide-react";
 
 interface MoreSheetProps {
   open: boolean;
@@ -24,8 +24,8 @@ function useMounted(): boolean {
  * Mobile "עוד" (More) bottom sheet -- reached from `BottomNav`'s 5th tab
  * (nav redesign pass). Holds exactly the destinations that are neither part
  * of the small curated bottom-nav set NOR account-related (those live in
- * `MobileProfileMenu` instead): מטווחים for every viewer, plus אזור
- * מנהל/מרכז התראות for a manager only -- the SAME `isManager` boundary
+ * `MobileProfileMenu` instead): מטווחים and עד מתי??? for every viewer, plus
+ * אזור מנהל/מרכז התראות for a manager only -- the SAME `isManager` boundary
  * every other manager-only surface in this app uses (`nav-items.ts`'s own
  * `managerOnly` flag), never a duplicated/looser check. Deliberately never
  * renders סנכרון יומן/theme/logout -- those stay exclusively in the profile
@@ -94,6 +94,15 @@ export function MoreSheet({ open, onClose, isManager }: MoreSheetProps) {
           >
             <Target className="h-5 w-5 text-muted" aria-hidden="true" strokeWidth={1.75} />
             מטווחים
+          </Link>
+
+          <Link
+            href="/countdown"
+            onClick={onClose}
+            className="flex min-h-[48px] items-center gap-3 rounded-xl px-3 py-2.5 text-[15px] font-medium text-foreground transition-colors duration-150 hover:bg-overlay-soft"
+          >
+            <Hourglass className="h-5 w-5 text-muted" aria-hidden="true" strokeWidth={1.75} />
+            עד מתי???
           </Link>
 
           {isManager ? (
